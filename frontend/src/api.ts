@@ -1,0 +1,74 @@
+import axios from 'axios';
+
+export type AuthUser = {
+  idUsuario: number;
+  idEmpresa: number | null;
+  email: string | null;
+  nombreCompleto: string;
+  roles: string[];
+};
+
+export type Company = {
+  idEmpresa: number;
+  nombre: string;
+};
+
+export type Role = {
+  idRol: number;
+  nombreRol: string;
+};
+
+export type UserRow = {
+  idUsuario: number;
+  nombreCompleto: string;
+  email: string | null;
+  activo: boolean | null;
+  empresa: string | null;
+  roles: Role[];
+};
+
+export type Prospect = {
+  idProspecto: number;
+  rut: string | null;
+  nombreCompleto: string | null;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+  estadoPipeline: string | null;
+  empresa?: Company | null;
+};
+
+export type AuditLog = {
+  idLog: string;
+  accion: string;
+  entidadAfectada: string | null;
+  idEntidadAfectada: number | null;
+  fechaHora: string | null;
+  usuario?: {
+    nombreCompleto: string;
+    email: string | null;
+  } | null;
+};
+
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api',
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('finet_token');
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
+});
+
+export function apiErrorMessage(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const responseMessage = error.response?.data?.message;
+    return Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage ?? error.message;
+  }
+
+  return 'Error inesperado';
+}
