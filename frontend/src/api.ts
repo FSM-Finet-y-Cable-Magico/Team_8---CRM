@@ -62,6 +62,60 @@ export type AuditLog = {
   } | null;
 };
 
+export type Customer = {
+  idCliente: number;
+  idEmpresa: number | null;
+  rut: string | null;
+  nombreCompleto: string;
+  email: string | null;
+  telefono: string | null;
+  estado: string;
+};
+
+export type InventoryUnit = {
+  idUnidad: number;
+  idEmpresa: number | null;
+  idTipoEquipo: number | null;
+  numeroSerie: string;
+  modelo: string | null;
+  estado: string;
+  idClienteInstalado: number | null;
+  diagnosticoTecnico: string | null;
+  tipoEquipo?: {
+    nombre: string;
+    categoria: string | null;
+  } | null;
+};
+
+export type TicketCategory = {
+  idCategoria: number;
+  nombre: string;
+  slaHoras: number | null;
+};
+
+export type Ticket = {
+  idTicket: number;
+  idCliente: number | null;
+  idCategoria: number;
+  codigoSeguimiento: string | null;
+  prioridad: string;
+  estado: string;
+  descripcion: string | null;
+  cliente?: Customer | null;
+  categoria?: TicketCategory | null;
+};
+
+export type WorkOrder = {
+  idOt: number;
+  idCliente: number | null;
+  idTicket: number | null;
+  tipoOt: string;
+  prioridad: string;
+  estado: string;
+  fechaProgramada: string | null;
+  observaciones: string | null;
+};
+
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api',
 });
