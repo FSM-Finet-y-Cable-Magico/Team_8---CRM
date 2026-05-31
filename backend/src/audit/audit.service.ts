@@ -31,7 +31,6 @@ export class AuditService {
       });
     } catch (error) {
       // La auditoria no debe romper la operacion principal, pero si queda visible en logs.
-      // eslint-disable-next-line no-console
       console.error('No se pudo registrar auditoria', error);
     }
   }
