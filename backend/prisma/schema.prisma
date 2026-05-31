@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Empresa {
+  idEmpresa  Int         @id @default(autoincrement()) @map("id_empresa")
+  nombre     String      @db.VarChar(100)
+  rutEmpresa String?     @unique @map("rut_empresa") @db.VarChar(12)
+  esquemaDb  String?     @map("esquema_db") @db.VarChar(50)
+  usuarios   Usuario[]
+  clientes   Cliente[]
+  prospectos Prospecto[]
+
+  @@map("empresa")
+}
+
+model Usuario {
+  idUsuario          Int             @id @default(autoincrement()) @map("id_usuario")
+  idEmpresa          Int?            @map("id_empresa")
+  nombreCompleto     String          @map("nombre_completo") @db.VarChar(80)
+  nombreUsuario      String?         @unique @map("nombre_usuario") @db.VarChar(50)
+  email              String?         @unique @db.VarChar(120)
+  passwordHash       String          @map("password_hash") @db.VarChar(72)
+  activo             Boolean?        @default(true)
+  fechaCreacion      DateTime?       @default(now()) @map("fecha_creacion")
+  esPasswordTemporal Boolean?        @default(true) @map("es_password_temporal")
+  intentosFallidos   Int?            @default(0) @map("intentos_fallidos")
+  empresa            Empresa?        @relation(fields: [idEmpresa], references: [idEmpresa])
+  usuarioRoles       UsuarioRol[]
+  auditorias         LogAuditoria[]
+  prospectos         Prospecto[]
+
+  @@map("usuario")
+}
+
+model Rol {
+  idRol        Int          @id @default(autoincrement()) @map("id_rol")
+  nombreRol    String       @unique @map("nombre_rol") @db.VarChar(50)
+  descripcion  String?
+  usuarioRoles UsuarioRol[]
+
+  @@map("rol")
+}
+
+model UsuarioRol {
+  idUsuarioRol    Int       @id @default(autoincrement()) @map("id_usuario_rol")
+  idUsuario       Int?      @map("id_usuario")
+  idRol           Int       @map("id_rol")
+  fechaAsignacion DateTime? @default(now()) @map("fecha_asignacion") @db.Date
+  usuario         Usuario?  @relation(fields: [idUsuario], references: [idUsuario])
+  rol             Rol       @relation(fields: [idRol], references: [idRol])
+
+  @@unique([idUsuario, idRol])
+  @@map("usuario_rol")
+}
+
+model LogAuditoria {
+  idLog             BigInt    @id @default(autoincrement()) @map("id_log")
+  idUsuario         Int?      @map("id_usuario")
+  accion            String    @db.VarChar(100)
+  entidadAfectada   String?   @map("entidad_afectada") @db.VarChar(80)
+  idEntidadAfectada Int?      @map("id_entidad_afectada")
+  valorAnterior     Json?     @map("valor_anterior")
+  valorNuevo        Json?     @map("valor_nuevo")
+  ipOrigen          String?   @map("ip_origen") @db.Inet
+  fechaHora         DateTime? @default(now()) @map("fecha_hora")
+  usuario           Usuario?  @relation(fields: [idUsuario], references: [idUsuario])
+
+  @@map("log_auditoria")
+}
+
+model Cliente {
+  idCliente          Int         @id @default(autoincrement()) @map("id_cliente")
+  idEmpresa          Int?        @map("id_empresa")
+  rut                String?     @unique @db.VarChar(12)
+  nombreCompleto     String      @map("nombre_completo") @db.VarChar(120)
+  email              String?     @db.VarChar(120)
+  telefono           String?     @db.VarChar(20)
+  passwordPortalHash String?     @map("password_portal_hash") @db.VarChar(72)
+  estado             String      @db.VarChar(20)
+  esConflictivo      Boolean?    @default(false) @map("es_conflictivo")
+  importadoMasivo    Boolean?    @default(false) @map("importado_masivo")
+  obsConflictivo     String?     @map("obs_conflictivo")
+  fechaCreacion      DateTime?   @default(now()) @map("fecha_creacion")
+  empresa            Empresa?    @relation(fields: [idEmpresa], references: [idEmpresa])
+  prospecto          Prospecto?
+
+  @@map("cliente")
+}
+
+model Prospecto {
+  idProspecto           Int       @id @default(autoincrement()) @map("id_prospecto")
+  idEmpresa             Int?      @map("id_empresa")
+  idUsuarioComercial    Int?      @map("id_usuario_comercial")
+  idCliente             Int?      @unique @map("id_cliente")
+  rut                   String?   @db.VarChar(12)
+  nombreCompleto        String?   @map("nombre_completo") @db.VarChar(120)
+  email                 String?   @db.VarChar(120)
+  telefono              String?   @db.VarChar(20)
+  direccion             String?   @db.VarChar(200)
+  estadoPipeline        String?   @map("estado_pipeline") @db.VarChar(30)
+  motivoPerdida         String?   @map("motivo_perdida") @db.VarChar(30)
+  tiempoConversionDias  Int?      @map("tiempo_conversion_dias")
+  fechaCreacion         DateTime? @map("fecha_creacion")
+  fechaConversion       DateTime? @map("fecha_conversion") @db.Date
+  empresa               Empresa?  @relation(fields: [idEmpresa], references: [idEmpresa])
+  usuarioComercial      Usuario?  @relation(fields: [idUsuarioComercial], references: [idUsuario])
+  cliente               Cliente?  @relation(fields: [idCliente], references: [idCliente])
+
+  @@map("prospecto")
+}

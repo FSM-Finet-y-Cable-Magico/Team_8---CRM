@@ -1,0 +1,44 @@
+# Requerimientos tecnologicos - CRM FiNet / Cable Magico Litoral
+
+## Runtime base
+- Node.js >= 20.11 LTS. Verificado localmente: Node.js 22.19.0.
+- npm >= 10. Verificado localmente: npm 10.9.3.
+- PostgreSQL 15 para ejecucion local o contenedor Docker.
+- Docker Desktop con Docker Compose para ambiente reproducible.
+
+## Backend NestJS
+- TypeScript.
+- NestJS core: @nestjs/common, @nestjs/core, @nestjs/platform-express.
+- Configuracion: @nestjs/config.
+- Validaciones DTO: class-validator, class-transformer.
+- ORM/acceso a datos: prisma, @prisma/client.
+- Autenticacion: @nestjs/jwt, bcrypt.
+- Carga de archivos: multer, @types/multer.
+- Importacion masiva: csv-parse para CSV y exceljs para Excel.
+- Utilidades HTTP: helmet y CORS desde NestJS.
+- Pruebas: jest, ts-jest, supertest.
+
+## Frontend React
+- React 18.
+- Vite.
+- TypeScript.
+- React Router DOM.
+- Axios para consumir API REST.
+- CSS modular/simple para prototipo funcional.
+
+## Base de datos
+- Archivo fuente: db/init/01_schema.sql, basado en mere_finet.sql.
+- Ajustes locales: db/init/02_local_adjustments.sql.
+- Datos iniciales: db/init/03_seed.sql.
+- Tablas clave para primeros 7 CU: empresa, usuario, rol, usuario_rol, log_auditoria, cliente, prospecto, intento_fallido.
+
+## Docker Compose
+- Servicio db: postgres:15-alpine.
+- Servicio backend: NestJS en puerto 3000.
+- Servicio frontend: Vite React en puerto 5173.
+- Variables esperadas: DATABASE_URL, JWT_SECRET, JWT_EXPIRES_IN, VITE_API_URL.
+
+## Herramientas opcionales recomendadas
+- pgAdmin o DBeaver para inspeccionar PostgreSQL.
+- Extensiones VS Code: Prisma, ESLint, Prettier, Docker.
+- Postman/Insomnia para probar endpoints REST.
