@@ -1,7 +1,22 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api, apiErrorMessage, AuditLog, AuthUser, Company, Prospect, Role, UserRow } from './api';
+import {
+  api,
+  apiErrorMessage,
+  AuditLog,
+  AuthUser,
+  Company,
+  Customer,
+  InventoryUnit,
+  Plan,
+  Prospect,
+  Role,
+  Ticket,
+  TicketCategory,
+  UserRow,
+  WorkOrder,
+} from './api';
 
-type Tab = 'prospects' | 'rut' | 'import' | 'users' | 'audit';
+type Tab = 'prospects' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
 
 type Summary = {
   metricas: {
@@ -92,11 +107,21 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [inventory, setInventory] = useState<InventoryUnit[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>([]);
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
   const isAdmin = user.roles.includes('Administrador');
+  const canManageCustomers = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte'].includes(role));
+  const canViewInventory = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
+  const canViewTickets = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte', 'Terreno'].includes(role));
+  const canViewWorkOrders = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -110,12 +135,24 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     setMessage('');
 
     try {
-      const [summaryResponse, prospectsResponse] = await Promise.all([
+      const [summaryResponse, prospectsResponse, plansResponse, customersResponse, inventoryResponse, ticketsResponse, categoriesResponse, workOrdersResponse] = await Promise.all([
         api.get<Summary>('/companies/summary', { params: { scope } }),
         api.get<Prospect[]>('/prospects', { params: { scope } }),
+        api.get<Plan[]>('/plans', { params: { scope } }),
+        canManageCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
+        canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
+        canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
+        canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
+        canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
       ]);
       setSummary(summaryResponse.data);
       setProspects(prospectsResponse.data);
+      setPlans(plansResponse.data);
+      setCustomers(customersResponse.data);
+      setInventory(inventoryResponse.data);
+      setTickets(ticketsResponse.data);
+      setTicketCategories(categoriesResponse.data);
+      setWorkOrders(workOrdersResponse.data);
 
       if (isAdmin) {
         const [companiesResponse, usersResponse, rolesResponse, auditResponse] = await Promise.all([
@@ -184,11 +221,34 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         <TabButton current={activeTab} value="prospects" onClick={setActiveTab}>
           Prospectos
         </TabButton>
+        {canManageCustomers && (
+          <TabButton current={activeTab} value="customers" onClick={setActiveTab}>
+            Clientes
+          </TabButton>
+        )}
+        {canViewInventory && (
+          <TabButton current={activeTab} value="inventory" onClick={setActiveTab}>
+            Inventario
+          </TabButton>
+        )}
+        {canViewTickets && (
+          <TabButton current={activeTab} value="tickets" onClick={setActiveTab}>
+            Tickets
+          </TabButton>
+        )}
+        {canViewWorkOrders && (
+          <TabButton current={activeTab} value="workOrders" onClick={setActiveTab}>
+            OTs
+          </TabButton>
+        )}
         <TabButton current={activeTab} value="rut" onClick={setActiveTab}>
           RUT
         </TabButton>
         {isAdmin && (
           <>
+            <TabButton current={activeTab} value="reports" onClick={setActiveTab}>
+              Reportes
+            </TabButton>
             <TabButton current={activeTab} value="import" onClick={setActiveTab}>
               Importacion
             </TabButton>
@@ -205,11 +265,21 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       {activeTab === 'prospects' && (
         <ProspectsPanel
           prospects={prospects}
+          plans={plans}
           writeCompanyId={writeCompanyId}
           onCreated={() => void loadData()}
         />
       )}
       {activeTab === 'rut' && <RutPanel />}
+      {activeTab === 'customers' && canManageCustomers && <CustomersPanel customers={customers} onChanged={() => void loadData()} />}
+      {activeTab === 'inventory' && canViewInventory && (
+        <InventoryPanel inventory={inventory} customers={customers} writeCompanyId={writeCompanyId} onChanged={() => void loadData()} />
+      )}
+      {activeTab === 'tickets' && canViewTickets && (
+        <TicketsPanel tickets={tickets} categories={ticketCategories} onChanged={() => void loadData()} />
+      )}
+      {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
+      {activeTab === 'reports' && isAdmin && <ReportsPanel scope={scope} />}
       {activeTab === 'import' && isAdmin && (
         <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
       )}
@@ -250,15 +320,26 @@ function TabButton({
 
 function ProspectsPanel({
   prospects,
+  plans,
   writeCompanyId,
   onCreated,
 }: {
   prospects: Prospect[];
+  plans: Plan[];
   writeCompanyId: number;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
   const [status, setStatus] = useState('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? prospects[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && prospects[0]) {
+      setSelectedId(prospects[0].idProspecto);
+    }
+  }, [prospects, selectedId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -315,6 +396,7 @@ function ProspectsPanel({
                 <th>Nombre</th>
                 <th>Estado</th>
                 <th>Empresa</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -324,12 +406,1020 @@ function ProspectsPanel({
                   <td>{prospect.nombreCompleto}</td>
                   <td>{prospect.estadoPipeline}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                      Gestionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {selectedProspect && (
+          <ProspectWorkflowPanel
+            prospect={selectedProspect}
+            plans={plans}
+            onChanged={onCreated}
+          />
+        )}
+      </section>
+    </section>
+  );
+}
+
+function ProspectWorkflowPanel({
+  prospect,
+  plans,
+  onChanged,
+}: {
+  prospect: Prospect;
+  plans: Plan[];
+  onChanged: () => void;
+}) {
+  const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
+  const [feasibilityResult, setFeasibilityResult] = useState<'Factible' | 'No Factible'>('Factible');
+  const [quotePlanId, setQuotePlanId] = useState('');
+  const [lossReason, setLossReason] = useState('Sin cobertura');
+  const [contractPlanId, setContractPlanId] = useState('');
+  const [dueDay, setDueDay] = useState(5);
+  const [installDate, setInstallDate] = useState('');
+  const [installPriority, setInstallPriority] = useState('Media');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
+  }, [prospect.idProspecto, prospect.estadoPipeline]);
+
+  const planOptions = plans.filter((plan) => !plan.idEmpresa || !prospect.empresa || plan.idEmpresa === prospect.empresa.idEmpresa);
+
+  async function runAction(action: () => Promise<unknown>, success: string) {
+    setStatus('');
+
+    try {
+      await action();
+      setStatus(success);
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function generateQuote() {
+    const { data } = await api.post(`/prospects/${prospect.idProspecto}/quotes`, { planId: Number(quotePlanId) });
+    const pdf = await api.get(data.pdfUrl, { responseType: 'blob' });
+    const objectUrl = URL.createObjectURL(pdf.data);
+    window.open(objectUrl, '_blank');
+  }
+
+  return (
+    <div className="workflow-panel">
+      <h3>{prospect.nombreCompleto}</h3>
+      <div className="workflow-grid">
+        <label>
+          Pipeline
+          <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
+            {[
+              'Prospecto Nuevo',
+              'Contactado',
+              'En Factibilidad',
+              'Cotizacion Enviada',
+              'Aceptado',
+              'Instalacion Programada',
+              'Servicio Activo',
+            ].map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction(
+                () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: pipelineStatus }),
+                'Pipeline actualizado',
+              )
+            }
+          >
+            Actualizar
+          </button>
+        </label>
+
+        <label>
+          Factibilidad
+          <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
+            <option value="Factible">Factible</option>
+            <option value="No Factible">No Factible</option>
+          </select>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction(
+                () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
+                'Factibilidad registrada',
+              )
+            }
+          >
+            Guardar
+          </button>
+        </label>
+
+        <label>
+          Cotizacion
+          <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
+            <option value="">Seleccionar plan</option>
+            {planOptions.map((plan) => (
+              <option key={plan.idPlan} value={plan.idPlan}>
+                {plan.nombreComercial}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!quotePlanId}
+            onClick={() => void runAction(generateQuote, 'Cotizacion generada')}
+          >
+            Generar PDF
+          </button>
+        </label>
+
+        <label>
+          Perdida
+          <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
+            {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              void runAction(
+                () => api.post(`/prospects/${prospect.idProspecto}/loss`, { motivo: lossReason }),
+                'Motivo de perdida registrado',
+              )
+            }
+          >
+            Marcar
+          </button>
+        </label>
+
+        <label>
+          Plan contratado
+          <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
+            <option value="">Seleccionar plan</option>
+            {planOptions.map((plan) => (
+              <option key={plan.idPlan} value={plan.idPlan}>
+                {plan.nombreComercial}
+              </option>
+            ))}
+          </select>
+          <input
+            min="1"
+            max="28"
+            type="number"
+            value={dueDay}
+            onChange={(event) => setDueDay(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            disabled={!contractPlanId}
+            onClick={() =>
+              void runAction(
+                () =>
+                  api.post(`/prospects/${prospect.idProspecto}/contracts`, {
+                    planId: Number(contractPlanId),
+                    diaVencimiento: dueDay,
+                  }),
+                'Plan contratado registrado',
+              )
+            }
+          >
+            Registrar
+          </button>
+        </label>
+
+        <label>
+          Orden instalacion
+          <input type="date" value={installDate} onChange={(event) => setInstallDate(event.target.value)} />
+          <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
+            <option value="Alta">Alta</option>
+            <option value="Media">Media</option>
+            <option value="Baja">Baja</option>
+          </select>
+          <button
+            type="button"
+            disabled={!installDate}
+            onClick={() =>
+              void runAction(
+                () =>
+                  api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
+                    fechaProgramada: installDate,
+                    prioridad: installPriority,
+                  }),
+                'Orden de instalacion creada',
+              )
+            }
+          >
+            Crear OT
+          </button>
+        </label>
+      </div>
+      {status && <p className="inline-status">{status}</p>}
+    </div>
+  );
+}
+
+type CustomerHistory = {
+  contratos: Array<{ idContrato: number; estado: string | null; plan?: Plan | null }>;
+  tickets: Array<{ idTicket: number; estado: string; prioridad: string; descripcion: string | null }>;
+  ordenes: Array<{ idOt: number; tipoOt: string; estado: string; observaciones: string | null }>;
+  equipos: Array<{ idUnidad: number; numeroSerie: string; estado: string; modelo: string | null }>;
+  auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
+};
+
+function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onChanged: () => void }) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [statusValue, setStatusValue] = useState('Activo');
+  const [history, setHistory] = useState<CustomerHistory | null>(null);
+  const [status, setStatus] = useState('');
+
+  const selectedCustomer = customers.find((customer) => customer.idCliente === selectedId) ?? customers[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && customers[0]) {
+      setSelectedId(customers[0].idCliente);
+      setStatusValue(customers[0].estado);
+    }
+  }, [customers, selectedId]);
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      setStatusValue(selectedCustomer.estado);
+      setHistory(null);
+    }
+  }, [selectedCustomer?.idCliente]);
+
+  async function updateCustomerStatus() {
+    if (!selectedCustomer) {
+      return;
+    }
+
+    try {
+      await api.patch(`/customers/${selectedCustomer.idCliente}/status`, { estado: statusValue });
+      setStatus('Estado del cliente actualizado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function loadHistory() {
+    if (!selectedCustomer) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<CustomerHistory>(`/customers/${selectedCustomer.idCliente}/history`);
+      setHistory(data);
+      setStatus('Historial cargado');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <section className="workspace-grid">
+      <section className="panel">
+        <h2>Clientes</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>RUT</th>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {customers.map((customer) => (
+                <tr key={customer.idCliente}>
+                  <td>{customer.rut ?? '-'}</td>
+                  <td>{customer.nombreCompleto}</td>
+                  <td>{customer.estado}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(customer.idCliente)}>
+                      Ver
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </section>
+
+      <section className="panel stack">
+        <h2>Gestion de cliente</h2>
+        {selectedCustomer ? (
+          <>
+            <p className="detail-line">
+              {selectedCustomer.nombreCompleto} - {selectedCustomer.rut ?? 'sin RUT'}
+            </p>
+            <label>
+              Estado operativo
+              <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                {['Activo', 'Suspendido', 'En Mantencion', 'Moroso', 'Baja'].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="button-row">
+              <button type="button" onClick={updateCustomerStatus}>
+                Actualizar estado
+              </button>
+              <button type="button" className="secondary" onClick={loadHistory}>
+                Ver historial
+              </button>
+            </div>
+            {status && <p className="inline-status">{status}</p>}
+            {history && (
+              <div className="history-grid">
+                <HistoryBox title="Contratos" value={history.contratos.length} />
+                <HistoryBox title="Tickets" value={history.tickets.length} />
+                <HistoryBox title="OTs" value={history.ordenes.length} />
+                <HistoryBox title="Equipos" value={history.equipos.length} />
+                <section className="history-list">
+                  <h3>Ultimos movimientos</h3>
+                  <ul>
+                    {history.auditoria.slice(0, 6).map((row) => (
+                      <li key={row.idLog}>
+                        {row.accion} {row.fechaHora ? new Date(row.fechaHora).toLocaleString() : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="inline-status">No hay clientes para gestionar.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function HistoryBox({ title, value }: { title: string; value: number }) {
+  return (
+    <article className="history-box">
+      <span>{title}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function InventoryPanel({
+  inventory,
+  customers,
+  writeCompanyId,
+  onChanged,
+}: {
+  inventory: InventoryUnit[];
+  customers: Customer[];
+  writeCompanyId: number;
+  onChanged: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [createForm, setCreateForm] = useState({ numeroSerie: '', modelo: '', tipoNombre: 'Router/ONU' });
+  const [movementForm, setMovementForm] = useState({ tipoMovimiento: 'Compra', idCliente: '', idEmpresaDestino: '' });
+  const [statusForm, setStatusForm] = useState({ estado: 'Disponible', motivo: '' });
+  const [installForm, setInstallForm] = useState({ idCliente: '', macAddress: '', puertoOlt: '', modelo: '' });
+  const [status, setStatus] = useState('');
+
+  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? inventory[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && inventory[0]) {
+      setSelectedId(inventory[0].idUnidad);
+    }
+  }, [inventory, selectedId]);
+
+  useEffect(() => {
+    if (selectedUnit) {
+      setStatusForm({ estado: selectedUnit.estado, motivo: '' });
+      setInstallForm((current) => ({ ...current, modelo: selectedUnit.modelo ?? '' }));
+    }
+  }, [selectedUnit?.idUnidad]);
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    try {
+      await action();
+      setStatus(success);
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  function selectedUnitPayload() {
+    if (!selectedUnit) {
+      throw new Error('No hay equipo seleccionado');
+    }
+
+    return selectedUnit.idUnidad;
+  }
+
+  return (
+    <section className="workspace-grid">
+      <form
+        className="panel stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(
+            () =>
+              api.post('/inventory/equipment', {
+                ...createForm,
+                idEmpresa: writeCompanyId,
+              }),
+            'Equipo creado en inventario',
+          );
+        }}
+      >
+        <h2>Nuevo equipo</h2>
+        <label>
+          Numero de serie
+          <input
+            value={createForm.numeroSerie}
+            onChange={(event) => setCreateForm({ ...createForm, numeroSerie: event.target.value })}
+          />
+        </label>
+        <label>
+          Modelo
+          <input value={createForm.modelo} onChange={(event) => setCreateForm({ ...createForm, modelo: event.target.value })} />
+        </label>
+        <label>
+          Tipo
+          <input
+            value={createForm.tipoNombre}
+            onChange={(event) => setCreateForm({ ...createForm, tipoNombre: event.target.value })}
+          />
+        </label>
+        <button>Crear equipo</button>
+        {status && <p className="inline-status">{status}</p>}
+      </form>
+
+      <section className="panel">
+        <h2>Inventario</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Serie</th>
+                <th>Modelo</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.map((unit) => (
+                <tr key={unit.idUnidad}>
+                  <td>{unit.numeroSerie}</td>
+                  <td>{unit.modelo ?? '-'}</td>
+                  <td>{unit.tipoEquipo?.nombre ?? unit.idTipoEquipo ?? '-'}</td>
+                  <td>{unit.estado}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(unit.idUnidad)}>
+                      Gestionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedUnit && (
+          <div className="workflow-panel">
+            <h3>{selectedUnit.numeroSerie}</h3>
+            <div className="workflow-grid">
+              <label>
+                Estado logico
+                <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
+                  {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva'].map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="Motivo"
+                  value={statusForm.motivo}
+                  onChange={(event) => setStatusForm({ ...statusForm, motivo: event.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () => api.patch(`/inventory/equipment/${selectedUnitPayload()}/status`, statusForm),
+                      'Estado de equipo actualizado',
+                    )
+                  }
+                >
+                  Actualizar
+                </button>
+              </label>
+
+              <label>
+                Movimiento
+                <select
+                  value={movementForm.tipoMovimiento}
+                  onChange={(event) => setMovementForm({ ...movementForm, tipoMovimiento: event.target.value })}
+                >
+                  {['Compra', 'Devolucion', 'Asignacion', 'Descarte', 'Transferencia'].map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <select value={movementForm.idCliente} onChange={(event) => setMovementForm({ ...movementForm, idCliente: event.target.value })}>
+                  <option value="">Cliente opcional</option>
+                  {customers.map((customer) => (
+                    <option key={customer.idCliente} value={customer.idCliente}>
+                      {customer.nombreCompleto}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="Empresa destino"
+                  value={movementForm.idEmpresaDestino}
+                  onChange={(event) => setMovementForm({ ...movementForm, idEmpresaDestino: event.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () =>
+                        api.post('/inventory/movements', {
+                          idUnidad: selectedUnitPayload(),
+                          tipoMovimiento: movementForm.tipoMovimiento,
+                          idCliente: movementForm.idCliente ? Number(movementForm.idCliente) : undefined,
+                          idEmpresaDestino: movementForm.idEmpresaDestino ? Number(movementForm.idEmpresaDestino) : undefined,
+                          cantidad: 1,
+                        }),
+                      'Movimiento registrado',
+                    )
+                  }
+                >
+                  Registrar
+                </button>
+              </label>
+
+              <label>
+                Instalar router/ONU
+                <select value={installForm.idCliente} onChange={(event) => setInstallForm({ ...installForm, idCliente: event.target.value })}>
+                  <option value="">Seleccionar cliente</option>
+                  {customers.map((customer) => (
+                    <option key={customer.idCliente} value={customer.idCliente}>
+                      {customer.nombreCompleto}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="MAC AA:BB:CC:DD:EE:FF"
+                  value={installForm.macAddress}
+                  onChange={(event) => setInstallForm({ ...installForm, macAddress: event.target.value })}
+                />
+                <input
+                  placeholder="Puerto OLT"
+                  value={installForm.puertoOlt}
+                  onChange={(event) => setInstallForm({ ...installForm, puertoOlt: event.target.value })}
+                />
+                <button
+                  type="button"
+                  disabled={!installForm.idCliente}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
+                          idCliente: Number(installForm.idCliente),
+                          modelo: installForm.modelo || undefined,
+                          macAddress: installForm.macAddress,
+                          puertoOlt: installForm.puertoOlt,
+                        }),
+                      'Equipo vinculado al cliente',
+                    )
+                  }
+                >
+                  Vincular
+                </button>
+              </label>
+            </div>
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function TicketsPanel({
+  tickets,
+  categories,
+  onChanged,
+}: {
+  tickets: Ticket[];
+  categories: TicketCategory[];
+  onChanged: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [createForm, setCreateForm] = useState({ rut: '', idCategoria: '', prioridad: 'Media', descripcion: '' });
+  const [categoryId, setCategoryId] = useState('');
+  const [priority, setPriority] = useState('Media');
+  const [ticketStatus, setTicketStatus] = useState('En progreso');
+  const [comment, setComment] = useState('');
+  const [diagnosis, setDiagnosis] = useState({
+    causaRaiz: '',
+    descripcionProblema: '',
+    accionesRealizadas: '',
+    estadoFinalServicio: 'Activo',
+    observaciones: '',
+  });
+  const [status, setStatus] = useState('');
+
+  const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? tickets[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && tickets[0]) {
+      setSelectedId(tickets[0].idTicket);
+    }
+  }, [tickets, selectedId]);
+
+  useEffect(() => {
+    if (selectedTicket) {
+      setCategoryId(String(selectedTicket.idCategoria));
+      setPriority(selectedTicket.prioridad);
+      setTicketStatus(selectedTicket.estado);
+    }
+  }, [selectedTicket?.idTicket]);
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    try {
+      await action();
+      setStatus(success);
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <section className="workspace-grid">
+      <form
+        className="panel stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void run(
+            () =>
+              api.post('/tickets', {
+                rut: createForm.rut,
+                idCategoria: Number(createForm.idCategoria),
+                prioridad: createForm.prioridad,
+                descripcion: createForm.descripcion,
+              }),
+            'Ticket creado',
+          );
+        }}
+      >
+        <h2>Nuevo ticket</h2>
+        <label>
+          RUT cliente
+          <input value={createForm.rut} onChange={(event) => setCreateForm({ ...createForm, rut: event.target.value })} />
+        </label>
+        <label>
+          Categoria
+          <select value={createForm.idCategoria} onChange={(event) => setCreateForm({ ...createForm, idCategoria: event.target.value })}>
+            <option value="">Seleccionar</option>
+            {categories.map((category) => (
+              <option key={category.idCategoria} value={category.idCategoria}>
+                {category.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Prioridad
+          <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>
+            <option value="Alta">Alta</option>
+            <option value="Media">Media</option>
+            <option value="Baja">Baja</option>
+          </select>
+        </label>
+        <label>
+          Descripcion
+          <textarea value={createForm.descripcion} onChange={(event) => setCreateForm({ ...createForm, descripcion: event.target.value })} />
+        </label>
+        <button disabled={!createForm.idCategoria}>Crear ticket</button>
+        {status && <p className="inline-status">{status}</p>}
+      </form>
+
+      <section className="panel">
+        <h2>Tickets</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Cliente</th>
+                <th>Categoria</th>
+                <th>Prioridad</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tickets.map((ticket) => (
+                <tr key={ticket.idTicket}>
+                  <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
+                  <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
+                  <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
+                  <td>{ticket.prioridad}</td>
+                  <td>{ticket.estado}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(ticket.idTicket)}>
+                      Gestionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedTicket && (
+          <div className="workflow-panel">
+            <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
+            <div className="workflow-grid">
+              <label>
+                Clasificacion
+                <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+                  {categories.map((category) => (
+                    <option key={category.idCategoria} value={category.idCategoria}>
+                      {category.nombre}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () => api.patch(`/tickets/${selectedTicket.idTicket}/category`, { idCategoria: Number(categoryId) }),
+                      'Ticket clasificado',
+                    )
+                  }
+                >
+                  Clasificar
+                </button>
+              </label>
+
+              <label>
+                Prioridad
+                <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+                  <option value="Alta">Alta</option>
+                  <option value="Media">Media</option>
+                  <option value="Baja">Baja</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () => api.patch(`/tickets/${selectedTicket.idTicket}/priority`, { prioridad: priority }),
+                      'Prioridad actualizada',
+                    )
+                  }
+                >
+                  Actualizar
+                </button>
+              </label>
+
+              <label>
+                Estado
+                <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
+                  {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () => api.patch(`/tickets/${selectedTicket.idTicket}/status`, { estado: ticketStatus, comentario: comment }),
+                      'Estado de ticket actualizado',
+                    )
+                  }
+                >
+                  Cambiar estado
+                </button>
+              </label>
+
+              <label>
+                Diagnostico tecnico
+                <input
+                  placeholder="Causa raiz"
+                  value={diagnosis.causaRaiz}
+                  onChange={(event) => setDiagnosis({ ...diagnosis, causaRaiz: event.target.value })}
+                />
+                <textarea
+                  placeholder="Problema detectado"
+                  value={diagnosis.descripcionProblema}
+                  onChange={(event) => setDiagnosis({ ...diagnosis, descripcionProblema: event.target.value })}
+                />
+                <textarea
+                  placeholder="Acciones realizadas"
+                  value={diagnosis.accionesRealizadas}
+                  onChange={(event) => setDiagnosis({ ...diagnosis, accionesRealizadas: event.target.value })}
+                />
+                <select
+                  value={diagnosis.estadoFinalServicio}
+                  onChange={(event) => setDiagnosis({ ...diagnosis, estadoFinalServicio: event.target.value })}
+                >
+                  <option value="Activo">Activo</option>
+                  <option value="En Mantencion">En Mantencion</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(
+                      () => api.post(`/tickets/${selectedTicket.idTicket}/diagnosis`, diagnosis),
+                      'Diagnostico registrado',
+                    )
+                  }
+                >
+                  Registrar diagnostico
+                </button>
+              </label>
+            </div>
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; onChanged: () => void }) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [form, setForm] = useState({ potenciaOpticaDbm: '', observaciones: '' });
+  const [status, setStatus] = useState('');
+
+  const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? workOrders[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && workOrders[0]) {
+      setSelectedId(workOrders[0].idOt);
+    }
+  }, [workOrders, selectedId]);
+
+  async function completeInstallation() {
+    if (!selectedOrder) {
+      return;
+    }
+
+    try {
+      await api.patch(`/work-orders/${selectedOrder.idOt}/complete-installation`, {
+        potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
+        observaciones: form.observaciones,
+      });
+      setStatus('Instalacion completada y cliente activado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <section className="workspace-grid">
+      <section className="panel">
+        <h2>Ordenes de trabajo</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tipo</th>
+                <th>Prioridad</th>
+                <th>Estado</th>
+                <th>Fecha</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {workOrders.map((order) => (
+                <tr key={order.idOt}>
+                  <td>{order.idOt}</td>
+                  <td>{order.tipoOt}</td>
+                  <td>{order.prioridad}</td>
+                  <td>{order.estado}</td>
+                  <td>{order.fechaProgramada ? new Date(order.fechaProgramada).toLocaleDateString() : '-'}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(order.idOt)}>
+                      Gestionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel stack">
+        <h2>Cierre de instalacion</h2>
+        {selectedOrder ? (
+          <>
+            <p className="detail-line">
+              OT {selectedOrder.idOt} - {selectedOrder.tipoOt} - {selectedOrder.estado}
+            </p>
+            <label>
+              Potencia optica dBm
+              <input
+                type="number"
+                step="0.01"
+                value={form.potenciaOpticaDbm}
+                onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
+              />
+            </label>
+            <label>
+              Observaciones
+              <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
+            </label>
+            <button type="button" onClick={completeInstallation}>
+              Completar instalacion
+            </button>
+            {status && <p className="inline-status">{status}</p>}
+          </>
+        ) : (
+          <p className="inline-status">No hay ordenes de trabajo pendientes.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function ReportsPanel({ scope }: { scope: string }) {
+  const [type, setType] = useState('clientes');
+  const [format, setFormat] = useState('csv');
+  const [status, setStatus] = useState('');
+
+  async function exportReport() {
+    try {
+      const response = await api.get('/reports/export', {
+        params: { type, format, scope },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `reporte-${type}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setStatus('Reporte generado');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <section className="panel narrow stack">
+      <h2>Reportes</h2>
+      <label>
+        Tipo
+        <select value={type} onChange={(event) => setType(event.target.value)}>
+          <option value="clientes">Clientes</option>
+          <option value="prospectos">Prospectos</option>
+          <option value="tickets">Tickets</option>
+          <option value="inventario">Inventario</option>
+        </select>
+      </label>
+      <label>
+        Formato
+        <select value={format} onChange={(event) => setFormat(event.target.value)}>
+          <option value="csv">CSV</option>
+          <option value="xlsx">XLSX</option>
+        </select>
+      </label>
+      <button type="button" onClick={exportReport}>
+        Exportar
+      </button>
+      {status && <p className="inline-status">{status}</p>}
     </section>
   );
 }

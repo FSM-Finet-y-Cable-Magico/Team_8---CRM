@@ -1,4 +1,4 @@
-# Primer incremento - primeros 7 casos de uso
+# Primer incremento - cobertura 28 casos de uso
 
 Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
@@ -43,3 +43,133 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 - Backend: crear prospecto con estado inicial `Prospecto Nuevo`.
 - Frontend: formulario de nuevo prospecto.
 - Base de datos: `prospecto`, `empresa`, `usuario`, `log_auditoria`.
+
+## CU02 - Actualizando estado del prospecto en el pipeline
+- Actor: Usuario Comercial.
+- Backend: endpoint de transicion controlada de pipeline.
+- Frontend: selector de estado en panel de gestion del prospecto.
+- Base de datos: `prospecto.estado_pipeline`, `prospecto.tiempo_conversion_dias`, `log_auditoria`.
+
+## CU06 - Verificando factibilidad tecnica de instalacion
+- Actor: Usuario Soporte Tecnico.
+- Backend: registra factibilidad sin agregar columnas nuevas; usa pipeline, cotizacion de control y auditoria.
+- Frontend: accion Factible / No Factible en panel de prospecto.
+- Base de datos: `prospecto.estado_pipeline`, `prospecto.motivo_perdida`, `cotizacion.factibilidad_verificada`, `log_auditoria`.
+
+## CU03 - Generando cotizacion en formato PDF
+- Actor: Usuario Comercial.
+- Backend: crea `cotizacion`, actualiza PDF URL y genera PDF bajo demanda.
+- Frontend: selector de plan y apertura de PDF.
+- Base de datos: `cotizacion`, `plan`, `prospecto`, `log_auditoria`.
+
+## CU04 - Registrando motivo de perdida de prospecto
+- Actor: Usuario Comercial.
+- Backend: marca el prospecto como `Perdido` y persiste el motivo.
+- Frontend: selector de motivo de perdida.
+- Base de datos: `prospecto.motivo_perdida`, `prospecto.estado_pipeline`, `log_auditoria`.
+
+## CU12 - Registrando tipo de plan contratado por el cliente
+- Actor: Usuario Comercial.
+- Backend: crea cliente si no existe y registra contrato con plan.
+- Frontend: selector de plan contratado y dia de vencimiento.
+- Base de datos: `cliente`, `plan`, `contrato`, `prospecto`, `log_auditoria`.
+
+## CU17 - Generando Orden de Instalacion
+- Actor: Usuario Comercial / Tecnico en Terreno.
+- Backend: crea direccion principal si falta y genera orden de trabajo.
+- Frontend: fecha programada, prioridad y accion de creacion de OT.
+- Base de datos: `direccion_servicio`, `orden_trabajo`, `prospecto`, `log_auditoria`.
+
+## CU08 - Actualizando estado operativo del cliente
+- Actor: Administrador, Soporte.
+- Backend: cambio controlado de `cliente.estado` con auditoria.
+- Frontend: modulo Clientes con selector de estado.
+- Base de datos: `cliente`, `log_auditoria`.
+
+## CU14 - Consultando historial completo del cliente
+- Actor: Administrador, Comercial, Soporte.
+- Backend: consolida contratos, facturas, pagos, tickets, ordenes, equipos y auditoria.
+- Frontend: boton Ver historial en Clientes con resumen operativo.
+- Base de datos: `cliente`, `contrato`, `factura`, `pago`, `ticket`, `orden_trabajo`, `unidad_equipo`, `log_auditoria`.
+
+## CU53 - Registrando movimientos de inventario
+- Actor: Administrador, Soporte.
+- Backend: registra compra, devolucion, asignacion, descarte o transferencia.
+- Frontend: panel Inventario con accion de movimiento sobre equipo seleccionado.
+- Base de datos: `movimiento_inventario`, `unidad_equipo`, `historial_estado_equipo`, `log_auditoria`.
+
+## CU54 - Actualizando estado logico de equipo
+- Actor: Administrador, Soporte.
+- Backend: actualiza estado de unidad y guarda historial.
+- Frontend: selector de estado en Inventario.
+- Base de datos: `unidad_equipo`, `historial_estado_equipo`, `log_auditoria`.
+
+## CU62 - Visualizando inventario por empresa
+- Actor: Administrador, Soporte, Terreno.
+- Backend: listado filtrado por empresa o consolidado.
+- Frontend: pestana Inventario conectada al selector superior de empresa.
+- Base de datos: `unidad_equipo`, `tipo_equipo`, `empresa`.
+
+## CU20 - Instalando router/ONU en domicilio
+- Actor: Tecnico en Terreno, Soporte.
+- Backend: vincula equipo disponible con cliente y marca estado `Instalado`.
+- Frontend: formulario Instalar router/ONU en Inventario.
+- Base de datos: `unidad_equipo`, `historial_estado_equipo`, `cliente`, `orden_trabajo`, `log_auditoria`.
+
+## CU59 - Asociando serie, MAC y puerto OLT al cliente
+- Actor: Tecnico en Terreno, Soporte.
+- Backend: guarda serie en `unidad_equipo.numero_serie` y registra MAC/OLT en notas tecnicas existentes.
+- Frontend: campos MAC y Puerto OLT en vinculacion de equipo.
+- Base de datos: `unidad_equipo.diagnostico_tecnico`, `orden_trabajo.observaciones`, `log_auditoria`.
+
+## CU23 - Registrando ticket de soporte
+- Actor: Comercial, Soporte.
+- Backend: crea ticket por RUT de cliente existente, categoria y prioridad.
+- Frontend: formulario Nuevo ticket.
+- Base de datos: `ticket`, `cliente`, `categoria_falla`, `log_auditoria`.
+
+## CU24 - Clasificando ticket por categoria de falla
+- Actor: Soporte.
+- Backend: actualiza `ticket.id_categoria` con validacion de categoria.
+- Frontend: selector Clasificacion en Tickets.
+- Base de datos: `ticket`, `categoria_falla`, `log_auditoria`.
+
+## CU25 - Asignando prioridad de atencion
+- Actor: Soporte.
+- Backend: actualiza prioridad `Alta`, `Media` o `Baja`.
+- Frontend: selector Prioridad en Tickets.
+- Base de datos: `ticket`, `log_auditoria`.
+
+## CU26 - Actualizando estado del ticket
+- Actor: Soporte, Terreno.
+- Backend: transiciones progresivas entre Abierto, En progreso, Escalado, Resuelto y Cerrado.
+- Frontend: selector Estado con comentario.
+- Base de datos: `ticket`, `log_auditoria`.
+
+## CU21 - Registrando diagnostico tecnico post-visita
+- Actor: Tecnico en Terreno.
+- Backend: agrega diagnostico al ticket, actualiza cliente y completa OT asociada si existe.
+- Frontend: formulario Diagnostico tecnico en Tickets.
+- Base de datos: `ticket`, `cliente`, `orden_trabajo`, `historial_ot`, `log_auditoria`.
+
+## CU07 - Cerrando instalacion y activando cliente
+- Actor: Tecnico en Terreno, Soporte.
+- Backend: completa OT de instalacion, activa cliente y contrato.
+- Frontend: modulo OTs con cierre de instalacion.
+- Base de datos: `orden_trabajo`, `cliente`, `contrato`, `historial_ot`, `log_auditoria`.
+
+## CU10 - Calculando tiempo de conversion de prospecto
+- Actor: Sistema / Comercial.
+- Backend: al cerrar instalacion calcula dias desde creacion del prospecto y marca Servicio Activo.
+- Frontend: se ejecuta desde cierre de instalacion en OTs.
+- Base de datos: `prospecto.fecha_conversion`, `prospecto.tiempo_conversion_dias`, `orden_trabajo`.
+
+## CU33 - Exportando reportes operativos
+- Actor: Administrador.
+- Backend: genera CSV o XLSX de clientes, prospectos, tickets e inventario.
+- Frontend: modulo Reportes con tipo y formato.
+- Base de datos: `cliente`, `prospecto`, `ticket`, `unidad_equipo`, `log_auditoria`.
+
+## Nota de compatibilidad con la base compartida
+
+Este bloque no modifica scripts SQL ni agrega columnas. La ampliacion de `backend/prisma/schema.prisma` solo le ensena a Prisma a leer tablas que ya existen en la base PostgreSQL entregada. Donde faltaban columnas especificas, por ejemplo MAC o puerto OLT, se reutilizaron campos tecnicos existentes (`diagnostico_tecnico` y `observaciones`) para mantener la misma base global que usa el equipo.

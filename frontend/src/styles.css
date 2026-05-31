@@ -16,7 +16,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -48,8 +49,15 @@ button.secondary:hover {
   background: #d6ded9;
 }
 
+button.compact {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+}
+
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 40px;
   border: 1px solid #cbd6d0;
@@ -57,6 +65,11 @@ select {
   padding: 8px 10px;
   color: #202326;
   background: #fff;
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
 }
 
 label {
@@ -246,6 +259,82 @@ th {
   margin-top: 12px;
 }
 
+.workflow-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  border-top: 1px solid #e2e8e4;
+  padding-top: 16px;
+}
+
+.workflow-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.detail-line {
+  margin: 0;
+  color: #3d4843;
+  font-weight: 700;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-box,
+.history-list {
+  border: 1px solid #e2e8e4;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8faf9;
+}
+
+.history-box {
+  display: grid;
+  gap: 4px;
+}
+
+.history-box span,
+.history-list li {
+  color: #68736e;
+  font-size: 0.84rem;
+}
+
+.history-box strong {
+  font-size: 1.35rem;
+}
+
+.history-list {
+  grid-column: 1 / -1;
+}
+
+.history-list h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.history-list ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 @media (max-width: 820px) {
   .topbar,
   .topbar-actions {
@@ -254,7 +343,8 @@ th {
   }
 
   .metrics,
-  .workspace-grid {
+  .workspace-grid,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 
