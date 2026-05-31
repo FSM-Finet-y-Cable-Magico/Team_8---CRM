@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api, apiErrorMessage, AuditLog, AuthUser, Company, Prospect, Role, UserRow } from './api';
+import { api, apiErrorMessage, AuditLog, AuthUser, Company, Plan, Prospect, Role, UserRow } from './api';
 
 type Tab = 'prospects' | 'rut' | 'import' | 'users' | 'audit';
 
@@ -92,6 +92,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
@@ -110,12 +111,14 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     setMessage('');
 
     try {
-      const [summaryResponse, prospectsResponse] = await Promise.all([
+      const [summaryResponse, prospectsResponse, plansResponse] = await Promise.all([
         api.get<Summary>('/companies/summary', { params: { scope } }),
         api.get<Prospect[]>('/prospects', { params: { scope } }),
+        api.get<Plan[]>('/plans', { params: { scope } }),
       ]);
       setSummary(summaryResponse.data);
       setProspects(prospectsResponse.data);
+      setPlans(plansResponse.data);
 
       if (isAdmin) {
         const [companiesResponse, usersResponse, rolesResponse, auditResponse] = await Promise.all([
@@ -205,6 +208,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       {activeTab === 'prospects' && (
         <ProspectsPanel
           prospects={prospects}
+          plans={plans}
           writeCompanyId={writeCompanyId}
           onCreated={() => void loadData()}
         />
@@ -250,15 +254,26 @@ function TabButton({
 
 function ProspectsPanel({
   prospects,
+  plans,
   writeCompanyId,
   onCreated,
 }: {
   prospects: Prospect[];
+  plans: Plan[];
   writeCompanyId: number;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
   const [status, setStatus] = useState('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? prospects[0] ?? null;
+
+  useEffect(() => {
+    if (!selectedId && prospects[0]) {
+      setSelectedId(prospects[0].idProspecto);
+    }
+  }, [prospects, selectedId]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -315,6 +330,7 @@ function ProspectsPanel({
                 <th>Nombre</th>
                 <th>Estado</th>
                 <th>Empresa</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -324,13 +340,230 @@ function ProspectsPanel({
                   <td>{prospect.nombreCompleto}</td>
                   <td>{prospect.estadoPipeline}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                      Gestionar
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {selectedProspect && (
+          <ProspectWorkflowPanel
+            prospect={selectedProspect}
+            plans={plans}
+            onChanged={onCreated}
+          />
+        )}
       </section>
     </section>
+  );
+}
+
+function ProspectWorkflowPanel({
+  prospect,
+  plans,
+  onChanged,
+}: {
+  prospect: Prospect;
+  plans: Plan[];
+  onChanged: () => void;
+}) {
+  const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
+  const [feasibilityResult, setFeasibilityResult] = useState<'Factible' | 'No Factible'>('Factible');
+  const [quotePlanId, setQuotePlanId] = useState('');
+  const [lossReason, setLossReason] = useState('Sin cobertura');
+  const [contractPlanId, setContractPlanId] = useState('');
+  const [dueDay, setDueDay] = useState(5);
+  const [installDate, setInstallDate] = useState('');
+  const [installPriority, setInstallPriority] = useState('Media');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
+  }, [prospect.idProspecto, prospect.estadoPipeline]);
+
+  const planOptions = plans.filter((plan) => !plan.idEmpresa || !prospect.empresa || plan.idEmpresa === prospect.empresa.idEmpresa);
+
+  async function runAction(action: () => Promise<unknown>, success: string) {
+    setStatus('');
+
+    try {
+      await action();
+      setStatus(success);
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function generateQuote() {
+    const { data } = await api.post(`/prospects/${prospect.idProspecto}/quotes`, { planId: Number(quotePlanId) });
+    const pdf = await api.get(data.pdfUrl, { responseType: 'blob' });
+    const objectUrl = URL.createObjectURL(pdf.data);
+    window.open(objectUrl, '_blank');
+  }
+
+  return (
+    <div className="workflow-panel">
+      <h3>{prospect.nombreCompleto}</h3>
+      <div className="workflow-grid">
+        <label>
+          Pipeline
+          <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
+            {[
+              'Prospecto Nuevo',
+              'Contactado',
+              'En Factibilidad',
+              'Cotizacion Enviada',
+              'Aceptado',
+              'Instalacion Programada',
+              'Servicio Activo',
+            ].map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction(
+                () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: pipelineStatus }),
+                'Pipeline actualizado',
+              )
+            }
+          >
+            Actualizar
+          </button>
+        </label>
+
+        <label>
+          Factibilidad
+          <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
+            <option value="Factible">Factible</option>
+            <option value="No Factible">No Factible</option>
+          </select>
+          <button
+            type="button"
+            onClick={() =>
+              void runAction(
+                () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
+                'Factibilidad registrada',
+              )
+            }
+          >
+            Guardar
+          </button>
+        </label>
+
+        <label>
+          Cotizacion
+          <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
+            <option value="">Seleccionar plan</option>
+            {planOptions.map((plan) => (
+              <option key={plan.idPlan} value={plan.idPlan}>
+                {plan.nombreComercial}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!quotePlanId}
+            onClick={() => void runAction(generateQuote, 'Cotizacion generada')}
+          >
+            Generar PDF
+          </button>
+        </label>
+
+        <label>
+          Perdida
+          <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
+            {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() =>
+              void runAction(
+                () => api.post(`/prospects/${prospect.idProspecto}/loss`, { motivo: lossReason }),
+                'Motivo de perdida registrado',
+              )
+            }
+          >
+            Marcar
+          </button>
+        </label>
+
+        <label>
+          Plan contratado
+          <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
+            <option value="">Seleccionar plan</option>
+            {planOptions.map((plan) => (
+              <option key={plan.idPlan} value={plan.idPlan}>
+                {plan.nombreComercial}
+              </option>
+            ))}
+          </select>
+          <input
+            min="1"
+            max="28"
+            type="number"
+            value={dueDay}
+            onChange={(event) => setDueDay(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            disabled={!contractPlanId}
+            onClick={() =>
+              void runAction(
+                () =>
+                  api.post(`/prospects/${prospect.idProspecto}/contracts`, {
+                    planId: Number(contractPlanId),
+                    diaVencimiento: dueDay,
+                  }),
+                'Plan contratado registrado',
+              )
+            }
+          >
+            Registrar
+          </button>
+        </label>
+
+        <label>
+          Orden instalacion
+          <input type="date" value={installDate} onChange={(event) => setInstallDate(event.target.value)} />
+          <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
+            <option value="Alta">Alta</option>
+            <option value="Media">Media</option>
+            <option value="Baja">Baja</option>
+          </select>
+          <button
+            type="button"
+            disabled={!installDate}
+            onClick={() =>
+              void runAction(
+                () =>
+                  api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
+                    fechaProgramada: installDate,
+                    prioridad: installPriority,
+                  }),
+                'Orden de instalacion creada',
+              )
+            }
+          >
+            Crear OT
+          </button>
+        </label>
+      </div>
+      {status && <p className="inline-status">{status}</p>}
+    </div>
   );
 }
 

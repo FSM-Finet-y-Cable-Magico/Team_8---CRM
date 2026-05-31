@@ -4,6 +4,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CompaniesModule } from './companies/companies.module';
 import { ImportsModule } from './imports/imports.module';
+import { PlansModule } from './plans/plans.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProspectsModule } from './prospects/prospects.module';
 import { RutModule } from './rut/rut.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './users/users.module';
     CompaniesModule,
     RutModule,
     ProspectsModule,
+    PlansModule,
     ImportsModule,
   ],
 })

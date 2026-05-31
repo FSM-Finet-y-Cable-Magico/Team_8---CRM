@@ -35,6 +35,18 @@ export type Prospect = {
   telefono: string | null;
   direccion: string | null;
   estadoPipeline: string | null;
+  motivoPerdida: string | null;
+  empresa?: Company | null;
+};
+
+export type Plan = {
+  idPlan: number;
+  idEmpresa: number | null;
+  nombreComercial: string;
+  tipoPlan: string;
+  tipoCliente: string;
+  velocidadMbps: number | null;
+  precioMensual: string;
   empresa?: Company | null;
 };
 

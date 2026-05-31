@@ -30,6 +30,7 @@ Password: Admin2026!
 3. Validar un RUT desde el modulo RUT.
 4. Crear un prospecto desde Prospectos.
 5. Revisar que el evento aparezca en Auditoria.
+6. Gestionar el prospecto: actualizar pipeline, verificar factibilidad, generar cotizacion, registrar plan y crear OT.
 
 ## 5. Importacion masiva
 
@@ -79,3 +80,18 @@ npm run dev
 - CU15: `POST /api/rut/validate`.
 - CU11: `POST /api/imports/clients`.
 - CU01: `POST /api/prospects`, `GET /api/prospects`.
+- CU02: `PATCH /api/prospects/:id/pipeline`.
+- CU06: `POST /api/prospects/:id/feasibility`.
+- CU03: `POST /api/prospects/:id/quotes`, `GET /api/prospects/:id/quotes/:quoteId/pdf`.
+- CU04: `POST /api/prospects/:id/loss`.
+- CU12: `POST /api/prospects/:id/contracts`.
+- CU17: `POST /api/prospects/:id/install-orders`.
+
+## 9. Nota sobre base de datos compartida
+
+El bloque 2 no agrega columnas ni modifica scripts de estructura. Para mantener compatibilidad con la base global, la factibilidad usa:
+
+- `prospecto.estado_pipeline` para avanzar o marcar perdida.
+- `prospecto.motivo_perdida` cuando no hay cobertura.
+- `cotizacion.factibilidad_verificada` como evidencia de factibilidad positiva.
+- `log_auditoria.valor_nuevo` para observaciones y trazabilidad.

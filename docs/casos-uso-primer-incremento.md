@@ -1,4 +1,4 @@
-# Primer incremento - primeros 7 casos de uso
+# Primer incremento - avance 13 casos de uso
 
 Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
@@ -43,3 +43,39 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 - Backend: crear prospecto con estado inicial `Prospecto Nuevo`.
 - Frontend: formulario de nuevo prospecto.
 - Base de datos: `prospecto`, `empresa`, `usuario`, `log_auditoria`.
+
+## CU02 - Actualizando estado del prospecto en el pipeline
+- Actor: Usuario Comercial.
+- Backend: endpoint de transicion controlada de pipeline.
+- Frontend: selector de estado en panel de gestion del prospecto.
+- Base de datos: `prospecto.estado_pipeline`, `prospecto.tiempo_conversion_dias`, `log_auditoria`.
+
+## CU06 - Verificando factibilidad tecnica de instalacion
+- Actor: Usuario Soporte Tecnico.
+- Backend: registra factibilidad sin agregar columnas nuevas; usa pipeline, cotizacion de control y auditoria.
+- Frontend: accion Factible / No Factible en panel de prospecto.
+- Base de datos: `prospecto.estado_pipeline`, `prospecto.motivo_perdida`, `cotizacion.factibilidad_verificada`, `log_auditoria`.
+
+## CU03 - Generando cotizacion en formato PDF
+- Actor: Usuario Comercial.
+- Backend: crea `cotizacion`, actualiza PDF URL y genera PDF bajo demanda.
+- Frontend: selector de plan y apertura de PDF.
+- Base de datos: `cotizacion`, `plan`, `prospecto`, `log_auditoria`.
+
+## CU04 - Registrando motivo de perdida de prospecto
+- Actor: Usuario Comercial.
+- Backend: marca el prospecto como `Perdido` y persiste el motivo.
+- Frontend: selector de motivo de perdida.
+- Base de datos: `prospecto.motivo_perdida`, `prospecto.estado_pipeline`, `log_auditoria`.
+
+## CU12 - Registrando tipo de plan contratado por el cliente
+- Actor: Usuario Comercial.
+- Backend: crea cliente si no existe y registra contrato con plan.
+- Frontend: selector de plan contratado y dia de vencimiento.
+- Base de datos: `cliente`, `plan`, `contrato`, `prospecto`, `log_auditoria`.
+
+## CU17 - Generando Orden de Instalacion
+- Actor: Usuario Comercial / Tecnico en Terreno.
+- Backend: crea direccion principal si falta y genera orden de trabajo.
+- Frontend: fecha programada, prioridad y accion de creacion de OT.
+- Base de datos: `direccion_servicio`, `orden_trabajo`, `prospecto`, `log_auditoria`.

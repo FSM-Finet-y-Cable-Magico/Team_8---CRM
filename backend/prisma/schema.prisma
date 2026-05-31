@@ -15,6 +15,7 @@ model Empresa {
   usuarios   Usuario[]
   clientes   Cliente[]
   prospectos Prospecto[]
+  planes     Plan[]
 
   @@map("empresa")
 }
@@ -89,6 +90,8 @@ model Cliente {
   fechaCreacion      DateTime?   @default(now()) @map("fecha_creacion")
   empresa            Empresa?    @relation(fields: [idEmpresa], references: [idEmpresa])
   prospecto          Prospecto?
+  contratos          Contrato[]
+  direcciones        DireccionServicio[]
 
   @@map("cliente")
 }
@@ -111,6 +114,85 @@ model Prospecto {
   empresa               Empresa?  @relation(fields: [idEmpresa], references: [idEmpresa])
   usuarioComercial      Usuario?  @relation(fields: [idUsuarioComercial], references: [idUsuario])
   cliente               Cliente?  @relation(fields: [idCliente], references: [idCliente])
+  cotizaciones          Cotizacion[]
 
   @@map("prospecto")
+}
+
+model Plan {
+  idPlan          Int          @id @default(autoincrement()) @map("id_plan")
+  idEmpresa       Int?         @map("id_empresa")
+  nombreComercial String       @map("nombre_comercial") @db.VarChar(100)
+  tipoPlan        String       @map("tipo_plan") @db.VarChar(20)
+  tipoCliente     String       @map("tipo_cliente") @db.VarChar(20)
+  velocidadMbps   Int?         @map("velocidad_mbps")
+  precioMensual   Decimal      @map("precio_mensual") @db.Decimal(10, 2)
+  descripcion     String?
+  activo          Boolean?     @default(true)
+  empresa         Empresa?     @relation(fields: [idEmpresa], references: [idEmpresa])
+  cotizaciones    Cotizacion[]
+  contratos       Contrato[]
+
+  @@map("plan")
+}
+
+model Cotizacion {
+  idCotizacion           Int        @id @default(autoincrement()) @map("id_cotizacion")
+  idProspecto            Int?       @map("id_prospecto")
+  idPlan                 Int?       @map("id_plan")
+  pdfUrl                 String?    @map("pdf_url")
+  fechaEnvio             DateTime?  @map("fecha_envio")
+  factibilidadVerificada Boolean?   @default(false) @map("factibilidad_verificada")
+  prospecto              Prospecto? @relation(fields: [idProspecto], references: [idProspecto])
+  plan                   Plan?      @relation(fields: [idPlan], references: [idPlan])
+
+  @@map("cotizacion")
+}
+
+model Contrato {
+  idContrato      Int       @id @default(autoincrement()) @map("id_contrato")
+  idCliente       Int?      @map("id_cliente")
+  idPlan          Int?      @map("id_plan")
+  idEmpresa       Int?      @map("id_empresa")
+  fechaInicio     DateTime  @map("fecha_inicio") @db.Date
+  diaVencimiento  Int       @map("dia_vencimiento") @db.SmallInt
+  estado          String    @db.VarChar(20)
+  fechaSuspension DateTime? @map("fecha_suspension") @db.Date
+  cliente         Cliente?  @relation(fields: [idCliente], references: [idCliente])
+  plan            Plan?     @relation(fields: [idPlan], references: [idPlan])
+
+  @@map("contrato")
+}
+
+model DireccionServicio {
+  idDireccion       Int      @id @default(autoincrement()) @map("id_direccion")
+  idCliente         Int?     @map("id_cliente")
+  direccionCompleta String   @map("direccion_completa") @db.VarChar(200)
+  comuna            String   @db.VarChar(80)
+  ciudad            String?  @db.VarChar(80)
+  esPrincipal       Boolean? @default(true) @map("es_principal")
+  cliente           Cliente? @relation(fields: [idCliente], references: [idCliente])
+
+  @@map("direccion_servicio")
+}
+
+model OrdenTrabajo {
+  idOt                Int       @id @default(autoincrement()) @map("id_ot")
+  idEmpresa           Int?      @map("id_empresa")
+  idCliente           Int?      @map("id_cliente")
+  idTecnico           Int?      @map("id_tecnico")
+  idTecnicoExterno    Int?      @map("id_tecnico_externo")
+  idDireccion         Int?      @map("id_direccion")
+  idTicket            Int?      @unique @map("id_ticket")
+  tipoOt              String    @map("tipo_ot") @db.VarChar(20)
+  prioridad           String    @db.VarChar(10)
+  estado              String    @db.VarChar(25)
+  fechaCreacion       DateTime? @map("fecha_creacion")
+  fechaProgramada     DateTime? @map("fecha_programada") @db.Date
+  fechaCompletada     DateTime? @map("fecha_completada")
+  potenciaOpticaDbm   Decimal?  @map("potencia_optica_dbm") @db.Decimal(5, 2)
+  observaciones       String?
+  resueltoRemotamente Boolean?  @default(false) @map("resuelto_remotamente")
+
+  @@map("orden_trabajo")
 }
