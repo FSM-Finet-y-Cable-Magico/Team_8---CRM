@@ -7,14 +7,16 @@ Copiar `.env.example` a `.env`. Para Docker no es obligatorio cambiar valores en
 ## 2. Levantar ambiente reproducible
 
 ```powershell
-docker compose up --build
+docker compose up --build -d
 ```
 
 Servicios esperados:
 
 - Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:3000/api`
-- PostgreSQL: `localhost:5432`, base `fsm_db`
+- PostgreSQL: `localhost:5432`, base `fsm_db`, o `localhost:5433` si `5432` ya esta ocupado y se ajusto `POSTGRES_PORT`.
+
+Guia detallada: `docs/puesta-en-marcha-docker.md`.
 
 ## 3. Entrar al sistema
 
@@ -31,6 +33,14 @@ Password: Admin2026!
 4. Crear un prospecto desde Prospectos.
 5. Revisar que el evento aparezca en Auditoria.
 6. Gestionar el prospecto: actualizar pipeline, verificar factibilidad, generar cotizacion, registrar plan y crear OT.
+
+Para probar flujos con datos realistas, cargar antes el seed demo local:
+
+```powershell
+Get-Content db\demo_seed.sql | docker exec -i finet-crm-db psql -U postgres -d fsm_db -v ON_ERROR_STOP=1
+```
+
+Este seed no toca Railway y no se ejecuta automaticamente.
 
 ## 5. Importacion masiva
 
@@ -101,6 +111,8 @@ npm run dev
 - CU07: `PATCH /api/work-orders/:id/complete-installation`.
 - CU10: `PATCH /api/work-orders/:id/complete-installation`.
 - CU33: `GET /api/reports/export?type=clientes|prospectos|tickets|inventario&format=csv|xlsx`.
+
+Estado detallado por caso de uso: `docs/estado-primer-incremento.md`.
 
 ## 9. Flujo recomendado para probar casos 14 a 28
 

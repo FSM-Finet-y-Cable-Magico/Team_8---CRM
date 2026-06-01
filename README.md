@@ -26,11 +26,19 @@ Correo: admin@finet.local
 Password: Admin2026!
 ```
 
+Guia detallada de Docker, puertos y base local: `docs/puesta-en-marcha-docker.md`.
+
 El contenedor de PostgreSQL carga automaticamente:
 
 - `db/init/01_schema.sql`
 - `db/init/02_local_adjustments.sql`
 - `db/init/03_seed.sql`
+
+Para probar el primer incremento con datos demo locales:
+
+```powershell
+Get-Content db\demo_seed.sql | docker exec -i finet-crm-db psql -U postgres -d fsm_db -v ON_ERROR_STOP=1
+```
 
 ## Puesta en marcha local sin Docker
 
@@ -69,3 +77,4 @@ npm run dev
 - CU01: registro de nuevo prospecto comercial.
 
 Guia operativa: `docs/desarrollo-paso-a-paso.md`.
+Estado de casos de uso: `docs/estado-primer-incremento.md`.
