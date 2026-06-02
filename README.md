@@ -33,6 +33,17 @@ El contenedor de PostgreSQL carga automaticamente:
 - `db/init/01_schema.sql`
 - `db/init/02_local_adjustments.sql`
 - `db/init/03_seed.sql`
+- `db/init/04_seed_demo.sql`
+
+`04_seed_demo.sql` agrega datos minimos para ejercitar los 28 casos de uso:
+planes comerciales, usuarios por rol y un cliente demo. Todos los usuarios demo
+comparten la contrasena `Admin2026!`:
+
+```text
+comercial@finet.local  (rol Comercial)
+soporte@finet.local    (rol Soporte)
+terreno@finet.local    (rol Terreno)
+```
 
 Para probar el primer incremento con datos demo locales:
 
@@ -55,6 +66,7 @@ createdb -U postgres fsm_db
 psql -U postgres -d fsm_db -f db/init/01_schema.sql
 psql -U postgres -d fsm_db -f db/init/02_local_adjustments.sql
 psql -U postgres -d fsm_db -f db/init/03_seed.sql
+psql -U postgres -d fsm_db -f db/init/04_seed_demo.sql
 ```
 
 3. Crea `backend/.env` basado en `backend/.env.example`.

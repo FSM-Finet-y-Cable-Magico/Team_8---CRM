@@ -46,8 +46,9 @@ export class ImportsService {
       throw new BadRequestException('El archivo no contiene filas');
     }
 
-    const normalizedRows = this.normalizeRows(rows);
-    const rejected: RejectedRow[] = [];
+    const totalRows = rows.length;
+    const { normalized: normalizedRows, rejected: structuralRejected } = this.normalizeRows(rows);
+    const rejected: RejectedRow[] = [...structuralRejected];
     const validRows: NormalizedImportRow[] = [];
     const seenRut = new Set<string>();
 
@@ -77,19 +78,19 @@ export class ImportsService {
       validRows.push({ ...row, rut: rutValidation.normalized });
     }
 
-    const rejectionRate = rejected.length / normalizedRows.length;
+    const rejectionRate = rejected.length / totalRows;
 
     if (rejectionRate > MAX_REJECTION_RATE) {
       await this.auditService.record({
         idUsuario: currentUser.idUsuario,
         accion: 'IMPORTACION_CLIENTES_FALLIDA',
         entidadAfectada: 'cliente',
-        valorNuevo: { total: normalizedRows.length, rechazadas: rejected.length, rejectionRate },
+        valorNuevo: { total: totalRows, rechazadas: rejected.length, rejectionRate },
       });
 
       return {
         status: 'fallida',
-        totalRows: normalizedRows.length,
+        totalRows,
         importedRows: 0,
         rejectedRows: rejected.length,
         rejectionRate,
@@ -134,7 +135,7 @@ export class ImportsService {
       accion: 'IMPORTACION_CLIENTES',
       entidadAfectada: 'cliente',
       valorNuevo: {
-        total: normalizedRows.length,
+        total: totalRows,
         importadas: validRows.length,
         rechazadas: rejected.length,
         idEmpresa,
@@ -143,7 +144,7 @@ export class ImportsService {
 
     return {
       status: 'completada',
-      totalRows: normalizedRows.length,
+      totalRows,
       importedRows: validRows.length,
       rejectedRows: rejected.length,
       rejectionRate,
@@ -219,8 +220,12 @@ export class ImportsService {
     return String(value);
   }
 
-  private normalizeRows(rows: RawRow[]): NormalizedImportRow[] {
-    return rows.map((row, index) => {
+  private normalizeRows(rows: RawRow[]): { normalized: NormalizedImportRow[]; rejected: RejectedRow[] } {
+    const normalized: NormalizedImportRow[] = [];
+    const rejected: RejectedRow[] = [];
+
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
       const rut = this.value(row, ['rut', 'RUT']);
       const nombreCompleto =
         this.value(row, ['nombre_completo', 'nombreCompleto', 'Nombre Completo']) ||
@@ -232,13 +237,16 @@ export class ImportsService {
       const estado = this.value(row, ['estado', 'Estado']);
 
       if (!rut || !nombreCompleto || !telefono || !direccion) {
-        throw new BadRequestException(
-          'La plantilla debe incluir rut, nombre/nombre_completo, telefono/celular y direccion',
-        );
+        rejected.push({
+          rowNumber,
+          rut: rut || undefined,
+          reason: 'Faltan campos obligatorios (rut, nombre/nombre_completo, telefono/celular y direccion)',
+        });
+        return;
       }
 
-      return {
-        rowNumber: index + 2,
+      normalized.push({
+        rowNumber,
         rut,
         nombreCompleto,
         email: email || undefined,
@@ -246,8 +254,10 @@ export class ImportsService {
         direccion,
         estado: estado || undefined,
         tipoRegistro: tipoRegistro === 'cliente' ? 'cliente' : 'prospecto',
-      };
+      });
     });
+
+    return { normalized, rejected };
   }
 
   private value(row: RawRow, aliases: string[]) {
