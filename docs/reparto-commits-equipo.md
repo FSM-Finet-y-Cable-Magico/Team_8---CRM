@@ -82,6 +82,30 @@ Explicacion corta:
 
 El cierre de instalacion completa la OT, activa cliente/contrato y calcula el tiempo de conversion del prospecto. Reportes genera CSV o XLSX de clientes, prospectos, tickets e inventario, dejando auditoria de exportacion.
 
+## Bloque E - Preparacion de demo y validaciones de formularios
+
+Casos apoyados:
+
+- CU01 Registrar nuevo prospecto comercial.
+- CU03 Generar cotizacion en PDF.
+- CU12 Registrar plan contratado.
+- CU17 Generar orden de instalacion.
+- CU23 Registrar ticket de soporte.
+- CU53 Registrar movimientos de inventario.
+- CU59 Asociar serie, MAC y puerto OLT al cliente.
+
+Archivos principales:
+
+- `frontend/src/App.tsx` formularios de prospectos, inventario y tickets.
+- `db/demo_seed.sql` datos locales para probar planes, clientes, prospectos, equipos, tickets y ordenes.
+- `docs/puesta-en-marcha-docker.md` guia reproducible para levantar el entorno.
+- `docs/estado-primer-incremento.md` matriz de avance por caso de uso.
+- `docs/desarrollo-paso-a-paso.md` referencia a Docker, seed demo y estado del incremento.
+
+Explicacion corta:
+
+Se agregan ayudas de formato y validaciones livianas en formularios criticos para evitar errores antes de llamar al backend. Tambien se separa una semilla demo manual que no modifica `db/init` ni Railway, permitiendo probar flujos end-to-end sin depender de datos compartidos.
+
 ## Validacion antes de subir
 
 Ejecutar:
@@ -94,3 +118,11 @@ git diff -- db/init/01_schema.sql db/init/02_local_adjustments.sql db/init/03_se
 ```
 
 El ultimo comando debe quedar sin salida. Eso confirma que no se modificaron los scripts SQL compartidos.
+
+Para validar la demo local:
+
+```powershell
+docker compose up -d
+Get-Content db\demo_seed.sql | docker exec -i finet-crm-db psql -U postgres -d fsm_db -v ON_ERROR_STOP=1
+docker compose exec -T frontend npm run build
+```

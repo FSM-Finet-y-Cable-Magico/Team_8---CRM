@@ -41,6 +41,45 @@ const emptyProspectForm: ProspectFormState = {
   direccion: '',
 };
 
+const rutPattern = /^\d{7,8}-[\dkK]$/;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const chileanMobilePattern = /^\+?56?9\d{8}$/;
+const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+
+function normalizeRutInput(value: string) {
+  return value.trim().replace(/\./g, '').toUpperCase();
+}
+
+function validateProspectForm(form: ProspectFormState) {
+  const rut = normalizeRutInput(form.rut);
+  const nombreCompleto = form.nombreCompleto.trim();
+  const email = form.email.trim().toLowerCase();
+  const telefono = form.telefono.trim();
+  const direccion = form.direccion.trim();
+
+  if (!rutPattern.test(rut)) {
+    return 'Ingresa el RUT con guion, por ejemplo 12345678-5.';
+  }
+
+  if (nombreCompleto.length < 5) {
+    return 'Ingresa nombre y apellido del prospecto.';
+  }
+
+  if (email && !emailPattern.test(email)) {
+    return 'Ingresa un correo valido, por ejemplo correo@ejemplo.cl.';
+  }
+
+  if (!chileanMobilePattern.test(telefono.replace(/\s/g, ''))) {
+    return 'Ingresa un celular chileno, por ejemplo +56912345678.';
+  }
+
+  if (direccion.length < 8) {
+    return 'Ingresa una direccion con calle, numero y comuna.';
+  }
+
+  return '';
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem('finet_user');
@@ -344,9 +383,22 @@ function ProspectsPanel({
   async function submit(event: FormEvent) {
     event.preventDefault();
     setStatus('');
+    const validationMessage = validateProspectForm(form);
+
+    if (validationMessage) {
+      setStatus(validationMessage);
+      return;
+    }
 
     try {
-      await api.post('/prospects', { ...form, idEmpresa: writeCompanyId });
+      await api.post('/prospects', {
+        rut: normalizeRutInput(form.rut),
+        nombreCompleto: form.nombreCompleto.trim(),
+        email: form.email.trim().toLowerCase() || undefined,
+        telefono: form.telefono.trim().replace(/\s/g, ''),
+        direccion: form.direccion.trim(),
+        idEmpresa: writeCompanyId,
+      });
       setForm(emptyProspectForm);
       setStatus('Prospecto creado');
       onCreated();
@@ -361,26 +413,52 @@ function ProspectsPanel({
         <h2>Nuevo prospecto</h2>
         <label>
           RUT
-          <input value={form.rut} onChange={(event) => setForm({ ...form, rut: event.target.value })} />
+          <input
+            value={form.rut}
+            onChange={(event) => setForm({ ...form, rut: event.target.value })}
+            placeholder="12345678-5"
+            required
+          />
         </label>
         <label>
           Nombre completo
           <input
             value={form.nombreCompleto}
             onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
+            placeholder="Nombre Apellido"
+            maxLength={120}
+            required
           />
         </label>
         <label>
           Email
-          <input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} type="email" />
+          <input
+            value={form.email}
+            onChange={(event) => setForm({ ...form, email: event.target.value })}
+            placeholder="correo@ejemplo.cl"
+            type="email"
+            maxLength={120}
+          />
         </label>
         <label>
           Celular
-          <input value={form.telefono} onChange={(event) => setForm({ ...form, telefono: event.target.value })} />
+          <input
+            value={form.telefono}
+            onChange={(event) => setForm({ ...form, telefono: event.target.value })}
+            placeholder="+56912345678"
+            maxLength={20}
+            required
+          />
         </label>
         <label>
           Direccion
-          <input value={form.direccion} onChange={(event) => setForm({ ...form, direccion: event.target.value })} />
+          <input
+            value={form.direccion}
+            onChange={(event) => setForm({ ...form, direccion: event.target.value })}
+            placeholder="Av. Siempre Viva 123, Comuna"
+            maxLength={200}
+            required
+          />
         </label>
         {status && <p className="inline-status">{status}</p>}
         <button>Guardar prospecto</button>
@@ -842,10 +920,18 @@ function InventoryPanel({
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
+
+          if (!createForm.numeroSerie.trim() || !createForm.tipoNombre.trim()) {
+            setStatus('Ingresa numero de serie y tipo de equipo.');
+            return;
+          }
+
           void run(
             () =>
               api.post('/inventory/equipment', {
-                ...createForm,
+                numeroSerie: createForm.numeroSerie.trim(),
+                modelo: createForm.modelo.trim() || undefined,
+                tipoNombre: createForm.tipoNombre.trim(),
                 idEmpresa: writeCompanyId,
               }),
             'Equipo creado en inventario',
@@ -858,17 +944,28 @@ function InventoryPanel({
           <input
             value={createForm.numeroSerie}
             onChange={(event) => setCreateForm({ ...createForm, numeroSerie: event.target.value })}
+            placeholder="DEMO-FINET-RTR-002"
+            maxLength={80}
+            required
           />
         </label>
         <label>
           Modelo
-          <input value={createForm.modelo} onChange={(event) => setCreateForm({ ...createForm, modelo: event.target.value })} />
+          <input
+            value={createForm.modelo}
+            onChange={(event) => setCreateForm({ ...createForm, modelo: event.target.value })}
+            placeholder="Huawei AX3 / FiberHome ONU"
+            maxLength={80}
+          />
         </label>
         <label>
           Tipo
           <input
             value={createForm.tipoNombre}
             onChange={(event) => setCreateForm({ ...createForm, tipoNombre: event.target.value })}
+            placeholder="Router/ONU"
+            maxLength={100}
+            required
           />
         </label>
         <button>Crear equipo</button>
@@ -920,7 +1017,7 @@ function InventoryPanel({
                   ))}
                 </select>
                 <input
-                  placeholder="Motivo"
+                  placeholder="Motivo del cambio de estado"
                   value={statusForm.motivo}
                   onChange={(event) => setStatusForm({ ...statusForm, motivo: event.target.value })}
                 />
@@ -958,7 +1055,7 @@ function InventoryPanel({
                   ))}
                 </select>
                 <input
-                  placeholder="Empresa destino"
+                  placeholder="ID empresa destino, ej: 2"
                   value={movementForm.idEmpresaDestino}
                   onChange={(event) => setMovementForm({ ...movementForm, idEmpresaDestino: event.target.value })}
                 />
@@ -998,7 +1095,7 @@ function InventoryPanel({
                   onChange={(event) => setInstallForm({ ...installForm, macAddress: event.target.value })}
                 />
                 <input
-                  placeholder="Puerto OLT"
+                  placeholder="Puerto OLT, ej: OLT-1/1/3"
                   value={installForm.puertoOlt}
                   onChange={(event) => setInstallForm({ ...installForm, puertoOlt: event.target.value })}
                 />
@@ -1006,16 +1103,18 @@ function InventoryPanel({
                   type="button"
                   disabled={!installForm.idCliente}
                   onClick={() =>
-                    void run(
-                      () =>
-                        api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
-                          idCliente: Number(installForm.idCliente),
-                          modelo: installForm.modelo || undefined,
-                          macAddress: installForm.macAddress,
-                          puertoOlt: installForm.puertoOlt,
-                        }),
-                      'Equipo vinculado al cliente',
-                    )
+                    !macPattern.test(installForm.macAddress.trim())
+                      ? setStatus('Ingresa una MAC valida, por ejemplo AA:BB:CC:DD:EE:FF.')
+                      : void run(
+                          () =>
+                            api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
+                              idCliente: Number(installForm.idCliente),
+                              modelo: installForm.modelo.trim() || undefined,
+                              macAddress: installForm.macAddress.trim().toUpperCase(),
+                              puertoOlt: installForm.puertoOlt.trim(),
+                            }),
+                          'Equipo vinculado al cliente',
+                        )
                   }
                 >
                   Vincular
@@ -1085,13 +1184,30 @@ function TicketsPanel({
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
+          const rut = normalizeRutInput(createForm.rut);
+
+          if (!rutPattern.test(rut)) {
+            setStatus('Ingresa el RUT del cliente con guion, por ejemplo 11111111-1.');
+            return;
+          }
+
+          if (!createForm.idCategoria) {
+            setStatus('Selecciona una categoria de falla.');
+            return;
+          }
+
+          if (createForm.descripcion.trim().length < 10) {
+            setStatus('Describe brevemente el problema reportado por el cliente.');
+            return;
+          }
+
           void run(
             () =>
               api.post('/tickets', {
-                rut: createForm.rut,
+                rut,
                 idCategoria: Number(createForm.idCategoria),
                 prioridad: createForm.prioridad,
-                descripcion: createForm.descripcion,
+                descripcion: createForm.descripcion.trim(),
               }),
             'Ticket creado',
           );
@@ -1100,7 +1216,12 @@ function TicketsPanel({
         <h2>Nuevo ticket</h2>
         <label>
           RUT cliente
-          <input value={createForm.rut} onChange={(event) => setCreateForm({ ...createForm, rut: event.target.value })} />
+          <input
+            value={createForm.rut}
+            onChange={(event) => setCreateForm({ ...createForm, rut: event.target.value })}
+            placeholder="11111111-1"
+            required
+          />
         </label>
         <label>
           Categoria
@@ -1123,7 +1244,12 @@ function TicketsPanel({
         </label>
         <label>
           Descripcion
-          <textarea value={createForm.descripcion} onChange={(event) => setCreateForm({ ...createForm, descripcion: event.target.value })} />
+          <textarea
+            value={createForm.descripcion}
+            onChange={(event) => setCreateForm({ ...createForm, descripcion: event.target.value })}
+            placeholder="Cliente reporta intermitencia o perdida de servicio"
+            required
+          />
         </label>
         <button disabled={!createForm.idCategoria}>Crear ticket</button>
         {status && <p className="inline-status">{status}</p>}
