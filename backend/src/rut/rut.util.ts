@@ -5,9 +5,11 @@ export type RutValidationResult = {
   reason?: string;
 };
 
+const RUT_FORMAT_CHARS = /[.-]/g;
+
 export function validateRut(input: string): RutValidationResult {
   const original = input ?? '';
-  const cleaned = original.replace(/\./g, '').replace(/-/g, '').trim().toUpperCase();
+  const cleaned = original.replace(RUT_FORMAT_CHARS, '').trim().toUpperCase();
 
   if (!cleaned) {
     return { input: original, normalized: null, valid: false, reason: 'RUT vacio' };
