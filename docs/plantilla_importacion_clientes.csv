@@ -1,0 +1,2 @@
+rut,nombre,apellido,email,celular,direccion,tipo_registro,estado
+11111111-1,Cliente,Demo,cliente.demo@example.com,+56911111111,Avenida Siempre Viva 123,prospecto,Prospecto Nuevo
