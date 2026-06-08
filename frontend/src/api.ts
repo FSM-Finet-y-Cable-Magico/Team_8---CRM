@@ -1,5 +1,13 @@
 import axios from 'axios';
 
+const envApiURL = import.meta.env.VITE_API_URL?.trim();
+const loopbackApiURL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
+const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+
+const isServedFromLocalhost = localHostnames.has(window.location.hostname);
+const isLoopbackApiURL = Boolean(envApiURL && loopbackApiURL.test(envApiURL));
+const apiBaseURL = envApiURL && (!isLoopbackApiURL || isServedFromLocalhost) ? envApiURL : '/api';
+
 export type AuthUser = {
   idUsuario: number;
   idEmpresa: number | null;
@@ -117,7 +125,7 @@ export type WorkOrder = {
 };
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api',
+  baseURL: apiBaseURL,
 });
 
 api.interceptors.request.use((config) => {

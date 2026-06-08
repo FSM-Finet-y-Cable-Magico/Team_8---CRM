@@ -7,11 +7,25 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
-  const frontendUrl = config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
+  const frontendUrls = (config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  const devTunnelOrigin = /^https:\/\/[\w.-]+\.devtunnels\.ms$/i;
 
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin: frontendUrl,
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const isAllowedOrigin = frontendUrls.includes(origin) || devTunnelOrigin.test(origin);
+      return callback(null, isAllowedOrigin);
+    },
     credentials: true,
   });
   app.use(helmet());
