@@ -44,7 +44,8 @@ JWT_EXPIRES_IN=8h
 
 BACKEND_PORT=3000
 FRONTEND_PORT=5173
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=/api
+API_PROXY_TARGET=http://127.0.0.1:3000
 ```
 
 > No subir credenciales reales al repositorio.
@@ -151,6 +152,10 @@ npm run dev:frontend
 ```
 
 Frontend disponible en `http://localhost:5173`.
+
+Para compartir la aplicacion con VS Code Ports, publica solo el puerto del
+frontend (`5173`). El frontend llama a `/api` y Vite reenvia esas peticiones al
+backend local, por lo que PostgreSQL (`5432`) no debe exponerse publicamente.
 
 ---
 
