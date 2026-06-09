@@ -94,8 +94,8 @@ export default function App() {
 }
 
 function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
-  const [email, setEmail] = useState('admin@finet.local');
-  const [password, setPassword] = useState('Admin2026!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -118,23 +118,38 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div>
-          <p className="eyebrow">CRM operativo</p>
-          <h1>FiNet y Cable Magico</h1>
-        </div>
-        <form onSubmit={submit} className="stack">
-          <label>
-            Correo
-            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
-          </label>
-          <label>
-            Password
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
-          </label>
-          {error && <p className="alert">{error}</p>}
-          <button disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar'}</button>
-        </form>
+      <section className="login-card" aria-label="Acceso FiNet">
+        <section className="login-panel">
+          <div className="login-heading">
+            <h1>FiNet y Cable Magico</h1>
+          </div>
+          <form onSubmit={submit} className="stack" autoComplete="off">
+            <label>
+              Correo
+              <input
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                type="email"
+                autoComplete="off"
+                placeholder="correo@finet.local"
+              />
+            </label>
+            <label>
+              Contraseña
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                type="password"
+                autoComplete="off"
+                placeholder="Ingresa tu contraseña"
+              />
+            </label>
+            {error && <p className="alert">{error}</p>}
+            <button className="login-button" disabled={loading}>
+              {loading ? 'Ingresando...' : 'Ingresar'}
+            </button>
+          </form>
+        </section>
       </section>
     </main>
   );
