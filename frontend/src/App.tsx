@@ -118,10 +118,11 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-card" aria-label="Acceso FiNet">
+      <section className="login-card" aria-label="Acceso al sistema CRM">
         <section className="login-panel">
           <div className="login-heading">
-            <h1>FiNet y Cable Magico</h1>
+            <h1>Sistema de Gestión CRM</h1>
+            <p>FiNet y Cable Mágico Litoral · Administración comercial, clientes y soporte.</p>
           </div>
           <form onSubmit={submit} className="stack" autoComplete="off">
             <label>
@@ -239,7 +240,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Primer incremento</p>
+          
           <h1>CRM FiNet</h1>
         </div>
         <div className="topbar-actions">

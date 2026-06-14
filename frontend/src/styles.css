@@ -214,6 +214,14 @@ th {
   line-height: 1.08;
 }
 
+.login-heading p {
+  max-width: 340px;
+  margin: 0;
+  color: #5e6a65;
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
 .panel h2 {
   font-size: 1.1rem;
 }
