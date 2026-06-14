@@ -27,25 +27,25 @@ Esta matriz resume el estado actual de los 28 casos de uso cubiertos por el prim
 | CU01 | Registrar prospecto | `POST /api/prospects` | Nuevo prospecto | Empresa, usuario | Implementado y mejorado | Seguir afinando validacion y textos de ayuda |
 | CU02 | Actualizar pipeline | `PATCH /api/prospects/:id/pipeline` | Gestion prospecto | Prospecto | Implementado | Validar secuencia completa de estados |
 | CU06 | Verificar factibilidad | `POST /api/prospects/:id/feasibility` | Gestion prospecto | Prospecto con direccion | Implementado | Mostrar observaciones en historial visible |
-| CU03 | Generar cotizacion PDF | `POST /api/prospects/:id/quotes`, `GET PDF` | Gestion prospecto | Prospecto factible + plan | Implementado con `db/demo_seed.sql` | Crear administracion de planes |
+| CU03 | Generar cotizacion PDF | `POST /api/prospects/:id/quotes`, `GET PDF` | Gestion prospecto | Prospecto factible + plan + SMTP para envio | Implementado; envio real configurable | Configurar credenciales SMTP del ambiente |
 | CU04 | Registrar perdida | `POST /api/prospects/:id/loss` | Gestion prospecto | Prospecto | Implementado | Confirmacion visual antes de marcar perdido |
 | CU12 | Registrar plan contratado | `POST /api/prospects/:id/contracts` | Gestion prospecto | Prospecto + plan | Implementado con `db/demo_seed.sql` | Crear administracion de planes |
 | CU17 | Generar orden de instalacion | `POST /api/prospects/:id/install-orders` | Gestion prospecto | Prospecto convertido a cliente | Implementado | Guiar usuario cuando falte contrato previo |
 | CU08 | Actualizar estado de cliente | `PATCH /api/customers/:id/status` | Clientes | Cliente | Implementado con `db/demo_seed.sql` | Validar catalogo de estados definitivo |
-| CU14 | Consultar historial de cliente | `GET /api/customers/:id/history` | Clientes | Cliente y registros asociados | Implementado | Mejorar visualizacion cronologica del historial |
+| CU14 | Consultar historial de cliente | `GET /api/customers`, `GET /api/customers/:id/history` | Clientes | Cliente y registros asociados | Implementado con busqueda por RUT, telefono y nombre | Mejorar visualizacion cronologica del historial |
 | CU53 | Registrar movimiento inventario | `POST /api/inventory/movements` | Inventario | Equipo | Implementado con `db/demo_seed.sql` | Validar obligatoriedad por tipo de movimiento |
 | CU54 | Actualizar estado logico equipo | `PATCH /api/inventory/equipment/:id/status` | Inventario | Equipo | Implementado | Mostrar historial de cambios de equipo |
-| CU62 | Visualizar inventario por empresa | `GET /api/inventory?scope=...` | Inventario | Equipos | Implementado | Agregar filtros por estado/tipo |
+| CU62 | Visualizar inventario por empresa | `GET /api/inventory?scope=...` | Inventario | Equipos | Implementado con empresa visible por equipo | Agregar filtros por estado/tipo |
 | CU20 | Instalar router/ONU | `POST /api/inventory/equipment/:id/install` | Inventario | Equipo disponible + cliente | Implementado | Mejorar seleccion de OT asociada |
-| CU59 | Asociar serie, MAC y puerto OLT | `POST /api/inventory/equipment/:id/install` | Inventario | Equipo disponible + cliente | Implementado | Persistir MAC/OLT en campos propios si la base evoluciona |
-| CU23 | Registrar ticket | `POST /api/tickets` | Tickets | Cliente + categoria | Implementado con `db/demo_seed.sql` | Mejorar busqueda de cliente por RUT |
+| CU59 | Asociar serie, MAC y puerto OLT | `POST /api/inventory/equipment/:id/install` | Inventario | Equipo disponible + cliente | Implementado con cliente, OT y datos tecnicos visibles | Persistir MAC/OLT en campos propios si la base evoluciona |
+| CU23 | Registrar ticket | `GET /api/customers/search`, `POST /api/tickets` | Tickets | Cliente + categoria | Implementado con consulta previa por RUT | Agregar mas datos de contacto si el caso evoluciona |
 | CU24 | Clasificar ticket | `PATCH /api/tickets/:id/category` | Tickets | Ticket + categorias | Implementado | Mostrar SLA de categoria |
 | CU25 | Asignar prioridad | `PATCH /api/tickets/:id/priority` | Tickets | Ticket | Implementado | Definir reglas de prioridad automatica si aplica |
 | CU26 | Actualizar estado ticket | `PATCH /api/tickets/:id/status` | Tickets | Ticket | Implementado | Validar transiciones permitidas con feedback visual |
 | CU21 | Registrar diagnostico tecnico | `POST /api/tickets/:id/diagnosis` | Tickets | Ticket | Implementado | Hacer obligatorios campos clave del diagnostico |
 | CU07 | Cerrar instalacion y activar cliente | `PATCH /api/work-orders/:id/complete-installation` | Ordenes | OT de instalacion | Implementado | Probar flujo completo desde prospecto |
 | CU10 | Calcular tiempo conversion | `PATCH /api/work-orders/:id/complete-installation` | Ordenes | Prospecto relacionado a cliente/OT | Implementado | Validar caso desde prospecto creado en UI |
-| CU33 | Exportar reportes operativos | `GET /api/reports/export` | Reportes | Datos segun reporte | Implementado | Ajustar columnas finales con el cliente/profesor |
+| CU33 | Exportar reportes operativos | `GET /api/reports/export` | Reportes operativos | Datos segun reporte | Implementado con periodo, alcance y empresa | Ajustar columnas finales con el cliente/profesor |
 
 ## Siguiente foco recomendado
 

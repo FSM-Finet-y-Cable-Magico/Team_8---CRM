@@ -153,6 +153,18 @@ npm run dev:frontend
 
 Frontend disponible en `http://localhost:5173`.
 
+### Docker conectado a Railway
+
+El repositorio incluye un modo separado que ejecuta frontend y backend en Docker, pero usa PostgreSQL remoto mediante el TCP Proxy de Railway:
+
+```powershell
+Copy-Item .env.railway.example .env.railway
+# Completar DATABASE_URL dentro de .env.railway
+npm run docker:railway
+```
+
+En este modo el frontend queda en `http://localhost:5174` y el backend en `http://localhost:3001/api`. La guia completa esta en `docs/puesta-en-marcha-docker.md`.
+
 Para compartir la aplicacion con VS Code Ports, publica solo el puerto del
 frontend (`5173`). El frontend llama a `/api` y Vite reenvia esas peticiones al
 backend local, por lo que PostgreSQL (`5432`) no debe exponerse publicamente.

@@ -12,7 +12,11 @@
     "dev:frontend": "npm run dev -w frontend",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "prisma:generate": "npm run prisma:generate -w backend"
+    "prisma:generate": "npm run prisma:generate -w backend",
+    "docker:local": "docker compose up --build -d",
+    "docker:local:down": "docker compose down",
+    "docker:railway": "docker compose --env-file .env.railway -f docker-compose.railway.yml up --build -d",
+    "docker:railway:down": "docker compose --env-file .env.railway -f docker-compose.railway.yml down"
   },
   "engines": {
     "node": ">=20.11"

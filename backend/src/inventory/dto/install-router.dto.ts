@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
 export class InstallRouterDto {
   @IsInt()
@@ -20,6 +20,7 @@ export class InstallRouterDto {
   macAddress!: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(80)
   puertoOlt!: string;
 }

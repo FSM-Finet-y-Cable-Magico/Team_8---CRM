@@ -47,11 +47,17 @@ export class WorkOrdersService {
       });
 
       await tx.contrato.updateMany({
-        where: { idCliente: cliente.idCliente, estado: { not: 'Activo' } },
+        where: {
+          idCliente: cliente.idCliente,
+          idEmpresa: order.idEmpresa,
+          estado: { not: 'Activo' },
+        },
         data: { estado: 'Activo' },
       });
 
-      const prospect = await tx.prospecto.findFirst({ where: { idCliente: cliente.idCliente } });
+      const prospect = await tx.prospecto.findFirst({
+        where: { idCliente: cliente.idCliente, idEmpresa: order.idEmpresa },
+      });
       let updatedProspect = null;
 
       if (prospect && prospect.estadoPipeline !== 'Servicio Activo') {
@@ -64,6 +70,7 @@ export class WorkOrdersService {
           where: { idProspecto: prospect.idProspecto },
           data: {
             estadoPipeline: 'Servicio Activo',
+            motivoPerdida: null,
             fechaConversion: now,
             tiempoConversionDias: conversionDays,
           },

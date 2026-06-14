@@ -89,7 +89,7 @@ model Cliente {
   obsConflictivo     String?     @map("obs_conflictivo")
   fechaCreacion      DateTime?   @default(now()) @map("fecha_creacion")
   empresa            Empresa?    @relation(fields: [idEmpresa], references: [idEmpresa])
-  prospecto          Prospecto?
+  prospectos         Prospecto[]
   contratos          Contrato[]
   direcciones        DireccionServicio[]
 
@@ -100,7 +100,7 @@ model Prospecto {
   idProspecto           Int       @id @default(autoincrement()) @map("id_prospecto")
   idEmpresa             Int?      @map("id_empresa")
   idUsuarioComercial    Int?      @map("id_usuario_comercial")
-  idCliente             Int?      @unique @map("id_cliente")
+  idCliente             Int?      @map("id_cliente")
   rut                   String?   @db.VarChar(12)
   nombreCompleto        String?   @map("nombre_completo") @db.VarChar(120)
   email                 String?   @db.VarChar(120)

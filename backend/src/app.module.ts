@@ -15,6 +15,7 @@ import { SecurityModule } from './security/security.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -35,5 +36,6 @@ import { WorkOrdersModule } from './work-orders/work-orders.module';
     ReportsModule,
     ImportsModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule {}

@@ -12,10 +12,11 @@ export class CompaniesService {
   }
 
   async summary(scope = 'consolidado') {
+    const customerFilter = this.buildCustomerCompanyFilter(scope);
     const companyFilter = this.buildCompanyFilter(scope);
 
     const [clientes, prospectos, empresas] = await Promise.all([
-      this.prisma.cliente.count({ where: companyFilter }),
+      this.prisma.cliente.count({ where: customerFilter }),
       this.prisma.prospecto.count({ where: companyFilter }),
       this.prisma.empresa.findMany({ orderBy: { idEmpresa: 'asc' } }),
     ]);
@@ -42,5 +43,20 @@ export class CompaniesService {
     }
 
     return { idEmpresa };
+  }
+
+  private buildCustomerCompanyFilter(scope: string) {
+    const companyFilter = this.buildCompanyFilter(scope);
+
+    if (!('idEmpresa' in companyFilter)) {
+      return {};
+    }
+
+    return {
+      OR: [
+        { idEmpresa: companyFilter.idEmpresa },
+        { contratos: { some: { idEmpresa: companyFilter.idEmpresa } } },
+      ],
+    };
   }
 }

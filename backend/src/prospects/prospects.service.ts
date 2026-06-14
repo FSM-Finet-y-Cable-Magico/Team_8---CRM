@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { ContractPlanDto } from './dto/contract-plan.dto';
@@ -29,6 +30,7 @@ export class ProspectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly mailService: MailService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -59,14 +61,22 @@ export class ProspectsService {
 
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
     const duplicateProspect = await this.prisma.prospecto.findFirst({
-      where: { rut: rutResult.normalized },
+      where: { rut: rutResult.normalized, idEmpresa },
     });
     const duplicateClient = await this.prisma.cliente.findUnique({
       where: { rut: rutResult.normalized },
+      include: {
+        contratos: {
+          select: { idEmpresa: true },
+        },
+      },
     });
+    const clientAlreadyInCompany =
+      duplicateClient?.idEmpresa === idEmpresa ||
+      duplicateClient?.contratos.some((contract) => contract.idEmpresa === idEmpresa);
 
-    if (duplicateProspect || duplicateClient) {
-      throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT');
+    if (duplicateProspect || clientAlreadyInCompany) {
+      throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
     const prospect = await this.prisma.prospecto.create({
@@ -108,11 +118,13 @@ export class ProspectsService {
 
     this.validatePipelineTransition(currentStatus, nextStatus);
 
+    const isReactivation = currentStatus === LOST_PIPELINE_STATUS;
     const conversionData = this.conversionData(nextStatus, prospect.fechaCreacion);
     const updated = await this.prisma.prospecto.update({
       where: { idProspecto },
       data: {
         estadoPipeline: nextStatus,
+        motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
         ...conversionData,
       },
       include: { empresa: true },
@@ -120,11 +132,11 @@ export class ProspectsService {
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_PIPELINE_PROSPECTO',
+      accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
-      valorAnterior: { estadoPipeline: currentStatus },
-      valorNuevo: { estadoPipeline: nextStatus, ...conversionData },
+      valorAnterior: { estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida },
+      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida, ...conversionData },
     });
 
     return updated;
@@ -217,15 +229,30 @@ export class ProspectsService {
         fechaEnvio: new Date(),
         factibilidadVerificada: true,
       },
-      include: { plan: true, prospecto: true },
+      include: { plan: true, prospecto: { include: { empresa: true } } },
     });
     const pdfUrl = `/prospects/${idProspecto}/quotes/${quote.idCotizacion}/pdf`;
 
     const updatedQuote = await this.prisma.cotizacion.update({
       where: { idCotizacion: quote.idCotizacion },
       data: { pdfUrl },
-      include: { plan: true, prospecto: true },
+      include: { plan: true, prospecto: { include: { empresa: true } } },
     });
+
+    const pdf = await this.renderQuotePdfBuffer(updatedQuote);
+    let emailDelivery: MailDeliveryResult | { status: 'failed' };
+
+    try {
+      emailDelivery = await this.mailService.sendQuote({
+        to: prospect.email,
+        prospectName: prospect.nombreCompleto ?? 'Cliente',
+        companyName: updatedQuote.prospecto?.empresa?.nombre ?? 'FiNet',
+        pdf,
+        filename: `cotizacion-${quote.idCotizacion}.pdf`,
+      });
+    } catch {
+      emailDelivery = { status: 'failed' };
+    }
 
     const currentStatus = prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
 
@@ -246,12 +273,13 @@ export class ProspectsService {
         idPlan: dto.planId,
         pdfUrl,
         emailDestino: prospect.email,
+        envioEmail: emailDelivery.status,
       },
     });
 
     return {
       ...updatedQuote,
-      envioEmail: 'simulado',
+      envioEmail: emailDelivery.status,
     };
   }
 
@@ -442,6 +470,30 @@ export class ProspectsService {
       throw new NotFoundException('Cotizacion no encontrada');
     }
 
+    return this.renderQuotePdfBuffer(quote);
+  }
+
+  private renderQuotePdfBuffer(quote: {
+    fechaEnvio: Date | null;
+    prospecto: {
+      nombreCompleto: string | null;
+      rut: string | null;
+      email: string | null;
+      direccion: string | null;
+      empresa?: { nombre: string } | null;
+    } | null;
+    plan: {
+      nombreComercial: string;
+      tipoPlan: string;
+      tipoCliente: string;
+      velocidadMbps: number | null;
+      precioMensual: { toString(): string };
+    } | null;
+  }) {
+    if (!quote.prospecto || !quote.plan) {
+      throw new NotFoundException('Cotizacion no encontrada');
+    }
+
     const quoteProspect = quote.prospecto;
     const quotePlan = quote.plan;
 
@@ -468,7 +520,7 @@ export class ProspectsService {
       doc.text(`Precio mensual: $${quotePlan.precioMensual.toString()}`);
       doc.moveDown();
       doc.text(`Fecha de envio: ${(quote.fechaEnvio ?? new Date()).toLocaleDateString('es-CL')}`);
-      doc.text('Envio de correo: simulado para ambiente academico.');
+      doc.text('Documento generado por CRM FiNet.');
       doc.end();
     });
   }
@@ -513,7 +565,7 @@ export class ProspectsService {
     }
 
     if (currentStatus === LOST_PIPELINE_STATUS) {
-      throw new BadRequestException('Un prospecto perdido no puede avanzar en pipeline');
+      return;
     }
 
     const currentIndex = this.statusIndex(currentStatus);

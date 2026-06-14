@@ -33,11 +33,25 @@ export class InventoryService {
     const types = typeIds.length
       ? await this.prisma.tipoEquipo.findMany({ where: { idTipoEquipo: { in: typeIds } } })
       : [];
+    const companyIds = [...new Set(units.map((unit) => unit.idEmpresa).filter((id): id is number => Boolean(id)))];
+    const customerIds = [
+      ...new Set(units.map((unit) => unit.idClienteInstalado).filter((id): id is number => Boolean(id))),
+    ];
+    const [companies, customers] = await Promise.all([
+      companyIds.length ? this.prisma.empresa.findMany({ where: { idEmpresa: { in: companyIds } } }) : [],
+      customerIds.length ? this.prisma.cliente.findMany({ where: { idCliente: { in: customerIds } } }) : [],
+    ]);
     const typeById = new Map(types.map((type) => [type.idTipoEquipo, type]));
+    const companyById = new Map(companies.map((company) => [company.idEmpresa, company]));
+    const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
 
     return units.map((unit) => ({
       ...unit,
       tipoEquipo: unit.idTipoEquipo ? typeById.get(unit.idTipoEquipo) ?? null : null,
+      empresa: unit.idEmpresa ? companyById.get(unit.idEmpresa) ?? null : null,
+      clienteInstalado: unit.idClienteInstalado ? customerById.get(unit.idClienteInstalado) ?? null : null,
+      macAddress: this.technicalValue(unit.diagnosticoTecnico, 'MAC'),
+      puertoOlt: this.technicalValue(unit.diagnosticoTecnico, 'Puerto OLT'),
     }));
   }
 
@@ -178,10 +192,31 @@ export class InventoryService {
       throw new BadRequestException('El equipo no figura como Disponible');
     }
 
-    const cliente = await this.prisma.cliente.findUnique({ where: { idCliente: dto.idCliente } });
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { idCliente: dto.idCliente },
+      include: { contratos: { select: { idEmpresa: true } } },
+    });
 
     if (!cliente) {
       throw new BadRequestException('Cliente inexistente');
+    }
+
+    const belongsToEquipmentCompany =
+      cliente.idEmpresa === unit.idEmpresa || cliente.contratos.some((contract) => contract.idEmpresa === unit.idEmpresa);
+
+    if (!belongsToEquipmentCompany) {
+      throw new BadRequestException('El cliente no tiene una cuenta asociada a la empresa del equipo');
+    }
+
+    const installOrder = dto.idOt
+      ? await this.prisma.ordenTrabajo.findUnique({ where: { idOt: dto.idOt } })
+      : null;
+
+    if (
+      installOrder &&
+      (installOrder.idCliente !== dto.idCliente || installOrder.idEmpresa !== unit.idEmpresa || installOrder.tipoOt !== 'Instalacion')
+    ) {
+      throw new BadRequestException('La orden de instalacion no corresponde al cliente y empresa seleccionados');
     }
 
     const technicalNotes = [
@@ -294,6 +329,15 @@ export class InventoryService {
     }
 
     return currentUser.idEmpresa;
+  }
+
+  private technicalValue(notes: string | null, label: 'MAC' | 'Puerto OLT') {
+    if (!notes) {
+      return null;
+    }
+
+    const pattern = label === 'MAC' ? /MAC:\s*([^;\n]+)/i : /Puerto OLT:\s*([^;\n]+)/i;
+    return pattern.exec(notes)?.[1]?.trim() ?? null;
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
