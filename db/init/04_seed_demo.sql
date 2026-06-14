@@ -22,7 +22,7 @@ ON CONFLICT (id_plan) DO UPDATE SET
 SELECT setval(pg_get_serial_sequence('plan', 'id_plan'), (SELECT MAX(id_plan) FROM plan));
 
 -- Usuarios por rol para probar endpoints con permisos distintos.
--- Reutilizan el mismo hash del admin, por lo que la contrasena es: Admin2026!
+
 INSERT INTO usuario (id_empresa, nombre_completo, nombre_usuario, email, password_hash, activo, es_password_temporal)
 VALUES
   (1, 'Comercial FiNet', 'comercial.finet', 'comercial@finet.local', '$2b$12$2N88Ad5Xg13UfkmVRM6wG.LqCvvl78OMgsEEqc.dqXZnmMzLbfTKG', TRUE, TRUE),

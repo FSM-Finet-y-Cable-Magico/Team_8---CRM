@@ -239,7 +239,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Primer incremento</p>
+          
           <h1>CRM FiNet</h1>
         </div>
         <div className="topbar-actions">
