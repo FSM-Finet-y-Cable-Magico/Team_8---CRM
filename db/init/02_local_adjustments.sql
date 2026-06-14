@@ -10,6 +10,11 @@ ALTER TABLE cliente
 ALTER TABLE cliente
   ADD COLUMN IF NOT EXISTS importado_masivo BOOLEAN DEFAULT FALSE;
 
+-- Una misma cuenta de cliente puede originarse en procesos comerciales de
+-- FiNet y Cable Magico. Cada prospecto conserva su empresa y comparte cliente.
+ALTER TABLE prospecto
+  DROP CONSTRAINT IF EXISTS prospecto_id_cliente_key;
+
 DO $$
 BEGIN
   IF NOT EXISTS (

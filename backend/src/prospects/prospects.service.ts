@@ -59,14 +59,22 @@ export class ProspectsService {
 
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
     const duplicateProspect = await this.prisma.prospecto.findFirst({
-      where: { rut: rutResult.normalized },
+      where: { rut: rutResult.normalized, idEmpresa },
     });
     const duplicateClient = await this.prisma.cliente.findUnique({
       where: { rut: rutResult.normalized },
+      include: {
+        contratos: {
+          select: { idEmpresa: true },
+        },
+      },
     });
+    const clientAlreadyInCompany =
+      duplicateClient?.idEmpresa === idEmpresa ||
+      duplicateClient?.contratos.some((contract) => contract.idEmpresa === idEmpresa);
 
-    if (duplicateProspect || duplicateClient) {
-      throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT');
+    if (duplicateProspect || clientAlreadyInCompany) {
+      throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
     const prospect = await this.prisma.prospecto.create({
@@ -108,11 +116,13 @@ export class ProspectsService {
 
     this.validatePipelineTransition(currentStatus, nextStatus);
 
+    const isReactivation = currentStatus === LOST_PIPELINE_STATUS;
     const conversionData = this.conversionData(nextStatus, prospect.fechaCreacion);
     const updated = await this.prisma.prospecto.update({
       where: { idProspecto },
       data: {
         estadoPipeline: nextStatus,
+        motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
         ...conversionData,
       },
       include: { empresa: true },
@@ -120,11 +130,11 @@ export class ProspectsService {
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_PIPELINE_PROSPECTO',
+      accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
-      valorAnterior: { estadoPipeline: currentStatus },
-      valorNuevo: { estadoPipeline: nextStatus, ...conversionData },
+      valorAnterior: { estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida },
+      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida, ...conversionData },
     });
 
     return updated;
@@ -513,7 +523,7 @@ export class ProspectsService {
     }
 
     if (currentStatus === LOST_PIPELINE_STATUS) {
-      throw new BadRequestException('Un prospecto perdido no puede avanzar en pipeline');
+      return;
     }
 
     const currentIndex = this.statusIndex(currentStatus);

@@ -78,6 +78,13 @@ export type Customer = {
   email: string | null;
   telefono: string | null;
   estado: string;
+  empresa?: Company | null;
+  empresas?: string[];
+  contratos?: Array<{
+    idContrato: number;
+    idEmpresa: number | null;
+    plan?: Plan | null;
+  }>;
 };
 
 export type InventoryUnit = {

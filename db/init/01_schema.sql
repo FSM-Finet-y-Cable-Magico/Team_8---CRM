@@ -470,7 +470,7 @@ CREATE TABLE prospecto (
     id_prospecto                   SERIAL         PRIMARY KEY,
     id_empresa                     INTEGER       ,
     id_usuario_comercial           INTEGER       ,
-    id_cliente                     INTEGER        UNIQUE,
+    id_cliente                     INTEGER       ,
     rut                            VARCHAR(12)   ,
     nombre_completo                VARCHAR(120)  ,
     email                          VARCHAR(120)  ,

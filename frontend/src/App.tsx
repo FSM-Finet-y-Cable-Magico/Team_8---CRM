@@ -292,7 +292,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         )}
         {canViewWorkOrders && (
           <TabButton current={activeTab} value="workOrders" onClick={setActiveTab}>
-            OTs
+            Órdenes de Trabajo
           </TabButton>
         )}
         <TabButton current={activeTab} value="rut" onClick={setActiveTab}>
@@ -325,7 +325,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         />
       )}
       {activeTab === 'rut' && <RutPanel />}
-      {activeTab === 'customers' && canManageCustomers && <CustomersPanel customers={customers} onChanged={() => void loadData()} />}
+      {activeTab === 'customers' && canManageCustomers && (
+        <CustomersPanel customers={customers} scope={scope} onChanged={() => void loadData()} />
+      )}
       {activeTab === 'inventory' && canViewInventory && (
         <InventoryPanel inventory={inventory} customers={customers} writeCompanyId={writeCompanyId} onChanged={() => void loadData()} />
       )}
@@ -425,7 +427,7 @@ function ProspectsPanel({
   return (
     <section className="workspace-grid">
       <form className="panel stack" onSubmit={submit}>
-        <h2>Nuevo prospecto</h2>
+        <h2>Registrando nuevo prospecto comercial</h2>
         <label>
           RUT
           <input
@@ -476,11 +478,11 @@ function ProspectsPanel({
           />
         </label>
         {status && <p className="inline-status">{status}</p>}
-        <button>Guardar prospecto</button>
+        <button>Registrar prospecto</button>
       </form>
 
       <section className="panel">
-        <h2>Prospectos recientes</h2>
+        <h2>Gestión de Prospectos</h2>
         <div className="table-wrap">
           <table>
             <thead>
@@ -570,7 +572,7 @@ function ProspectWorkflowPanel({
       <h3>{prospect.nombreCompleto}</h3>
       <div className="workflow-grid">
         <label>
-          Pipeline
+          Actualizar estado del prospecto en el pipeline
           <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
             {[
               'Prospecto Nuevo',
@@ -591,16 +593,16 @@ function ProspectWorkflowPanel({
             onClick={() =>
               void runAction(
                 () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: pipelineStatus }),
-                'Pipeline actualizado',
+                prospect.estadoPipeline === 'Perdido' ? 'Prospecto reactivado y pipeline actualizado' : 'Pipeline actualizado',
               )
             }
           >
-            Actualizar
+            Actualizar Estado
           </button>
         </label>
 
         <label>
-          Factibilidad
+          Verificando factibilidad técnica de instalación
           <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
             <option value="Factible">Factible</option>
             <option value="No Factible">No Factible</option>
@@ -614,12 +616,12 @@ function ProspectWorkflowPanel({
               )
             }
           >
-            Guardar
+            Registrar factibilidad
           </button>
         </label>
 
         <label>
-          Cotizacion
+          Generando cotización en formato PDF
           <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
             {planOptions.map((plan) => (
@@ -633,12 +635,12 @@ function ProspectWorkflowPanel({
             disabled={!quotePlanId}
             onClick={() => void runAction(generateQuote, 'Cotizacion generada')}
           >
-            Generar PDF
+            Generar Cotización
           </button>
         </label>
 
         <label>
-          Perdida
+          Registrando motivo de pérdida de prospecto
           <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
             {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
               <option key={item} value={item}>
@@ -656,12 +658,12 @@ function ProspectWorkflowPanel({
               )
             }
           >
-            Marcar
+            Marcar como Perdido
           </button>
         </label>
 
         <label>
-          Plan contratado
+          Registrando tipo de plan contratado por el cliente
           <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
             {planOptions.map((plan) => (
@@ -691,12 +693,12 @@ function ProspectWorkflowPanel({
               )
             }
           >
-            Registrar
+            Registrar plan contratado
           </button>
         </label>
 
         <label>
-          Orden instalacion
+          Generando Orden de Instalación
           <input type="date" value={installDate} onChange={(event) => setInstallDate(event.target.value)} />
           <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
             <option value="Alta">Alta</option>
@@ -717,7 +719,7 @@ function ProspectWorkflowPanel({
               )
             }
           >
-            Crear OT
+            Generar Orden de Instalación
           </button>
         </label>
       </div>
@@ -734,13 +736,25 @@ type CustomerHistory = {
   auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
 };
 
-function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onChanged: () => void }) {
+function CustomersPanel({
+  customers,
+  scope,
+  onChanged,
+}: {
+  customers: Customer[];
+  scope: string;
+  onChanged: () => void;
+}) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusValue, setStatusValue] = useState('Activo');
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [status, setStatus] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<Customer[] | null>(null);
 
-  const selectedCustomer = customers.find((customer) => customer.idCliente === selectedId) ?? customers[0] ?? null;
+  const visibleCustomers = searchResults ?? customers;
+  const selectedCustomer =
+    visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? visibleCustomers[0] ?? null;
 
   useEffect(() => {
     if (!selectedId && customers[0]) {
@@ -755,6 +769,38 @@ function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onCha
       setHistory(null);
     }
   }, [selectedCustomer?.idCliente]);
+
+  useEffect(() => {
+    setSearchResults(null);
+    setSearchTerm('');
+  }, [scope]);
+
+  async function searchCustomers(event: FormEvent) {
+    event.preventDefault();
+    const term = searchTerm.trim();
+
+    if (!term) {
+      setSearchResults(null);
+      setStatus('');
+      return;
+    }
+
+    try {
+      const { data } = await api.get<Customer[]>('/customers', { params: { scope, query: term } });
+      setSearchResults(data);
+      setSelectedId(data[0]?.idCliente ?? null);
+      setStatus(data.length ? `${data.length} cliente(s) encontrado(s)` : 'No se encontraron clientes');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  function clearSearch() {
+    setSearchTerm('');
+    setSearchResults(null);
+    setSelectedId(customers[0]?.idCliente ?? null);
+    setStatus('');
+  }
 
   async function updateCustomerStatus() {
     if (!selectedCustomer) {
@@ -787,26 +833,48 @@ function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onCha
   return (
     <section className="workspace-grid">
       <section className="panel">
-        <h2>Clientes</h2>
+        <h2>Consultando historial completo del cliente</h2>
+        <form className="customer-search" onSubmit={searchCustomers}>
+          <label>
+            Buscar cliente por RUT, teléfono, nombre o número de contrato
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Ej.: 12345678-5, +569..., Ana Pérez o 25"
+            />
+          </label>
+          <div className="button-row">
+            <button type="submit">Buscar cliente</button>
+            {searchResults && (
+              <button type="button" className="secondary" onClick={clearSearch}>
+                Limpiar búsqueda
+              </button>
+            )}
+          </div>
+        </form>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>RUT</th>
                 <th>Nombre</th>
+                <th>Teléfono</th>
                 <th>Estado</th>
+                <th>Empresas</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer) => (
+              {visibleCustomers.map((customer) => (
                 <tr key={customer.idCliente}>
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
+                  <td>{customer.telefono ?? '-'}</td>
                   <td>{customer.estado}</td>
+                  <td>{customer.empresas?.join(', ') || customer.empresa?.nombre || '-'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => setSelectedId(customer.idCliente)}>
-                      Ver
+                      Gestionar cliente
                     </button>
                   </td>
                 </tr>
@@ -817,7 +885,7 @@ function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onCha
       </section>
 
       <section className="panel stack">
-        <h2>Gestion de cliente</h2>
+        <h2>Modificando estado del cliente según ciclo de vida</h2>
         {selectedCustomer ? (
           <>
             <p className="detail-line">
@@ -835,10 +903,10 @@ function CustomersPanel({ customers, onChanged }: { customers: Customer[]; onCha
             </label>
             <div className="button-row">
               <button type="button" onClick={updateCustomerStatus}>
-                Actualizar estado
+                Cambiar Estado Operativo
               </button>
               <button type="button" className="secondary" onClick={loadHistory}>
-                Ver historial
+                Ver Historial
               </button>
             </div>
             {status && <p className="inline-status">{status}</p>}
@@ -1449,7 +1517,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
   return (
     <section className="workspace-grid">
       <section className="panel">
-        <h2>Ordenes de trabajo</h2>
+        <h2>Órdenes de Trabajo</h2>
         <div className="table-wrap">
           <table>
             <thead>
@@ -1483,7 +1551,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
       </section>
 
       <section className="panel stack">
-        <h2>Cierre de instalacion</h2>
+        <h2>Activando cliente tras confirmación de instalación</h2>
         {selectedOrder ? (
           <>
             <p className="detail-line">
@@ -1503,7 +1571,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
             </label>
             <button type="button" onClick={completeInstallation}>
-              Completar instalacion
+              Confirmar instalación y activar cliente
             </button>
             {status && <p className="inline-status">{status}</p>}
           </>
@@ -1540,7 +1608,7 @@ function ReportsPanel({ scope }: { scope: string }) {
 
   return (
     <section className="panel narrow stack">
-      <h2>Reportes</h2>
+      <h2>Exportación de reportes en CSV o Excel</h2>
       <label>
         Tipo
         <select value={type} onChange={(event) => setType(event.target.value)}>
@@ -1558,7 +1626,7 @@ function ReportsPanel({ scope }: { scope: string }) {
         </select>
       </label>
       <button type="button" onClick={exportReport}>
-        Exportar
+        Exportar reporte
       </button>
       {status && <p className="inline-status">{status}</p>}
     </section>
