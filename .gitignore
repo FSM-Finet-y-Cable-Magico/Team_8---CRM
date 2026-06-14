@@ -11,3 +11,4 @@ coverage/
 uploads/
 .DS_Store
 *.tsbuildinfo
+.codex-review/

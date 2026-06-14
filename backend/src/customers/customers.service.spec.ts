@@ -72,4 +72,37 @@ describe('CustomersService', () => {
     expect(result).toBe(customer);
     expect(prisma.contrato.findUnique).not.toHaveBeenCalled();
   });
+
+  it('permite reactivar un cliente suspendido', async () => {
+    const customer = {
+      idCliente: 8,
+      idEmpresa: 2,
+      estado: 'Suspendido',
+      contratos: [{ idEmpresa: 2 }],
+    };
+    const prisma = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue(customer),
+        update: jest.fn().mockResolvedValue({ ...customer, estado: 'Activo' }),
+      },
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new CustomersService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    const result = await service.updateStatus(8, { estado: 'Activo' }, supportUser);
+
+    expect(result.estado).toBe('Activo');
+    expect(prisma.cliente.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { estado: 'Activo' } }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        valorAnterior: { estado: 'Suspendido' },
+        valorNuevo: { estado: 'Activo' },
+      }),
+    );
+  });
 });

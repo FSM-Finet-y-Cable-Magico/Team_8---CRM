@@ -179,3 +179,20 @@ npm run dev:backend
 - No escribir credenciales reales en `docker-compose*.yml`, `.env.example`, documentacion ni commits.
 - No ejecutar seeds, `prisma db push` o scripts SQL contra Railway sin respaldo y coordinacion del equipo.
 - Si una contrasena fue compartida en texto plano o dentro de un documento, se recomienda rotarla desde Railway.
+
+## Envio de cotizaciones por correo
+
+CU03 usa SMTP para enviar automaticamente el PDF al correo del prospecto. Configurar estas variables en `.env` o `.env.railway` segun el modo utilizado:
+
+```env
+SMTP_HOST=smtp.proveedor.cl
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_STARTTLS=true
+SMTP_USER=usuario_smtp
+SMTP_PASSWORD=contrasena_smtp
+SMTP_FROM=cotizaciones@empresa.cl
+SMTP_FROM_NAME=CRM FiNet
+```
+
+No confirmar credenciales SMTP en Git. Si `SMTP_HOST` o `SMTP_FROM` estan vacios, el PDF se genera normalmente y la interfaz informa que el envio automatico no esta configurado.

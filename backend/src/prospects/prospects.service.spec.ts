@@ -1,6 +1,7 @@
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { ProspectsService } from './prospects.service';
 
 describe('ProspectsService', () => {
@@ -30,6 +31,7 @@ describe('ProspectsService', () => {
     const service = new ProspectsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
     );
 
     const result = await service.updatePipeline(10, { estadoPipeline: 'Servicio Activo' }, admin);
@@ -72,6 +74,7 @@ describe('ProspectsService', () => {
     const service = new ProspectsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
     );
 
     const result = await service.create(

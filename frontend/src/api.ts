@@ -96,6 +96,10 @@ export type InventoryUnit = {
   estado: string;
   idClienteInstalado: number | null;
   diagnosticoTecnico: string | null;
+  empresa?: Company | null;
+  clienteInstalado?: Customer | null;
+  macAddress?: string | null;
+  puertoOlt?: string | null;
   tipoEquipo?: {
     nombre: string;
     categoria: string | null;
@@ -122,6 +126,7 @@ export type Ticket = {
 
 export type WorkOrder = {
   idOt: number;
+  idEmpresa: number | null;
   idCliente: number | null;
   idTicket: number | null;
   tipoOt: string;
