@@ -20,8 +20,10 @@ export class ReportsController {
     @Query('format') format: 'csv' | 'xlsx' = 'csv',
     @Query('scope') scope = 'consolidado',
     @Res() response: Response,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
-    const report = await this.reportsService.export(type, format, user, scope);
+    const report = await this.reportsService.export(type, format, user, scope, dateFrom, dateTo);
 
     response.setHeader('Content-Type', report.contentType);
     response.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);

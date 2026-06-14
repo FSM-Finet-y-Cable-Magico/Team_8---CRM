@@ -354,6 +354,35 @@ th {
   gap: 10px;
 }
 
+.customer-search {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.customer-search .button-row button {
+  flex: 1;
+}
+
+.customer-preview {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #b9d7cd;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f2faf7;
+}
+
+.customer-preview h3,
+.customer-preview p {
+  margin: 0;
+}
+
+input[readonly] {
+  color: #49534f;
+  background: #f1f4f2;
+}
+
 .detail-line {
   margin: 0;
   color: #3d4843;

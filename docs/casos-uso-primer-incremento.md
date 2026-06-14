@@ -58,8 +58,8 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
 ## CU03 - Generando cotizacion en formato PDF
 - Actor: Usuario Comercial.
-- Backend: crea `cotizacion`, actualiza PDF URL y genera PDF bajo demanda.
-- Frontend: selector de plan y apertura de PDF.
+- Backend: crea `cotizacion`, genera el PDF y lo envia como adjunto al correo registrado mediante SMTP cuando el servicio esta configurado.
+- Frontend: selector de plan, apertura del PDF y confirmacion visible del resultado del envio.
 - Base de datos: `cotizacion`, `plan`, `prospecto`, `log_auditoria`.
 
 ## CU04 - Registrando motivo de perdida de prospecto
@@ -89,7 +89,7 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 ## CU14 - Consultando historial completo del cliente
 - Actor: Administrador, Comercial, Soporte.
 - Backend: consolida contratos, facturas, pagos, tickets, ordenes, equipos y auditoria.
-- Frontend: boton Ver historial en Clientes con resumen operativo.
+- Frontend: busqueda por RUT, telefono, nombre o contrato, mas boton Ver historial con resumen operativo.
 - Base de datos: `cliente`, `contrato`, `factura`, `pago`, `ticket`, `orden_trabajo`, `unidad_equipo`, `log_auditoria`.
 
 ## CU53 - Registrando movimientos de inventario
@@ -107,7 +107,7 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 ## CU62 - Visualizando inventario por empresa
 - Actor: Administrador, Soporte, Terreno.
 - Backend: listado filtrado por empresa o consolidado.
-- Frontend: pestana Inventario conectada al selector superior de empresa.
+- Frontend: pestana Inventario conectada al selector superior y columna Empresa visible por equipo.
 - Base de datos: `unidad_equipo`, `tipo_equipo`, `empresa`.
 
 ## CU20 - Instalando router/ONU en domicilio
@@ -119,13 +119,13 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 ## CU59 - Asociando serie, MAC y puerto OLT al cliente
 - Actor: Tecnico en Terreno, Soporte.
 - Backend: guarda serie en `unidad_equipo.numero_serie` y registra MAC/OLT en notas tecnicas existentes.
-- Frontend: campos MAC y Puerto OLT en vinculacion de equipo.
+- Frontend: serie visible, seleccion de cliente y OT, campos MAC/Puerto OLT y consulta posterior de los datos asociados.
 - Base de datos: `unidad_equipo.diagnostico_tecnico`, `orden_trabajo.observaciones`, `log_auditoria`.
 
 ## CU23 - Registrando ticket de soporte
 - Actor: Comercial, Soporte.
 - Backend: crea ticket por RUT de cliente existente, categoria y prioridad.
-- Frontend: formulario Nuevo ticket.
+- Frontend: formulario Registrando ticket de soporte que consulta y muestra los datos del cliente al ingresar su RUT.
 - Base de datos: `ticket`, `cliente`, `categoria_falla`, `log_auditoria`.
 
 ## CU24 - Clasificando ticket por categoria de falla
@@ -166,8 +166,8 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
 ## CU33 - Exportando reportes operativos
 - Actor: Administrador.
-- Backend: genera CSV o XLSX de clientes, prospectos, tickets e inventario.
-- Frontend: modulo Reportes con tipo y formato.
+- Backend: genera CSV o XLSX de clientes, prospectos, tickets e inventario filtrados por periodo y empresa.
+- Frontend: modulo Reportes operativos con tipo, periodo, alcance, empresa y formato.
 - Base de datos: `cliente`, `prospecto`, `ticket`, `unidad_equipo`, `log_auditoria`.
 
 ## Nota de compatibilidad con la base compartida

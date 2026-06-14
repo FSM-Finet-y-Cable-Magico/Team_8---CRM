@@ -14,15 +14,23 @@ export class ReportsService {
     private readonly auditService: AuditService,
   ) {}
 
-  async export(type: ReportType, format: ReportFormat, currentUser: AuthUser, scope = 'consolidado') {
-    const rows = await this.rows(type, currentUser, scope);
+  async export(
+    type: ReportType,
+    format: ReportFormat,
+    currentUser: AuthUser,
+    scope = 'consolidado',
+    dateFrom?: string,
+    dateTo?: string,
+  ) {
+    const period = this.reportPeriod(dateFrom, dateTo);
+    const rows = await this.rows(type, currentUser, scope, period);
     const buffer = format === 'csv' ? this.csv(rows) : await this.xlsx(rows, type);
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'EXPORTAR_REPORTE',
       entidadAfectada: 'reporte',
-      valorNuevo: { type, format, scope, rows: rows.length },
+      valorNuevo: { type, format, scope, dateFrom, dateTo, rows: rows.length },
     });
 
     return {
@@ -35,11 +43,19 @@ export class ReportsService {
     };
   }
 
-  private async rows(type: ReportType, currentUser: AuthUser, scope: string) {
+  private async rows(
+    type: ReportType,
+    currentUser: AuthUser,
+    scope: string,
+    period?: { gte?: Date; lte?: Date },
+  ) {
     const where = this.companyScope(currentUser, scope);
 
     if (type === 'clientes') {
-      const rows = await this.prisma.cliente.findMany({ where, orderBy: { fechaCreacion: 'desc' } });
+      const rows = await this.prisma.cliente.findMany({
+        where: { ...where, ...(period ? { fechaCreacion: period } : {}) },
+        orderBy: { fechaCreacion: 'desc' },
+      });
       return rows.map((row) => ({
         id: row.idCliente,
         rut: row.rut,
@@ -52,7 +68,10 @@ export class ReportsService {
     }
 
     if (type === 'prospectos') {
-      const rows = await this.prisma.prospecto.findMany({ where, orderBy: { fechaCreacion: 'desc' } });
+      const rows = await this.prisma.prospecto.findMany({
+        where: { ...where, ...(period ? { fechaCreacion: period } : {}) },
+        orderBy: { fechaCreacion: 'desc' },
+      });
       return rows.map((row) => ({
         id: row.idProspecto,
         rut: row.rut,
@@ -65,7 +84,10 @@ export class ReportsService {
     }
 
     if (type === 'tickets') {
-      const rows = await this.prisma.ticket.findMany({ where, orderBy: { fechaCreacion: 'desc' } });
+      const rows = await this.prisma.ticket.findMany({
+        where: { ...where, ...(period ? { fechaCreacion: period } : {}) },
+        orderBy: { fechaCreacion: 'desc' },
+      });
       return rows.map((row) => ({
         id: row.idTicket,
         cliente: row.idCliente,
@@ -78,7 +100,10 @@ export class ReportsService {
     }
 
     if (type === 'inventario') {
-      const rows = await this.prisma.unidadEquipo.findMany({ where, orderBy: { idUnidad: 'desc' } });
+      const rows = await this.prisma.unidadEquipo.findMany({
+        where: { ...where, ...(period ? { fechaAdquisicion: period } : {}) },
+        orderBy: { idUnidad: 'desc' },
+      });
       return rows.map((row) => ({
         id: row.idUnidad,
         serie: row.numeroSerie,
@@ -127,6 +152,42 @@ export class ReportsService {
     }
 
     return text;
+  }
+
+  private reportPeriod(dateFrom?: string, dateTo?: string) {
+    const from = this.parseDate(dateFrom, false);
+    const to = this.parseDate(dateTo, true);
+
+    if (from && to && from > to) {
+      throw new BadRequestException('El inicio del periodo no puede ser posterior al termino');
+    }
+
+    if (!from && !to) {
+      return undefined;
+    }
+
+    return {
+      ...(from ? { gte: from } : {}),
+      ...(to ? { lte: to } : {}),
+    };
+  }
+
+  private parseDate(value: string | undefined, endOfDay: boolean) {
+    if (!value) {
+      return undefined;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new BadRequestException('El periodo debe usar el formato AAAA-MM-DD');
+    }
+
+    const date = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('El periodo informado no es valido');
+    }
+
+    return date;
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {

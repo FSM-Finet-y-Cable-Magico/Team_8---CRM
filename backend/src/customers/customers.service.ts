@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,31 +13,37 @@ export class CustomersService {
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado', query = '') {
-    const where = {
-      ...this.companyScope(currentUser, scope),
-      ...(query
-        ? {
-            OR: [
-              { rut: { contains: query, mode: 'insensitive' as const } },
-              { nombreCompleto: { contains: query, mode: 'insensitive' as const } },
-              { email: { contains: query, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
-    };
+    const normalizedQuery = query.trim();
+    const filters: Prisma.ClienteWhereInput[] = [this.companyScope(currentUser, scope)];
 
-    return this.prisma.cliente.findMany({
-      where,
+    if (normalizedQuery) {
+      filters.push(this.customerSearchFilter(normalizedQuery));
+    }
+
+    const customers = await this.prisma.cliente.findMany({
+      where: { AND: filters },
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
         empresa: true,
         contratos: {
-          include: { plan: true },
+          include: {
+            plan: {
+              include: { empresa: true },
+            },
+          },
           orderBy: { fechaInicio: 'desc' },
         },
       },
     });
+
+    return customers.map((customer) => ({
+      ...customer,
+      empresas: [
+        customer.empresa?.nombre,
+        ...customer.contratos.map((contract) => contract.plan?.empresa?.nombre),
+      ].filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index),
+    }));
   }
 
   async updateStatus(idCliente: number, dto: UpdateCustomerStatusDto, currentUser: AuthUser) {
@@ -62,10 +69,13 @@ export class CustomersService {
 
   async history(idCliente: number, currentUser: AuthUser) {
     const cliente = await this.getCustomerOrThrow(idCliente, currentUser);
+    const companyFilter = currentUser.roles.includes('Administrador') || !currentUser.idEmpresa
+      ? {}
+      : { idEmpresa: currentUser.idEmpresa };
 
     const [contratos, tickets, ordenes, equipos, auditoria] = await Promise.all([
       this.prisma.contrato.findMany({
-        where: { idCliente },
+        where: { idCliente, ...companyFilter },
         orderBy: { fechaInicio: 'desc' },
         include: {
           plan: true,
@@ -76,15 +86,15 @@ export class CustomersService {
         },
       }),
       this.prisma.ticket.findMany({
-        where: { idCliente },
+        where: { idCliente, ...companyFilter },
         orderBy: { fechaCreacion: 'desc' },
       }),
       this.prisma.ordenTrabajo.findMany({
-        where: { idCliente },
+        where: { idCliente, ...companyFilter },
         orderBy: { fechaCreacion: 'desc' },
       }),
       this.prisma.unidadEquipo.findMany({
-        where: { idClienteInstalado: idCliente },
+        where: { idClienteInstalado: idCliente, ...companyFilter },
         orderBy: { idUnidad: 'desc' },
       }),
       this.prisma.logAuditoria.findMany({
@@ -116,29 +126,33 @@ export class CustomersService {
       throw new BadRequestException('Debe informar un criterio de busqueda');
     }
 
-    const contractId = Number(normalizedTerm);
-    const customerByContract = Number.isInteger(contractId)
+    const contractId = /^\d+$/.test(normalizedTerm) ? Number(normalizedTerm) : null;
+    const customerByContract = contractId && Number.isSafeInteger(contractId) && contractId <= 2147483647
       ? await this.prisma.contrato.findUnique({
           where: { idContrato: contractId },
         })
       : null;
 
     const cliente = customerByContract?.idCliente
-      ? await this.prisma.cliente.findUnique({ where: { idCliente: customerByContract.idCliente } })
+      ? await this.prisma.cliente.findUnique({
+          where: { idCliente: customerByContract.idCliente },
+          include: { contratos: { select: { idEmpresa: true } } },
+        })
       : await this.prisma.cliente.findFirst({
           where: {
-            OR: [
-              { rut: { equals: normalizedTerm } },
-              { nombreCompleto: { contains: normalizedTerm, mode: 'insensitive' } },
+            AND: [
+              this.customerSearchFilter(normalizedTerm),
+              this.companyScope(currentUser, 'consolidado'),
             ],
           },
+          include: { contratos: { select: { idEmpresa: true } } },
         });
 
     if (!cliente) {
       throw new NotFoundException('Cliente no encontrado');
     }
 
-    if (!currentUser.roles.includes('Administrador') && cliente.idEmpresa !== currentUser.idEmpresa) {
+    if (!this.canAccessCustomer(cliente, currentUser)) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
@@ -148,27 +162,30 @@ export class CustomersService {
   private async getCustomerOrThrow(idCliente: number, currentUser: AuthUser) {
     const cliente = await this.prisma.cliente.findUnique({
       where: { idCliente },
-      include: { empresa: true },
+      include: {
+        empresa: true,
+        contratos: { select: { idEmpresa: true } },
+      },
     });
 
     if (!cliente) {
       throw new NotFoundException('Cliente no encontrado');
     }
 
-    if (!currentUser.roles.includes('Administrador') && cliente.idEmpresa !== currentUser.idEmpresa) {
+    if (!this.canAccessCustomer(cliente, currentUser)) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
     return cliente;
   }
 
-  private companyScope(currentUser: AuthUser, scope: string) {
+  private companyScope(currentUser: AuthUser, scope: string): Prisma.ClienteWhereInput {
     if (!currentUser.roles.includes('Administrador')) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }
 
-      return { idEmpresa: currentUser.idEmpresa };
+      return this.customerCompanyFilter(currentUser.idEmpresa);
     }
 
     if (!scope || scope === 'consolidado') {
@@ -181,6 +198,44 @@ export class CustomersService {
       throw new BadRequestException('Vista de empresa invalida');
     }
 
-    return { idEmpresa };
+    return this.customerCompanyFilter(idEmpresa);
+  }
+
+  private customerCompanyFilter(idEmpresa: number): Prisma.ClienteWhereInput {
+    return {
+      OR: [
+        { idEmpresa },
+        { contratos: { some: { idEmpresa } } },
+      ],
+    };
+  }
+
+  private customerSearchFilter(term: string): Prisma.ClienteWhereInput {
+    const normalizedRut = term.replace(/\./g, '').replace(/\s/g, '').toUpperCase();
+    const normalizedPhone = term.replace(/[^\d+]/g, '');
+    const contractId = /^\d+$/.test(term) ? Number(term) : null;
+    const alternatives: Prisma.ClienteWhereInput[] = [
+      { rut: { contains: normalizedRut, mode: 'insensitive' } },
+      { nombreCompleto: { contains: term, mode: 'insensitive' } },
+    ];
+
+    if (normalizedPhone.length >= 4) {
+      alternatives.push({ telefono: { contains: normalizedPhone } });
+    }
+
+    if (contractId && Number.isSafeInteger(contractId) && contractId <= 2147483647) {
+      alternatives.push({ contratos: { some: { idContrato: contractId } } });
+    }
+
+    return { OR: alternatives };
+  }
+
+  private canAccessCustomer(
+    customer: { idEmpresa: number | null; contratos: Array<{ idEmpresa: number | null }> },
+    currentUser: AuthUser,
+  ) {
+    return currentUser.roles.includes('Administrador') ||
+      customer.idEmpresa === currentUser.idEmpresa ||
+      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
   }
 }
