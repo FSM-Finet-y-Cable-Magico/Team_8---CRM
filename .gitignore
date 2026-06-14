@@ -5,6 +5,7 @@ build/
 .env
 .env.*
 !.env.example
+!.env.railway.example
 coverage/
 *.log
 uploads/

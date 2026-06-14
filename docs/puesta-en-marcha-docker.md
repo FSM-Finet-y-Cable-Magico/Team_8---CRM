@@ -1,6 +1,9 @@
-# Puesta en marcha local con Docker
+# Puesta en marcha con Docker y Railway
 
-Esta guia documenta el flujo recomendado para levantar el CRM en desarrollo local sin depender de Railway ni de una instalacion manual de PostgreSQL.
+Esta guia documenta dos modos independientes:
+
+- Docker local completo: frontend, backend y PostgreSQL local.
+- Docker con Railway: frontend y backend locales conectados al PostgreSQL remoto.
 
 ## Requisitos
 
@@ -113,6 +116,66 @@ Usar `down -v` solo cuando se quiera recrear la base desde cero, porque borra el
 
 ## Railway
 
-Railway puede usarse como base compartida o entorno de demo del equipo. Para desarrollo local se recomienda Docker con base local, asi se evitan cambios accidentales en la base compartida.
+Railway puede usarse como base compartida o entorno de demo del equipo. Railway expone `DATABASE_URL` y permite conexiones externas mediante su TCP Proxy. Desde un contenedor Docker ejecutado en el computador se debe usar la URL publica del proxy, no una direccion privada `*.railway.internal`.
 
-No copiar una `DATABASE_URL` de Railway en `.env` local sin coordinarlo con el equipo.
+### Preparar las variables
+
+Crear el archivo privado desde la plantilla:
+
+```powershell
+Copy-Item .env.railway.example .env.railway
+```
+
+Editar `.env.railway` y reemplazar `DATABASE_URL` por la URL publica entregada por Railway. El archivo real esta ignorado por Git y no debe confirmarse en commits.
+
+### Levantar Docker conectado a Railway
+
+```powershell
+npm run docker:railway
+```
+
+Servicios esperados:
+
+| Servicio | URL |
+| --- | --- |
+| Frontend Railway | `http://localhost:5174` |
+| Backend Railway | `http://localhost:3001/api` |
+| PostgreSQL | Railway mediante TCP Proxy |
+
+Este modo usa `docker-compose.railway.yml` y deliberadamente no crea un contenedor PostgreSQL local. El backend recibe `DATABASE_URL` desde `.env.railway`.
+
+Para revisar el estado y los logs:
+
+```powershell
+docker compose --env-file .env.railway -f docker-compose.railway.yml ps
+docker compose --env-file .env.railway -f docker-compose.railway.yml logs backend --tail 100
+```
+
+Para apagarlo:
+
+```powershell
+npm run docker:railway:down
+```
+
+Los puertos alternativos permiten mantener simultaneamente el stack local en `5173/3000` y el stack conectado a Railway en `5174/3001`.
+
+### Backend local sin Docker conectado a Railway
+
+Si solo se ejecuta NestJS desde la terminal, copiar la URL publica a `backend/.env`:
+
+```env
+DATABASE_URL=postgresql://postgres:REEMPLAZAR_PASSWORD@REEMPLAZAR_HOST_PROXY:REEMPLAZAR_PUERTO/railway?schema=public
+```
+
+Luego ejecutar:
+
+```powershell
+npm run prisma:generate
+npm run dev:backend
+```
+
+### Seguridad
+
+- No escribir credenciales reales en `docker-compose*.yml`, `.env.example`, documentacion ni commits.
+- No ejecutar seeds, `prisma db push` o scripts SQL contra Railway sin respaldo y coordinacion del equipo.
+- Si una contrasena fue compartida en texto plano o dentro de un documento, se recomienda rotarla desde Railway.
