@@ -5,6 +5,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { ReportsService } from './reports.service';
 
 @Controller('reports')
@@ -13,7 +14,7 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('export')
-  @Roles('Administrador')
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
   async export(
     @CurrentUser() user: AuthUser,
     @Query('type') type: 'clientes' | 'prospectos' | 'tickets' | 'inventario',

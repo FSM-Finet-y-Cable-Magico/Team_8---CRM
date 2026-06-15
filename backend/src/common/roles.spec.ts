@@ -1,17 +1,14 @@
-import { normalizeRoleName, normalizeRoles } from './roles';
+import { CANONICAL_ROLES, isRoleName, normalizeRoles } from './roles';
 
 describe('role normalization', () => {
-  it.each([
-    ['ADMIN', 'Administrador'],
-    ['SUPERUSUARIO', 'Administrador'],
-    ['COMERCIAL', 'Comercial'],
-    ['TECNICO_TERRENO', 'Terreno'],
-    ['Soporte', 'Soporte'],
-  ])('normalizes %s as %s', (source, expected) => {
-    expect(normalizeRoleName(source)).toBe(expected);
+  it.each(CANONICAL_ROLES)('accepts canonical role %s', (role) => {
+    expect(isRoleName(role)).toBe(true);
   });
 
-  it('removes duplicate aliases', () => {
-    expect(normalizeRoles(['ADMIN', 'Administrador', 'COMERCIAL'])).toEqual(['Administrador', 'Comercial']);
+  it('drops unknown non-canonical roles', () => {
+    expect(normalizeRoles(['Rol antiguo', 'Administrador', 'Tecnico en terreno', 'Comercial'])).toEqual([
+      'Administrador',
+      'Comercial',
+    ]);
   });
 });

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -35,7 +36,7 @@ export class CompaniesService {
   }
 
   private resolveScope(currentUser: AuthUser, requestedScope: string) {
-    if (currentUser.roles.includes('Administrador')) {
+    if (isAdministrator(currentUser.roles)) {
       return requestedScope;
     }
 

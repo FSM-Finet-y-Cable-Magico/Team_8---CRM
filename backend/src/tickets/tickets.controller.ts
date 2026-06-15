@@ -4,6 +4,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
@@ -17,25 +18,25 @@ export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
   @Get()
-  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
   list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
     return this.ticketsService.list(user, scope ?? 'consolidado');
   }
 
   @Get('categories')
-  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
   categories() {
     return this.ticketsService.categories();
   }
 
   @Post()
-  @Roles('Administrador', 'Comercial', 'Soporte')
+  @Roles(...ACCESS_ROLES.CREATE_TICKETS)
   create(@Body() dto: CreateTicketDto, @CurrentUser() user: AuthUser) {
     return this.ticketsService.create(dto, user);
   }
 
   @Patch(':id/category')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.MANAGE_TICKETS)
   updateCategory(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketCategoryDto,
@@ -45,7 +46,7 @@ export class TicketsController {
   }
 
   @Patch(':id/priority')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.MANAGE_TICKETS)
   updatePriority(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketPriorityDto,
@@ -55,7 +56,7 @@ export class TicketsController {
   }
 
   @Patch(':id/status')
-  @Roles('Administrador', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.UPDATE_TICKET_STATUS)
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketStatusDto,
@@ -65,7 +66,7 @@ export class TicketsController {
   }
 
   @Post(':id/diagnosis')
-  @Roles('Administrador', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.UPDATE_TICKET_STATUS)
   registerDiagnosis(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: RegisterDiagnosisDto,

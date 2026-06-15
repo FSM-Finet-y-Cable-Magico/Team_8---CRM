@@ -5,6 +5,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
@@ -20,19 +21,19 @@ export class ProspectsController {
   constructor(private readonly prospectsService: ProspectsService) {}
 
   @Get()
-  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
   list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
     return this.prospectsService.list(user, scope ?? 'consolidado');
   }
 
   @Post()
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   create(@Body() dto: CreateProspectDto, @CurrentUser() user: AuthUser) {
     return this.prospectsService.create(dto, user);
   }
 
   @Patch(':id/pipeline')
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   updatePipeline(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePipelineDto,
@@ -42,7 +43,7 @@ export class ProspectsController {
   }
 
   @Post(':id/feasibility')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.VERIFY_FEASIBILITY)
   verifyFeasibility(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: VerifyFeasibilityDto,
@@ -52,7 +53,7 @@ export class ProspectsController {
   }
 
   @Post(':id/quotes')
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   generateQuote(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: GenerateQuoteDto,
@@ -62,7 +63,7 @@ export class ProspectsController {
   }
 
   @Get(':id/quotes/:quoteId/pdf')
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   async downloadQuotePdf(
     @Param('id', ParseIntPipe) id: number,
     @Param('quoteId', ParseIntPipe) quoteId: number,
@@ -77,7 +78,7 @@ export class ProspectsController {
   }
 
   @Post(':id/loss')
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   recordLoss(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: RecordLossDto,
@@ -87,7 +88,7 @@ export class ProspectsController {
   }
 
   @Post(':id/contracts')
-  @Roles('Administrador', 'Comercial')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   contractPlan(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ContractPlanDto,
@@ -97,7 +98,7 @@ export class ProspectsController {
   }
 
   @Post(':id/install-orders')
-  @Roles('Administrador', 'Comercial', 'Terreno')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
   createInstallOrder(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateInstallOrderDto,

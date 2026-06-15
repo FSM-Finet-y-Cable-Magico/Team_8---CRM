@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
 
@@ -164,7 +165,7 @@ export class WorkOrdersService {
       throw new NotFoundException('Orden de trabajo no encontrada');
     }
 
-    if (!currentUser.roles.includes('Administrador') && order.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && order.idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('La orden no pertenece a tu empresa');
     }
 
@@ -172,7 +173,7 @@ export class WorkOrdersService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }
