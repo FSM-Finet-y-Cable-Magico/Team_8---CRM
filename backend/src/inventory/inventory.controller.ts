@@ -4,6 +4,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { CreateEquipmentDto } from './dto/create-equipment.dto';
 import { InstallRouterDto } from './dto/install-router.dto';
 import { RecordMovementDto } from './dto/record-movement.dto';
@@ -16,25 +17,25 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get()
-  @Roles('Administrador', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.VIEW_INVENTORY)
   list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
     return this.inventoryService.list(user, scope ?? 'consolidado');
   }
 
   @Post('equipment')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   createEquipment(@Body() dto: CreateEquipmentDto, @CurrentUser() user: AuthUser) {
     return this.inventoryService.createEquipment(dto, user);
   }
 
   @Post('movements')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   recordMovement(@Body() dto: RecordMovementDto, @CurrentUser() user: AuthUser) {
     return this.inventoryService.recordMovement(dto, user);
   }
 
   @Patch('equipment/:id/status')
-  @Roles('Administrador', 'Soporte')
+  @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateEquipmentStatusDto,
@@ -44,7 +45,7 @@ export class InventoryController {
   }
 
   @Post('equipment/:id/install')
-  @Roles('Administrador', 'Soporte', 'Terreno')
+  @Roles(...ACCESS_ROLES.INSTALL_EQUIPMENT)
   installRouter(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: InstallRouterDto,

@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { parseDateOnly, REPORT_MIN_DATE, todayDateOnly } from '../common/date-rules';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 
 type ReportFormat = 'csv' | 'xlsx';
@@ -200,7 +201,7 @@ export class ReportsService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }

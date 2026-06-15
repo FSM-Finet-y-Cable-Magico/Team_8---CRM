@@ -37,6 +37,7 @@ export type UserRow = {
 
 export type Prospect = {
   idProspecto: number;
+  idCliente: number | null;
   rut: string | null;
   nombreCompleto: string | null;
   email: string | null;
@@ -45,6 +46,24 @@ export type Prospect = {
   estadoPipeline: string | null;
   motivoPerdida: string | null;
   empresa?: Company | null;
+};
+
+export type InstallTechnician = {
+  idTecnico: number;
+  nombreCompleto: string;
+  email: string | null;
+};
+
+export type InstallAvailability = {
+  fechaProgramada: string;
+  horaVisita: string;
+  tecnicosDisponibles: InstallTechnician[];
+  alternativas: Array<{
+    fechaProgramada: string;
+    horaVisita: string;
+    tecnicosDisponibles: InstallTechnician[];
+  }>;
+  mensaje: string;
 };
 
 export type Plan = {
@@ -128,12 +147,22 @@ export type WorkOrder = {
   idOt: number;
   idEmpresa: number | null;
   idCliente: number | null;
+  idTecnico: number | null;
   idTicket: number | null;
   tipoOt: string;
   prioridad: string;
   estado: string;
   fechaProgramada: string | null;
   observaciones: string | null;
+  tipoConexion?: 'Fibra Optica' | 'Television' | null;
+  horaVisita?: string | null;
+  observacionesAgenda?: string | null;
+  observacionesCierre?: string | null;
+  tecnico?: {
+    idUsuario: number;
+    nombreCompleto: string;
+    email: string | null;
+  } | null;
   prospecto?: {
     idProspecto: number;
     fechaCreacion: string | null;

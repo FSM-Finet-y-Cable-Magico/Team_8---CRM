@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -58,7 +59,7 @@ export class TicketsService {
       throw new BadRequestException('El RUT no corresponde a un cliente existente');
     }
 
-    if (!currentUser.roles.includes('Administrador') && cliente.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && cliente.idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
@@ -255,7 +256,7 @@ export class TicketsService {
       throw new NotFoundException('Ticket no encontrado');
     }
 
-    if (!currentUser.roles.includes('Administrador') && ticket.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && ticket.idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El ticket no pertenece a tu empresa');
     }
 
@@ -263,7 +264,7 @@ export class TicketsService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }
