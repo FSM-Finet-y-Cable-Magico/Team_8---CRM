@@ -7,7 +7,6 @@
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "lint": "eslint \"src/**/*.ts\"",
-    "db:compatibility": "prisma db execute --file prisma/compatibility.sql --schema prisma/schema.prisma",
     "prisma:generate": "prisma generate",
     "prisma:pull": "prisma db pull",
     "test": "jest"

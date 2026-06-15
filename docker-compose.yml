@@ -47,7 +47,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "npm install && npx prisma generate && npm run db:compatibility && npm run start:dev"
+    command: sh -c "npm install && npx prisma generate && npm run start:dev"
 
   frontend:
     build:
