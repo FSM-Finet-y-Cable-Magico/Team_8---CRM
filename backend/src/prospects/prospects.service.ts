@@ -351,7 +351,17 @@ export class ProspectsService {
         });
       }
 
-      const contrato = await tx.contrato.create({
+      const existingContract = await tx.contrato.findFirst({
+        where: {
+          idCliente: cliente.idCliente,
+          idPlan: dto.planId,
+          idEmpresa: prospect.idEmpresa,
+          estado: { in: ['Pendiente', 'Activo'] },
+        },
+        orderBy: { idContrato: 'desc' },
+      });
+
+      const contrato = existingContract ?? await tx.contrato.create({
         data: {
           idCliente: cliente.idCliente,
           idPlan: dto.planId,

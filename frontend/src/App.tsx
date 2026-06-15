@@ -685,6 +685,7 @@ function ProspectWorkflowPanel({
   const [contractPlanId, setContractPlanId] = useState('');
   const [dueDay, setDueDay] = useState(5);
   const [status, setStatus] = useState('');
+  const [statusIsError, setStatusIsError] = useState(false);
 
   useEffect(() => {
     setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -694,18 +695,21 @@ function ProspectWorkflowPanel({
 
   async function runAction(action: () => Promise<unknown>, success: string) {
     setStatus('');
+    setStatusIsError(false);
 
     try {
       await action();
       setStatus(success);
       onChanged();
     } catch (err) {
+      setStatusIsError(true);
       setStatus(apiErrorMessage(err));
     }
   }
 
   async function generateQuote() {
     setStatus('');
+    setStatusIsError(false);
 
     try {
       const { data } = await api.post(`/prospects/${prospect.idProspecto}/quotes`, { planId: Number(quotePlanId) });
@@ -721,6 +725,7 @@ function ProspectWorkflowPanel({
       );
       onChanged();
     } catch (err) {
+      setStatusIsError(true);
       setStatus(apiErrorMessage(err));
     }
   }
@@ -864,14 +869,15 @@ function ProspectWorkflowPanel({
           <InstallOrderForm prospect={prospect} onChanged={onChanged} />
         )}
       </div>
-      {status && <p className="inline-status">{status}</p>}
+      {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
     </div>
   );
 }
 
 function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; onChanged: () => void }) {
   const installationProspects = prospects.filter((prospect) =>
-    ['Aceptado', 'Instalacion Programada'].includes(prospect.estadoPipeline ?? ''),
+    prospect.estadoPipeline === 'Instalacion Programada' ||
+    (prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente)),
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const selectedProspect =
@@ -947,7 +953,8 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
   const [error, setError] = useState('');
   const today = dateInputValue(new Date());
   const latestInstallDate = addYearsToInputDate(today, 1);
-  const canCreate = prospect.estadoPipeline === 'Aceptado';
+  const hasContractedPlan = Boolean(prospect.idCliente);
+  const canCreate = prospect.estadoPipeline === 'Aceptado' && hasContractedPlan;
 
   useEffect(() => {
     setForm({
@@ -1080,7 +1087,10 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
       <p className="detail-line">
         Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
       </p>
-      {!canCreate && (
+      {prospect.estadoPipeline === 'Aceptado' && !hasContractedPlan && (
+        <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
+      )}
+      {prospect.estadoPipeline !== 'Aceptado' && (
         <p className="inline-status">La Orden de Instalación ya fue generada para este prospecto.</p>
       )}
       <div className="install-form-grid">
