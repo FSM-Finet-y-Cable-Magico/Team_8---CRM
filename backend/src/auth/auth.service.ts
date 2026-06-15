@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { normalizeRoles } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 
@@ -55,7 +56,7 @@ export class AuthService {
       idEmpresa: user.idEmpresa ?? null,
       email: user.email ?? null,
       nombreCompleto: user.nombreCompleto,
-      roles: user.usuarioRoles.map((usuarioRol) => usuarioRol.rol.nombreRol),
+      roles: normalizeRoles(user.usuarioRoles.map((usuarioRol) => usuarioRol.rol.nombreRol)),
     };
 
     await this.prisma.usuario.update({

@@ -19,10 +19,28 @@ import {
 type Tab = 'prospects' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
 
 type Summary = {
+  scope: string;
+  empresas: Company[];
   metricas: {
     clientes: number;
     prospectos: number;
   };
+};
+
+type DashboardPermissions = {
+  createProspects: boolean;
+  manageProspectPipeline: boolean;
+  verifyFeasibility: boolean;
+  generateQuotes: boolean;
+  recordProspectLoss: boolean;
+  contractPlans: boolean;
+  createInstallOrders: boolean;
+  manageInventory: boolean;
+  installEquipment: boolean;
+  createTickets: boolean;
+  classifyTickets: boolean;
+  updateTicketStatus: boolean;
+  diagnoseTickets: boolean;
 };
 
 type ProspectFormState = {
@@ -45,33 +63,42 @@ const rutPattern = /^\d{7,8}-[\dkK]$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const chileanMobilePattern = /^\+?56?9\d{8}$/;
 const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
-const reportMinimumDate = '2000-01-01';
+const roleAliases: Record<string, string> = {
+  ADMIN: 'Administrador',
+  ADMINISTRADOR: 'Administrador',
+  SUPERUSUARIO: 'Administrador',
+  COMERCIAL: 'Comercial',
+  SOPORTE: 'Soporte',
+  TERRENO: 'Terreno',
+  TECNICO_TERRENO: 'Terreno',
+};
 
 function normalizeRutInput(value: string) {
   return value.trim().replace(/\./g, '').toUpperCase();
 }
 
-function dateInputValue(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
+function hasAnyRole(user: AuthUser, roles: string[]) {
+  return user.roles.some((role) => roles.includes(role));
 }
 
-function addYearsToInputDate(value: string, years: number) {
-  const [year, month, day] = value.split('-').map(Number);
-  return dateInputValue(new Date(year + years, month - 1, day));
+function normalizeAuthUser(user: AuthUser) {
+  return {
+    ...user,
+    roles: [...new Set(user.roles.map((role) => roleAliases[role.trim().toUpperCase()] ?? role.trim()))],
+  };
 }
 
-function formatDateOnly(value: string | null | undefined) {
-  if (!value) {
-    return 'Pendiente';
+function settledData<T>(
+  result: PromiseSettledResult<{ data: T }>,
+  fallback: T,
+  errors: string[],
+) {
+  if (result.status === 'fulfilled') {
+    return result.value.data;
   }
 
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('es-CL');
-}
-
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString('es-CL') : 'No informada';
+  errors.push(apiErrorMessage(result.reason));
+  return fallback;
 }
 
 function validateProspectForm(form: ProspectFormState) {
@@ -107,7 +134,7 @@ function validateProspectForm(form: ProspectFormState) {
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem('finet_user');
-    return stored ? (JSON.parse(stored) as AuthUser) : null;
+    return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
 
   if (!user) {
@@ -130,9 +157,10 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
     try {
       const { data } = await api.post('/auth/login', { email, password });
+      const normalizedUser = normalizeAuthUser(data.user);
       localStorage.setItem('finet_token', data.accessToken);
-      localStorage.setItem('finet_user', JSON.stringify(data.user));
-      onLogin(data.user);
+      localStorage.setItem('finet_user', JSON.stringify(normalizedUser));
+      onLogin(normalizedUser);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -142,10 +170,11 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   return (
     <main className="login-shell">
-      <section className="login-card" aria-label="Acceso FiNet">
+      <section className="login-card" aria-label="Acceso al sistema CRM">
         <section className="login-panel">
           <div className="login-heading">
-            <h1>FiNet y Cable Magico</h1>
+            <h1>Sistema de Gestión CRM</h1>
+            <p>FiNet y Cable Mágico Litoral · Administración comercial, clientes y soporte.</p>
           </div>
           <form onSubmit={submit} className="stack" autoComplete="off">
             <label>
@@ -196,10 +225,25 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
   const isAdmin = user.roles.includes('Administrador');
-  const canManageCustomers = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte'].includes(role));
-  const canViewInventory = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
-  const canViewTickets = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte', 'Terreno'].includes(role));
-  const canViewWorkOrders = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
+  const canManageCustomers = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']);
+  const canViewInventory = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
+  const canViewTickets = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte', 'Terreno']);
+  const canViewWorkOrders = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
+  const permissions: DashboardPermissions = {
+    createProspects: hasAnyRole(user, ['Administrador', 'Comercial']),
+    manageProspectPipeline: hasAnyRole(user, ['Administrador', 'Comercial']),
+    verifyFeasibility: hasAnyRole(user, ['Administrador', 'Soporte']),
+    generateQuotes: hasAnyRole(user, ['Administrador', 'Comercial']),
+    recordProspectLoss: hasAnyRole(user, ['Administrador', 'Comercial']),
+    contractPlans: hasAnyRole(user, ['Administrador', 'Comercial']),
+    createInstallOrders: hasAnyRole(user, ['Administrador', 'Comercial', 'Terreno']),
+    manageInventory: hasAnyRole(user, ['Administrador', 'Soporte']),
+    installEquipment: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
+    createTickets: hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']),
+    classifyTickets: hasAnyRole(user, ['Administrador', 'Soporte']),
+    updateTicketStatus: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
+    diagnoseTickets: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
+  };
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -211,41 +255,43 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   async function loadData() {
     setMessage('');
+    const errors: string[] = [];
+    const loadCustomers = canManageCustomers || permissions.installEquipment;
+    const [summaryResult, prospectsResult, plansResult, customersResult, inventoryResult, ticketsResult, categoriesResult, workOrdersResult] = await Promise.allSettled([
+      api.get<Summary>('/companies/summary', { params: { scope } }),
+      api.get<Prospect[]>('/prospects', { params: { scope } }),
+      api.get<Plan[]>('/plans', { params: { scope } }),
+      loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
+      canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
+      canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
+      canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
+      canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+    ]);
+    const summaryData = settledData(summaryResult, null as Summary | null, errors);
 
-    try {
-      const [summaryResponse, prospectsResponse, plansResponse, customersResponse, inventoryResponse, ticketsResponse, categoriesResponse, workOrdersResponse] = await Promise.all([
-        api.get<Summary>('/companies/summary', { params: { scope } }),
-        api.get<Prospect[]>('/prospects', { params: { scope } }),
-        api.get<Plan[]>('/plans', { params: { scope } }),
-        canManageCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
-        canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-        canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
-        canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
-        canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+    setSummary(summaryData);
+    setCompanies(summaryData?.empresas ?? []);
+    setProspects(settledData(prospectsResult, [] as Prospect[], errors));
+    setPlans(settledData(plansResult, [] as Plan[], errors));
+    setCustomers(settledData(customersResult, [] as Customer[], errors));
+    setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
+    setTickets(settledData(ticketsResult, [] as Ticket[], errors));
+    setTicketCategories(settledData(categoriesResult, [] as TicketCategory[], errors));
+    setWorkOrders(settledData(workOrdersResult, [] as WorkOrder[], errors));
+
+    if (isAdmin) {
+      const [usersResult, rolesResult, auditResult] = await Promise.allSettled([
+        api.get<UserRow[]>('/users'),
+        api.get<Role[]>('/users/roles'),
+        api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
       ]);
-      setSummary(summaryResponse.data);
-      setProspects(prospectsResponse.data);
-      setPlans(plansResponse.data);
-      setCustomers(customersResponse.data);
-      setInventory(inventoryResponse.data);
-      setTickets(ticketsResponse.data);
-      setTicketCategories(categoriesResponse.data);
-      setWorkOrders(workOrdersResponse.data);
+      setUsers(settledData(usersResult, [] as UserRow[], errors));
+      setRoles(settledData(rolesResult, [] as Role[], errors));
+      setAudit(settledData(auditResult, [] as AuditLog[], errors));
+    }
 
-      if (isAdmin) {
-        const [companiesResponse, usersResponse, rolesResponse, auditResponse] = await Promise.all([
-          api.get<Company[]>('/companies'),
-          api.get<UserRow[]>('/users'),
-          api.get<Role[]>('/users/roles'),
-          api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
-        ]);
-        setCompanies(companiesResponse.data);
-        setUsers(usersResponse.data);
-        setRoles(rolesResponse.data);
-        setAudit(auditResponse.data);
-      }
-    } catch (err) {
-      setMessage(apiErrorMessage(err));
+    if (errors.length) {
+      setMessage([...new Set(errors)].join(' | '));
     }
   }
 
@@ -345,6 +391,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           prospects={prospects}
           plans={plans}
           writeCompanyId={writeCompanyId}
+          permissions={permissions}
           onCreated={() => void loadData()}
         />
       )}
@@ -358,11 +405,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           customers={customers}
           workOrders={workOrders}
           writeCompanyId={writeCompanyId}
+          permissions={permissions}
           onChanged={() => void loadData()}
         />
       )}
       {activeTab === 'tickets' && canViewTickets && (
-        <TicketsPanel tickets={tickets} categories={ticketCategories} onChanged={() => void loadData()} />
+        <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} onChanged={() => void loadData()} />
       )}
       {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
       {activeTab === 'reports' && isAdmin && <ReportsPanel companies={companies} initialScope={scope} />}
@@ -408,11 +456,13 @@ function ProspectsPanel({
   prospects,
   plans,
   writeCompanyId,
+  permissions,
   onCreated,
 }: {
   prospects: Prospect[];
   plans: Plan[];
   writeCompanyId: number;
+  permissions: DashboardPermissions;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
@@ -456,60 +506,62 @@ function ProspectsPanel({
 
   return (
     <section className="workspace-grid">
-      <form className="panel stack" onSubmit={submit}>
-        <h2>Registrando nuevo prospecto comercial</h2>
-        <label>
-          RUT
-          <input
-            value={form.rut}
-            onChange={(event) => setForm({ ...form, rut: event.target.value })}
-            placeholder="12345678-5"
-            required
-          />
-        </label>
-        <label>
-          Nombre completo
-          <input
-            value={form.nombreCompleto}
-            onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
-            placeholder="Nombre Apellido"
-            maxLength={120}
-            required
-          />
-        </label>
-        <label>
-          Email
-          <input
-            value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-            placeholder="correo@ejemplo.cl"
-            type="email"
-            maxLength={120}
-          />
-        </label>
-        <label>
-          Celular
-          <input
-            value={form.telefono}
-            onChange={(event) => setForm({ ...form, telefono: event.target.value })}
-            placeholder="+56912345678"
-            maxLength={20}
-            required
-          />
-        </label>
-        <label>
-          Direccion
-          <input
-            value={form.direccion}
-            onChange={(event) => setForm({ ...form, direccion: event.target.value })}
-            placeholder="Av. Siempre Viva 123, Comuna"
-            maxLength={200}
-            required
-          />
-        </label>
-        {status && <p className="inline-status">{status}</p>}
-        <button>Registrar prospecto</button>
-      </form>
+      {permissions.createProspects && (
+        <form className="panel stack" onSubmit={submit}>
+          <h2>Registrando nuevo prospecto comercial</h2>
+          <label>
+            RUT
+            <input
+              value={form.rut}
+              onChange={(event) => setForm({ ...form, rut: event.target.value })}
+              placeholder="12345678-5"
+              required
+            />
+          </label>
+          <label>
+            Nombre completo
+            <input
+              value={form.nombreCompleto}
+              onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
+              placeholder="Nombre Apellido"
+              maxLength={120}
+              required
+            />
+          </label>
+          <label>
+            Email
+            <input
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+              placeholder="correo@ejemplo.cl"
+              type="email"
+              maxLength={120}
+            />
+          </label>
+          <label>
+            Celular
+            <input
+              value={form.telefono}
+              onChange={(event) => setForm({ ...form, telefono: event.target.value })}
+              placeholder="+56912345678"
+              maxLength={20}
+              required
+            />
+          </label>
+          <label>
+            Direccion
+            <input
+              value={form.direccion}
+              onChange={(event) => setForm({ ...form, direccion: event.target.value })}
+              placeholder="Av. Siempre Viva 123, Comuna"
+              maxLength={200}
+              required
+            />
+          </label>
+          {status && <p className="inline-status">{status}</p>}
+          <button>Registrar prospecto</button>
+        </form>
+      )}
 
       <section className="panel">
         <h2>Gestión de Prospectos</h2>
@@ -545,6 +597,7 @@ function ProspectsPanel({
           <ProspectWorkflowPanel
             prospect={selectedProspect}
             plans={plans}
+            permissions={permissions}
             onChanged={onCreated}
           />
         )}
@@ -556,10 +609,12 @@ function ProspectsPanel({
 function ProspectWorkflowPanel({
   prospect,
   plans,
+  permissions,
   onChanged,
 }: {
   prospect: Prospect;
   plans: Plan[];
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -617,7 +672,7 @@ function ProspectWorkflowPanel({
     <div className="workflow-panel">
       <h3>{prospect.nombreCompleto}</h3>
       <div className="workflow-grid">
-        <label>
+        {permissions.manageProspectPipeline && <label>
           Actualizar estado del prospecto en el pipeline
           <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
             {prospect.estadoPipeline === 'Perdido' && (
@@ -650,9 +705,9 @@ function ProspectWorkflowPanel({
           >
             Actualizar Estado
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.verifyFeasibility && <label>
           Verificando factibilidad técnica de instalación
           <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
             <option value="Factible">Factible</option>
@@ -669,9 +724,9 @@ function ProspectWorkflowPanel({
           >
             Registrar factibilidad
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.generateQuotes && <label>
           Generando cotización en formato PDF
           <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
@@ -688,9 +743,9 @@ function ProspectWorkflowPanel({
           >
             Generar Cotización
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.recordProspectLoss && <label>
           Registrando motivo de pérdida de prospecto
           <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
             {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
@@ -711,9 +766,9 @@ function ProspectWorkflowPanel({
           >
             Marcar como Perdido
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.contractPlans && <label>
           Registrando tipo de plan contratado por el cliente
           <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
@@ -746,9 +801,9 @@ function ProspectWorkflowPanel({
           >
             Registrar plan contratado
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.createInstallOrders && <label>
           Generando Orden de Instalación
           <input
             type="date"
@@ -782,8 +837,7 @@ function ProspectWorkflowPanel({
           >
             Generar Orden de Instalación
           </button>
-          <small>Fecha permitida: desde hoy hasta {formatDateOnly(latestInstallDate)}.</small>
-        </label>
+        </label>}
       </div>
       {status && <p className="inline-status">{status}</p>}
     </div>
@@ -1019,12 +1073,14 @@ function InventoryPanel({
   customers,
   workOrders,
   writeCompanyId,
+  permissions,
   onChanged,
 }: {
   inventory: InventoryUnit[];
   customers: Customer[];
   workOrders: WorkOrder[];
   writeCompanyId: number;
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1080,7 +1136,7 @@ function InventoryPanel({
 
   return (
     <section className="workspace-grid">
-      <form
+      {permissions.manageInventory && <form
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1134,7 +1190,7 @@ function InventoryPanel({
         </label>
         <button>Crear equipo</button>
         {status && <p className="inline-status">{status}</p>}
-      </form>
+      </form>}
 
       <section className="panel">
         <h2>Visualizando inventario por empresa</h2>
@@ -1182,7 +1238,7 @@ function InventoryPanel({
               </p>
             )}
             <div className="workflow-grid">
-              <label>
+              {permissions.manageInventory && <label>
                 Estado logico
                 <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
                   {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva'].map((item) => (
@@ -1207,9 +1263,9 @@ function InventoryPanel({
                 >
                   Actualizar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.manageInventory && <label>
                 Movimiento
                 <select
                   value={movementForm.tipoMovimiento}
@@ -1252,9 +1308,9 @@ function InventoryPanel({
                 >
                   Registrar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.installEquipment && <label>
                 Asociando serie, MAC y puerto OLT al cliente
                 <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
                 <select
@@ -1309,7 +1365,7 @@ function InventoryPanel({
                 >
                   Vincular
                 </button>
-              </label>
+              </label>}
             </div>
           </div>
         )}
@@ -1321,10 +1377,12 @@ function InventoryPanel({
 function TicketsPanel({
   tickets,
   categories,
+  permissions,
   onChanged,
 }: {
   tickets: Ticket[];
   categories: TicketCategory[];
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1392,7 +1450,7 @@ function TicketsPanel({
 
   return (
     <section className="workspace-grid">
-      <form
+      {permissions.createTickets && <form
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1487,7 +1545,7 @@ function TicketsPanel({
         </label>
         <button disabled={!createForm.idCategoria}>Crear ticket</button>
         {status && <p className="inline-status">{status}</p>}
-      </form>
+      </form>}
 
       <section className="panel">
         <h2>Tickets</h2>
@@ -1522,11 +1580,11 @@ function TicketsPanel({
           </table>
         </div>
 
-        {selectedTicket && (
+        {selectedTicket && (permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) && (
           <div className="workflow-panel">
             <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
             <div className="workflow-grid">
-              <label>
+              {permissions.classifyTickets && <label>
                 Clasificacion
                 <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
                   {categories.map((category) => (
@@ -1546,9 +1604,9 @@ function TicketsPanel({
                 >
                   Clasificar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.classifyTickets && <label>
                 Prioridad
                 <select value={priority} onChange={(event) => setPriority(event.target.value)}>
                   <option value="Alta">Alta</option>
@@ -1566,9 +1624,9 @@ function TicketsPanel({
                 >
                   Actualizar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.updateTicketStatus && <label>
                 Estado
                 <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
                   {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
@@ -1589,9 +1647,9 @@ function TicketsPanel({
                 >
                   Cambiar estado
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.diagnoseTickets && <label>
                 Diagnostico tecnico
                 <input
                   placeholder="Causa raiz"
@@ -1626,7 +1684,7 @@ function TicketsPanel({
                 >
                   Registrar diagnostico
                 </button>
-              </label>
+              </label>}
             </div>
           </div>
         )}
