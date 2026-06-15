@@ -20,7 +20,7 @@ export class ProspectsController {
   constructor(private readonly prospectsService: ProspectsService) {}
 
   @Get()
-  @Roles('Administrador', 'Comercial', 'Soporte')
+  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
   list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
     return this.prospectsService.list(user, scope ?? 'consolidado');
   }
