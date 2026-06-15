@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
@@ -384,6 +385,21 @@ export class ProspectsService {
 
   async createInstallOrder(idProspecto: number, dto: CreateInstallOrderDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const scheduledDate = parseDateOnly(dto.fechaProgramada);
+    const today = todayDateOnly();
+    const latestScheduledDate = addYearsToDateOnly(today, 1);
+
+    if (!scheduledDate) {
+      throw new BadRequestException('La fecha programada no es una fecha calendario valida');
+    }
+
+    if (dto.fechaProgramada < today) {
+      throw new BadRequestException('La fecha programada no puede ser anterior a hoy');
+    }
+
+    if (dto.fechaProgramada > latestScheduledDate) {
+      throw new BadRequestException('La fecha programada no puede superar un ano desde hoy');
+    }
 
     if (!prospect.idCliente) {
       throw new BadRequestException('Primero debe registrar el plan contratado del prospecto');
@@ -422,7 +438,7 @@ export class ProspectsService {
           prioridad: dto.prioridad ?? 'Media',
           estado: 'Pendiente',
           fechaCreacion: new Date(),
-          fechaProgramada: new Date(dto.fechaProgramada),
+          fechaProgramada: scheduledDate,
           observaciones: dto.observaciones,
           resueltoRemotamente: false,
         },

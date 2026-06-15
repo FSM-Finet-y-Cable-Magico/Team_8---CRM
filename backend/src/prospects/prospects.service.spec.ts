@@ -95,4 +95,26 @@ describe('ProspectsService', () => {
     });
     expect(prisma.prospecto.create).toHaveBeenCalled();
   });
+
+  it('rechaza una orden de instalacion programada en una fecha historica', async () => {
+    const prisma = {
+      prospecto: {
+        findUnique: jest.fn().mockResolvedValue({
+          idProspecto: 10,
+          idEmpresa: 1,
+          idCliente: 5,
+          direccion: 'Av. Siempre Viva 123',
+        }),
+      },
+    };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+    );
+
+    await expect(
+      service.createInstallOrder(10, { fechaProgramada: '1700-01-01' }, admin),
+    ).rejects.toThrow('no puede ser anterior a hoy');
+  });
 });
