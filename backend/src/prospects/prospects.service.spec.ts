@@ -1,5 +1,7 @@
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { todayDateOnly } from '../common/date-rules';
+import { buildInstallOrderObservations } from '../common/install-order-metadata';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { ProspectsService } from './prospects.service';
@@ -12,6 +14,12 @@ describe('ProspectsService', () => {
     nombreCompleto: 'Administrador',
     roles: ['Administrador'],
   };
+
+  function futureDate(days = 2) {
+    const date = new Date(`${todayDateOnly()}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  }
 
   it('reactiva un prospecto perdido y limpia el motivo de perdida', async () => {
     const prospect = {
@@ -114,7 +122,142 @@ describe('ProspectsService', () => {
     );
 
     await expect(
-      service.createInstallOrder(10, { fechaProgramada: '1700-01-01' }, admin),
+      service.createInstallOrder(
+        10,
+        {
+          fechaProgramada: '1700-01-01',
+          horaVisita: '10:00',
+          tipoConexion: 'Fibra Optica',
+          idTecnico: 4,
+        },
+        admin,
+      ),
     ).rejects.toThrow('no puede ser anterior a hoy');
+  });
+
+  it('sugiere horarios alternativos cuando todos los tecnicos estan ocupados', async () => {
+    const requestedDate = futureDate();
+    const prospect = {
+      idProspecto: 10,
+      idEmpresa: 1,
+      idCliente: 5,
+      estadoPipeline: 'Aceptado',
+      direccion: 'Av. Siempre Viva 123',
+    };
+    const prisma = {
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
+      cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
+      contrato: { findFirst: jest.fn().mockResolvedValue({ idContrato: 2 }) },
+      usuario: {
+        findMany: jest.fn().mockResolvedValue([
+          { idUsuario: 4, nombreCompleto: 'Tecnico FiNet', email: 'terreno@finet.local' },
+        ]),
+      },
+      ordenTrabajo: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            idTecnico: 4,
+            fechaProgramada: new Date(`${requestedDate}T00:00:00.000Z`),
+            observaciones: buildInstallOrderObservations({
+              tipoConexion: 'Fibra Optica',
+              horaVisita: '10:00',
+            }),
+          },
+        ]),
+      },
+    };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+    );
+
+    const result = await service.installAvailability(
+      10,
+      { fechaProgramada: requestedDate, horaVisita: '10:00' },
+      admin,
+    );
+
+    expect(result.tecnicosDisponibles).toEqual([]);
+    expect(result.alternativas.length).toBeGreaterThan(0);
+    expect(result.alternativas[0].tecnicosDisponibles[0].idTecnico).toBe(4);
+  });
+
+  it('crea la orden asignada y avanza el prospecto a Instalacion Programada', async () => {
+    const requestedDate = futureDate();
+    const prospect = {
+      idProspecto: 10,
+      idEmpresa: 1,
+      idCliente: 5,
+      estadoPipeline: 'Aceptado',
+      direccion: 'Av. Siempre Viva 123',
+    };
+    const transaction = {
+      direccionServicio: {
+        findFirst: jest.fn().mockResolvedValue({ idDireccion: 8 }),
+        create: jest.fn(),
+      },
+      ordenTrabajo: {
+        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 30, ...data })),
+      },
+      prospecto: {
+        update: jest.fn().mockResolvedValue({
+          ...prospect,
+          estadoPipeline: 'Instalacion Programada',
+        }),
+      },
+    };
+    const prisma = {
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
+      cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
+      contrato: { findFirst: jest.fn().mockResolvedValue({ idContrato: 2 }) },
+      usuario: {
+        findMany: jest.fn().mockResolvedValue([
+          { idUsuario: 4, nombreCompleto: 'Tecnico FiNet', email: 'terreno@finet.local' },
+        ]),
+      },
+      ordenTrabajo: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: jest.fn().mockImplementation(
+        (callback: (tx: typeof transaction) => unknown) => callback(transaction),
+      ),
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+    );
+
+    const result = await service.createInstallOrder(
+      10,
+      {
+        fechaProgramada: requestedDate,
+        horaVisita: '10:00',
+        tipoConexion: 'Fibra Optica',
+        idTecnico: 4,
+        prioridad: 'Media',
+        observaciones: 'Coordinar acceso con conserjeria',
+      },
+      admin,
+    );
+
+    expect(transaction.ordenTrabajo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          idTecnico: 4,
+          tipoOt: 'Instalacion',
+          fechaProgramada: new Date(`${requestedDate}T00:00:00.000Z`),
+        }),
+      }),
+    );
+    expect(result.prospecto.estadoPipeline).toBe('Instalacion Programada');
+    expect(result.orden.tecnico.nombreCompleto).toBe('Tecnico FiNet');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'GENERAR_ORDEN_INSTALACION' }),
+    );
   });
 });

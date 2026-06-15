@@ -1,6 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import {
+  parseInstallOrderObservations,
+  preserveInstallOrderMetadata,
+} from '../common/install-order-metadata';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
 
@@ -18,8 +22,10 @@ export class WorkOrdersService {
       take: 150,
     });
     const customerIds = [...new Set(orders.map((order) => order.idCliente).filter((id): id is number => id !== null))];
-    const prospects = customerIds.length
-      ? await this.prisma.prospecto.findMany({
+    const technicianIds = [...new Set(orders.map((order) => order.idTecnico).filter((id): id is number => id !== null))];
+    const [prospects, technicians] = await Promise.all([
+      customerIds.length
+        ? this.prisma.prospecto.findMany({
           where: { idCliente: { in: customerIds } },
           orderBy: { fechaCreacion: 'desc' },
           select: {
@@ -31,9 +37,21 @@ export class WorkOrdersService {
             tiempoConversionDias: true,
             estadoPipeline: true,
           },
-        })
-      : [];
+          })
+        : Promise.resolve([]),
+      technicianIds.length
+        ? this.prisma.usuario.findMany({
+            where: { idUsuario: { in: technicianIds } },
+            select: {
+              idUsuario: true,
+              nombreCompleto: true,
+              email: true,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
     const prospectByCustomerCompany = new Map<string, (typeof prospects)[number]>();
+    const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
 
     for (const prospect of prospects) {
       const key = `${prospect.idCliente}:${prospect.idEmpresa}`;
@@ -43,10 +61,19 @@ export class WorkOrdersService {
       }
     }
 
-    return orders.map((order) => ({
-      ...order,
-      prospecto: prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`) ?? null,
-    }));
+    return orders.map((order) => {
+      const metadata = parseInstallOrderObservations(order.observaciones);
+
+      return {
+        ...order,
+        tipoConexion: metadata.tipoConexion,
+        horaVisita: metadata.horaVisita,
+        observacionesAgenda: metadata.observacionesAgenda,
+        observacionesCierre: metadata.observacionesCierre,
+        tecnico: order.idTecnico ? technicianById.get(order.idTecnico) ?? null : null,
+        prospecto: prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`) ?? null,
+      };
+    });
   }
 
   async completeInstallation(idOt: number, dto: CompleteInstallOrderDto, currentUser: AuthUser) {
@@ -87,6 +114,7 @@ export class WorkOrdersService {
       0,
       Math.ceil((conversionDate.getTime() - prospect.fechaCreacion.getTime()) / (1000 * 60 * 60 * 24)),
     );
+    const completionObservations = preserveInstallOrderMetadata(order.observaciones, dto.observaciones);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.ordenTrabajo.update({
@@ -95,7 +123,7 @@ export class WorkOrdersService {
           estado: 'Completada',
           fechaCompletada: new Date(),
           potenciaOpticaDbm: dto.potenciaOpticaDbm,
-          observaciones: dto.observaciones,
+          observaciones: completionObservations,
         },
       });
 
@@ -129,7 +157,7 @@ export class WorkOrdersService {
           idUsuario: currentUser.idUsuario,
           estadoAnterior: order.estado,
           estadoNuevo: 'Completada',
-          observaciones: dto.observaciones,
+          observaciones: completionObservations,
           fechaHora: new Date(),
         },
       });

@@ -9,6 +9,7 @@ import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
 import { GenerateQuoteDto } from './dto/generate-quote.dto';
+import { InstallAvailabilityDto } from './dto/install-availability.dto';
 import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
@@ -97,12 +98,22 @@ export class ProspectsController {
   }
 
   @Post(':id/install-orders')
-  @Roles('Administrador', 'Comercial', 'Terreno')
+  @Roles('Administrador', 'Comercial', 'Soporte')
   createInstallOrder(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateInstallOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
     return this.prospectsService.createInstallOrder(id, dto, user);
+  }
+
+  @Get(':id/install-availability')
+  @Roles('Administrador', 'Comercial', 'Soporte')
+  installAvailability(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() dto: InstallAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prospectsService.installAvailability(id, dto, user);
   }
 }

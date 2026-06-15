@@ -6,6 +6,7 @@ import {
   AuthUser,
   Company,
   Customer,
+  InstallAvailability,
   InventoryUnit,
   Plan,
   Prospect,
@@ -16,7 +17,7 @@ import {
   WorkOrder,
 } from './api';
 
-type Tab = 'prospects' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
+type Tab = 'prospects' | 'installations' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
 
 type Summary = {
   scope: string;
@@ -100,8 +101,27 @@ function parseDateValue(value?: string | null) {
 }
 
 function formatDateOnly(value?: string | null) {
+  const dateOnly = value?.slice(0, 10);
+
+  if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    const [year, month, day] = dateOnly.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('es-CL');
+  }
+
   const date = parseDateValue(value);
   return date ? date.toLocaleDateString('es-CL') : 'Sin dato';
+}
+
+function formatConnectionType(value?: WorkOrder['tipoConexion']) {
+  if (value === 'Fibra Optica') {
+    return 'Fibra Óptica';
+  }
+
+  if (value === 'Television') {
+    return 'Televisión';
+  }
+
+  return 'Sin dato';
 }
 
 function formatDateTime(value?: string | null) {
@@ -260,6 +280,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const canManageCustomers = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']);
   const canViewInventory = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
   const canViewTickets = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte', 'Terreno']);
+  const canViewInstallations = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']);
   const canViewWorkOrders = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
   const permissions: DashboardPermissions = {
     createProspects: hasAnyRole(user, ['Administrador', 'Comercial']),
@@ -268,7 +289,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     generateQuotes: hasAnyRole(user, ['Administrador', 'Comercial']),
     recordProspectLoss: hasAnyRole(user, ['Administrador', 'Comercial']),
     contractPlans: hasAnyRole(user, ['Administrador', 'Comercial']),
-    createInstallOrders: hasAnyRole(user, ['Administrador', 'Comercial', 'Terreno']),
+    createInstallOrders: hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']),
     manageInventory: hasAnyRole(user, ['Administrador', 'Soporte']),
     installEquipment: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
     createTickets: hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']),
@@ -377,6 +398,11 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         <TabButton current={activeTab} value="prospects" onClick={setActiveTab}>
           Prospectos
         </TabButton>
+        {canViewInstallations && (
+          <TabButton current={activeTab} value="installations" onClick={setActiveTab}>
+            Instalaciones
+          </TabButton>
+        )}
         {canManageCustomers && (
           <TabButton current={activeTab} value="customers" onClick={setActiveTab}>
             Clientes
@@ -426,6 +452,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           permissions={permissions}
           onCreated={() => void loadData()}
         />
+      )}
+      {activeTab === 'installations' && canViewInstallations && (
+        <InstallationsPanel prospects={prospects} onChanged={() => void loadData()} />
       )}
       {activeTab === 'rut' && <RutPanel />}
       {activeTab === 'customers' && canManageCustomers && (
@@ -655,11 +684,7 @@ function ProspectWorkflowPanel({
   const [lossReason, setLossReason] = useState('Sin cobertura');
   const [contractPlanId, setContractPlanId] = useState('');
   const [dueDay, setDueDay] = useState(5);
-  const [installDate, setInstallDate] = useState('');
-  const [installPriority, setInstallPriority] = useState('Media');
   const [status, setStatus] = useState('');
-  const today = dateInputValue(new Date());
-  const latestInstallDate = addYearsToInputDate(today, 1);
 
   useEffect(() => {
     setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -835,42 +860,326 @@ function ProspectWorkflowPanel({
           </button>
         </label>}
 
-        {permissions.createInstallOrders && <label>
-          Generando Orden de Instalación
+        {permissions.createInstallOrders && (
+          <InstallOrderForm prospect={prospect} onChanged={onChanged} />
+        )}
+      </div>
+      {status && <p className="inline-status">{status}</p>}
+    </div>
+  );
+}
+
+function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; onChanged: () => void }) {
+  const installationProspects = prospects.filter((prospect) =>
+    ['Aceptado', 'Instalacion Programada'].includes(prospect.estadoPipeline ?? ''),
+  );
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selectedProspect =
+    installationProspects.find((prospect) => prospect.idProspecto === selectedId) ??
+    installationProspects[0] ??
+    null;
+
+  useEffect(() => {
+    if (!selectedId && installationProspects[0]) {
+      setSelectedId(installationProspects[0].idProspecto);
+    }
+  }, [installationProspects, selectedId]);
+
+  return (
+    <section className="workspace-grid">
+      <section className="panel">
+        <h2>Instalaciones</h2>
+        <p className="detail-line">Selecciona un prospecto con cotización aceptada y factibilidad confirmada.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>RUT</th>
+                <th>Prospecto</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {installationProspects.map((prospect) => (
+                <tr key={prospect.idProspecto}>
+                  <td>{prospect.rut ?? '-'}</td>
+                  <td>{prospect.nombreCompleto ?? '-'}</td>
+                  <td>{prospect.estadoPipeline ?? '-'}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                      Nueva Orden
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!installationProspects.length && (
+          <p className="inline-status">No hay prospectos habilitados para generar una Orden de Instalación.</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Nueva Orden</h2>
+        {selectedProspect ? (
+          <InstallOrderForm prospect={selectedProspect} onChanged={onChanged} />
+        ) : (
+          <p className="inline-status">Selecciona un prospecto que cumpla las precondiciones de CU-17.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChanged: () => void }) {
+  const [form, setForm] = useState({
+    tipoConexion: '',
+    fechaProgramada: '',
+    horaVisita: '',
+    prioridad: 'Media',
+    observaciones: '',
+  });
+  const [availability, setAvailability] = useState<InstallAvailability | null>(null);
+  const [technicianId, setTechnicianId] = useState('');
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const today = dateInputValue(new Date());
+  const latestInstallDate = addYearsToInputDate(today, 1);
+  const canCreate = prospect.estadoPipeline === 'Aceptado';
+
+  useEffect(() => {
+    setForm({
+      tipoConexion: '',
+      fechaProgramada: '',
+      horaVisita: '',
+      prioridad: 'Media',
+      observaciones: '',
+    });
+    setAvailability(null);
+    setTechnicianId('');
+    setStatus('');
+    setError('');
+  }, [prospect.idProspecto]);
+
+  function updateSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setAvailability(null);
+    setTechnicianId('');
+    setStatus('');
+    setError('');
+  }
+
+  function validateRequiredFields() {
+    if (!form.tipoConexion || !form.fechaProgramada || !form.horaVisita) {
+      return 'Completa tipo de conexión, fecha y hora de la visita.';
+    }
+
+    if (form.fechaProgramada < today) {
+      return 'La fecha de instalación no puede ser anterior a hoy.';
+    }
+
+    if (form.fechaProgramada > latestInstallDate) {
+      return 'La fecha de instalación no puede superar un año desde hoy.';
+    }
+
+    return '';
+  }
+
+  async function checkAvailability() {
+    setStatus('');
+    setError('');
+    const validationError = validateRequiredFields();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    try {
+      const { data } = await api.get<InstallAvailability>(
+        `/prospects/${prospect.idProspecto}/install-availability`,
+        {
+          params: {
+            fechaProgramada: form.fechaProgramada,
+            horaVisita: form.horaVisita,
+          },
+        },
+      );
+      setAvailability(data);
+      setTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
+
+      if (data.tecnicosDisponibles.length) {
+        setStatus(data.mensaje);
+      } else {
+        setError(data.mensaje);
+      }
+    } catch (err) {
+      setAvailability(null);
+      setTechnicianId('');
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  function selectAlternative(alternative: InstallAvailability['alternativas'][number]) {
+    setForm((current) => ({
+      ...current,
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+    }));
+    setAvailability({
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+      tecnicosDisponibles: alternative.tecnicosDisponibles,
+      alternativas: [],
+      mensaje: 'Horario alternativo seleccionado. Confirma el técnico asignado.',
+    });
+    setTechnicianId(
+      alternative.tecnicosDisponibles[0] ? String(alternative.tecnicosDisponibles[0].idTecnico) : '',
+    );
+    setError('');
+    setStatus('Horario alternativo seleccionado. Confirma el técnico asignado.');
+  }
+
+  async function createInstallOrder() {
+    setStatus('');
+    setError('');
+    const validationError = validateRequiredFields();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    if (!technicianId) {
+      setError('Verifica la disponibilidad y selecciona un técnico antes de crear la orden.');
+      return;
+    }
+
+    try {
+      const { data } = await api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
+        ...form,
+        idTecnico: Number(technicianId),
+      });
+      setStatus(
+        `Orden de Instalación OT ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
+        `El prospecto avanzó a Instalación Programada.`,
+      );
+      setAvailability(null);
+      setTechnicianId('');
+      onChanged();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <div className="install-order-form">
+      <h3>Generando Orden de Instalación (CU-17)</h3>
+      <p className="detail-line">
+        Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
+      </p>
+      {!canCreate && (
+        <p className="inline-status">La Orden de Instalación ya fue generada para este prospecto.</p>
+      )}
+      <div className="install-form-grid">
+        <label>
+          Tipo de conexión
+          <select
+            value={form.tipoConexion}
+            disabled={!canCreate}
+            onChange={(event) => {
+              setForm((current) => ({ ...current, tipoConexion: event.target.value }));
+              setError('');
+            }}
+          >
+            <option value="">Seleccionar tipo de conexión</option>
+            <option value="Fibra Optica">Fibra Óptica</option>
+            <option value="Television">Televisión</option>
+          </select>
+        </label>
+        <label>
+          Fecha de la visita
           <input
             type="date"
             min={today}
             max={latestInstallDate}
-            value={installDate}
-            onChange={(event) => setInstallDate(event.target.value)}
+            disabled={!canCreate}
+            value={form.fechaProgramada}
+            onChange={(event) => updateSchedule('fechaProgramada', event.target.value)}
           />
-          <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
+        </label>
+        <label>
+          Hora de la visita
+          <input
+            type="time"
+            disabled={!canCreate}
+            value={form.horaVisita}
+            onChange={(event) => updateSchedule('horaVisita', event.target.value)}
+          />
+        </label>
+        <label>
+          Prioridad
+          <select
+            value={form.prioridad}
+            disabled={!canCreate}
+            onChange={(event) => setForm((current) => ({ ...current, prioridad: event.target.value }))}
+          >
             <option value="Alta">Alta</option>
             <option value="Media">Media</option>
             <option value="Baja">Baja</option>
           </select>
-          <button
-            type="button"
-            disabled={!installDate}
-            onClick={() =>
-              installDate < today
-                ? setStatus('La fecha de instalacion no puede ser anterior a hoy.')
-                : installDate > latestInstallDate
-                  ? setStatus('La fecha de instalacion no puede superar un ano desde hoy.')
-                  : void runAction(
-                      () =>
-                        api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
-                          fechaProgramada: installDate,
-                          prioridad: installPriority,
-                        }),
-                      'Orden de instalacion creada',
-                    )
-            }
-          >
-            Generar Orden de Instalación
-          </button>
-        </label>}
+        </label>
+        <label className="full-width-field">
+          Observaciones de agenda
+          <textarea
+            maxLength={300}
+            disabled={!canCreate}
+            value={form.observaciones}
+            onChange={(event) => setForm((current) => ({ ...current, observaciones: event.target.value }))}
+          />
+        </label>
       </div>
+      <button type="button" className="secondary" disabled={!canCreate} onClick={() => void checkAvailability()}>
+        Verificar disponibilidad técnica
+      </button>
+
+      {availability?.tecnicosDisponibles.length ? (
+        <label>
+          Técnico asignado
+          <select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>
+            {availability.tecnicosDisponibles.map((technician) => (
+              <option key={technician.idTecnico} value={technician.idTecnico}>
+                {technician.nombreCompleto}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {availability && !availability.tecnicosDisponibles.length && availability.alternativas.length > 0 && (
+        <div className="alternative-slots">
+          <strong>Horarios alternativos sugeridos</strong>
+          <div className="button-row">
+            {availability.alternativas.map((alternative) => (
+              <button
+                key={`${alternative.fechaProgramada}-${alternative.horaVisita}`}
+                type="button"
+                className="secondary compact"
+                onClick={() => selectAlternative(alternative)}
+              >
+                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} técnico(s))
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button type="button" disabled={!canCreate || !technicianId} onClick={() => void createInstallOrder()}>
+        Generar Orden de Instalación
+      </button>
+      {error && <p className="alert">{error}</p>}
       {status && <p className="inline-status">{status}</p>}
     </div>
   );
@@ -1773,7 +2082,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                 <th>Tipo</th>
                 <th>Prioridad</th>
                 <th>Estado</th>
-                <th>Fecha</th>
+                <th>Conexión</th>
+                <th>Visita</th>
+                <th>Técnico</th>
                 <th></th>
               </tr>
             </thead>
@@ -1784,7 +2095,12 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                   <td>{order.tipoOt}</td>
                   <td>{order.prioridad}</td>
                   <td>{order.estado}</td>
-                  <td>{order.fechaProgramada ? new Date(order.fechaProgramada).toLocaleDateString() : '-'}</td>
+                  <td>{formatConnectionType(order.tipoConexion)}</td>
+                  <td>
+                    {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
+                    {order.horaVisita ? ` ${order.horaVisita}` : ''}
+                  </td>
+                  <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => setSelectedId(order.idOt)}>
                       Gestionar
@@ -1804,6 +2120,14 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
             <p className="detail-line">
               OT {selectedOrder.idOt} - {selectedOrder.tipoOt} - {selectedOrder.estado}
             </p>
+            <p className="detail-line">
+              Tipo de conexión: {formatConnectionType(selectedOrder.tipoConexion)} - Visita:{' '}
+              {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
+              {selectedOrder.horaVisita ?? 'Sin hora'} - Técnico: {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}
+            </p>
+            {selectedOrder.observacionesAgenda && (
+              <p className="detail-line">Observaciones de agenda: {selectedOrder.observacionesAgenda}</p>
+            )}
             <div className="history-grid">
               <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
               <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />

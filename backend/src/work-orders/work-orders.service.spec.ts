@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { buildInstallOrderObservations } from '../common/install-order-metadata';
 import { PrismaService } from '../prisma/prisma.service';
 import { WorkOrdersService } from './work-orders.service';
 
@@ -13,6 +14,47 @@ const terreno: AuthUser = {
 };
 
 describe('WorkOrdersService', () => {
+  it('expone tipo de conexion, hora y tecnico asignado en la vista de ordenes', async () => {
+    const prisma = {
+      ordenTrabajo: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            idOt: 20,
+            idEmpresa: 1,
+            idCliente: 10,
+            idTecnico: 4,
+            observaciones: buildInstallOrderObservations({
+              tipoConexion: 'Fibra Optica',
+              horaVisita: '11:00',
+              observacionesAgenda: 'Llamar antes',
+            }),
+          },
+        ]),
+      },
+      prospecto: { findMany: jest.fn().mockResolvedValue([]) },
+      usuario: {
+        findMany: jest.fn().mockResolvedValue([
+          { idUsuario: 4, nombreCompleto: 'Terreno FiNet', email: 'terreno@finet.local' },
+        ]),
+      },
+    };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    const result = await service.list(terreno);
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        tipoConexion: 'Fibra Optica',
+        horaVisita: '11:00',
+        observacionesAgenda: 'Llamar antes',
+        tecnico: expect.objectContaining({ nombreCompleto: 'Terreno FiNet' }),
+      }),
+    );
+  });
+
   it('rechaza completar la instalacion cuando falta la fecha de creacion del prospecto', async () => {
     const prisma = {
       ordenTrabajo: {
