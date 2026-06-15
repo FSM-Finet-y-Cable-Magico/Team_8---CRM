@@ -1,4 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { AuthUser } from '../common/auth.types';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -16,8 +18,8 @@ export class CompaniesController {
   }
 
   @Get('summary')
-  @Roles('Administrador')
-  summary(@Query('scope') scope?: string) {
-    return this.companiesService.summary(scope ?? 'consolidado');
+  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
+  summary(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
+    return this.companiesService.summary(user, scope ?? 'consolidado');
   }
 }

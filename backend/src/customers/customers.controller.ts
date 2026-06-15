@@ -13,7 +13,7 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  @Roles('Administrador', 'Comercial', 'Soporte')
+  @Roles('Administrador', 'Comercial', 'Soporte', 'Terreno')
   list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string, @Query('query') query?: string) {
     return this.customersService.list(user, scope ?? 'consolidado', query ?? '');
   }
