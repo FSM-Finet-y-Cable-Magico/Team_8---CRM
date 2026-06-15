@@ -46,6 +46,35 @@ describe('CustomersService', () => {
     );
   });
 
+  it.each([
+    ['RUT', '21.600.781-6', { rut: { contains: '21600781-6', mode: 'insensitive' } }],
+    ['nombre', 'Xiao Zhong', { nombreCompleto: { contains: 'Xiao Zhong', mode: 'insensitive' } }],
+  ])('busca clientes por %s', async (_criterion, query, expectedFilter) => {
+    const prisma = {
+      cliente: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+    const service = new CustomersService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await service.list(supportUser, 'consolidado', query);
+
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([expectedFilter]),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('permite consultar una cuenta compartida mediante telefono', async () => {
     const customer = {
       idCliente: 5,

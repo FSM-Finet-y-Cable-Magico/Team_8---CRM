@@ -104,6 +104,63 @@ describe('ProspectsService', () => {
     expect(prisma.prospecto.create).toHaveBeenCalled();
   });
 
+  it('reutiliza un contrato vigente al registrar nuevamente el mismo plan', async () => {
+    const prospect = {
+      idProspecto: 20,
+      idEmpresa: 1,
+      idCliente: 5,
+      rut: '21600781-6',
+      nombreCompleto: 'Xiao Zhong',
+      email: 'xiao@example.com',
+      telefono: '+56940618332',
+      estadoPipeline: 'Aceptado',
+    };
+    const existingContract = {
+      idContrato: 30,
+      idCliente: 5,
+      idPlan: 8,
+      idEmpresa: 1,
+      estado: 'Pendiente',
+    };
+    const transaction = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue({ idCliente: 5 }),
+        create: jest.fn(),
+      },
+      contrato: {
+        findFirst: jest.fn().mockResolvedValue(existingContract),
+        create: jest.fn(),
+      },
+      prospecto: {
+        update: jest.fn().mockResolvedValue(prospect),
+      },
+    };
+    const prisma = {
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 8, idEmpresa: 1, activo: true }) },
+      $transaction: jest.fn().mockImplementation(
+        (callback: (tx: typeof transaction) => unknown) => callback(transaction),
+      ),
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+    );
+
+    const result = await service.contractPlan(20, { planId: 8, diaVencimiento: 5 }, admin);
+
+    expect(result.contrato).toBe(existingContract);
+    expect(transaction.contrato.create).not.toHaveBeenCalled();
+    expect(transaction.prospecto.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idProspecto: 20 },
+        data: { idCliente: 5, estadoPipeline: 'Aceptado' },
+      }),
+    );
+  });
+
   it('rechaza una orden de instalacion programada en una fecha historica', async () => {
     const prisma = {
       prospecto: {
