@@ -63,6 +63,7 @@ const rutPattern = /^\d{7,8}-[\dkK]$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const chileanMobilePattern = /^\+?56?9\d{8}$/;
 const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+const reportMinimumDate = '2020-01-01';
 const roleAliases: Record<string, string> = {
   ADMIN: 'Administrador',
   ADMINISTRADOR: 'Administrador',
@@ -75,6 +76,37 @@ const roleAliases: Record<string, string> = {
 
 function normalizeRutInput(value: string) {
   return value.trim().replace(/\./g, '').toUpperCase();
+}
+
+function dateInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addYearsToInputDate(value: string, years: number) {
+  const [year, month, day] = value.split('-').map(Number);
+  return dateInputValue(new Date(year + years, month - 1, day));
+}
+
+function parseDateValue(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateOnly(value?: string | null) {
+  const date = parseDateValue(value);
+  return date ? date.toLocaleDateString('es-CL') : 'Sin dato';
+}
+
+function formatDateTime(value?: string | null) {
+  const date = parseDateValue(value);
+  return date ? date.toLocaleString('es-CL') : 'Sin dato';
 }
 
 function hasAnyRole(user: AuthUser, roles: string[]) {
