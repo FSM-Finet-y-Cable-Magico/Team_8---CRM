@@ -16,6 +16,7 @@ import {
   UserRow,
   WorkOrder,
 } from './api';
+import { DashboardPermissions, getDashboardPermissions, hasPermission, normalizeUserRoles } from './permissions';
 
 type Tab = 'prospects' | 'installations' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
 
@@ -26,22 +27,6 @@ type Summary = {
     clientes: number;
     prospectos: number;
   };
-};
-
-type DashboardPermissions = {
-  createProspects: boolean;
-  manageProspectPipeline: boolean;
-  verifyFeasibility: boolean;
-  generateQuotes: boolean;
-  recordProspectLoss: boolean;
-  contractPlans: boolean;
-  createInstallOrders: boolean;
-  manageInventory: boolean;
-  installEquipment: boolean;
-  createTickets: boolean;
-  classifyTickets: boolean;
-  updateTicketStatus: boolean;
-  diagnoseTickets: boolean;
 };
 
 type ProspectFormState = {
@@ -65,15 +50,6 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const chileanMobilePattern = /^\+?56?9\d{8}$/;
 const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 const reportMinimumDate = '2020-01-01';
-const roleAliases: Record<string, string> = {
-  ADMIN: 'Administrador',
-  ADMINISTRADOR: 'Administrador',
-  SUPERUSUARIO: 'Administrador',
-  COMERCIAL: 'Comercial',
-  SOPORTE: 'Soporte',
-  TERRENO: 'Terreno',
-  TECNICO_TERRENO: 'Terreno',
-};
 
 function normalizeRutInput(value: string) {
   return value.trim().replace(/\./g, '').toUpperCase();
@@ -129,14 +105,10 @@ function formatDateTime(value?: string | null) {
   return date ? date.toLocaleString('es-CL') : 'Sin dato';
 }
 
-function hasAnyRole(user: AuthUser, roles: string[]) {
-  return user.roles.some((role) => roles.includes(role));
-}
-
 function normalizeAuthUser(user: AuthUser) {
   return {
     ...user,
-    roles: [...new Set(user.roles.map((role) => roleAliases[role.trim().toUpperCase()] ?? role.trim()))],
+    roles: normalizeUserRoles(user.roles),
   };
 }
 
@@ -276,27 +248,13 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
-  const isAdmin = user.roles.includes('Administrador');
-  const canManageCustomers = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']);
-  const canViewInventory = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
-  const canViewTickets = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte', 'Terreno']);
-  const canViewInstallations = hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']);
-  const canViewWorkOrders = hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']);
-  const permissions: DashboardPermissions = {
-    createProspects: hasAnyRole(user, ['Administrador', 'Comercial']),
-    manageProspectPipeline: hasAnyRole(user, ['Administrador', 'Comercial']),
-    verifyFeasibility: hasAnyRole(user, ['Administrador', 'Soporte']),
-    generateQuotes: hasAnyRole(user, ['Administrador', 'Comercial']),
-    recordProspectLoss: hasAnyRole(user, ['Administrador', 'Comercial']),
-    contractPlans: hasAnyRole(user, ['Administrador', 'Comercial']),
-    createInstallOrders: hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']),
-    manageInventory: hasAnyRole(user, ['Administrador', 'Soporte']),
-    installEquipment: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
-    createTickets: hasAnyRole(user, ['Administrador', 'Comercial', 'Soporte']),
-    classifyTickets: hasAnyRole(user, ['Administrador', 'Soporte']),
-    updateTicketStatus: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
-    diagnoseTickets: hasAnyRole(user, ['Administrador', 'Soporte', 'Terreno']),
-  };
+  const isAdmin = hasPermission(user.roles, 'manageCompanyScope');
+  const permissions = getDashboardPermissions(user.roles);
+  const canManageCustomers = permissions.viewCustomers;
+  const canViewInventory = permissions.viewInventory;
+  const canViewTickets = permissions.viewTickets;
+  const canViewInstallations = permissions.viewInstallations;
+  const canViewWorkOrders = permissions.viewWorkOrders;
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -474,14 +432,14 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} onChanged={() => void loadData()} />
       )}
       {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
-      {activeTab === 'reports' && isAdmin && <ReportsPanel companies={companies} initialScope={scope} />}
-      {activeTab === 'import' && isAdmin && (
+      {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}
+      {activeTab === 'import' && permissions.viewImport && (
         <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
       )}
-      {activeTab === 'users' && isAdmin && (
+      {activeTab === 'users' && permissions.viewUsers && (
         <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
       )}
-      {activeTab === 'audit' && isAdmin && <AuditPanel audit={audit} />}
+      {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
     </main>
   );
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -22,7 +23,7 @@ export class PlansService {
   }
 
   private companyScope(currentUser: AuthUser, requestedScope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEquipmentDto } from './dto/create-equipment.dto';
 import { InstallRouterDto } from './dto/install-router.dto';
@@ -306,7 +307,7 @@ export class InventoryService {
       throw new NotFoundException('Equipo no encontrado');
     }
 
-    if (!currentUser.roles.includes('Administrador') && unit.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && unit.idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El equipo no pertenece a tu empresa');
     }
 
@@ -314,7 +315,7 @@ export class InventoryService {
   }
 
   private resolveCompanyId(requestedCompanyId: number | undefined, currentUser: AuthUser) {
-    if (currentUser.roles.includes('Administrador')) {
+    if (isAdministrator(currentUser.roles)) {
       const idEmpresa = requestedCompanyId ?? currentUser.idEmpresa;
 
       if (!idEmpresa) {
@@ -341,7 +342,7 @@ export class InventoryService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }

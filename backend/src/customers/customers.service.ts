@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
@@ -69,7 +70,7 @@ export class CustomersService {
 
   async history(idCliente: number, currentUser: AuthUser) {
     const cliente = await this.getCustomerOrThrow(idCliente, currentUser);
-    const companyFilter = currentUser.roles.includes('Administrador') || !currentUser.idEmpresa
+    const companyFilter = isAdministrator(currentUser.roles) || !currentUser.idEmpresa
       ? {}
       : { idEmpresa: currentUser.idEmpresa };
 
@@ -180,7 +181,7 @@ export class CustomersService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string): Prisma.ClienteWhereInput {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }
@@ -234,7 +235,7 @@ export class CustomersService {
     customer: { idEmpresa: number | null; contratos: Array<{ idEmpresa: number | null }> },
     currentUser: AuthUser,
   ) {
-    return currentUser.roles.includes('Administrador') ||
+    return isAdministrator(currentUser.roles) ||
       customer.idEmpresa === currentUser.idEmpresa ||
       customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
   }

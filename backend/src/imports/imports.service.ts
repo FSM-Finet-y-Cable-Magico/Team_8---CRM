@@ -3,6 +3,7 @@ import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 
@@ -274,7 +275,7 @@ export class ImportsService {
   }
 
   private resolveCompanyId(currentUser: AuthUser, requestedCompanyId?: number) {
-    if (currentUser.roles.includes('Administrador')) {
+    if (isAdministrator(currentUser.roles)) {
       const idEmpresa = requestedCompanyId ?? currentUser.idEmpresa;
 
       if (!idEmpresa) {

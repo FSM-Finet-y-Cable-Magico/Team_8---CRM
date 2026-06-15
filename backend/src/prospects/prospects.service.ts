@@ -7,6 +7,7 @@ import {
   buildInstallOrderObservations,
   parseInstallOrderObservations,
 } from '../common/install-order-metadata';
+import { isAdministrator } from '../common/roles';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
@@ -832,7 +833,7 @@ export class ProspectsService {
   }
 
   private resolveCompanyId(requestedCompanyId: number | undefined, currentUser: AuthUser) {
-    if (currentUser.roles.includes('Administrador')) {
+    if (isAdministrator(currentUser.roles)) {
       const adminCompany = requestedCompanyId ?? currentUser.idEmpresa;
 
       if (!adminCompany) {
@@ -858,7 +859,7 @@ export class ProspectsService {
       throw new NotFoundException('Prospecto no encontrado');
     }
 
-    if (!currentUser.roles.includes('Administrador') && prospect.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && prospect.idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El prospecto no pertenece a tu empresa');
     }
 
@@ -902,7 +903,7 @@ export class ProspectsService {
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
-    if (!currentUser.roles.includes('Administrador')) {
+    if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {
         throw new BadRequestException('El usuario no tiene empresa asociada');
       }

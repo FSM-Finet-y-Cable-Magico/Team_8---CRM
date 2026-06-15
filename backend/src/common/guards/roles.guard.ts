@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { AuthRequest } from '../auth.types';
-import { normalizeRoles } from '../roles';
+import { isRoleName, normalizeRoles } from '../roles';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -24,7 +24,7 @@ export class RolesGuard implements CanActivate {
     if (request.user) {
       request.user.roles = userRoles;
     }
-    const allowed = requiredRoles.some((role) => userRoles.includes(role));
+    const allowed = requiredRoles.some((role) => isRoleName(role) && userRoles.includes(role));
 
     if (!allowed) {
       throw new ForbiddenException('No tienes permisos para ejecutar esta accion');
