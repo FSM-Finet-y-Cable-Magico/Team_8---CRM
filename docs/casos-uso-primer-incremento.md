@@ -76,8 +76,8 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
 ## CU17 - Generando Orden de Instalacion
 - Actor: Usuario Comercial / Tecnico en Terreno.
-- Backend: crea direccion principal si falta y genera orden de trabajo.
-- Frontend: fecha programada, prioridad y accion de creacion de OT.
+- Backend: crea direccion principal si falta y genera orden de trabajo con fecha programada desde hoy hasta un ano hacia adelante.
+- Frontend: fecha programada con limites visibles, prioridad y accion de creacion de OT.
 - Base de datos: `direccion_servicio`, `orden_trabajo`, `prospecto`, `log_auditoria`.
 
 ## CU08 - Actualizando estado operativo del cliente
@@ -160,14 +160,14 @@ Fuente: `Casos_Uso_Primer_Incremento_CRM_FINET.pdf`.
 
 ## CU10 - Calculando tiempo de conversion de prospecto
 - Actor: Sistema / Comercial.
-- Backend: al cerrar instalacion calcula dias desde creacion del prospecto y marca Servicio Activo.
-- Frontend: se ejecuta desde cierre de instalacion en OTs.
+- Backend: al cerrar instalacion exige un prospecto asociado con fecha de creacion, registra la fecha de conversion, calcula los dias transcurridos y marca Servicio Activo. Si las fechas faltan o son incoherentes, la operacion se rechaza sin activar al cliente.
+- Frontend: el panel de OTs muestra fecha de creacion, fecha de conversion y dias calculados; tambien presenta la excepcion cuando falta informacion para calcular.
 - Base de datos: `prospecto.fecha_conversion`, `prospecto.tiempo_conversion_dias`, `orden_trabajo`.
 
 ## CU33 - Exportando reportes operativos
 - Actor: Administrador.
-- Backend: genera CSV o XLSX de clientes, prospectos, tickets e inventario filtrados por periodo y empresa.
-- Frontend: modulo Reportes operativos con tipo, periodo, alcance, empresa y formato.
+- Backend: genera CSV o XLSX de clientes, prospectos, tickets e inventario filtrados por periodo y empresa. Rechaza fechas inexistentes, anteriores a `2000-01-01`, futuras o rangos invertidos.
+- Frontend: modulo Reportes operativos con tipo, periodo, alcance, empresa y formato; los calendarios aplican los mismos limites del backend.
 - Base de datos: `cliente`, `prospecto`, `ticket`, `unidad_equipo`, `log_auditoria`.
 
 ## Nota de compatibilidad con la base compartida

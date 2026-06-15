@@ -23,14 +23,14 @@ describe('ReportsService', () => {
       audit as unknown as AuditService,
     );
 
-    await service.export('clientes', 'csv', admin, '2', '2026-06-01', '2026-06-30');
+    await service.export('clientes', 'csv', admin, '2', '2026-05-01', '2026-05-31');
 
     expect(prisma.cliente.findMany).toHaveBeenCalledWith({
       where: {
         idEmpresa: 2,
         fechaCreacion: {
-          gte: new Date('2026-06-01T00:00:00.000Z'),
-          lte: new Date('2026-06-30T23:59:59.999Z'),
+          gte: new Date('2026-05-01T00:00:00.000Z'),
+          lte: new Date('2026-05-31T23:59:59.999Z'),
         },
       },
       orderBy: { fechaCreacion: 'desc' },
@@ -46,5 +46,38 @@ describe('ReportsService', () => {
     await expect(
       service.export('clientes', 'csv', admin, 'consolidado', '2026-07-01', '2026-06-01'),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rechaza periodos anteriores al limite operacional', async () => {
+    const service = new ReportsService(
+      {} as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(
+      service.export('tickets', 'xlsx', admin, 'consolidado', '1700-01-01', '1800-12-31'),
+    ).rejects.toThrow('no puede ser anterior a 2000-01-01');
+  });
+
+  it('rechaza periodos futuros', async () => {
+    const service = new ReportsService(
+      {} as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(
+      service.export('clientes', 'csv', admin, 'consolidado', '2999-01-01', '2999-01-31'),
+    ).rejects.toThrow('no puede incluir fechas futuras');
+  });
+
+  it('rechaza fechas calendario inexistentes', async () => {
+    const service = new ReportsService(
+      {} as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(
+      service.export('clientes', 'csv', admin, 'consolidado', '2026-02-31', '2026-03-01'),
+    ).rejects.toThrow('periodo informado no es valido');
   });
 });

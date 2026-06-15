@@ -134,6 +134,13 @@ export type WorkOrder = {
   estado: string;
   fechaProgramada: string | null;
   observaciones: string | null;
+  prospecto?: {
+    idProspecto: number;
+    fechaCreacion: string | null;
+    fechaConversion: string | null;
+    tiempoConversionDias: number | null;
+    estadoPipeline: string | null;
+  } | null;
 };
 
 export const api = axios.create({

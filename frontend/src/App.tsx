@@ -626,6 +626,8 @@ function ProspectWorkflowPanel({
   const [installDate, setInstallDate] = useState('');
   const [installPriority, setInstallPriority] = useState('Media');
   const [status, setStatus] = useState('');
+  const today = dateInputValue(new Date());
+  const latestInstallDate = addYearsToInputDate(today, 1);
 
   useEffect(() => {
     setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -803,7 +805,13 @@ function ProspectWorkflowPanel({
 
         {permissions.createInstallOrders && <label>
           Generando Orden de Instalación
-          <input type="date" value={installDate} onChange={(event) => setInstallDate(event.target.value)} />
+          <input
+            type="date"
+            min={today}
+            max={latestInstallDate}
+            value={installDate}
+            onChange={(event) => setInstallDate(event.target.value)}
+          />
           <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
             <option value="Alta">Alta</option>
             <option value="Media">Media</option>
@@ -813,14 +821,18 @@ function ProspectWorkflowPanel({
             type="button"
             disabled={!installDate}
             onClick={() =>
-              void runAction(
-                () =>
-                  api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
-                    fechaProgramada: installDate,
-                    prioridad: installPriority,
-                  }),
-                'Orden de instalacion creada',
-              )
+              installDate < today
+                ? setStatus('La fecha de instalacion no puede ser anterior a hoy.')
+                : installDate > latestInstallDate
+                  ? setStatus('La fecha de instalacion no puede superar un ano desde hoy.')
+                  : void runAction(
+                      () =>
+                        api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
+                          fechaProgramada: installDate,
+                          prioridad: installPriority,
+                        }),
+                      'Orden de instalacion creada',
+                    )
             }
           >
             Generar Orden de Instalación
@@ -1047,7 +1059,7 @@ function CustomersPanel({
   );
 }
 
-function HistoryBox({ title, value }: { title: string; value: number }) {
+function HistoryBox({ title, value }: { title: string; value: string | number }) {
   return (
     <article className="history-box">
       <span>{title}</span>
@@ -1707,9 +1719,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
         observaciones: form.observaciones,
       });
       setStatus(
-        data.prospect?.tiempoConversionDias === null || data.prospect?.tiempoConversionDias === undefined
-          ? 'Instalación completada y cliente activado.'
-          : `Instalación completada, cliente activado y tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
+        `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
+        `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
+        `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
       );
       onChanged();
     } catch (err) {
@@ -1760,6 +1772,21 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
             <p className="detail-line">
               OT {selectedOrder.idOt} - {selectedOrder.tipoOt} - {selectedOrder.estado}
             </p>
+            <div className="history-grid">
+              <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
+              <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
+              <HistoryBox
+                title="Tiempo de conversión"
+                value={
+                  selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
+                    ? 'Pendiente'
+                    : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
+                }
+              />
+            </div>
+            {!selectedOrder.prospecto?.fechaCreacion && (
+              <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
+            )}
             <label>
               Potencia optica dBm
               <input
@@ -1773,7 +1800,11 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               Observaciones
               <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
             </label>
-            <button type="button" disabled={selectedOrder.estado === 'Completada'} onClick={completeInstallation}>
+            <button
+              type="button"
+              disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
+              onClick={completeInstallation}
+            >
               Confirmar instalación y activar cliente
             </button>
             {status && <p className="inline-status">{status}</p>}
@@ -1794,6 +1825,7 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [status, setStatus] = useState('');
+  const today = dateInputValue(new Date());
 
   useEffect(() => {
     if (!companyId && companies[0]) {
@@ -1809,6 +1841,16 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
 
     if (dateFrom && dateTo && dateFrom > dateTo) {
       setStatus('La fecha desde no puede ser posterior a la fecha hasta.');
+      return;
+    }
+
+    if ((dateFrom && dateFrom < reportMinimumDate) || (dateTo && dateTo < reportMinimumDate)) {
+      setStatus(`El periodo no puede ser anterior a ${formatDateOnly(reportMinimumDate)}.`);
+      return;
+    }
+
+    if ((dateFrom && dateFrom > today) || (dateTo && dateTo > today)) {
+      setStatus('El periodo del reporte no puede incluir fechas futuras.');
       return;
     }
 
@@ -1849,12 +1891,25 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
       </label>
       <label>
         Período desde
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        <input
+          type="date"
+          min={reportMinimumDate}
+          max={today}
+          value={dateFrom}
+          onChange={(event) => setDateFrom(event.target.value)}
+        />
       </label>
       <label>
         Período hasta
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        <input
+          type="date"
+          min={reportMinimumDate}
+          max={today}
+          value={dateTo}
+          onChange={(event) => setDateTo(event.target.value)}
+        />
       </label>
+      <small>Periodo permitido: desde {formatDateOnly(reportMinimumDate)} hasta hoy.</small>
       <label>
         Alcance
         <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}>

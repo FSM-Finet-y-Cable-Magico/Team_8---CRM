@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { parseDateOnly, REPORT_MIN_DATE, todayDateOnly } from '../common/date-rules';
 import { PrismaService } from '../prisma/prisma.service';
 
 type ReportFormat = 'csv' | 'xlsx';
@@ -181,13 +182,21 @@ export class ReportsService {
       throw new BadRequestException('El periodo debe usar el formato AAAA-MM-DD');
     }
 
-    const date = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+    const parsedDate = parseDateOnly(value);
 
-    if (Number.isNaN(date.getTime())) {
+    if (!parsedDate) {
       throw new BadRequestException('El periodo informado no es valido');
     }
 
-    return date;
+    if (value < REPORT_MIN_DATE) {
+      throw new BadRequestException(`El periodo no puede ser anterior a ${REPORT_MIN_DATE}`);
+    }
+
+    if (value > todayDateOnly()) {
+      throw new BadRequestException('El periodo del reporte no puede incluir fechas futuras');
+    }
+
+    return new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
