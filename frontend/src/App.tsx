@@ -6,6 +6,7 @@ import {
   AuthUser,
   Company,
   Customer,
+  InstallAvailability,
   InventoryUnit,
   Plan,
   Prospect,
@@ -15,10 +16,13 @@ import {
   UserRow,
   WorkOrder,
 } from './api';
+import { DashboardPermissions, getDashboardPermissions, hasPermission, normalizeUserRoles } from './permissions';
 
-type Tab = 'prospects' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
+type Tab = 'prospects' | 'installations' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
 
 type Summary = {
+  scope: string;
+  empresas: Company[];
   metricas: {
     clientes: number;
     prospectos: number;
@@ -45,9 +49,80 @@ const rutPattern = /^\d{7,8}-[\dkK]$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const chileanMobilePattern = /^\+?56?9\d{8}$/;
 const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+const reportMinimumDate = '2020-01-01';
 
 function normalizeRutInput(value: string) {
   return value.trim().replace(/\./g, '').toUpperCase();
+}
+
+function dateInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addYearsToInputDate(value: string, years: number) {
+  const [year, month, day] = value.split('-').map(Number);
+  return dateInputValue(new Date(year + years, month - 1, day));
+}
+
+function parseDateValue(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateOnly(value?: string | null) {
+  const dateOnly = value?.slice(0, 10);
+
+  if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    const [year, month, day] = dateOnly.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('es-CL');
+  }
+
+  const date = parseDateValue(value);
+  return date ? date.toLocaleDateString('es-CL') : 'Sin dato';
+}
+
+function formatConnectionType(value?: WorkOrder['tipoConexion']) {
+  if (value === 'Fibra Optica') {
+    return 'Fibra Óptica';
+  }
+
+  if (value === 'Television') {
+    return 'Televisión';
+  }
+
+  return 'Sin dato';
+}
+
+function formatDateTime(value?: string | null) {
+  const date = parseDateValue(value);
+  return date ? date.toLocaleString('es-CL') : 'Sin dato';
+}
+
+function normalizeAuthUser(user: AuthUser) {
+  return {
+    ...user,
+    roles: normalizeUserRoles(user.roles),
+  };
+}
+
+function settledData<T>(
+  result: PromiseSettledResult<{ data: T }>,
+  fallback: T,
+  errors: string[],
+) {
+  if (result.status === 'fulfilled') {
+    return result.value.data;
+  }
+
+  errors.push(apiErrorMessage(result.reason));
+  return fallback;
 }
 
 function validateProspectForm(form: ProspectFormState) {
@@ -83,7 +158,7 @@ function validateProspectForm(form: ProspectFormState) {
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem('finet_user');
-    return stored ? (JSON.parse(stored) as AuthUser) : null;
+    return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
 
   if (!user) {
@@ -106,9 +181,10 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
     try {
       const { data } = await api.post('/auth/login', { email, password });
+      const normalizedUser = normalizeAuthUser(data.user);
       localStorage.setItem('finet_token', data.accessToken);
-      localStorage.setItem('finet_user', JSON.stringify(data.user));
-      onLogin(data.user);
+      localStorage.setItem('finet_user', JSON.stringify(normalizedUser));
+      onLogin(normalizedUser);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -172,11 +248,13 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
-  const isAdmin = user.roles.includes('Administrador');
-  const canManageCustomers = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte'].includes(role));
-  const canViewInventory = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
-  const canViewTickets = user.roles.some((role) => ['Administrador', 'Comercial', 'Soporte', 'Terreno'].includes(role));
-  const canViewWorkOrders = user.roles.some((role) => ['Administrador', 'Soporte', 'Terreno'].includes(role));
+  const isAdmin = hasPermission(user.roles, 'manageCompanyScope');
+  const permissions = getDashboardPermissions(user.roles);
+  const canManageCustomers = permissions.viewCustomers;
+  const canViewInventory = permissions.viewInventory;
+  const canViewTickets = permissions.viewTickets;
+  const canViewInstallations = permissions.viewInstallations;
+  const canViewWorkOrders = permissions.viewWorkOrders;
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -188,41 +266,43 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   async function loadData() {
     setMessage('');
+    const errors: string[] = [];
+    const loadCustomers = canManageCustomers || permissions.installEquipment;
+    const [summaryResult, prospectsResult, plansResult, customersResult, inventoryResult, ticketsResult, categoriesResult, workOrdersResult] = await Promise.allSettled([
+      api.get<Summary>('/companies/summary', { params: { scope } }),
+      api.get<Prospect[]>('/prospects', { params: { scope } }),
+      api.get<Plan[]>('/plans', { params: { scope } }),
+      loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
+      canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
+      canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
+      canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
+      canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+    ]);
+    const summaryData = settledData(summaryResult, null as Summary | null, errors);
 
-    try {
-      const [summaryResponse, prospectsResponse, plansResponse, customersResponse, inventoryResponse, ticketsResponse, categoriesResponse, workOrdersResponse] = await Promise.all([
-        api.get<Summary>('/companies/summary', { params: { scope } }),
-        api.get<Prospect[]>('/prospects', { params: { scope } }),
-        api.get<Plan[]>('/plans', { params: { scope } }),
-        canManageCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
-        canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-        canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
-        canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
-        canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+    setSummary(summaryData);
+    setCompanies(summaryData?.empresas ?? []);
+    setProspects(settledData(prospectsResult, [] as Prospect[], errors));
+    setPlans(settledData(plansResult, [] as Plan[], errors));
+    setCustomers(settledData(customersResult, [] as Customer[], errors));
+    setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
+    setTickets(settledData(ticketsResult, [] as Ticket[], errors));
+    setTicketCategories(settledData(categoriesResult, [] as TicketCategory[], errors));
+    setWorkOrders(settledData(workOrdersResult, [] as WorkOrder[], errors));
+
+    if (isAdmin) {
+      const [usersResult, rolesResult, auditResult] = await Promise.allSettled([
+        api.get<UserRow[]>('/users'),
+        api.get<Role[]>('/users/roles'),
+        api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
       ]);
-      setSummary(summaryResponse.data);
-      setProspects(prospectsResponse.data);
-      setPlans(plansResponse.data);
-      setCustomers(customersResponse.data);
-      setInventory(inventoryResponse.data);
-      setTickets(ticketsResponse.data);
-      setTicketCategories(categoriesResponse.data);
-      setWorkOrders(workOrdersResponse.data);
+      setUsers(settledData(usersResult, [] as UserRow[], errors));
+      setRoles(settledData(rolesResult, [] as Role[], errors));
+      setAudit(settledData(auditResult, [] as AuditLog[], errors));
+    }
 
-      if (isAdmin) {
-        const [companiesResponse, usersResponse, rolesResponse, auditResponse] = await Promise.all([
-          api.get<Company[]>('/companies'),
-          api.get<UserRow[]>('/users'),
-          api.get<Role[]>('/users/roles'),
-          api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
-        ]);
-        setCompanies(companiesResponse.data);
-        setUsers(usersResponse.data);
-        setRoles(rolesResponse.data);
-        setAudit(auditResponse.data);
-      }
-    } catch (err) {
-      setMessage(apiErrorMessage(err));
+    if (errors.length) {
+      setMessage([...new Set(errors)].join(' | '));
     }
   }
 
@@ -276,6 +356,11 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         <TabButton current={activeTab} value="prospects" onClick={setActiveTab}>
           Prospectos
         </TabButton>
+        {canViewInstallations && (
+          <TabButton current={activeTab} value="installations" onClick={setActiveTab}>
+            Instalaciones
+          </TabButton>
+        )}
         {canManageCustomers && (
           <TabButton current={activeTab} value="customers" onClick={setActiveTab}>
             Clientes
@@ -322,8 +407,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           prospects={prospects}
           plans={plans}
           writeCompanyId={writeCompanyId}
+          permissions={permissions}
           onCreated={() => void loadData()}
         />
+      )}
+      {activeTab === 'installations' && canViewInstallations && (
+        <InstallationsPanel prospects={prospects} onChanged={() => void loadData()} />
       )}
       {activeTab === 'rut' && <RutPanel />}
       {activeTab === 'customers' && canManageCustomers && (
@@ -335,21 +424,22 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           customers={customers}
           workOrders={workOrders}
           writeCompanyId={writeCompanyId}
+          permissions={permissions}
           onChanged={() => void loadData()}
         />
       )}
       {activeTab === 'tickets' && canViewTickets && (
-        <TicketsPanel tickets={tickets} categories={ticketCategories} onChanged={() => void loadData()} />
+        <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} onChanged={() => void loadData()} />
       )}
       {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
-      {activeTab === 'reports' && isAdmin && <ReportsPanel companies={companies} initialScope={scope} />}
-      {activeTab === 'import' && isAdmin && (
+      {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}
+      {activeTab === 'import' && permissions.viewImport && (
         <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
       )}
-      {activeTab === 'users' && isAdmin && (
+      {activeTab === 'users' && permissions.viewUsers && (
         <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
       )}
-      {activeTab === 'audit' && isAdmin && <AuditPanel audit={audit} />}
+      {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
     </main>
   );
 }
@@ -385,11 +475,13 @@ function ProspectsPanel({
   prospects,
   plans,
   writeCompanyId,
+  permissions,
   onCreated,
 }: {
   prospects: Prospect[];
   plans: Plan[];
   writeCompanyId: number;
+  permissions: DashboardPermissions;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
@@ -433,60 +525,62 @@ function ProspectsPanel({
 
   return (
     <section className="workspace-grid">
-      <form className="panel stack" onSubmit={submit}>
-        <h2>Registrando nuevo prospecto comercial</h2>
-        <label>
-          RUT
-          <input
-            value={form.rut}
-            onChange={(event) => setForm({ ...form, rut: event.target.value })}
-            placeholder="12345678-5"
-            required
-          />
-        </label>
-        <label>
-          Nombre completo
-          <input
-            value={form.nombreCompleto}
-            onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
-            placeholder="Nombre Apellido"
-            maxLength={120}
-            required
-          />
-        </label>
-        <label>
-          Email
-          <input
-            value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-            placeholder="correo@ejemplo.cl"
-            type="email"
-            maxLength={120}
-          />
-        </label>
-        <label>
-          Celular
-          <input
-            value={form.telefono}
-            onChange={(event) => setForm({ ...form, telefono: event.target.value })}
-            placeholder="+56912345678"
-            maxLength={20}
-            required
-          />
-        </label>
-        <label>
-          Direccion
-          <input
-            value={form.direccion}
-            onChange={(event) => setForm({ ...form, direccion: event.target.value })}
-            placeholder="Av. Siempre Viva 123, Comuna"
-            maxLength={200}
-            required
-          />
-        </label>
-        {status && <p className="inline-status">{status}</p>}
-        <button>Registrar prospecto</button>
-      </form>
+      {permissions.createProspects && (
+        <form className="panel stack" onSubmit={submit}>
+          <h2>Registrando nuevo prospecto comercial</h2>
+          <label>
+            RUT
+            <input
+              value={form.rut}
+              onChange={(event) => setForm({ ...form, rut: event.target.value })}
+              placeholder="12345678-5"
+              required
+            />
+          </label>
+          <label>
+            Nombre completo
+            <input
+              value={form.nombreCompleto}
+              onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
+              placeholder="Nombre Apellido"
+              maxLength={120}
+              required
+            />
+          </label>
+          <label>
+            Email
+            <input
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+              placeholder="correo@ejemplo.cl"
+              type="email"
+              maxLength={120}
+            />
+          </label>
+          <label>
+            Celular
+            <input
+              value={form.telefono}
+              onChange={(event) => setForm({ ...form, telefono: event.target.value })}
+              placeholder="+56912345678"
+              maxLength={20}
+              required
+            />
+          </label>
+          <label>
+            Direccion
+            <input
+              value={form.direccion}
+              onChange={(event) => setForm({ ...form, direccion: event.target.value })}
+              placeholder="Av. Siempre Viva 123, Comuna"
+              maxLength={200}
+              required
+            />
+          </label>
+          {status && <p className="inline-status">{status}</p>}
+          <button>Registrar prospecto</button>
+        </form>
+      )}
 
       <section className="panel">
         <h2>Gestión de Prospectos</h2>
@@ -522,6 +616,7 @@ function ProspectsPanel({
           <ProspectWorkflowPanel
             prospect={selectedProspect}
             plans={plans}
+            permissions={permissions}
             onChanged={onCreated}
           />
         )}
@@ -533,10 +628,12 @@ function ProspectsPanel({
 function ProspectWorkflowPanel({
   prospect,
   plans,
+  permissions,
   onChanged,
 }: {
   prospect: Prospect;
   plans: Plan[];
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -545,9 +642,8 @@ function ProspectWorkflowPanel({
   const [lossReason, setLossReason] = useState('Sin cobertura');
   const [contractPlanId, setContractPlanId] = useState('');
   const [dueDay, setDueDay] = useState(5);
-  const [installDate, setInstallDate] = useState('');
-  const [installPriority, setInstallPriority] = useState('Media');
   const [status, setStatus] = useState('');
+  const [statusIsError, setStatusIsError] = useState(false);
 
   useEffect(() => {
     setPipelineStatus(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -557,18 +653,21 @@ function ProspectWorkflowPanel({
 
   async function runAction(action: () => Promise<unknown>, success: string) {
     setStatus('');
+    setStatusIsError(false);
 
     try {
       await action();
       setStatus(success);
       onChanged();
     } catch (err) {
+      setStatusIsError(true);
       setStatus(apiErrorMessage(err));
     }
   }
 
   async function generateQuote() {
     setStatus('');
+    setStatusIsError(false);
 
     try {
       const { data } = await api.post(`/prospects/${prospect.idProspecto}/quotes`, { planId: Number(quotePlanId) });
@@ -584,6 +683,7 @@ function ProspectWorkflowPanel({
       );
       onChanged();
     } catch (err) {
+      setStatusIsError(true);
       setStatus(apiErrorMessage(err));
     }
   }
@@ -592,7 +692,7 @@ function ProspectWorkflowPanel({
     <div className="workflow-panel">
       <h3>{prospect.nombreCompleto}</h3>
       <div className="workflow-grid">
-        <label>
+        {permissions.manageProspectPipeline && <label>
           Actualizar estado del prospecto en el pipeline
           <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
             {prospect.estadoPipeline === 'Perdido' && (
@@ -625,9 +725,9 @@ function ProspectWorkflowPanel({
           >
             Actualizar Estado
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.verifyFeasibility && <label>
           Verificando factibilidad técnica de instalación
           <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
             <option value="Factible">Factible</option>
@@ -644,9 +744,9 @@ function ProspectWorkflowPanel({
           >
             Registrar factibilidad
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.generateQuotes && <label>
           Generando cotización en formato PDF
           <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
@@ -663,9 +763,9 @@ function ProspectWorkflowPanel({
           >
             Generar Cotización
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.recordProspectLoss && <label>
           Registrando motivo de pérdida de prospecto
           <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
             {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
@@ -686,9 +786,9 @@ function ProspectWorkflowPanel({
           >
             Marcar como Perdido
           </button>
-        </label>
+        </label>}
 
-        <label>
+        {permissions.contractPlans && <label>
           Registrando tipo de plan contratado por el cliente
           <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
@@ -721,34 +821,333 @@ function ProspectWorkflowPanel({
           >
             Registrar plan contratado
           </button>
-        </label>
+        </label>}
 
+        {permissions.createInstallOrders && (
+          <InstallOrderForm prospect={prospect} onChanged={onChanged} />
+        )}
+      </div>
+      {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
+    </div>
+  );
+}
+
+function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; onChanged: () => void }) {
+  const installationProspects = prospects.filter((prospect) =>
+    prospect.estadoPipeline === 'Instalacion Programada' ||
+    (prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente)),
+  );
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selectedProspect =
+    installationProspects.find((prospect) => prospect.idProspecto === selectedId) ??
+    installationProspects[0] ??
+    null;
+
+  useEffect(() => {
+    if (!selectedId && installationProspects[0]) {
+      setSelectedId(installationProspects[0].idProspecto);
+    }
+  }, [installationProspects, selectedId]);
+
+  return (
+    <section className="workspace-grid">
+      <section className="panel">
+        <h2>Instalaciones</h2>
+        <p className="detail-line">Selecciona un prospecto con cotización aceptada y factibilidad confirmada.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>RUT</th>
+                <th>Prospecto</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {installationProspects.map((prospect) => (
+                <tr key={prospect.idProspecto}>
+                  <td>{prospect.rut ?? '-'}</td>
+                  <td>{prospect.nombreCompleto ?? '-'}</td>
+                  <td>{prospect.estadoPipeline ?? '-'}</td>
+                  <td>
+                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                      Nueva Orden
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!installationProspects.length && (
+          <p className="inline-status">No hay prospectos habilitados para generar una Orden de Instalación.</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Nueva Orden</h2>
+        {selectedProspect ? (
+          <InstallOrderForm prospect={selectedProspect} onChanged={onChanged} />
+        ) : (
+          <p className="inline-status">Selecciona un prospecto que cumpla las precondiciones de CU-17.</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChanged: () => void }) {
+  const [form, setForm] = useState({
+    tipoConexion: '',
+    fechaProgramada: '',
+    horaVisita: '',
+    prioridad: 'Media',
+    observaciones: '',
+  });
+  const [availability, setAvailability] = useState<InstallAvailability | null>(null);
+  const [technicianId, setTechnicianId] = useState('');
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const today = dateInputValue(new Date());
+  const latestInstallDate = addYearsToInputDate(today, 1);
+  const hasContractedPlan = Boolean(prospect.idCliente);
+  const canCreate = prospect.estadoPipeline === 'Aceptado' && hasContractedPlan;
+
+  useEffect(() => {
+    setForm({
+      tipoConexion: '',
+      fechaProgramada: '',
+      horaVisita: '',
+      prioridad: 'Media',
+      observaciones: '',
+    });
+    setAvailability(null);
+    setTechnicianId('');
+    setStatus('');
+    setError('');
+  }, [prospect.idProspecto]);
+
+  function updateSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setAvailability(null);
+    setTechnicianId('');
+    setStatus('');
+    setError('');
+  }
+
+  function validateRequiredFields() {
+    if (!form.tipoConexion || !form.fechaProgramada || !form.horaVisita) {
+      return 'Completa tipo de conexión, fecha y hora de la visita.';
+    }
+
+    if (form.fechaProgramada < today) {
+      return 'La fecha de instalación no puede ser anterior a hoy.';
+    }
+
+    if (form.fechaProgramada > latestInstallDate) {
+      return 'La fecha de instalación no puede superar un año desde hoy.';
+    }
+
+    return '';
+  }
+
+  async function checkAvailability() {
+    setStatus('');
+    setError('');
+    const validationError = validateRequiredFields();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    try {
+      const { data } = await api.get<InstallAvailability>(
+        `/prospects/${prospect.idProspecto}/install-availability`,
+        {
+          params: {
+            fechaProgramada: form.fechaProgramada,
+            horaVisita: form.horaVisita,
+          },
+        },
+      );
+      setAvailability(data);
+      setTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
+
+      if (data.tecnicosDisponibles.length) {
+        setStatus(data.mensaje);
+      } else {
+        setError(data.mensaje);
+      }
+    } catch (err) {
+      setAvailability(null);
+      setTechnicianId('');
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  function selectAlternative(alternative: InstallAvailability['alternativas'][number]) {
+    setForm((current) => ({
+      ...current,
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+    }));
+    setAvailability({
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+      tecnicosDisponibles: alternative.tecnicosDisponibles,
+      alternativas: [],
+      mensaje: 'Horario alternativo seleccionado. Confirma el técnico asignado.',
+    });
+    setTechnicianId(
+      alternative.tecnicosDisponibles[0] ? String(alternative.tecnicosDisponibles[0].idTecnico) : '',
+    );
+    setError('');
+    setStatus('Horario alternativo seleccionado. Confirma el técnico asignado.');
+  }
+
+  async function createInstallOrder() {
+    setStatus('');
+    setError('');
+    const validationError = validateRequiredFields();
+
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    if (!technicianId) {
+      setError('Verifica la disponibilidad y selecciona un técnico antes de crear la orden.');
+      return;
+    }
+
+    try {
+      const { data } = await api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
+        ...form,
+        idTecnico: Number(technicianId),
+      });
+      setStatus(
+        `Orden de Instalación OT ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
+        `El prospecto avanzó a Instalación Programada.`,
+      );
+      setAvailability(null);
+      setTechnicianId('');
+      onChanged();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <div className="install-order-form">
+      <h3>Generando Orden de Instalación (CU-17)</h3>
+      <p className="detail-line">
+        Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
+      </p>
+      {prospect.estadoPipeline === 'Aceptado' && !hasContractedPlan && (
+        <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
+      )}
+      {prospect.estadoPipeline !== 'Aceptado' && (
+        <p className="inline-status">La Orden de Instalación ya fue generada para este prospecto.</p>
+      )}
+      <div className="install-form-grid">
         <label>
-          Generando Orden de Instalación
-          <input type="date" value={installDate} onChange={(event) => setInstallDate(event.target.value)} />
-          <select value={installPriority} onChange={(event) => setInstallPriority(event.target.value)}>
+          Tipo de conexión
+          <select
+            value={form.tipoConexion}
+            disabled={!canCreate}
+            onChange={(event) => {
+              setForm((current) => ({ ...current, tipoConexion: event.target.value }));
+              setError('');
+            }}
+          >
+            <option value="">Seleccionar tipo de conexión</option>
+            <option value="Fibra Optica">Fibra Óptica</option>
+            <option value="Television">Televisión</option>
+          </select>
+        </label>
+        <label>
+          Fecha de la visita
+          <input
+            type="date"
+            min={today}
+            max={latestInstallDate}
+            disabled={!canCreate}
+            value={form.fechaProgramada}
+            onChange={(event) => updateSchedule('fechaProgramada', event.target.value)}
+          />
+        </label>
+        <label>
+          Hora de la visita
+          <input
+            type="time"
+            disabled={!canCreate}
+            value={form.horaVisita}
+            onChange={(event) => updateSchedule('horaVisita', event.target.value)}
+          />
+        </label>
+        <label>
+          Prioridad
+          <select
+            value={form.prioridad}
+            disabled={!canCreate}
+            onChange={(event) => setForm((current) => ({ ...current, prioridad: event.target.value }))}
+          >
             <option value="Alta">Alta</option>
             <option value="Media">Media</option>
             <option value="Baja">Baja</option>
           </select>
-          <button
-            type="button"
-            disabled={!installDate}
-            onClick={() =>
-              void runAction(
-                () =>
-                  api.post(`/prospects/${prospect.idProspecto}/install-orders`, {
-                    fechaProgramada: installDate,
-                    prioridad: installPriority,
-                  }),
-                'Orden de instalacion creada',
-              )
-            }
-          >
-            Generar Orden de Instalación
-          </button>
+        </label>
+        <label className="full-width-field">
+          Observaciones de agenda
+          <textarea
+            maxLength={300}
+            disabled={!canCreate}
+            value={form.observaciones}
+            onChange={(event) => setForm((current) => ({ ...current, observaciones: event.target.value }))}
+          />
         </label>
       </div>
+      <button type="button" className="secondary" disabled={!canCreate} onClick={() => void checkAvailability()}>
+        Verificar disponibilidad técnica
+      </button>
+
+      {availability?.tecnicosDisponibles.length ? (
+        <label>
+          Técnico asignado
+          <select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>
+            {availability.tecnicosDisponibles.map((technician) => (
+              <option key={technician.idTecnico} value={technician.idTecnico}>
+                {technician.nombreCompleto}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {availability && !availability.tecnicosDisponibles.length && availability.alternativas.length > 0 && (
+        <div className="alternative-slots">
+          <strong>Horarios alternativos sugeridos</strong>
+          <div className="button-row">
+            {availability.alternativas.map((alternative) => (
+              <button
+                key={`${alternative.fechaProgramada}-${alternative.horaVisita}`}
+                type="button"
+                className="secondary compact"
+                onClick={() => selectAlternative(alternative)}
+              >
+                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} técnico(s))
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button type="button" disabled={!canCreate || !technicianId} onClick={() => void createInstallOrder()}>
+        Generar Orden de Instalación
+      </button>
+      {error && <p className="alert">{error}</p>}
       {status && <p className="inline-status">{status}</p>}
     </div>
   );
@@ -969,7 +1368,7 @@ function CustomersPanel({
   );
 }
 
-function HistoryBox({ title, value }: { title: string; value: number }) {
+function HistoryBox({ title, value }: { title: string; value: string | number }) {
   return (
     <article className="history-box">
       <span>{title}</span>
@@ -983,12 +1382,14 @@ function InventoryPanel({
   customers,
   workOrders,
   writeCompanyId,
+  permissions,
   onChanged,
 }: {
   inventory: InventoryUnit[];
   customers: Customer[];
   workOrders: WorkOrder[];
   writeCompanyId: number;
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1044,7 +1445,7 @@ function InventoryPanel({
 
   return (
     <section className="workspace-grid">
-      <form
+      {permissions.manageInventory && <form
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1098,7 +1499,7 @@ function InventoryPanel({
         </label>
         <button>Crear equipo</button>
         {status && <p className="inline-status">{status}</p>}
-      </form>
+      </form>}
 
       <section className="panel">
         <h2>Visualizando inventario por empresa</h2>
@@ -1146,7 +1547,7 @@ function InventoryPanel({
               </p>
             )}
             <div className="workflow-grid">
-              <label>
+              {permissions.manageInventory && <label>
                 Estado logico
                 <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
                   {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva'].map((item) => (
@@ -1171,9 +1572,9 @@ function InventoryPanel({
                 >
                   Actualizar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.manageInventory && <label>
                 Movimiento
                 <select
                   value={movementForm.tipoMovimiento}
@@ -1216,9 +1617,9 @@ function InventoryPanel({
                 >
                   Registrar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.installEquipment && <label>
                 Asociando serie, MAC y puerto OLT al cliente
                 <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
                 <select
@@ -1273,7 +1674,7 @@ function InventoryPanel({
                 >
                   Vincular
                 </button>
-              </label>
+              </label>}
             </div>
           </div>
         )}
@@ -1285,10 +1686,12 @@ function InventoryPanel({
 function TicketsPanel({
   tickets,
   categories,
+  permissions,
   onChanged,
 }: {
   tickets: Ticket[];
   categories: TicketCategory[];
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1356,7 +1759,7 @@ function TicketsPanel({
 
   return (
     <section className="workspace-grid">
-      <form
+      {permissions.createTickets && <form
         className="panel stack"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1451,7 +1854,7 @@ function TicketsPanel({
         </label>
         <button disabled={!createForm.idCategoria}>Crear ticket</button>
         {status && <p className="inline-status">{status}</p>}
-      </form>
+      </form>}
 
       <section className="panel">
         <h2>Tickets</h2>
@@ -1486,11 +1889,11 @@ function TicketsPanel({
           </table>
         </div>
 
-        {selectedTicket && (
+        {selectedTicket && (permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) && (
           <div className="workflow-panel">
             <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
             <div className="workflow-grid">
-              <label>
+              {permissions.classifyTickets && <label>
                 Clasificacion
                 <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
                   {categories.map((category) => (
@@ -1510,9 +1913,9 @@ function TicketsPanel({
                 >
                   Clasificar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.classifyTickets && <label>
                 Prioridad
                 <select value={priority} onChange={(event) => setPriority(event.target.value)}>
                   <option value="Alta">Alta</option>
@@ -1530,9 +1933,9 @@ function TicketsPanel({
                 >
                   Actualizar
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.updateTicketStatus && <label>
                 Estado
                 <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
                   {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
@@ -1553,9 +1956,9 @@ function TicketsPanel({
                 >
                   Cambiar estado
                 </button>
-              </label>
+              </label>}
 
-              <label>
+              {permissions.diagnoseTickets && <label>
                 Diagnostico tecnico
                 <input
                   placeholder="Causa raiz"
@@ -1590,7 +1993,7 @@ function TicketsPanel({
                 >
                   Registrar diagnostico
                 </button>
-              </label>
+              </label>}
             </div>
           </div>
         )}
@@ -1625,9 +2028,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
         observaciones: form.observaciones,
       });
       setStatus(
-        data.prospect?.tiempoConversionDias === null || data.prospect?.tiempoConversionDias === undefined
-          ? 'Instalación completada y cliente activado.'
-          : `Instalación completada, cliente activado y tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
+        `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
+        `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
+        `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
       );
       onChanged();
     } catch (err) {
@@ -1647,7 +2050,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                 <th>Tipo</th>
                 <th>Prioridad</th>
                 <th>Estado</th>
-                <th>Fecha</th>
+                <th>Conexión</th>
+                <th>Visita</th>
+                <th>Técnico</th>
                 <th></th>
               </tr>
             </thead>
@@ -1658,7 +2063,12 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                   <td>{order.tipoOt}</td>
                   <td>{order.prioridad}</td>
                   <td>{order.estado}</td>
-                  <td>{order.fechaProgramada ? new Date(order.fechaProgramada).toLocaleDateString() : '-'}</td>
+                  <td>{formatConnectionType(order.tipoConexion)}</td>
+                  <td>
+                    {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
+                    {order.horaVisita ? ` ${order.horaVisita}` : ''}
+                  </td>
+                  <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => setSelectedId(order.idOt)}>
                       Gestionar
@@ -1678,6 +2088,29 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
             <p className="detail-line">
               OT {selectedOrder.idOt} - {selectedOrder.tipoOt} - {selectedOrder.estado}
             </p>
+            <p className="detail-line">
+              Tipo de conexión: {formatConnectionType(selectedOrder.tipoConexion)} - Visita:{' '}
+              {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
+              {selectedOrder.horaVisita ?? 'Sin hora'} - Técnico: {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}
+            </p>
+            {selectedOrder.observacionesAgenda && (
+              <p className="detail-line">Observaciones de agenda: {selectedOrder.observacionesAgenda}</p>
+            )}
+            <div className="history-grid">
+              <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
+              <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
+              <HistoryBox
+                title="Tiempo de conversión"
+                value={
+                  selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
+                    ? 'Pendiente'
+                    : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
+                }
+              />
+            </div>
+            {!selectedOrder.prospecto?.fechaCreacion && (
+              <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
+            )}
             <label>
               Potencia optica dBm
               <input
@@ -1691,7 +2124,11 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               Observaciones
               <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
             </label>
-            <button type="button" disabled={selectedOrder.estado === 'Completada'} onClick={completeInstallation}>
+            <button
+              type="button"
+              disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
+              onClick={completeInstallation}
+            >
               Confirmar instalación y activar cliente
             </button>
             {status && <p className="inline-status">{status}</p>}
@@ -1712,6 +2149,7 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [status, setStatus] = useState('');
+  const today = dateInputValue(new Date());
 
   useEffect(() => {
     if (!companyId && companies[0]) {
@@ -1727,6 +2165,16 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
 
     if (dateFrom && dateTo && dateFrom > dateTo) {
       setStatus('La fecha desde no puede ser posterior a la fecha hasta.');
+      return;
+    }
+
+    if ((dateFrom && dateFrom < reportMinimumDate) || (dateTo && dateTo < reportMinimumDate)) {
+      setStatus(`El periodo no puede ser anterior a ${formatDateOnly(reportMinimumDate)}.`);
+      return;
+    }
+
+    if ((dateFrom && dateFrom > today) || (dateTo && dateTo > today)) {
+      setStatus('El periodo del reporte no puede incluir fechas futuras.');
       return;
     }
 
@@ -1767,12 +2215,25 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
       </label>
       <label>
         Período desde
-        <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        <input
+          type="date"
+          min={reportMinimumDate}
+          max={today}
+          value={dateFrom}
+          onChange={(event) => setDateFrom(event.target.value)}
+        />
       </label>
       <label>
         Período hasta
-        <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        <input
+          type="date"
+          min={reportMinimumDate}
+          max={today}
+          value={dateTo}
+          onChange={(event) => setDateTo(event.target.value)}
+        />
       </label>
+      <small>Periodo permitido: desde {formatDateOnly(reportMinimumDate)} hasta hoy.</small>
       <label>
         Alcance
         <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}>

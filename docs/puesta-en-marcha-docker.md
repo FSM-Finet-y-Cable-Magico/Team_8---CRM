@@ -65,13 +65,21 @@ docker compose logs db --tail 80
 
 ## Cargar datos demo locales
 
-El seed base solo crea empresas, roles, usuario admin y categorias de falla. Para probar el primer incremento con datos completos, aplicar:
+En una base nueva, Docker ejecuta automaticamente los seeds de `db/init`. Si el volumen ya existia antes de agregar los datos demo, los scripts no se vuelven a ejecutar. Para cargar todos los datos del primer incremento manualmente, aplicar:
 
 ```powershell
 Get-Content db\demo_seed.sql | docker exec -i finet-crm-db psql -U postgres -d fsm_db -v ON_ERROR_STOP=1
 ```
 
 Este seed agrega planes, clientes, prospectos, contratos, equipos, tickets y ordenes de trabajo de prueba. No se ejecuta automaticamente y no apunta a Railway.
+
+Para cargar o actualizar solo los datos de Cable Magico en una base local existente:
+
+```powershell
+Get-Content db\init\05_seed_cable_magico.sql | docker exec -i finet-crm-db psql -U postgres -d fsm_db -v ON_ERROR_STOP=1
+```
+
+El seed de Cable Magico es idempotente: puede repetirse y no duplica los registros principales.
 
 ## Ver base de datos
 
@@ -173,6 +181,19 @@ Luego ejecutar:
 npm run prisma:generate
 npm run dev:backend
 ```
+
+### Cargar datos demo de Cable Magico en Railway
+
+Este paso modifica la base compartida. Se debe ejecutar solo con autorizacion del equipo y usando el archivo privado `.env.railway`:
+
+```powershell
+$databaseLine = Get-Content .env.railway | Where-Object { $_ -like 'DATABASE_URL=*' } | Select-Object -First 1
+$env:DATABASE_URL = $databaseLine.Substring('DATABASE_URL='.Length)
+npx prisma db execute --schema backend/prisma/schema.prisma --file db/init/05_seed_cable_magico.sql
+Remove-Item Env:DATABASE_URL
+```
+
+Despues de ejecutarlo, recargar `http://localhost:5174`, seleccionar `Cable Magico Litoral` y comprobar los planes `Cable 200 Hogar` y `Pack TV + Internet 400`.
 
 ### Seguridad
 

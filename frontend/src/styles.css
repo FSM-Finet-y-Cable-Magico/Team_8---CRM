@@ -356,6 +356,40 @@ th {
   gap: 12px;
 }
 
+.install-order-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d7e3de;
+  border-radius: 10px;
+  padding: 14px;
+  background: #f8fbfa;
+}
+
+.install-order-form h3 {
+  margin: 0;
+}
+
+.install-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.full-width-field,
+.alternative-slots {
+  grid-column: 1 / -1;
+}
+
+.alternative-slots {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e0c68a;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff9e8;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -463,7 +497,8 @@ input[readonly] {
 
   .metrics,
   .workspace-grid,
-  .workflow-grid {
+  .workflow-grid,
+  .install-form-grid {
     grid-template-columns: 1fr;
   }
 

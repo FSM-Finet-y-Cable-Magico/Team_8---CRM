@@ -4,12 +4,13 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { AssignRoleDto } from './dto/assign-role.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Administrador')
+@Roles(...ACCESS_ROLES.ADMIN_ONLY)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
