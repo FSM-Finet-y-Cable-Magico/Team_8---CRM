@@ -113,6 +113,7 @@ describe('ProspectsService', () => {
       nombreCompleto: 'Xiao Zhong',
       email: 'xiao@example.com',
       telefono: '+56940618332',
+      direccion: 'Claudio Gay 2547, Santiago',
       estadoPipeline: 'Aceptado',
     };
     const existingContract = {
@@ -131,13 +132,30 @@ describe('ProspectsService', () => {
         findFirst: jest.fn().mockResolvedValue(existingContract),
         create: jest.fn(),
       },
+      direccionServicio: {
+        findFirst: jest.fn().mockResolvedValue({ idDireccion: 12 }),
+        create: jest.fn(),
+      },
+      servicioContratado: {
+        findFirst: jest.fn().mockResolvedValue({ idServicio: 44 }),
+        create: jest.fn(),
+      },
       prospecto: {
         update: jest.fn().mockResolvedValue(prospect),
       },
     };
     const prisma = {
       prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
-      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 8, idEmpresa: 1, activo: true }) },
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({
+          idPlan: 8,
+          idEmpresa: 1,
+          activo: true,
+          tipoPlan: 'Internet',
+          nombreComercial: 'Fibra 300 Hogar',
+          velocidadMbps: 300,
+        }),
+      },
       $transaction: jest.fn().mockImplementation(
         (callback: (tx: typeof transaction) => unknown) => callback(transaction),
       ),
@@ -159,6 +177,7 @@ describe('ProspectsService', () => {
         data: { idCliente: 5, estadoPipeline: 'Aceptado' },
       }),
     );
+    expect(transaction.servicioContratado.create).not.toHaveBeenCalled();
   });
 
   it('rechaza una orden de instalacion programada en una fecha historica', async () => {
@@ -255,6 +274,10 @@ describe('ProspectsService', () => {
         findFirst: jest.fn().mockResolvedValue({ idDireccion: 8 }),
         create: jest.fn(),
       },
+      servicioContratado: {
+        findFirst: jest.fn().mockResolvedValue({ idServicio: 18, idDireccion: 8 }),
+        update: jest.fn(),
+      },
       ordenTrabajo: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 30, ...data })),
       },
@@ -306,6 +329,7 @@ describe('ProspectsService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           idTecnico: 4,
+          idServicio: 18,
           tipoOt: 'Instalacion',
           fechaProgramada: new Date(`${requestedDate}T00:00:00.000Z`),
         }),

@@ -310,6 +310,10 @@ th {
   width: min(520px, 100%);
 }
 
+.full-width-panel {
+  grid-column: 1 / -1;
+}
+
 .stack {
   display: grid;
   gap: 14px;

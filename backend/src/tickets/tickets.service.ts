@@ -69,10 +69,26 @@ export class TicketsService {
       throw new BadRequestException('Categoria seleccionada invalida');
     }
 
+    const servicio = dto.idServicio
+      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } })
+      : null;
+
+    if (dto.idServicio && !servicio) {
+      throw new BadRequestException('El servicio contratado indicado no existe');
+    }
+
+    if (
+      servicio &&
+      (servicio.idCliente !== cliente.idCliente || servicio.idEmpresa !== cliente.idEmpresa)
+    ) {
+      throw new BadRequestException('El servicio contratado no corresponde al cliente seleccionado');
+    }
+
     const ticket = await this.prisma.ticket.create({
       data: {
         idCliente: cliente.idCliente,
         idEmpresa: cliente.idEmpresa,
+        idServicio: servicio?.idServicio,
         idUsuarioAsignado: currentUser.idUsuario,
         idCategoria: dto.idCategoria,
         codigoSeguimiento: this.trackingCode(),
@@ -94,6 +110,7 @@ export class TicketsService {
         rut: cliente.rut,
         categoria: categoria.nombre,
         prioridad: dto.prioridad,
+        idServicio: servicio?.idServicio,
       },
     });
 

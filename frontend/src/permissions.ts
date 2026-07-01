@@ -21,6 +21,7 @@ export type DashboardPermissions = {
   recordProspectLoss: boolean;
   contractPlans: boolean;
   createInstallOrders: boolean;
+  manageServices: boolean;
   manageInventory: boolean;
   installEquipment: boolean;
   createTickets: boolean;
@@ -58,6 +59,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   recordProspectLoss: ['Administrador', 'Comercial'],
   contractPlans: ['Administrador', 'Comercial'],
   createInstallOrders: ['Administrador', 'Comercial', 'Soporte'],
+  manageServices: ['Administrador', 'Comercial', 'Soporte'],
   manageInventory: ['Administrador', 'Soporte'],
   installEquipment: ['Administrador', 'Soporte', 'Terreno'],
   createTickets: ['Administrador', 'Comercial', 'Soporte'],

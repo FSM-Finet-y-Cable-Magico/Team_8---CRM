@@ -52,6 +52,8 @@ CREATE TABLE cliente (
     estado                         VARCHAR(20)    NOT NULL,
     es_conflictivo                 BOOLEAN        DEFAULT FALSE,
     importado_masivo               BOOLEAN        DEFAULT FALSE,
+    origen_contacto                VARCHAR(40)   ,
+    datos_tecnicos                 JSONB         ,
     fecha_creacion                 TIMESTAMP      DEFAULT NOW()
 );
 
@@ -87,6 +89,19 @@ CREATE TABLE contrato (
     fecha_suspension               DATE
 );
 
+CREATE TABLE servicio_contratado (
+    id_servicio                    SERIAL         PRIMARY KEY,
+    id_cliente                     INTEGER        NOT NULL,
+    id_empresa                     INTEGER       ,
+    id_contrato                    INTEGER       ,
+    id_direccion                   INTEGER       ,
+    tipo_servicio                  VARCHAR(40)    NOT NULL,
+    estado_operativo               VARCHAR(30)    NOT NULL,
+    observaciones                  TEXT          ,
+    datos_tecnicos                 JSONB         ,
+    fecha_creacion                 TIMESTAMP      DEFAULT NOW()
+);
+
 CREATE TABLE factura (
     id_factura                     SERIAL         PRIMARY KEY,
     id_contrato                    INTEGER       ,
@@ -114,6 +129,7 @@ CREATE TABLE ticket (
     id_ticket                      SERIAL         PRIMARY KEY,
     id_cliente                     INTEGER       ,
     id_empresa                     INTEGER       ,
+    id_servicio                    INTEGER       ,
     id_usuario_asignado            INTEGER       ,
     id_categoria                   INTEGER        NOT NULL,
     id_conversacion_bot            INTEGER        UNIQUE,
@@ -165,6 +181,7 @@ CREATE TABLE unidad_equipo (
     fecha_venc_garantia            DATE          ,
     diagnostico_tecnico            TEXT          ,
     id_cliente_instalado           INTEGER       ,
+    id_servicio                    INTEGER       ,
     id_bodega_actual               INTEGER       ,
     numero_poste                   VARCHAR(30)   ,
     id_caja_nap                    INTEGER
@@ -189,6 +206,7 @@ CREATE TABLE orden_trabajo (
     id_tecnico                     INTEGER       ,
     id_tecnico_externo             INTEGER       ,
     id_direccion                   INTEGER       ,
+    id_servicio                    INTEGER       ,
     id_ticket                      INTEGER        UNIQUE,
     tipo_ot                        VARCHAR(20)    NOT NULL,
     prioridad                      VARCHAR(10)    NOT NULL,
@@ -478,6 +496,7 @@ CREATE TABLE prospecto (
     direccion                      VARCHAR(200)  ,
     estado_pipeline                VARCHAR(30)   ,
     motivo_perdida                 VARCHAR(30)   ,
+    origen_contacto                VARCHAR(40)   ,
     tiempo_conversion_dias         INTEGER       ,
     fecha_creacion                 TIMESTAMP     ,
     fecha_conversion               DATE
@@ -546,11 +565,16 @@ ALTER TABLE plan ADD CONSTRAINT fk_plan_id_empresa FOREIGN KEY (id_empresa) REFE
 ALTER TABLE contrato ADD CONSTRAINT fk_contrato_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
 ALTER TABLE contrato ADD CONSTRAINT fk_contrato_id_plan FOREIGN KEY (id_plan) REFERENCES plan(id_plan);
 ALTER TABLE contrato ADD CONSTRAINT fk_contrato_id_empresa FOREIGN KEY (id_empresa) REFERENCES empresa(id_empresa);
+ALTER TABLE servicio_contratado ADD CONSTRAINT fk_servicio_contratado_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
+ALTER TABLE servicio_contratado ADD CONSTRAINT fk_servicio_contratado_id_empresa FOREIGN KEY (id_empresa) REFERENCES empresa(id_empresa);
+ALTER TABLE servicio_contratado ADD CONSTRAINT fk_servicio_contratado_id_contrato FOREIGN KEY (id_contrato) REFERENCES contrato(id_contrato);
+ALTER TABLE servicio_contratado ADD CONSTRAINT fk_servicio_contratado_id_direccion FOREIGN KEY (id_direccion) REFERENCES direccion_servicio(id_direccion);
 ALTER TABLE factura ADD CONSTRAINT fk_factura_id_contrato FOREIGN KEY (id_contrato) REFERENCES contrato(id_contrato);
 ALTER TABLE pago ADD CONSTRAINT fk_pago_id_factura FOREIGN KEY (id_factura) REFERENCES factura(id_factura);
 ALTER TABLE pago ADD CONSTRAINT fk_pago_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
 ALTER TABLE ticket ADD CONSTRAINT fk_ticket_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
 ALTER TABLE ticket ADD CONSTRAINT fk_ticket_id_empresa FOREIGN KEY (id_empresa) REFERENCES empresa(id_empresa);
+ALTER TABLE ticket ADD CONSTRAINT fk_ticket_id_servicio FOREIGN KEY (id_servicio) REFERENCES servicio_contratado(id_servicio);
 ALTER TABLE ticket ADD CONSTRAINT fk_ticket_id_usuario_asignado FOREIGN KEY (id_usuario_asignado) REFERENCES usuario(id_usuario);
 ALTER TABLE log_notificacion ADD CONSTRAINT fk_log_notificacion_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
 ALTER TABLE log_notificacion ADD CONSTRAINT fk_log_notificacion_id_plantilla FOREIGN KEY (id_plantilla) REFERENCES plantilla_notificacion(id_plantilla);
@@ -558,6 +582,7 @@ ALTER TABLE tipo_equipo ADD CONSTRAINT fk_tipo_equipo_id_empresa FOREIGN KEY (id
 ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_tipo_equipo FOREIGN KEY (id_tipo_equipo) REFERENCES tipo_equipo(id_tipo_equipo);
 ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_empresa FOREIGN KEY (id_empresa) REFERENCES empresa(id_empresa);
 ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_cliente_instalado FOREIGN KEY (id_cliente_instalado) REFERENCES cliente(id_cliente);
+ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_servicio FOREIGN KEY (id_servicio) REFERENCES servicio_contratado(id_servicio);
 ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_bodega_actual FOREIGN KEY (id_bodega_actual) REFERENCES bodega(id_bodega);
 ALTER TABLE unidad_equipo ADD CONSTRAINT fk_unidad_equipo_id_caja_nap FOREIGN KEY (id_caja_nap) REFERENCES caja_nap(id_caja_nap);
 ALTER TABLE caja_nap ADD CONSTRAINT fk_caja_nap_id_empresa FOREIGN KEY (id_empresa) REFERENCES empresa(id_empresa);
@@ -567,6 +592,7 @@ ALTER TABLE orden_trabajo ADD CONSTRAINT fk_orden_trabajo_id_cliente FOREIGN KEY
 ALTER TABLE orden_trabajo ADD CONSTRAINT fk_orden_trabajo_id_tecnico FOREIGN KEY (id_tecnico) REFERENCES usuario(id_usuario);
 ALTER TABLE orden_trabajo ADD CONSTRAINT fk_orden_trabajo_id_tecnico_externo FOREIGN KEY (id_tecnico_externo) REFERENCES tecnico_externo(id_tecnico_ext);
 ALTER TABLE orden_trabajo ADD CONSTRAINT fk_orden_trabajo_id_direccion FOREIGN KEY (id_direccion) REFERENCES direccion_servicio(id_direccion);
+ALTER TABLE orden_trabajo ADD CONSTRAINT fk_orden_trabajo_id_servicio FOREIGN KEY (id_servicio) REFERENCES servicio_contratado(id_servicio);
 ALTER TABLE conversacion_bot ADD CONSTRAINT fk_conversacion_bot_id_cliente FOREIGN KEY (id_cliente) REFERENCES cliente(id_cliente);
 ALTER TABLE conversacion_bot ADD CONSTRAINT fk_conversacion_bot_id_canal_wa FOREIGN KEY (id_canal_wa) REFERENCES canal_whatsapp(id_canal);
 ALTER TABLE mensaje_bot ADD CONSTRAINT fk_mensaje_bot_id_conversacion FOREIGN KEY (id_conversacion) REFERENCES conversacion_bot(id_conversacion);

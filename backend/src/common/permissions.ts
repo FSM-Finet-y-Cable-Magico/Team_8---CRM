@@ -6,6 +6,7 @@ export const ACCESS_ROLES = {
   MANAGE_PROSPECTS: ['Administrador', 'Comercial'],
   VERIFY_FEASIBILITY: ['Administrador', 'Soporte'],
   MANAGE_CUSTOMERS: ['Administrador', 'Comercial', 'Soporte'],
+  MANAGE_SERVICES: ['Administrador', 'Comercial', 'Soporte'],
   CREATE_INSTALL_ORDER: ['Administrador', 'Comercial', 'Soporte'],
   VIEW_INVENTORY: ['Administrador', 'Soporte', 'Terreno'],
   MANAGE_INVENTORY: ['Administrador', 'Soporte'],

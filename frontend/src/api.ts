@@ -45,6 +45,7 @@ export type Prospect = {
   direccion: string | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
+  origenContacto: string | null;
   empresa?: Company | null;
 };
 
@@ -97,6 +98,8 @@ export type Customer = {
   email: string | null;
   telefono: string | null;
   estado: string;
+  origenContacto: string | null;
+  datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;
   empresas?: string[];
   contratos?: Array<{
@@ -106,10 +109,41 @@ export type Customer = {
   }>;
 };
 
+export type CustomerService = {
+  idServicio: number;
+  idCliente: number;
+  idEmpresa: number | null;
+  idContrato: number | null;
+  idDireccion: number | null;
+  tipoServicio: string;
+  estadoOperativo: string;
+  observaciones: string | null;
+  datosTecnicos: Record<string, unknown> | null;
+  fechaCreacion: string;
+  cliente?: Customer;
+  empresa?: Company | null;
+  contrato?: {
+    idContrato: number;
+    estado: string | null;
+    plan?: Plan | null;
+  } | null;
+  direccion?: {
+    idDireccion: number;
+    direccionCompleta: string;
+    comuna: string | null;
+    ciudad: string | null;
+  } | null;
+  equipos?: InventoryUnit[];
+  tickets?: Ticket[];
+  ordenes?: WorkOrder[];
+  auditoria?: AuditLog[];
+};
+
 export type InventoryUnit = {
   idUnidad: number;
   idEmpresa: number | null;
   idTipoEquipo: number | null;
+  idServicio: number | null;
   numeroSerie: string;
   modelo: string | null;
   estado: string;
@@ -134,6 +168,7 @@ export type TicketCategory = {
 export type Ticket = {
   idTicket: number;
   idCliente: number | null;
+  idServicio: number | null;
   idCategoria: number;
   codigoSeguimiento: string | null;
   prioridad: string;
@@ -149,6 +184,7 @@ export type WorkOrder = {
   idCliente: number | null;
   idTecnico: number | null;
   idTicket: number | null;
+  idServicio: number | null;
   tipoOt: string;
   prioridad: string;
   estado: string;
