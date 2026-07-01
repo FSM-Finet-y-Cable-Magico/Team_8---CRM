@@ -189,9 +189,9 @@ th {
 }
 
 .app-shell {
-  width: min(1240px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 24px 0 40px;
+  width: 100%;
+  min-height: 100vh;
+  padding: 24px clamp(16px, 2vw, 32px) 40px;
 }
 
 .topbar {
