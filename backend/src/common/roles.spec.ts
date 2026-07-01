@@ -9,6 +9,8 @@ describe('role normalization', () => {
     ['ADMIN', 'Administrador'],
     ['SUPERUSUARIO', 'Administrador'],
     ['COMERCIAL', 'Comercial'],
+    ['ADMIN_BODEGA', 'Inventario'],
+    ['INVENTARIO', 'Inventario'],
     ['TECNICO_TERRENO', 'Terreno'],
     ['Soporte', 'Soporte'],
   ])('normalizes %s as %s', (source, expected) => {
