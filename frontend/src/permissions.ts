@@ -1,4 +1,4 @@
-export const CANONICAL_ROLES = ['Administrador', 'Comercial', 'Soporte', 'Terreno'] as const;
+export const CANONICAL_ROLES = ['Administrador', 'Comercial', 'Soporte', 'Terreno', 'Inventario'] as const;
 
 export type RoleName = (typeof CANONICAL_ROLES)[number];
 
@@ -36,6 +36,8 @@ const ROLE_ALIASES: Record<string, RoleName> = {
   COMERCIAL: 'Comercial',
   SOPORTE: 'Soporte',
   TERRENO: 'Terreno',
+  INVENTARIO: 'Inventario',
+  ADMIN_BODEGA: 'Inventario',
   TECNICO_TERRENO: 'Terreno',
 };
 
@@ -43,7 +45,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   viewProspects: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
   viewInstallations: ['Administrador', 'Comercial', 'Soporte'],
   viewCustomers: ['Administrador', 'Comercial', 'Soporte'],
-  viewInventory: ['Administrador', 'Soporte', 'Terreno'],
+  viewInventory: ['Administrador', 'Soporte', 'Terreno', 'Inventario'],
   viewTickets: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
   viewWorkOrders: ['Administrador', 'Soporte', 'Terreno'],
   viewReports: ['Administrador'],
@@ -58,7 +60,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   recordProspectLoss: ['Administrador', 'Comercial'],
   contractPlans: ['Administrador', 'Comercial'],
   createInstallOrders: ['Administrador', 'Comercial', 'Soporte'],
-  manageInventory: ['Administrador', 'Soporte'],
+  manageInventory: ['Administrador', 'Soporte', 'Inventario'],
   installEquipment: ['Administrador', 'Soporte', 'Terreno'],
   createTickets: ['Administrador', 'Comercial', 'Soporte'],
   classifyTickets: ['Administrador', 'Soporte'],
