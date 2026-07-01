@@ -6,6 +6,7 @@ import {
   AuthUser,
   Company,
   Customer,
+  CustomerService,
   InstallAvailability,
   InventoryUnit,
   Plan,
@@ -35,6 +36,7 @@ type ProspectFormState = {
   email: string;
   telefono: string;
   direccion: string;
+  origenContacto: string;
 };
 
 const emptyProspectForm: ProspectFormState = {
@@ -43,6 +45,7 @@ const emptyProspectForm: ProspectFormState = {
   email: '',
   telefono: '',
   direccion: '',
+  origenContacto: 'Formulario web',
 };
 
 const rutPattern = /^\d{7,8}-[\dkK]$/;
@@ -105,6 +108,12 @@ function formatDateTime(value?: string | null) {
   return date ? date.toLocaleString('es-CL') : 'Sin dato';
 }
 
+function technicalEntries(data?: Record<string, unknown> | null) {
+  return Object.entries(data ?? {})
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${key}: ${String(value)}`);
+}
+
 function normalizeAuthUser(user: AuthUser) {
   return {
     ...user,
@@ -131,6 +140,7 @@ function validateProspectForm(form: ProspectFormState) {
   const email = form.email.trim().toLowerCase();
   const telefono = form.telefono.trim();
   const direccion = form.direccion.trim();
+  const origenContacto = form.origenContacto.trim();
 
   if (!rutPattern.test(rut)) {
     return 'Ingresa el RUT con guion, por ejemplo 12345678-5.';
@@ -150,6 +160,10 @@ function validateProspectForm(form: ProspectFormState) {
 
   if (direccion.length < 8) {
     return 'Ingresa una direccion con calle, numero y comuna.';
+  }
+
+  if (!origenContacto) {
+    return 'Selecciona el origen de contacto del prospecto.';
   }
 
   return '';
@@ -416,7 +430,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       )}
       {activeTab === 'rut' && <RutPanel />}
       {activeTab === 'customers' && canManageCustomers && (
-        <CustomersPanel customers={customers} scope={scope} onChanged={() => void loadData()} />
+        <CustomersPanel customers={customers} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
       )}
       {activeTab === 'inventory' && canViewInventory && (
         <InventoryPanel
@@ -513,6 +527,7 @@ function ProspectsPanel({
         email: form.email.trim().toLowerCase() || undefined,
         telefono: form.telefono.trim().replace(/\s/g, ''),
         direccion: form.direccion.trim(),
+        origenContacto: form.origenContacto.trim(),
         idEmpresa: writeCompanyId,
       });
       setForm(emptyProspectForm);
@@ -568,6 +583,19 @@ function ProspectsPanel({
             />
           </label>
           <label>
+            Origen de contacto
+            <select
+              value={form.origenContacto}
+              onChange={(event) => setForm({ ...form, origenContacto: event.target.value })}
+            >
+              {['Formulario web', 'Telefono', 'Sucursal', 'Referido', 'Redes sociales', 'Terreno'].map((origin) => (
+                <option key={origin} value={origin}>
+                  {origin}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Direccion
             <input
               value={form.direccion}
@@ -591,6 +619,7 @@ function ProspectsPanel({
                 <th>RUT</th>
                 <th>Nombre</th>
                 <th>Estado</th>
+                <th>Origen</th>
                 <th>Empresa</th>
                 <th></th>
               </tr>
@@ -601,6 +630,7 @@ function ProspectsPanel({
                   <td>{prospect.rut}</td>
                   <td>{prospect.nombreCompleto}</td>
                   <td>{prospect.estadoPipeline}</td>
+                  <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
@@ -1155,19 +1185,40 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
 
 type CustomerHistory = {
   contratos: Array<{ idContrato: number; estado: string | null; plan?: Plan | null }>;
+  servicios: CustomerService[];
   tickets: Array<{ idTicket: number; estado: string; prioridad: string; descripcion: string | null }>;
   ordenes: Array<{ idOt: number; tipoOt: string; estado: string; observaciones: string | null }>;
   equipos: Array<{ idUnidad: number; numeroSerie: string; estado: string; modelo: string | null }>;
   auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
 };
 
+const serviceTypeOptions = ['Internet', 'Television', 'Internet + Television'];
+const serviceStatusOptions = ['Activo', 'Pendiente Instalacion', 'Suspendido', 'Baja'];
+
+function emptyServiceForm() {
+  return {
+    idContrato: '',
+    tipoServicio: 'Internet',
+    estadoOperativo: 'Pendiente Instalacion',
+    observaciones: '',
+    tecnologia: '',
+    velocidad: '',
+    macAddress: '',
+    puertoOlt: '',
+    ipAsignada: '',
+    observacionesTecnicas: '',
+  };
+}
+
 function CustomersPanel({
   customers,
   scope,
+  permissions,
   onChanged,
 }: {
   customers: Customer[];
   scope: string;
+  permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1176,10 +1227,27 @@ function CustomersPanel({
   const [status, setStatus] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<Customer[] | null>(null);
+  const [services, setServices] = useState<CustomerService[]>([]);
+  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
+  const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
+  const [serviceUpdateForm, setServiceUpdateForm] = useState(emptyServiceForm());
+  const [equipmentForm, setEquipmentForm] = useState({
+    numeroSerie: '',
+    modelo: '',
+    macAddress: '',
+    puertoOlt: '',
+    observaciones: '',
+  });
 
   const visibleCustomers = searchResults ?? customers;
   const selectedCustomer =
     visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? visibleCustomers[0] ?? null;
+  const selectedService =
+    services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
+  const contractOptions = selectedCustomer?.contratos ?? [];
+  const customerCompanyId = scope !== 'consolidado'
+    ? Number(scope)
+    : selectedCustomer?.idEmpresa ?? contractOptions[0]?.idEmpresa ?? undefined;
 
   useEffect(() => {
     if (!selectedId && customers[0]) {
@@ -1192,8 +1260,37 @@ function CustomersPanel({
     if (selectedCustomer) {
       setStatusValue(selectedCustomer.estado);
       setHistory(null);
+      setServices([]);
+      setSelectedServiceId(null);
+      setServiceCreateForm({
+        ...emptyServiceForm(),
+        idContrato: selectedCustomer.contratos?.[0] ? String(selectedCustomer.contratos[0].idContrato) : '',
+      });
+      void loadServicesForCustomer(selectedCustomer.idCliente, true);
     }
   }, [selectedCustomer?.idCliente]);
+
+  useEffect(() => {
+    if (!selectedService) {
+      setServiceUpdateForm(emptyServiceForm());
+      return;
+    }
+
+    const technicalData = selectedService.datosTecnicos ?? {};
+
+    setServiceUpdateForm({
+      idContrato: selectedService.idContrato ? String(selectedService.idContrato) : '',
+      tipoServicio: selectedService.tipoServicio,
+      estadoOperativo: selectedService.estadoOperativo,
+      observaciones: selectedService.observaciones ?? '',
+      tecnologia: String(technicalData.tecnologia ?? ''),
+      velocidad: String(technicalData.velocidad ?? technicalData.velocidadMbps ?? ''),
+      macAddress: String(technicalData.macAddress ?? ''),
+      puertoOlt: String(technicalData.puertoOlt ?? ''),
+      ipAsignada: String(technicalData.ipAsignada ?? ''),
+      observacionesTecnicas: String(technicalData.observacionesTecnicas ?? ''),
+    });
+  }, [selectedService?.idServicio]);
 
   useEffect(() => {
     setSearchResults(null);
@@ -1261,6 +1358,109 @@ function CustomersPanel({
     }
   }
 
+  async function loadServicesForCustomer(idCliente: number, silent = false, preferredServiceId?: number) {
+    try {
+      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`);
+      setServices(data);
+      setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);
+
+      if (!silent) {
+        setStatus(data.length ? 'Servicios contratados cargados' : 'El cliente no tiene servicios registrados');
+      }
+    } catch (err) {
+      setServices([]);
+      setSelectedServiceId(null);
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function createService(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedCustomer) {
+      return;
+    }
+
+    try {
+      const { data } = await api.post<CustomerService>('/services', {
+        idCliente: selectedCustomer.idCliente,
+        idEmpresa: customerCompanyId,
+        idContrato: serviceCreateForm.idContrato ? Number(serviceCreateForm.idContrato) : undefined,
+        tipoServicio: serviceCreateForm.tipoServicio,
+        estadoOperativo: serviceCreateForm.estadoOperativo,
+        observaciones: serviceCreateForm.observaciones.trim() || undefined,
+        tecnologia: serviceCreateForm.tecnologia.trim() || undefined,
+        velocidad: serviceCreateForm.velocidad.trim() || undefined,
+        macAddress: serviceCreateForm.macAddress.trim() || undefined,
+        puertoOlt: serviceCreateForm.puertoOlt.trim() || undefined,
+        ipAsignada: serviceCreateForm.ipAsignada.trim() || undefined,
+        observacionesTecnicas: serviceCreateForm.observacionesTecnicas.trim() || undefined,
+      });
+      setServiceCreateForm(emptyServiceForm());
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, data.idServicio);
+      setStatus('Servicio contratado registrado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function updateService(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedService || !selectedCustomer) {
+      return;
+    }
+
+    try {
+      await api.patch<CustomerService>(`/services/${selectedService.idServicio}`, {
+        tipoServicio: serviceUpdateForm.tipoServicio,
+        estadoOperativo: serviceUpdateForm.estadoOperativo,
+        observaciones: serviceUpdateForm.observaciones.trim() || undefined,
+        tecnologia: serviceUpdateForm.tecnologia.trim() || undefined,
+        velocidad: serviceUpdateForm.velocidad.trim() || undefined,
+        macAddress: serviceUpdateForm.macAddress.trim() || undefined,
+        puertoOlt: serviceUpdateForm.puertoOlt.trim() || undefined,
+        ipAsignada: serviceUpdateForm.ipAsignada.trim() || undefined,
+        observacionesTecnicas: serviceUpdateForm.observacionesTecnicas.trim() || undefined,
+      });
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
+      setStatus('Perfil de servicio actualizado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function attachEquipment(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedService || !selectedCustomer) {
+      return;
+    }
+
+    if (!equipmentForm.numeroSerie.trim()) {
+      setStatus('Ingresa el numero de serie del equipo a asociar.');
+      return;
+    }
+
+    try {
+      await api.post(`/services/${selectedService.idServicio}/equipment`, {
+        numeroSerie: equipmentForm.numeroSerie.trim(),
+        modelo: equipmentForm.modelo.trim() || undefined,
+        macAddress: equipmentForm.macAddress.trim() || undefined,
+        puertoOlt: equipmentForm.puertoOlt.trim() || undefined,
+        observaciones: equipmentForm.observaciones.trim() || undefined,
+      });
+      setEquipmentForm({ numeroSerie: '', modelo: '', macAddress: '', puertoOlt: '', observaciones: '' });
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
+      setStatus('Equipo asociado al servicio contratado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
   return (
     <section className="workspace-grid">
       <section className="panel">
@@ -1291,6 +1491,7 @@ function CustomersPanel({
                 <th>Nombre</th>
                 <th>Teléfono</th>
                 <th>Estado</th>
+                <th>Origen</th>
                 <th>Empresas</th>
                 <th></th>
               </tr>
@@ -1302,6 +1503,7 @@ function CustomersPanel({
                   <td>{customer.nombreCompleto}</td>
                   <td>{customer.telefono ?? '-'}</td>
                   <td>{customer.estado}</td>
+                  <td>{customer.origenContacto ?? '-'}</td>
                   <td>{customer.empresas?.join(', ') || customer.empresa?.nombre || '-'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => setSelectedId(customer.idCliente)}>
@@ -1321,6 +1523,9 @@ function CustomersPanel({
           <>
             <p className="detail-line">
               {selectedCustomer.nombreCompleto} - {selectedCustomer.rut ?? 'sin RUT'}
+            </p>
+            <p className="detail-line">
+              Origen: {selectedCustomer.origenContacto ?? 'Sin dato'} - Servicios registrados: {services.length}
             </p>
             <label>
               Estado operativo
@@ -1344,6 +1549,7 @@ function CustomersPanel({
             {history && (
               <div className="history-grid">
                 <HistoryBox title="Contratos" value={history.contratos.length} />
+                <HistoryBox title="Servicios" value={history.servicios.length} />
                 <HistoryBox title="Tickets" value={history.tickets.length} />
                 <HistoryBox title="OTs" value={history.ordenes.length} />
                 <HistoryBox title="Equipos" value={history.equipos.length} />
@@ -1362,6 +1568,230 @@ function CustomersPanel({
           </>
         ) : (
           <p className="inline-status">No hay clientes para gestionar.</p>
+        )}
+      </section>
+
+      <section className="panel stack full-width-panel">
+        <h2>Perfil individual de servicios contratados</h2>
+        {selectedCustomer ? (
+          <>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Servicio</th>
+                    <th>Estado</th>
+                    <th>Plan</th>
+                    <th>Direccion</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {services.map((service) => (
+                    <tr key={service.idServicio}>
+                      <td>{service.tipoServicio}</td>
+                      <td>{service.estadoOperativo}</td>
+                      <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
+                      <td>{service.direccion?.direccionCompleta ?? '-'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          onClick={() => setSelectedServiceId(service.idServicio)}
+                        >
+                          Ver perfil
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {!services.length && (
+              <p className="inline-status">Este cliente aun no tiene servicios contratados registrados.</p>
+            )}
+
+            {selectedService && (
+              <div className="workflow-panel">
+                <h3>Servicio #{selectedService.idServicio}</h3>
+                <p className="detail-line">
+                  {selectedService.tipoServicio} - {selectedService.estadoOperativo}
+                  {selectedService.contrato?.plan ? ` - ${selectedService.contrato.plan.nombreComercial}` : ''}
+                </p>
+                <div className="history-grid">
+                  <HistoryBox title="Equipos instalados" value={selectedService.equipos?.length ?? 0} />
+                  <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
+                  <HistoryBox title="OTs" value={selectedService.ordenes?.length ?? 0} />
+                  <HistoryBox title="Direccion" value={selectedService.direccion?.comuna ?? 'Sin dato'} />
+                  <section className="history-list">
+                    <h3>Datos tecnicos del servicio</h3>
+                    <ul>
+                      {technicalEntries(selectedService.datosTecnicos).map((entry) => (
+                        <li key={entry}>{entry}</li>
+                      ))}
+                      {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
+                    </ul>
+                  </section>
+                  <section className="history-list">
+                    <h3>Solicitudes y visitas asociadas</h3>
+                    <ul>
+                      {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
+                        <li key={`ticket-${ticket.idTicket}`}>
+                          Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
+                        </li>
+                      ))}
+                      {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
+                        <li key={`order-${order.idOt}`}>
+                          OT {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
+                        </li>
+                      ))}
+                      {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
+                        <li>No hay solicitudes ni visitas asociadas.</li>
+                      )}
+                    </ul>
+                  </section>
+                </div>
+              </div>
+            )}
+
+            {permissions.manageServices && (
+              <div className="workflow-grid">
+                <form className="stack" onSubmit={createService}>
+                  <h3>Registrar servicio adicional</h3>
+                  <label>
+                    Contrato asociado
+                    <select
+                      value={serviceCreateForm.idContrato}
+                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, idContrato: event.target.value })}
+                    >
+                      <option value="">Sin contrato especifico</option>
+                      {contractOptions.map((contract) => (
+                        <option key={contract.idContrato} value={contract.idContrato}>
+                          Contrato {contract.idContrato} - {contract.plan?.nombreComercial ?? 'sin plan'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Tipo de servicio
+                    <select
+                      value={serviceCreateForm.tipoServicio}
+                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tipoServicio: event.target.value })}
+                    >
+                      {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    Estado operativo
+                    <select
+                      value={serviceCreateForm.estadoOperativo}
+                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, estadoOperativo: event.target.value })}
+                    >
+                      {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                  </label>
+                  <input
+                    placeholder="Tecnologia, ej: Fibra Optica"
+                    value={serviceCreateForm.tecnologia}
+                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tecnologia: event.target.value })}
+                  />
+                  <input
+                    placeholder="Velocidad o caracteristica comercial"
+                    value={serviceCreateForm.velocidad}
+                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, velocidad: event.target.value })}
+                  />
+                  <textarea
+                    placeholder="Observaciones del servicio"
+                    value={serviceCreateForm.observaciones}
+                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, observaciones: event.target.value })}
+                  />
+                  <button type="submit">Registrar servicio</button>
+                </form>
+
+                {selectedService && (
+                  <form className="stack" onSubmit={updateService}>
+                    <h3>Actualizar perfil tecnico</h3>
+                    <label>
+                      Estado operativo
+                      <select
+                        value={serviceUpdateForm.estadoOperativo}
+                        onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, estadoOperativo: event.target.value })}
+                      >
+                        {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Tipo de servicio
+                      <select
+                        value={serviceUpdateForm.tipoServicio}
+                        onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, tipoServicio: event.target.value })}
+                      >
+                        {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    <input
+                      placeholder="MAC del servicio"
+                      value={serviceUpdateForm.macAddress}
+                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, macAddress: event.target.value })}
+                    />
+                    <input
+                      placeholder="Puerto OLT / nodo"
+                      value={serviceUpdateForm.puertoOlt}
+                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, puertoOlt: event.target.value })}
+                    />
+                    <input
+                      placeholder="IP asignada"
+                      value={serviceUpdateForm.ipAsignada}
+                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, ipAsignada: event.target.value })}
+                    />
+                    <textarea
+                      placeholder="Observaciones tecnicas"
+                      value={serviceUpdateForm.observacionesTecnicas}
+                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, observacionesTecnicas: event.target.value })}
+                    />
+                    <button type="submit">Actualizar perfil de servicio</button>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {permissions.manageServices && selectedService && (
+              <form className="stack" onSubmit={attachEquipment}>
+                <h3>Asociar equipo instalado al servicio</h3>
+                <div className="workflow-grid">
+                  <input
+                    placeholder="Numero de serie existente"
+                    value={equipmentForm.numeroSerie}
+                    onChange={(event) => setEquipmentForm({ ...equipmentForm, numeroSerie: event.target.value })}
+                  />
+                  <input
+                    placeholder="Modelo opcional"
+                    value={equipmentForm.modelo}
+                    onChange={(event) => setEquipmentForm({ ...equipmentForm, modelo: event.target.value })}
+                  />
+                  <input
+                    placeholder="MAC AA:BB:CC:DD:EE:FF"
+                    value={equipmentForm.macAddress}
+                    onChange={(event) => setEquipmentForm({ ...equipmentForm, macAddress: event.target.value })}
+                  />
+                  <input
+                    placeholder="Puerto OLT / nodo"
+                    value={equipmentForm.puertoOlt}
+                    onChange={(event) => setEquipmentForm({ ...equipmentForm, puertoOlt: event.target.value })}
+                  />
+                </div>
+                <textarea
+                  placeholder="Observaciones de instalacion"
+                  value={equipmentForm.observaciones}
+                  onChange={(event) => setEquipmentForm({ ...equipmentForm, observaciones: event.target.value })}
+                />
+                <button type="submit">Asociar equipo</button>
+              </form>
+            )}
+          </>
+        ) : (
+          <p className="inline-status">Selecciona un cliente para revisar sus servicios contratados.</p>
         )}
       </section>
     </section>
@@ -1695,7 +2125,7 @@ function TicketsPanel({
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [createForm, setCreateForm] = useState({ rut: '', idCategoria: '', prioridad: 'Media', descripcion: '' });
+  const [createForm, setCreateForm] = useState({ rut: '', idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
   const [categoryId, setCategoryId] = useState('');
   const [priority, setPriority] = useState('Media');
   const [ticketStatus, setTicketStatus] = useState('En progreso');
@@ -1709,6 +2139,7 @@ function TicketsPanel({
   });
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
+  const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
   const [customerLookupStatus, setCustomerLookupStatus] = useState('');
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? tickets[0] ?? null;
@@ -1742,6 +2173,7 @@ function TicketsPanel({
 
     if (!rutPattern.test(rut)) {
       setCustomerPreview(null);
+      setTicketServices([]);
       setCustomerLookupStatus('Ingresa un RUT válido para consultar al cliente.');
       return;
     }
@@ -1750,9 +2182,12 @@ function TicketsPanel({
       const { data } = await api.get<Customer>('/customers/search', { params: { term: rut } });
       setCreateForm((current) => ({ ...current, rut }));
       setCustomerPreview(data);
+      const servicesResult = await api.get<CustomerService[]>(`/services/customer/${data.idCliente}`);
+      setTicketServices(servicesResult.data);
       setCustomerLookupStatus('Cliente encontrado');
     } catch (err) {
       setCustomerPreview(null);
+      setTicketServices([]);
       setCustomerLookupStatus(apiErrorMessage(err));
     }
   }
@@ -1785,6 +2220,7 @@ function TicketsPanel({
               api.post('/tickets', {
                 rut,
                 idCategoria: Number(createForm.idCategoria),
+                idServicio: createForm.idServicio ? Number(createForm.idServicio) : undefined,
                 prioridad: createForm.prioridad,
                 descripcion: createForm.descripcion.trim(),
               }),
@@ -1798,8 +2234,9 @@ function TicketsPanel({
           <input
             value={createForm.rut}
             onChange={(event) => {
-              setCreateForm({ ...createForm, rut: event.target.value });
+              setCreateForm({ ...createForm, rut: event.target.value, idServicio: '' });
               setCustomerPreview(null);
+              setTicketServices([]);
               setCustomerLookupStatus('');
             }}
             onBlur={() => {
@@ -1823,6 +2260,22 @@ function TicketsPanel({
             <p><strong>Correo:</strong> {customerPreview.email ?? '-'}</p>
             <p><strong>Estado:</strong> {customerPreview.estado}</p>
           </section>
+        )}
+        {ticketServices.length > 0 && (
+          <label>
+            Servicio asociado
+            <select
+              value={createForm.idServicio}
+              onChange={(event) => setCreateForm({ ...createForm, idServicio: event.target.value })}
+            >
+              <option value="">Ticket general del cliente</option>
+              {ticketServices.map((service) => (
+                <option key={service.idServicio} value={service.idServicio}>
+                  Servicio {service.idServicio} - {service.tipoServicio} - {service.estadoOperativo}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
         <label>
           Categoria
@@ -1865,6 +2318,7 @@ function TicketsPanel({
                 <th>Codigo</th>
                 <th>Cliente</th>
                 <th>Categoria</th>
+                <th>Servicio</th>
                 <th>Prioridad</th>
                 <th>Estado</th>
                 <th></th>
@@ -1876,6 +2330,7 @@ function TicketsPanel({
                   <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
                   <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
                   <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
+                  <td>{ticket.idServicio ?? '-'}</td>
                   <td>{ticket.prioridad}</td>
                   <td>{ticket.estado}</td>
                   <td>

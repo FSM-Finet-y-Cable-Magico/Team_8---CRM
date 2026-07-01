@@ -97,6 +97,7 @@ export class ProspectsService {
         email: dto.email?.trim().toLowerCase(),
         telefono: dto.telefono.trim(),
         direccion: dto.direccion.trim(),
+        origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
         estadoPipeline: INITIAL_PIPELINE_STATUS,
         fechaCreacion: new Date(),
       },
@@ -114,6 +115,7 @@ export class ProspectsService {
         rut: prospect.rut,
         estadoPipeline: prospect.estadoPipeline,
         idEmpresa: prospect.idEmpresa,
+        origenContacto: prospect.origenContacto,
       },
     });
 
@@ -347,7 +349,27 @@ export class ProspectsService {
             email: prospect.email,
             telefono: prospect.telefono,
             estado: 'Pendiente',
+            origenContacto: prospect.origenContacto,
             importadoMasivo: false,
+          },
+        });
+      }
+
+      let direccion = await tx.direccionServicio.findFirst({
+        where: {
+          idCliente: cliente.idCliente,
+          direccionCompleta: prospect.direccion ?? '',
+        },
+      });
+
+      if (!direccion && prospect.direccion?.trim()) {
+        direccion = await tx.direccionServicio.create({
+          data: {
+            idCliente: cliente.idCliente,
+            direccionCompleta: prospect.direccion,
+            comuna: 'Por confirmar',
+            ciudad: 'Por confirmar',
+            esPrincipal: true,
           },
         });
       }
@@ -373,6 +395,30 @@ export class ProspectsService {
         },
       });
 
+      const existingService = await tx.servicioContratado.findFirst({
+        where: {
+          idCliente: cliente.idCliente,
+          idContrato: contrato.idContrato,
+          idEmpresa: prospect.idEmpresa,
+        },
+      });
+
+      const servicio = existingService ?? await tx.servicioContratado.create({
+        data: {
+          idCliente: cliente.idCliente,
+          idEmpresa: prospect.idEmpresa,
+          idContrato: contrato.idContrato,
+          idDireccion: direccion?.idDireccion,
+          tipoServicio: this.serviceTypeFromPlan(plan.tipoPlan),
+          estadoOperativo: 'Pendiente Instalacion',
+          observaciones: `Servicio creado desde prospecto ${idProspecto}`,
+          datosTecnicos: {
+            plan: plan.nombreComercial,
+            velocidadMbps: plan.velocidadMbps,
+          },
+        },
+      });
+
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
@@ -382,7 +428,7 @@ export class ProspectsService {
         include: { empresa: true },
       });
 
-      return { cliente, contrato, prospecto: updatedProspect };
+      return { cliente, contrato, prospecto: updatedProspect, servicio };
     });
 
     await this.auditService.record({
@@ -394,6 +440,7 @@ export class ProspectsService {
         idProspecto,
         idCliente: result.cliente.idCliente,
         idPlan: dto.planId,
+        idServicio: result.servicio.idServicio,
         diaVencimiento: dto.diaVencimiento,
       },
     });
@@ -419,6 +466,13 @@ export class ProspectsService {
 
     await this.validateInstallOrderPreconditions(prospect);
 
+    const idCliente = prospect.idCliente;
+    const idEmpresa = prospect.idEmpresa;
+
+    if (!idCliente || !idEmpresa) {
+      throw new BadRequestException('La orden requiere cliente y empresa asociados');
+    }
+
     if (!prospect.direccion?.trim()) {
       throw new BadRequestException('El prospecto no tiene direccion para instalar');
     }
@@ -441,7 +495,7 @@ export class ProspectsService {
     const result = await this.prisma.$transaction(async (tx) => {
       let direccion = await tx.direccionServicio.findFirst({
         where: {
-          idCliente: prospect.idCliente,
+          idCliente,
           esPrincipal: true,
         },
       });
@@ -449,7 +503,7 @@ export class ProspectsService {
       if (!direccion) {
         direccion = await tx.direccionServicio.create({
           data: {
-            idCliente: prospect.idCliente,
+            idCliente,
             direccionCompleta: prospect.direccion ?? '',
             comuna: 'Por confirmar',
             ciudad: 'Por confirmar',
@@ -458,12 +512,29 @@ export class ProspectsService {
         });
       }
 
+      const servicio = await tx.servicioContratado.findFirst({
+        where: {
+          idCliente,
+          idEmpresa,
+          estadoOperativo: { not: 'Baja' },
+        },
+        orderBy: { fechaCreacion: 'desc' },
+      });
+
+      if (servicio && !servicio.idDireccion) {
+        await tx.servicioContratado.update({
+          where: { idServicio: servicio.idServicio },
+          data: { idDireccion: direccion.idDireccion },
+        });
+      }
+
       const orden = await tx.ordenTrabajo.create({
         data: {
-          idEmpresa: prospect.idEmpresa,
-          idCliente: prospect.idCliente,
+          idEmpresa,
+          idCliente,
           idTecnico: dto.idTecnico,
           idDireccion: direccion.idDireccion,
+          idServicio: servicio?.idServicio,
           tipoOt: 'Instalacion',
           prioridad: dto.prioridad ?? 'Media',
           estado: 'Pendiente',
@@ -494,6 +565,7 @@ export class ProspectsService {
           tecnico: technician,
         },
         prospecto: updatedProspect,
+        servicio,
       };
     });
 
@@ -504,13 +576,14 @@ export class ProspectsService {
       idEntidadAfectada: result.orden.idOt,
       valorNuevo: {
         idProspecto,
-        idCliente: prospect.idCliente,
+        idCliente,
         fechaProgramada: dto.fechaProgramada,
         horaVisita: dto.horaVisita,
         tipoConexion: dto.tipoConexion,
         idTecnico: dto.idTecnico,
         tecnico: technician.nombreCompleto,
         prioridad: dto.prioridad ?? 'Media',
+        idServicio: result.servicio?.idServicio,
       },
     });
 
@@ -886,6 +959,16 @@ export class ProspectsService {
   private statusIndex(status: string) {
     const index = PIPELINE_STATUSES.indexOf(status);
     return index === -1 ? 0 : index;
+  }
+
+  private serviceTypeFromPlan(planType: string) {
+    const normalized = planType.trim().toLowerCase();
+
+    if (normalized.includes('tv') || normalized.includes('television')) {
+      return normalized.includes('internet') ? 'Internet + Television' : 'Television';
+    }
+
+    return 'Internet';
   }
 
   private conversionData(nextStatus: string, fechaCreacion: Date | null) {

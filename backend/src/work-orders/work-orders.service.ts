@@ -142,6 +142,19 @@ export class WorkOrdersService {
         data: { estado: 'Activo' },
       });
 
+      const serviceWhere = order.idServicio
+        ? { idServicio: order.idServicio }
+        : {
+            idCliente: cliente.idCliente,
+            idEmpresa: order.idEmpresa,
+            estadoOperativo: { not: 'Baja' },
+          };
+
+      await tx.servicioContratado.updateMany({
+        where: serviceWhere,
+        data: { estadoOperativo: 'Activo' },
+      });
+
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto: prospect.idProspecto },
         data: {
@@ -180,6 +193,7 @@ export class WorkOrdersService {
         fechaCreacionProspecto: prospect.fechaCreacion.toISOString(),
         fechaConversion: conversionDate.toISOString(),
         tiempoConversionDias: conversionDays,
+        idServicio: order.idServicio,
       },
     });
 

@@ -22,6 +22,11 @@ export class CreateProspectDto {
   direccion!: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  origenContacto?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   idEmpresa?: number;
