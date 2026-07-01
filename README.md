@@ -32,21 +32,7 @@ cd Team_8---CRM
 Crear un archivo `.env` en la raiz del proyecto usando `.env.example` como base.
 Las credenciales reales o compartidas deben pedirse al equipo por el canal privado.
 
-```env
-POSTGRES_DB=fsm_db
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_PORT=5432
 
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/fsm_db?schema=public
-JWT_SECRET=change_me_in_local_env
-JWT_EXPIRES_IN=8h
-
-BACKEND_PORT=3000
-FRONTEND_PORT=5173
-VITE_API_URL=/api
-API_PROXY_TARGET=http://127.0.0.1:3000
-```
 
 > No subir credenciales reales al repositorio.
 
@@ -84,22 +70,18 @@ db/init/03_seed.sql
 db/init/04_seed_demo.sql
 ```
 
-Credenciales iniciales:
 
-```text
-Correo: admin@finet.local
-Password: Admin2026!
-```
 
 Usuarios demo:
 
 ```text
+admin@finet.local
 comercial@finet.local  (rol Comercial)
 soporte@finet.local    (rol Soporte)
 terreno@finet.local    (rol Terreno)
 ```
 
-Todos los usuarios demo usan la contrasena `Admin2026!`.
+
 
 Guia detallada: `docs/puesta-en-marcha-docker.md`.
 

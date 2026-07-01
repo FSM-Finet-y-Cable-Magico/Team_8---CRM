@@ -1,4 +1,4 @@
-export const CANONICAL_ROLES = ['Administrador', 'Comercial', 'Soporte', 'Terreno'] as const;
+export const CANONICAL_ROLES = ['Administrador', 'Comercial', 'Soporte', 'Terreno', 'Inventario'] as const;
 
 export type RoleName = (typeof CANONICAL_ROLES)[number];
 
@@ -9,6 +9,8 @@ const ROLE_ALIASES: Record<string, RoleName> = {
   COMERCIAL: 'Comercial',
   SOPORTE: 'Soporte',
   TERRENO: 'Terreno',
+  INVENTARIO: 'Inventario',
+  ADMIN_BODEGA: 'Inventario',
   TECNICO_TERRENO: 'Terreno',
 };
 
