@@ -11,6 +11,11 @@ export class InstallRouterDto {
   idOt?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  idServicio?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(80)
   modelo?: string;

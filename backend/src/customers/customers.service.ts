@@ -74,7 +74,7 @@ export class CustomersService {
       ? {}
       : { idEmpresa: currentUser.idEmpresa };
 
-    const [contratos, tickets, ordenes, equipos, auditoria] = await Promise.all([
+    const [contratos, servicios, tickets, ordenes, equipos, auditoria] = await Promise.all([
       this.prisma.contrato.findMany({
         where: { idCliente, ...companyFilter },
         orderBy: { fechaInicio: 'desc' },
@@ -84,6 +84,15 @@ export class CustomersService {
             include: { pagos: true },
             orderBy: [{ periodoAnio: 'desc' }, { periodoMes: 'desc' }],
           },
+        },
+      }),
+      this.prisma.servicioContratado.findMany({
+        where: { idCliente, ...companyFilter },
+        orderBy: { fechaCreacion: 'desc' },
+        include: {
+          contrato: { include: { plan: true } },
+          direccion: true,
+          equipos: true,
         },
       }),
       this.prisma.ticket.findMany({
@@ -113,6 +122,7 @@ export class CustomersService {
     return {
       cliente,
       contratos,
+      servicios,
       tickets,
       ordenes,
       equipos,

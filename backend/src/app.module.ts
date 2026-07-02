@@ -12,6 +12,7 @@ import { ProspectsModule } from './prospects/prospects.module';
 import { ReportsModule } from './reports/reports.module';
 import { RutModule } from './rut/rut.module';
 import { SecurityModule } from './security/security.module';
+import { ServicesModule } from './services/services.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
@@ -30,6 +31,7 @@ import { AppController } from './app.controller';
     RutModule,
     ProspectsModule,
     PlansModule,
+    ServicesModule,
     InventoryModule,
     TicketsModule,
     WorkOrdersModule,

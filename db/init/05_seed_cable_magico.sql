@@ -116,11 +116,37 @@ INSERT INTO cliente (
   estado,
   es_conflictivo,
   importado_masivo,
-  obs_conflictivo
+  obs_conflictivo,
+  origen_contacto,
+  datos_tecnicos
 )
 VALUES
-  (2, '33333333-3', 'Cliente Cable Activo',     'cliente.activo@cable.demo',     '+56933333333', 'Activo',     FALSE, FALSE, NULL),
-  (2, '44444444-4', 'Cliente Cable Suspendido', 'cliente.suspendido@cable.demo', '+56944444444', 'Suspendido', FALSE, FALSE, 'Cliente demo para probar reactivacion')
+  (
+    2,
+    '33333333-3',
+    'Cliente Cable Activo',
+    'cliente.activo@cable.demo',
+    '+56933333333',
+    'Activo',
+    FALSE,
+    FALSE,
+    NULL,
+    'Demo local',
+    jsonb_build_object('segmento', 'Hogar', 'canal', 'Telefono')
+  ),
+  (
+    2,
+    '44444444-4',
+    'Cliente Cable Suspendido',
+    'cliente.suspendido@cable.demo',
+    '+56944444444',
+    'Suspendido',
+    FALSE,
+    FALSE,
+    'Cliente demo para probar reactivacion',
+    'Demo local',
+    jsonb_build_object('segmento', 'Hogar', 'canal', 'Sucursal')
+  )
 ON CONFLICT (rut) DO UPDATE SET
   id_empresa = EXCLUDED.id_empresa,
   nombre_completo = EXCLUDED.nombre_completo,
@@ -129,7 +155,9 @@ ON CONFLICT (rut) DO UPDATE SET
   estado = EXCLUDED.estado,
   es_conflictivo = EXCLUDED.es_conflictivo,
   importado_masivo = EXCLUDED.importado_masivo,
-  obs_conflictivo = EXCLUDED.obs_conflictivo;
+  obs_conflictivo = EXCLUDED.obs_conflictivo,
+  origen_contacto = EXCLUDED.origen_contacto,
+  datos_tecnicos = EXCLUDED.datos_tecnicos;
 
 INSERT INTO direccion_servicio (id_cliente, direccion_completa, comuna, ciudad, es_principal)
 SELECT customer.id_cliente, address_data.direccion, address_data.comuna, address_data.ciudad, TRUE
@@ -172,6 +200,50 @@ WHERE NOT EXISTS (
     AND existing_contract.id_plan = selected_plan.id_plan
 );
 
+INSERT INTO servicio_contratado (
+  id_cliente,
+  id_empresa,
+  id_contrato,
+  id_direccion,
+  tipo_servicio,
+  estado_operativo,
+  observaciones,
+  datos_tecnicos
+)
+SELECT
+  customer.id_cliente,
+  2,
+  contract.id_contrato,
+  customer_address.id_direccion,
+  CASE
+    WHEN lower(selected_plan.tipo_plan) LIKE '%tv%' THEN 'Internet + Television'
+    ELSE 'Internet'
+  END,
+  CASE
+    WHEN customer.estado = 'Suspendido' THEN 'Suspendido'
+    ELSE 'Activo'
+  END,
+  'Servicio demo Cable Magico para perfil individual y seguimiento comercial',
+  jsonb_build_object(
+    'tecnologia', CASE WHEN lower(selected_plan.tipo_plan) LIKE '%tv%' THEN 'HFC/Television' ELSE 'Cable/Fibra' END,
+    'velocidad', selected_plan.velocidad_mbps::TEXT || ' Mbps',
+    'plan', selected_plan.nombre_comercial,
+    'canalOrigen', customer.origen_contacto
+  )
+FROM contrato contract
+JOIN cliente customer ON customer.id_cliente = contract.id_cliente
+JOIN plan selected_plan ON selected_plan.id_plan = contract.id_plan
+LEFT JOIN direccion_servicio customer_address
+  ON customer_address.id_cliente = customer.id_cliente
+ AND customer_address.es_principal = TRUE
+WHERE contract.id_empresa = 2
+  AND customer.rut IN ('33333333-3', '44444444-4')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM servicio_contratado existing_service
+    WHERE existing_service.id_contrato = contract.id_contrato
+  );
+
 -- Prospectos listos para probar cotizacion, contrato y reactivacion de perdidos.
 INSERT INTO prospecto (
   id_empresa,
@@ -184,6 +256,7 @@ INSERT INTO prospecto (
   direccion,
   estado_pipeline,
   motivo_perdida,
+  origen_contacto,
   tiempo_conversion_dias,
   fecha_creacion,
   fecha_conversion
@@ -199,13 +272,14 @@ SELECT
   prospect_data.direccion,
   prospect_data.estado_pipeline,
   prospect_data.motivo_perdida,
+  prospect_data.origen_contacto,
   NULL,
   prospect_data.fecha_creacion,
   NULL
 FROM (
   VALUES
-    ('55555555-5', 'Prospecto Cable Factible', 'prospecto.factible@cable.demo', '+56955555555', 'Costanera 350, Algarrobo', 'En Factibilidad', NULL::VARCHAR(30), CURRENT_TIMESTAMP - INTERVAL '4 days'),
-    ('66666666-6', 'Prospecto Cable Perdido',  'prospecto.perdido@cable.demo',  '+56966666666', 'Los Aromos 125, El Quisco', 'Perdido',        'Sin cobertura'::VARCHAR(30), CURRENT_TIMESTAMP - INTERVAL '8 days')
+    ('55555555-5', 'Prospecto Cable Factible', 'prospecto.factible@cable.demo', '+56955555555', 'Costanera 350, Algarrobo', 'En Factibilidad', NULL::VARCHAR(30), 'Formulario web', CURRENT_TIMESTAMP - INTERVAL '4 days'),
+    ('66666666-6', 'Prospecto Cable Perdido',  'prospecto.perdido@cable.demo',  '+56966666666', 'Los Aromos 125, El Quisco', 'Perdido',        'Sin cobertura'::VARCHAR(30), 'Telefono', CURRENT_TIMESTAMP - INTERVAL '8 days')
 ) AS prospect_data (
   rut,
   nombre_completo,
@@ -214,6 +288,7 @@ FROM (
   direccion,
   estado_pipeline,
   motivo_perdida,
+  origen_contacto,
   fecha_creacion
 )
 JOIN usuario sales_user ON sales_user.nombre_usuario = 'comercial.cable'
@@ -235,6 +310,7 @@ INSERT INTO prospecto (
   telefono,
   direccion,
   estado_pipeline,
+  origen_contacto,
   fecha_creacion
 )
 SELECT
@@ -247,6 +323,7 @@ SELECT
   finet_customer.telefono,
   'Av. Demo 100, Valparaiso',
   'En Factibilidad',
+  'Referido FiNet',
   CURRENT_TIMESTAMP - INTERVAL '2 days'
 FROM cliente finet_customer
 JOIN usuario sales_user ON sales_user.nombre_usuario = 'comercial.cable'
@@ -303,7 +380,8 @@ INSERT INTO unidad_equipo (
   fecha_adquisicion,
   fecha_venc_garantia,
   diagnostico_tecnico,
-  id_cliente_instalado
+  id_cliente_instalado,
+  id_servicio
 )
 SELECT
   equipment_type.id_tipo_equipo,
@@ -314,7 +392,8 @@ SELECT
   CURRENT_DATE - 30,
   CURRENT_DATE + 335,
   unit_data.diagnostico,
-  installed_customer.id_cliente
+  installed_customer.id_cliente,
+  installed_service.id_servicio
 FROM (
   VALUES
     ('Router WiFi 6 Cable Magico', 'DEMO-CABLE-RTR-001', 'TP-Link Archer AX55', 'Disponible', NULL::TEXT,                         NULL::VARCHAR(12)),
@@ -325,6 +404,14 @@ JOIN tipo_equipo equipment_type
   ON equipment_type.id_empresa = 2
  AND equipment_type.nombre = unit_data.type_name
 LEFT JOIN cliente installed_customer ON installed_customer.rut = unit_data.rut_cliente
+LEFT JOIN LATERAL (
+  SELECT service.id_servicio
+  FROM servicio_contratado service
+  WHERE service.id_cliente = installed_customer.id_cliente
+    AND service.id_empresa = 2
+  ORDER BY service.id_servicio DESC
+  LIMIT 1
+) installed_service ON TRUE
 ON CONFLICT (numero_serie) DO UPDATE SET
   id_tipo_equipo = EXCLUDED.id_tipo_equipo,
   id_empresa = EXCLUDED.id_empresa,
@@ -333,12 +420,14 @@ ON CONFLICT (numero_serie) DO UPDATE SET
   fecha_adquisicion = EXCLUDED.fecha_adquisicion,
   fecha_venc_garantia = EXCLUDED.fecha_venc_garantia,
   diagnostico_tecnico = EXCLUDED.diagnostico_tecnico,
-  id_cliente_instalado = EXCLUDED.id_cliente_instalado;
+  id_cliente_instalado = EXCLUDED.id_cliente_instalado,
+  id_servicio = EXCLUDED.id_servicio;
 
 -- Ticket y ordenes para validar soporte y trabajo en terreno.
 INSERT INTO ticket (
   id_cliente,
   id_empresa,
+  id_servicio,
   id_usuario_asignado,
   id_categoria,
   codigo_seguimiento,
@@ -352,6 +441,7 @@ INSERT INTO ticket (
 SELECT
   customer.id_cliente,
   2,
+  contracted_service.id_servicio,
   support_user.id_usuario,
   category.id_categoria,
   'TK-CABLE-DEMO-001',
@@ -362,12 +452,21 @@ SELECT
   'Telefono',
   FALSE
 FROM cliente customer
+LEFT JOIN LATERAL (
+  SELECT service.id_servicio
+  FROM servicio_contratado service
+  WHERE service.id_cliente = customer.id_cliente
+    AND service.id_empresa = 2
+  ORDER BY service.id_servicio DESC
+  LIMIT 1
+) contracted_service ON TRUE
 JOIN usuario support_user ON support_user.nombre_usuario = 'soporte.cable'
 JOIN categoria_falla category ON category.nombre = 'Falla de internet'
 WHERE customer.rut = '33333333-3'
 ON CONFLICT (codigo_seguimiento) DO UPDATE SET
   id_cliente = EXCLUDED.id_cliente,
   id_empresa = EXCLUDED.id_empresa,
+  id_servicio = EXCLUDED.id_servicio,
   id_usuario_asignado = EXCLUDED.id_usuario_asignado,
   id_categoria = EXCLUDED.id_categoria,
   prioridad = EXCLUDED.prioridad,
@@ -381,6 +480,7 @@ INSERT INTO orden_trabajo (
   id_cliente,
   id_tecnico,
   id_direccion,
+  id_servicio,
   id_ticket,
   tipo_ot,
   prioridad,
@@ -395,6 +495,7 @@ SELECT
   customer.id_cliente,
   field_user.id_usuario,
   customer_address.id_direccion,
+  contracted_service.id_servicio,
   support_ticket.id_ticket,
   'Reparacion',
   'Alta',
@@ -407,6 +508,14 @@ FROM cliente customer
 JOIN direccion_servicio customer_address
   ON customer_address.id_cliente = customer.id_cliente
  AND customer_address.es_principal = TRUE
+LEFT JOIN LATERAL (
+  SELECT service.id_servicio
+  FROM servicio_contratado service
+  WHERE service.id_cliente = customer.id_cliente
+    AND service.id_empresa = 2
+  ORDER BY service.id_servicio DESC
+  LIMIT 1
+) contracted_service ON TRUE
 JOIN ticket support_ticket ON support_ticket.codigo_seguimiento = 'TK-CABLE-DEMO-001'
 JOIN usuario field_user ON field_user.nombre_usuario = 'terreno.cable'
 WHERE customer.rut = '33333333-3'
@@ -420,6 +529,7 @@ INSERT INTO orden_trabajo (
   id_cliente,
   id_tecnico,
   id_direccion,
+  id_servicio,
   tipo_ot,
   prioridad,
   estado,
@@ -433,6 +543,7 @@ SELECT
   customer.id_cliente,
   field_user.id_usuario,
   customer_address.id_direccion,
+  contracted_service.id_servicio,
   'Instalacion',
   'Media',
   'Pendiente',
@@ -444,6 +555,14 @@ FROM cliente customer
 JOIN direccion_servicio customer_address
   ON customer_address.id_cliente = customer.id_cliente
  AND customer_address.es_principal = TRUE
+LEFT JOIN LATERAL (
+  SELECT service.id_servicio
+  FROM servicio_contratado service
+  WHERE service.id_cliente = customer.id_cliente
+    AND service.id_empresa = 2
+  ORDER BY service.id_servicio DESC
+  LIMIT 1
+) contracted_service ON TRUE
 JOIN usuario field_user ON field_user.nombre_usuario = 'terreno.cable'
 WHERE customer.rut = '33333333-3'
   AND NOT EXISTS (

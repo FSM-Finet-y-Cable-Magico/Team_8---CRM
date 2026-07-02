@@ -12,3 +12,6 @@ uploads/
 .DS_Store
 *.tsbuildinfo
 .codex-review/
+docs/guia-estudio-codigo.md
+docs/guia-estudio-codigo.pdf
+db/*.dump

@@ -220,6 +220,26 @@ export class InventoryService {
       throw new BadRequestException('La orden de instalacion no corresponde al cliente y empresa seleccionados');
     }
 
+    if (installOrder?.idServicio && dto.idServicio && installOrder.idServicio !== dto.idServicio) {
+      throw new BadRequestException('El servicio indicado no corresponde a la orden de instalacion');
+    }
+
+    const idServicio = dto.idServicio ?? installOrder?.idServicio ?? null;
+    const servicio = idServicio
+      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio } })
+      : null;
+
+    if (idServicio && !servicio) {
+      throw new BadRequestException('El servicio contratado indicado no existe');
+    }
+
+    if (
+      servicio &&
+      (servicio.idCliente !== dto.idCliente || servicio.idEmpresa !== unit.idEmpresa)
+    ) {
+      throw new BadRequestException('El servicio contratado no corresponde al cliente y empresa del equipo');
+    }
+
     const technicalNotes = [
       unit.diagnosticoTecnico,
       `Instalacion router/ONU - MAC: ${dto.macAddress}; Puerto OLT: ${dto.puertoOlt}`,
@@ -234,6 +254,7 @@ export class InventoryService {
           modelo: dto.modelo ?? unit.modelo,
           estado: 'Instalado',
           idClienteInstalado: dto.idCliente,
+          idServicio,
           diagnosticoTecnico: technicalNotes,
         },
       });
@@ -253,6 +274,7 @@ export class InventoryService {
         await tx.ordenTrabajo.update({
           where: { idOt: dto.idOt },
           data: {
+            idServicio: idServicio ?? installOrder?.idServicio,
             observaciones: technicalNotes,
           },
         });
@@ -270,6 +292,7 @@ export class InventoryService {
       valorNuevo: {
         estado: 'Instalado',
         idCliente: dto.idCliente,
+        idServicio,
         macAddress: dto.macAddress,
         puertoOlt: dto.puertoOlt,
       },

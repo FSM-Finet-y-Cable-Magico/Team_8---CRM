@@ -54,11 +54,82 @@ JOIN rol r ON r.nombre_rol = 'Terreno'
 WHERE u.nombre_usuario = 'terreno.finet'
 ON CONFLICT DO NOTHING;
 
--- Cliente demo (RUT con digito verificador valido) para CU23 ticket por RUT, CU08 y CU14.
-INSERT INTO cliente (id_empresa, rut, nombre_completo, email, telefono, estado)
-VALUES (1, '11111111-1', 'Cliente Demo', 'cliente.demo@correo.local', '+56911111111', 'Activo')
+-- Cliente demo (RUT con digito verificador valido) para CU23 ticket por RUT, CU08, CU14 y RF-64..RF-71.
+INSERT INTO cliente (id_empresa, rut, nombre_completo, email, telefono, estado, origen_contacto, datos_tecnicos)
+VALUES (
+  1,
+  '11111111-1',
+  'Cliente Demo',
+  'cliente.demo@correo.local',
+  '+56911111111',
+  'Activo',
+  'Demo local',
+  jsonb_build_object('observacion', 'Cliente base para validar perfil de servicio y seguimiento comercial')
+)
 ON CONFLICT (rut) DO UPDATE SET
   nombre_completo = EXCLUDED.nombre_completo,
   email           = EXCLUDED.email,
   telefono        = EXCLUDED.telefono,
-  estado          = EXCLUDED.estado;
+  estado          = EXCLUDED.estado,
+  origen_contacto = EXCLUDED.origen_contacto,
+  datos_tecnicos  = EXCLUDED.datos_tecnicos;
+
+INSERT INTO direccion_servicio (id_cliente, direccion_completa, comuna, ciudad, es_principal)
+SELECT cliente.id_cliente, 'Av. Demo 100, Santiago', 'Santiago', 'Santiago', TRUE
+FROM cliente
+WHERE cliente.rut = '11111111-1'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM direccion_servicio existing_address
+    WHERE existing_address.id_cliente = cliente.id_cliente
+      AND existing_address.direccion_completa = 'Av. Demo 100, Santiago'
+  );
+
+INSERT INTO contrato (id_cliente, id_plan, id_empresa, fecha_inicio, dia_vencimiento, estado)
+SELECT cliente.id_cliente, plan.id_plan, 1, CURRENT_DATE - 30, 5, 'Activo'
+FROM cliente
+JOIN plan ON plan.id_empresa = 1 AND plan.nombre_comercial = 'Fibra 300 Hogar'
+WHERE cliente.rut = '11111111-1'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM contrato existing_contract
+    WHERE existing_contract.id_cliente = cliente.id_cliente
+      AND existing_contract.id_empresa = 1
+      AND existing_contract.id_plan = plan.id_plan
+  );
+
+INSERT INTO servicio_contratado (
+  id_cliente,
+  id_empresa,
+  id_contrato,
+  id_direccion,
+  tipo_servicio,
+  estado_operativo,
+  observaciones,
+  datos_tecnicos
+)
+SELECT
+  cliente.id_cliente,
+  1,
+  contrato.id_contrato,
+  direccion.id_direccion,
+  'Internet',
+  'Activo',
+  'Servicio demo FiNet para perfil individual y seguimiento comercial',
+  jsonb_build_object(
+    'tecnologia', 'Fibra Optica',
+    'velocidad', plan.velocidad_mbps::TEXT || ' Mbps',
+    'plan', plan.nombre_comercial
+  )
+FROM cliente
+JOIN contrato ON contrato.id_cliente = cliente.id_cliente AND contrato.id_empresa = 1
+JOIN plan ON plan.id_plan = contrato.id_plan
+LEFT JOIN direccion_servicio direccion
+  ON direccion.id_cliente = cliente.id_cliente
+ AND direccion.es_principal = TRUE
+WHERE cliente.rut = '11111111-1'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM servicio_contratado existing_service
+    WHERE existing_service.id_contrato = contrato.id_contrato
+  );

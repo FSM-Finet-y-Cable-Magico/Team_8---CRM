@@ -9,6 +9,11 @@ export class CreateTicketDto {
   @Min(1)
   idCategoria!: number;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  idServicio?: number;
+
   @IsIn(['Alta', 'Media', 'Baja'])
   prioridad!: 'Alta' | 'Media' | 'Baja';
 
