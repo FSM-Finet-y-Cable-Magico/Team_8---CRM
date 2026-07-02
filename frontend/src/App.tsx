@@ -32,23 +32,9 @@ type Tab =
   | 'users'
   | 'audit';
 
-type IconName =
-  | 'dashboard'
-  | 'prospects'
-  | 'customers'
-  | 'installations'
-  | 'inventory'
-  | 'tickets'
-  | 'workOrders'
-  | 'reports'
-  | 'audit'
-  | 'import'
-  | 'users';
-
 type NavItem = {
   tab: Tab;
   label: string;
-  icon: IconName;
   visible: boolean;
 };
 
@@ -364,19 +350,19 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   const currentCompanyName = companies.find((company) => company.idEmpresa === writeCompanyId)?.nombre ?? 'FiNet Limitada';
   const mainNavItems: NavItem[] = [
-    { tab: 'dashboard', label: 'Dashboard', icon: 'dashboard', visible: true },
-    { tab: 'prospects', label: 'Prospectos', icon: 'prospects', visible: permissions.viewProspects },
-    { tab: 'customers', label: 'Clientes', icon: 'customers', visible: canManageCustomers },
-    { tab: 'installations', label: 'Instalaciones', icon: 'installations', visible: canViewInstallations },
-    { tab: 'inventory', label: 'Inventario', icon: 'inventory', visible: canViewInventory },
-    { tab: 'tickets', label: 'Tickets', icon: 'tickets', visible: canViewTickets },
-    { tab: 'workOrders', label: 'Órdenes de Trabajo', icon: 'workOrders', visible: canViewWorkOrders },
-    { tab: 'reports', label: 'Reportes', icon: 'reports', visible: permissions.viewReports },
-    { tab: 'audit', label: 'Auditoría', icon: 'audit', visible: permissions.viewAudit },
+    { tab: 'dashboard', label: 'Dashboard', visible: true },
+    { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects },
+    { tab: 'customers', label: 'Clientes', visible: canManageCustomers },
+    { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations },
+    { tab: 'inventory', label: 'Inventario', visible: canViewInventory },
+    { tab: 'tickets', label: 'Tickets', visible: canViewTickets },
+    { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders },
+    { tab: 'reports', label: 'Reportes', visible: permissions.viewReports },
+    { tab: 'audit', label: 'Auditoría', visible: permissions.viewAudit },
   ];
   const secondaryNavItems: NavItem[] = [
-    { tab: 'import', label: 'Importación', icon: 'import', visible: permissions.viewImport },
-    { tab: 'users', label: 'Usuarios', icon: 'users', visible: permissions.viewUsers },
+    { tab: 'import', label: 'Importación', visible: permissions.viewImport },
+    { tab: 'users', label: 'Usuarios', visible: permissions.viewUsers },
   ];
 
   return (
@@ -390,10 +376,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
       <section className="crm-main">
         <header className="topbar">
-          <div className="global-search" aria-label="Buscador global visual">
-            <AppIcon name="reports" />
-            <input readOnly placeholder="Buscar prospectos, clientes, tickets..." />
-          </div>
           <div className="topbar-actions">
             {isAdmin && (
               <label className="select-label compact-label">
@@ -413,9 +395,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               <strong>{currentCompanyName}</strong>
               <i aria-hidden="true" />
             </div>
-            <button type="button" className="icon-button" aria-label="Notificaciones">
-              <AppIcon name="audit" />
-            </button>
             <span className="user-chip">{user.nombreCompleto}</span>
             <button className="secondary" onClick={logout}>
               Salir
@@ -491,28 +470,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   );
 }
 
-const iconLabels: Record<IconName, string> = {
-  dashboard: 'DB',
-  prospects: 'PR',
-  customers: 'CL',
-  installations: 'IN',
-  inventory: 'EQ',
-  tickets: 'TK',
-  workOrders: 'OT',
-  reports: 'RP',
-  audit: 'AU',
-  import: 'IM',
-  users: 'US',
-};
-
-function AppIcon({ name }: { name: IconName }) {
-  return (
-    <span className="app-icon" aria-hidden="true">
-      {iconLabels[name]}
-    </span>
-  );
-}
-
 function Sidebar({
   activeTab,
   mainItems,
@@ -529,7 +486,6 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">F</span>
         <strong>CRM FiNet</strong>
       </div>
 
@@ -541,7 +497,6 @@ function Sidebar({
             className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
             onClick={() => onNavigate(item.tab)}
           >
-            <AppIcon name={item.icon} />
             <span>{item.label}</span>
           </button>
         ))}
@@ -557,20 +512,11 @@ function Sidebar({
               className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
               onClick={() => onNavigate(item.tab)}
             >
-              <AppIcon name={item.icon} />
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
       )}
-
-      <section className="support-card">
-        <strong>Centro de soporte</strong>
-        <span>¿Necesitas ayuda?</span>
-        <button type="button" className="secondary compact">
-          Abrir chat
-        </button>
-      </section>
     </aside>
   );
 }
@@ -600,25 +546,21 @@ function DashboardHome({
   const openTickets = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
   const stats = [
     {
-      icon: 'prospects' as IconName,
       label: 'Prospectos activos',
       value: summary?.metricas.prospectos ?? prospects.length,
       hint: 'Resumen actual',
     },
     {
-      icon: 'customers' as IconName,
       label: 'Clientes activos',
       value: summary?.metricas.clientes ?? customers.length,
       hint: currentCompanyName,
     },
     {
-      icon: 'installations' as IconName,
       label: 'Instalaciones pendientes',
       value: pendingInstallations,
       hint: 'Órdenes por coordinar o cerrar',
     },
     {
-      icon: 'tickets' as IconName,
       label: 'Tickets abiertos',
       value: openTickets,
       hint: 'Casos en atención',
@@ -626,28 +568,24 @@ function DashboardHome({
   ];
   const quickActions = [
     {
-      icon: 'prospects' as IconName,
       label: 'Nuevo prospecto',
       description: 'Registrar oportunidad comercial',
       tab: 'prospects' as Tab,
       visible: permissions.createProspects || permissions.viewProspects,
     },
     {
-      icon: 'tickets' as IconName,
       label: 'Crear ticket',
       description: 'Atender solicitud de soporte',
       tab: 'tickets' as Tab,
       visible: permissions.viewTickets,
     },
     {
-      icon: 'installations' as IconName,
       label: 'Agendar instalación',
       description: 'Coordinar visita técnica',
       tab: 'installations' as Tab,
       visible: permissions.viewInstallations,
     },
     {
-      icon: 'workOrders' as IconName,
       label: 'Nueva orden',
       description: 'Revisar órdenes de trabajo',
       tab: 'workOrders' as Tab,
@@ -658,9 +596,7 @@ function DashboardHome({
   return (
     <section className="dashboard-home">
       <div className="page-heading">
-        <span className="eyebrow">Panel principal</span>
         <h1>Dashboard operativo</h1>
-        <p>Vista general del embudo comercial, clientes, instalaciones y soporte usando datos actuales.</p>
       </div>
 
       <section className="stat-grid">
@@ -669,59 +605,23 @@ function DashboardHome({
         ))}
       </section>
 
-      <section className="dashboard-grid">
-        <section className="panel stack">
-          <div className="section-heading">
-            <h2>Acciones rápidas</h2>
-            <p>Accesos directos a los flujos principales de la demo.</p>
-          </div>
-          <div className="quick-actions">
-            {quickActions.filter((action) => action.visible).map((action) => (
-              <QuickActionCard key={action.label} {...action} onNavigate={onNavigate} />
-            ))}
-          </div>
-        </section>
-
-        <section className="panel stack">
-          <div className="section-heading">
-            <h2>Actividad reciente</h2>
-            <p>Últimos registros cargados desde el backend.</p>
-          </div>
-          <div className="activity-list">
-            {tickets.slice(0, 4).map((ticket) => (
-              <article key={`ticket-${ticket.idTicket}`} className="activity-item">
-                <AppIcon name="tickets" />
-                <div>
-                  <strong>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</strong>
-                  <span>{ticket.cliente?.nombreCompleto ?? 'Cliente sin nombre'} · {ticket.estado}</span>
-                </div>
-              </article>
-            ))}
-            {prospects.slice(0, 3).map((prospect) => (
-              <article key={`prospect-${prospect.idProspecto}`} className="activity-item">
-                <AppIcon name="prospects" />
-                <div>
-                  <strong>{prospect.nombreCompleto ?? `Prospecto ${prospect.idProspecto}`}</strong>
-                  <span>{prospect.estadoPipeline ?? 'Sin estado'} · {prospect.empresa?.nombre ?? currentCompanyName}</span>
-                </div>
-              </article>
-            ))}
-            {!tickets.length && !prospects.length && (
-              <p className="empty-state">Aún no hay actividad reciente para mostrar.</p>
-            )}
-          </div>
-        </section>
+      <section className="panel stack dashboard-actions-panel">
+        <div className="section-heading">
+          <h2>Acciones rápidas</h2>
+        </div>
+        <div className="quick-actions">
+          {quickActions.filter((action) => action.visible).map((action) => (
+            <QuickActionCard key={action.label} {...action} onNavigate={onNavigate} />
+          ))}
+        </div>
       </section>
     </section>
   );
 }
 
-function StatCard({ icon, label, value, hint }: { icon: IconName; label: string; value: string | number; hint: string }) {
+function StatCard({ label, value, hint }: { label: string; value: string | number; hint: string }) {
   return (
     <article className="stat-card">
-      <div className="stat-icon">
-        <AppIcon name={icon} />
-      </div>
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
@@ -732,13 +632,11 @@ function StatCard({ icon, label, value, hint }: { icon: IconName; label: string;
 }
 
 function QuickActionCard({
-  icon,
   label,
   description,
   tab,
   onNavigate,
 }: {
-  icon: IconName;
   label: string;
   description: string;
   tab: Tab;
@@ -746,7 +644,6 @@ function QuickActionCard({
 }) {
   return (
     <button type="button" className="quick-action-card" onClick={() => onNavigate(tab)}>
-      <AppIcon name={icon} />
       <strong>{label}</strong>
       <span>{description}</span>
     </button>
@@ -1300,7 +1197,7 @@ function InstallationsPanel({
           <table>
             <thead>
               <tr>
-                <th>OT</th>
+                <th>Orden</th>
                 <th>Cliente</th>
                 <th>Fecha</th>
                 <th>Hora</th>
@@ -1481,7 +1378,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         idTecnico: Number(technicianId),
       });
       setStatus(
-        `Orden de Instalación OT ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
+        `Orden de Instalación ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
         `El prospecto avanzó a Instalación Programada.`,
       );
       setAvailability(null);
@@ -2066,7 +1963,7 @@ function CustomersPanel({
                       ))}
                       {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
                         <li key={`order-${order.idOt}`}>
-                          OT {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
+                          Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
                         </li>
                       ))}
                       {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
@@ -2492,7 +2389,7 @@ function InventoryPanel({
                   <option value="">Orden de instalación opcional</option>
                   {eligibleInstallOrders.map((order) => (
                     <option key={order.idOt} value={order.idOt}>
-                      OT {order.idOt} - {order.estado}
+                      Orden {order.idOt} - {order.estado}
                     </option>
                   ))}
                 </select>
@@ -3007,7 +2904,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
         {selectedOrder ? (
           <div className="workflow-panel modal-workflow">
             <section className="customer-preview">
-              <h3>OT {selectedOrder.idOt}</h3>
+              <h3>Orden {selectedOrder.idOt}</h3>
               <p><strong>Tipo:</strong> {selectedOrder.tipoOt}</p>
               <p><strong>Asociado:</strong> {ownerLabel(selectedOrder)}</p>
               <p><strong>Estado:</strong> {selectedOrder.estado}</p>
