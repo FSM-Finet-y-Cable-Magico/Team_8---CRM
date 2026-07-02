@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   api,
   apiErrorMessage,
@@ -249,6 +249,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('prospects');
   const [scope, setScope] = useState('consolidado');
+  const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -422,11 +423,21 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           plans={plans}
           writeCompanyId={writeCompanyId}
           permissions={permissions}
+          onOpenInstallation={(idProspecto) => {
+            setFocusedInstallationProspectId(idProspecto);
+            setActiveTab('installations');
+          }}
           onCreated={() => void loadData()}
         />
       )}
       {activeTab === 'installations' && canViewInstallations && (
-        <InstallationsPanel prospects={prospects} onChanged={() => void loadData()} />
+        <InstallationsPanel
+          prospects={prospects}
+          workOrders={workOrders}
+          focusedProspectId={focusedInstallationProspectId}
+          onFocusConsumed={() => setFocusedInstallationProspectId(null)}
+          onChanged={() => void loadData()}
+        />
       )}
       {activeTab === 'rut' && <RutPanel />}
       {activeTab === 'customers' && canManageCustomers && (
@@ -485,30 +496,62 @@ function TabButton({
   );
 }
 
+function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <h2>{title}</h2>
+          <button type="button" className="secondary compact" onClick={onClose}>
+            Cerrar
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
 function ProspectsPanel({
   prospects,
   plans,
   writeCompanyId,
   permissions,
+  onOpenInstallation,
   onCreated,
 }: {
   prospects: Prospect[];
   plans: Plan[];
   writeCompanyId: number;
   permissions: DashboardPermissions;
+  onOpenInstallation: (idProspecto: number) => void;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? prospects[0] ?? null;
-
-  useEffect(() => {
-    if (!selectedId && prospects[0]) {
-      setSelectedId(prospects[0].idProspecto);
-    }
-  }, [prospects, selectedId]);
+  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -633,7 +676,7 @@ function ProspectsPanel({
                   <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                    <button type="button" className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
                     </button>
                   </td>
@@ -642,14 +685,24 @@ function ProspectsPanel({
             </tbody>
           </table>
         </div>
-        {selectedProspect && (
+        <Modal
+          title="Gestionar prospecto"
+          open={Boolean(selectedProspect)}
+          onClose={() => setSelectedId(null)}
+        >
+          {selectedProspect && (
           <ProspectWorkflowPanel
             prospect={selectedProspect}
             plans={plans}
             permissions={permissions}
+            onOpenInstallation={() => {
+              setSelectedId(null);
+              onOpenInstallation(selectedProspect.idProspecto);
+            }}
             onChanged={onCreated}
           />
-        )}
+          )}
+        </Modal>
       </section>
     </section>
   );
@@ -659,11 +712,13 @@ function ProspectWorkflowPanel({
   prospect,
   plans,
   permissions,
+  onOpenInstallation,
   onChanged,
 }: {
   prospect: Prospect;
   plans: Plan[];
   permissions: DashboardPermissions;
+  onOpenInstallation: () => void;
   onChanged: () => void;
 }) {
   const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -719,8 +774,15 @@ function ProspectWorkflowPanel({
   }
 
   return (
-    <div className="workflow-panel">
-      <h3>{prospect.nombreCompleto}</h3>
+    <div className="workflow-panel modal-workflow">
+      <section className="customer-preview">
+        <h3>{prospect.nombreCompleto}</h3>
+        <p><strong>RUT:</strong> {prospect.rut ?? '-'}</p>
+        <p><strong>Teléfono:</strong> {prospect.telefono ?? '-'}</p>
+        <p><strong>Correo:</strong> {prospect.email ?? '-'}</p>
+        <p><strong>Estado:</strong> {prospect.estadoPipeline ?? '-'}</p>
+        <p><strong>Origen:</strong> {prospect.origenContacto ?? '-'}</p>
+      </section>
       <div className="workflow-grid">
         {permissions.manageProspectPipeline && <label>
           Actualizar estado del prospecto en el pipeline
@@ -853,8 +915,13 @@ function ProspectWorkflowPanel({
           </button>
         </label>}
 
-        {permissions.createInstallOrders && (
-          <InstallOrderForm prospect={prospect} onChanged={onChanged} />
+        {permissions.createInstallOrders && prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente) && (
+          <label>
+            Agenda de instalación
+            <button type="button" onClick={onOpenInstallation}>
+              Generar instalación
+            </button>
+          </label>
         )}
       </div>
       {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
@@ -862,28 +929,69 @@ function ProspectWorkflowPanel({
   );
 }
 
-function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; onChanged: () => void }) {
-  const installationProspects = prospects.filter((prospect) =>
-    prospect.estadoPipeline === 'Instalacion Programada' ||
-    (prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente)),
+function InstallationsPanel({
+  prospects,
+  workOrders,
+  focusedProspectId,
+  onFocusConsumed,
+  onChanged,
+}: {
+  prospects: Prospect[];
+  workOrders: WorkOrder[];
+  focusedProspectId: number | null;
+  onFocusConsumed: () => void;
+  onChanged: () => void;
+}) {
+  const installationProspects = useMemo(
+    () => prospects.filter((prospect) =>
+      prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente),
+    ),
+    [prospects],
+  );
+  const installationOrders = useMemo(
+    () => workOrders.filter((order) => order.tipoOt === 'Instalacion'),
+    [workOrders],
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const selectedProspect =
-    installationProspects.find((prospect) => prospect.idProspecto === selectedId) ??
-    installationProspects[0] ??
-    null;
+  const [modalOpen, setModalOpen] = useState(false);
+  const selectedProspect = installationProspects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
+  const prospectByCustomerCompany = useMemo(() => {
+    const map = new Map<string, Prospect>();
+
+    for (const prospect of prospects) {
+      if (prospect.idCliente && prospect.empresa?.idEmpresa) {
+        map.set(`${prospect.idCliente}:${prospect.empresa.idEmpresa}`, prospect);
+      }
+    }
+
+    return map;
+  }, [prospects]);
 
   useEffect(() => {
-    if (!selectedId && installationProspects[0]) {
-      setSelectedId(installationProspects[0].idProspecto);
+    if (!focusedProspectId) {
+      return;
     }
-  }, [installationProspects, selectedId]);
+
+    const focused = installationProspects.find((prospect) => prospect.idProspecto === focusedProspectId);
+
+    if (focused) {
+      setSelectedId(focused.idProspecto);
+      setModalOpen(true);
+    }
+
+    onFocusConsumed();
+  }, [focusedProspectId, installationProspects, onFocusConsumed]);
+
+  function openInstallModal(idProspecto: number) {
+    setSelectedId(idProspecto);
+    setModalOpen(true);
+  }
 
   return (
     <section className="workspace-grid">
       <section className="panel">
-        <h2>Instalaciones</h2>
-        <p className="detail-line">Selecciona un prospecto con cotización aceptada y factibilidad confirmada.</p>
+        <h2>Prospectos listos para instalación</h2>
+        <p className="detail-line">Agenda instalaciones para prospectos aceptados y con plan contratado.</p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -901,8 +1009,8 @@ function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; o
                   <td>{prospect.nombreCompleto ?? '-'}</td>
                   <td>{prospect.estadoPipeline ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
-                      Nueva Orden
+                    <button className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>
+                      Agendar instalación
                     </button>
                   </td>
                 </tr>
@@ -911,18 +1019,63 @@ function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; o
           </table>
         </div>
         {!installationProspects.length && (
-          <p className="inline-status">No hay prospectos habilitados para generar una Orden de Instalación.</p>
+          <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>
         )}
       </section>
 
       <section className="panel">
-        <h2>Nueva Orden</h2>
-        {selectedProspect ? (
-          <InstallOrderForm prospect={selectedProspect} onChanged={onChanged} />
-        ) : (
-          <p className="inline-status">Selecciona un prospecto que cumpla las precondiciones de CU-17.</p>
+        <h2>Agenda de instalaciones</h2>
+        <p className="detail-line">Visitas de instalación generadas y conectadas con órdenes de trabajo.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>OT</th>
+                <th>Cliente</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Técnico</th>
+                <th>Prioridad</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {installationOrders.map((order) => {
+                const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`);
+
+                return (
+                  <tr key={order.idOt}>
+                    <td>{order.idOt}</td>
+                    <td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td>
+                    <td>{formatDateOnly(order.fechaProgramada)}</td>
+                    <td>{order.horaVisita ?? '-'}</td>
+                    <td>{order.tecnico?.nombreCompleto ?? '-'}</td>
+                    <td>{order.prioridad}</td>
+                    <td>{order.estado}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!installationOrders.length && (
+          <p className="inline-status">No hay instalaciones agendadas.</p>
         )}
       </section>
+
+      <Modal title="Generar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
+        {selectedProspect ? (
+          <InstallOrderForm
+            prospect={selectedProspect}
+            onChanged={() => {
+              setModalOpen(false);
+              onChanged();
+            }}
+          />
+        ) : (
+          <p className="inline-status">Selecciona un prospecto aceptado para agendar la instalación.</p>
+        )}
+      </Modal>
     </section>
   );
 }
@@ -1071,7 +1224,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
 
   return (
     <div className="install-order-form">
-      <h3>Generando Orden de Instalación (CU-17)</h3>
+      <h3>Generar orden de instalación</h3>
       <p className="detail-line">
         Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
       </p>
@@ -1079,7 +1232,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
       )}
       {prospect.estadoPipeline !== 'Aceptado' && (
-        <p className="inline-status">La Orden de Instalación ya fue generada para este prospecto.</p>
+        <p className="inline-status">La orden de instalación ya fue generada para este prospecto.</p>
       )}
       <div className="install-form-grid">
         <label>
@@ -1828,8 +1981,9 @@ function InventoryPanel({
   const [statusForm, setStatusForm] = useState({ estado: 'Disponible', motivo: '' });
   const [installForm, setInstallForm] = useState({ idCliente: '', idOt: '', macAddress: '', puertoOlt: '', modelo: '' });
   const [status, setStatus] = useState('');
+  const [managementOpen, setManagementOpen] = useState(false);
 
-  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? inventory[0] ?? null;
+  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? null;
   const eligibleCustomers = customers.filter(
     (customer) =>
       customer.idEmpresa === selectedUnit?.idEmpresa ||
@@ -1841,12 +1995,6 @@ function InventoryPanel({
       order.idCliente === Number(installForm.idCliente) &&
       order.idEmpresa === selectedUnit?.idEmpresa,
   );
-
-  useEffect(() => {
-    if (!selectedId && inventory[0]) {
-      setSelectedId(inventory[0].idUnidad);
-    }
-  }, [inventory, selectedId]);
 
   useEffect(() => {
     if (selectedUnit) {
@@ -1954,7 +2102,13 @@ function InventoryPanel({
                   <td>{unit.estado}</td>
                   <td>{unit.empresa?.nombre ?? `Empresa ${unit.idEmpresa ?? '-'}`}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(unit.idUnidad)}>
+                    <button
+                      className="secondary compact"
+                      onClick={() => {
+                        setSelectedId(unit.idUnidad);
+                        setManagementOpen(true);
+                      }}
+                    >
                       Gestionar
                     </button>
                   </td>
@@ -1964,8 +2118,9 @@ function InventoryPanel({
           </table>
         </div>
 
-        {selectedUnit && (
-          <div className="workflow-panel">
+        <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
+        {selectedUnit ? (
+          <div className="workflow-panel modal-workflow">
             <h3>{selectedUnit.numeroSerie}</h3>
             <p className="detail-line">
               Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
@@ -2106,8 +2261,12 @@ function InventoryPanel({
                 </button>
               </label>}
             </div>
+            {status && <p className="inline-status">{status}</p>}
           </div>
+        ) : (
+          <p className="inline-status">Selecciona un equipo del inventario para gestionarlo.</p>
         )}
+        </Modal>
       </section>
     </section>
   );

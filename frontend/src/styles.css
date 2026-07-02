@@ -336,6 +336,46 @@ th {
   background: #e6f4ee;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(19, 32, 27, 0.48);
+}
+
+.modal-card {
+  width: min(980px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid #d5e2dc;
+  border-radius: 12px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 25, 21, 0.24);
+}
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -18px -18px 16px;
+  border-bottom: 1px solid #e2e8e4;
+  padding: 16px 18px;
+  background: #fff;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
 .table-wrap {
   overflow-x: auto;
   margin-top: 12px;
@@ -352,6 +392,12 @@ th {
 .workflow-panel h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.modal-workflow {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
 }
 
 .workflow-grid {
@@ -504,6 +550,19 @@ input[readonly] {
   .workflow-grid,
   .install-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 24px);
+  }
+
+  .modal-header {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .select-label {
