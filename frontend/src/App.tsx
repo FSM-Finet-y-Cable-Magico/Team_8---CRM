@@ -1558,23 +1558,16 @@ function CustomersPanel({
     puertoOlt: '',
     observaciones: '',
   });
+  const [managementOpen, setManagementOpen] = useState(false);
 
   const visibleCustomers = searchResults ?? customers;
-  const selectedCustomer =
-    visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? visibleCustomers[0] ?? null;
+  const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
   const contractOptions = selectedCustomer?.contratos ?? [];
   const customerCompanyId = scope !== 'consolidado'
     ? Number(scope)
     : selectedCustomer?.idEmpresa ?? contractOptions[0]?.idEmpresa ?? undefined;
-
-  useEffect(() => {
-    if (!selectedId && customers[0]) {
-      setSelectedId(customers[0].idCliente);
-      setStatusValue(customers[0].estado);
-    }
-  }, [customers, selectedId]);
 
   useEffect(() => {
     if (selectedCustomer) {
@@ -1630,7 +1623,8 @@ function CustomersPanel({
     try {
       const { data } = await api.get<Customer[]>('/customers', { params: { scope, query: term } });
       setSearchResults(data);
-      setSelectedId(data[0]?.idCliente ?? null);
+      setSelectedId(null);
+      setManagementOpen(false);
       setStatus(data.length ? `${data.length} cliente(s) encontrado(s)` : 'No se encontraron clientes');
     } catch (err) {
       setStatus(apiErrorMessage(err));
@@ -1640,8 +1634,23 @@ function CustomersPanel({
   function clearSearch() {
     setSearchTerm('');
     setSearchResults(null);
-    setSelectedId(customers[0]?.idCliente ?? null);
+    setSelectedId(null);
+    setManagementOpen(false);
     setStatus('');
+  }
+
+  function openCustomerManagement(customerId: number) {
+    setSelectedId(customerId);
+    setManagementOpen(true);
+    setStatus('');
+  }
+
+  function customerCompanyLabel(customer: Customer) {
+    return customer.empresas?.join(', ') || customer.empresa?.nombre || '-';
+  }
+
+  function customerMainPlan(customer: Customer) {
+    return customer.contratos?.find((contract) => contract.plan)?.plan?.nombreComercial ?? '-';
   }
 
   async function updateCustomerStatus() {
@@ -1782,37 +1791,42 @@ function CustomersPanel({
   }
 
   return (
-    <section className="workspace-grid">
-      <section className="panel">
-        <h2>Consultando historial completo del cliente</h2>
+    <section className="customers-module">
+      <section className="panel customers-list-panel">
+        <div className="section-heading">
+          <h2>Clientes</h2>
+          <p>Consulta y gestiona clientes registrados por RUT, nombre, teléfono o contrato.</p>
+        </div>
         <form className="customer-search" onSubmit={searchCustomers}>
           <label>
-            Buscar cliente por RUT, teléfono, nombre o número de contrato
+            Buscar cliente
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Ej.: 12345678-5, +569..., Ana Pérez o 25"
+              placeholder="Buscar por RUT, nombre, teléfono o contrato"
             />
           </label>
           <div className="button-row">
-            <button type="submit">Buscar cliente</button>
+            <button type="submit">Buscar</button>
             {searchResults && (
               <button type="button" className="secondary" onClick={clearSearch}>
-                Limpiar búsqueda
+                Limpiar
               </button>
             )}
           </div>
         </form>
+        {status && !managementOpen && <p className="inline-status">{status}</p>}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>RUT</th>
                 <th>Nombre</th>
-                <th>Teléfono</th>
-                <th>Estado</th>
+                <th>Empresa</th>
+                <th>Estado actual</th>
                 <th>Origen</th>
-                <th>Empresas</th>
+                <th>Servicio / Plan</th>
+                <th>Contacto</th>
                 <th></th>
               </tr>
             </thead>
@@ -1821,13 +1835,14 @@ function CustomersPanel({
                 <tr key={customer.idCliente}>
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
-                  <td>{customer.telefono ?? '-'}</td>
-                  <td>{customer.estado}</td>
+                  <td>{customerCompanyLabel(customer)}</td>
+                  <td><StatusBadge value={customer.estado} /></td>
                   <td>{customer.origenContacto ?? '-'}</td>
-                  <td>{customer.empresas?.join(', ') || customer.empresa?.nombre || '-'}</td>
+                  <td>{customerMainPlan(customer)}</td>
+                  <td>{customer.telefono ?? customer.email ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(customer.idCliente)}>
-                      Gestionar cliente
+                    <button className="secondary compact" onClick={() => openCustomerManagement(customer.idCliente)}>
+                      Gestionar
                     </button>
                   </td>
                 </tr>
@@ -1835,10 +1850,35 @@ function CustomersPanel({
             </tbody>
           </table>
         </div>
+        {!visibleCustomers.length && (
+          <p className="empty-state">
+            {searchResults ? 'No se encontraron clientes con los criterios ingresados.' : 'No hay clientes registrados para mostrar.'}
+          </p>
+        )}
       </section>
 
+      <Modal title="Gestionar cliente" open={managementOpen} onClose={() => setManagementOpen(false)}>
+        {selectedCustomer ? (
+          <div className="customer-management-modal">
+            <section className="customer-summary-grid">
+              <article className="customer-preview">
+                <h3>{selectedCustomer.nombreCompleto}</h3>
+                <p><strong>RUT:</strong> {selectedCustomer.rut ?? '-'}</p>
+                <p><strong>Empresa:</strong> {customerCompanyLabel(selectedCustomer)}</p>
+                <p><strong>Estado:</strong> {selectedCustomer.estado}</p>
+                <p><strong>Origen:</strong> {selectedCustomer.origenContacto ?? '-'}</p>
+              </article>
+              <article className="customer-preview">
+                <h3>Datos de contacto</h3>
+                <p><strong>Teléfono:</strong> {selectedCustomer.telefono ?? '-'}</p>
+                <p><strong>Correo:</strong> {selectedCustomer.email ?? '-'}</p>
+                <p><strong>Dirección:</strong> {String(selectedCustomer.datosTecnicos?.direccion ?? '-')}</p>
+                <p><strong>Plan principal:</strong> {customerMainPlan(selectedCustomer)}</p>
+              </article>
+            </section>
+
       <section className="panel stack">
-        <h2>Actualizando estado operativo del cliente</h2>
+        <h2>Estado operativo</h2>
         {selectedCustomer ? (
           <>
             <p className="detail-line">
@@ -1892,7 +1932,7 @@ function CustomersPanel({
       </section>
 
       <section className="panel stack full-width-panel">
-        <h2>Perfil individual de servicios contratados</h2>
+        <h2>Servicios contratados</h2>
         {selectedCustomer ? (
           <>
             <div className="table-wrap">
@@ -2114,6 +2154,11 @@ function CustomersPanel({
           <p className="inline-status">Selecciona un cliente para revisar sus servicios contratados.</p>
         )}
       </section>
+          </div>
+        ) : (
+          <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
+        )}
+      </Modal>
     </section>
   );
 }

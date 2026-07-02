@@ -436,12 +436,38 @@ th {
 
 .customer-search {
   display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
   gap: 12px;
   margin-bottom: 16px;
 }
 
 .customer-search .button-row button {
   flex: 1;
+}
+
+.customers-module {
+  display: grid;
+  gap: 16px;
+}
+
+.customers-list-panel {
+  width: 100%;
+}
+
+.customers-list-panel .customer-search {
+  max-width: 920px;
+}
+
+.customer-management-modal {
+  display: grid;
+  gap: 16px;
+}
+
+.customer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .customer-preview {
@@ -859,6 +885,8 @@ input[readonly] {
   .stat-grid,
   .workspace-grid,
   .workflow-grid,
+  .customer-search,
+  .customer-summary-grid,
   .install-form-grid,
   .report-form-grid {
     grid-template-columns: 1fr;
