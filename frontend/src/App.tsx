@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   api,
   apiErrorMessage,
@@ -19,7 +19,24 @@ import {
 } from './api';
 import { DashboardPermissions, getDashboardPermissions, hasPermission, normalizeUserRoles } from './permissions';
 
-type Tab = 'prospects' | 'installations' | 'customers' | 'inventory' | 'tickets' | 'workOrders' | 'reports' | 'rut' | 'import' | 'users' | 'audit';
+type Tab =
+  | 'dashboard'
+  | 'prospects'
+  | 'installations'
+  | 'customers'
+  | 'inventory'
+  | 'tickets'
+  | 'workOrders'
+  | 'reports'
+  | 'import'
+  | 'users'
+  | 'audit';
+
+type NavItem = {
+  tab: Tab;
+  label: string;
+  visible: boolean;
+};
 
 type Summary = {
   scope: string;
@@ -247,8 +264,9 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 }
 
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  const [activeTab, setActiveTab] = useState<Tab>('prospects');
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [scope, setScope] = useState('consolidado');
+  const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -330,158 +348,354 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     onLogout();
   }
 
+  const currentCompanyName = companies.find((company) => company.idEmpresa === writeCompanyId)?.nombre ?? 'FiNet Limitada';
+  const mainNavItems: NavItem[] = [
+    { tab: 'dashboard', label: 'Dashboard', visible: true },
+    { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects },
+    { tab: 'customers', label: 'Clientes', visible: canManageCustomers },
+    { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations },
+    { tab: 'inventory', label: 'Inventario', visible: canViewInventory },
+    { tab: 'tickets', label: 'Tickets', visible: canViewTickets },
+    { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders },
+    { tab: 'reports', label: 'Reportes', visible: permissions.viewReports },
+    { tab: 'audit', label: 'Auditoría', visible: permissions.viewAudit },
+  ];
+  const secondaryNavItems: NavItem[] = [
+    { tab: 'import', label: 'Importación', visible: permissions.viewImport },
+    { tab: 'users', label: 'Usuarios', visible: permissions.viewUsers },
+  ];
+
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          
-          <h1>CRM FiNet</h1>
-        </div>
-        <div className="topbar-actions">
-          {isAdmin && (
-            <label className="select-label">
-              Empresa
-              <select value={scope} onChange={(event) => setScope(event.target.value)}>
-                <option value="consolidado">Consolidado</option>
-                {companies.map((company) => (
-                  <option key={company.idEmpresa} value={company.idEmpresa}>
-                    {company.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
+    <main className="crm-shell">
+      <Sidebar
+        activeTab={activeTab}
+        mainItems={mainNavItems}
+        secondaryItems={secondaryNavItems}
+        onNavigate={setActiveTab}
+      />
+
+      <section className="crm-main">
+        <header className="topbar">
+          <div className="topbar-actions">
+            {isAdmin && (
+              <label className="select-label compact-label">
+                Alcance
+                <select value={scope} onChange={(event) => setScope(event.target.value)}>
+                  <option value="consolidado">Consolidado</option>
+                  {companies.map((company) => (
+                    <option key={company.idEmpresa} value={company.idEmpresa}>
+                      {company.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="company-chip">
+              <span>Empresa actual</span>
+              <strong>{currentCompanyName}</strong>
+              <i aria-hidden="true" />
+            </div>
+            <span className="user-chip">{user.nombreCompleto}</span>
+            <button className="secondary" onClick={logout}>
+              Salir
+            </button>
+          </div>
+        </header>
+
+        {message && <p className="alert app-alert">{message}</p>}
+
+        <section className="content-shell">
+          {activeTab === 'dashboard' && (
+            <DashboardHome
+              summary={summary}
+              prospects={prospects}
+              customers={customers}
+              tickets={tickets}
+              workOrders={workOrders}
+              currentCompanyName={currentCompanyName}
+              permissions={permissions}
+              onNavigate={setActiveTab}
+            />
           )}
-          <span className="user-chip">{user.nombreCompleto}</span>
-          <button className="secondary" onClick={logout}>
-            Salir
-          </button>
-        </div>
-      </header>
-
-      <section className="metrics">
-        <Metric label="Clientes" value={summary?.metricas.clientes ?? 0} />
-        <Metric label="Prospectos" value={summary?.metricas.prospectos ?? 0} />
-        <Metric label="Empresa de trabajo" value={companies.find((company) => company.idEmpresa === writeCompanyId)?.nombre ?? 'FiNet'} />
+          {activeTab === 'prospects' && permissions.viewProspects && (
+            <ProspectsPanel
+              prospects={prospects}
+              plans={plans}
+              writeCompanyId={writeCompanyId}
+              permissions={permissions}
+              onOpenInstallation={(idProspecto) => {
+                setFocusedInstallationProspectId(idProspecto);
+                setActiveTab('installations');
+              }}
+              onCreated={() => void loadData()}
+            />
+          )}
+          {activeTab === 'installations' && canViewInstallations && (
+            <InstallationsPanel
+              prospects={prospects}
+              workOrders={workOrders}
+              focusedProspectId={focusedInstallationProspectId}
+              onFocusConsumed={() => setFocusedInstallationProspectId(null)}
+              onChanged={() => void loadData()}
+            />
+          )}
+          {activeTab === 'customers' && canManageCustomers && (
+            <CustomersPanel customers={customers} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
+          )}
+          {activeTab === 'inventory' && canViewInventory && (
+            <InventoryPanel
+              inventory={inventory}
+              customers={customers}
+              workOrders={workOrders}
+              writeCompanyId={writeCompanyId}
+              permissions={permissions}
+              onChanged={() => void loadData()}
+            />
+          )}
+          {activeTab === 'tickets' && canViewTickets && (
+            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} onChanged={() => void loadData()} />
+          )}
+          {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
+          {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}
+          {activeTab === 'import' && permissions.viewImport && (
+            <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
+          )}
+          {activeTab === 'users' && permissions.viewUsers && (
+            <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
+          )}
+          {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
+        </section>
       </section>
-
-      {message && <p className="alert">{message}</p>}
-
-      <nav className="tabs">
-        <TabButton current={activeTab} value="prospects" onClick={setActiveTab}>
-          Prospectos
-        </TabButton>
-        {canViewInstallations && (
-          <TabButton current={activeTab} value="installations" onClick={setActiveTab}>
-            Instalaciones
-          </TabButton>
-        )}
-        {canManageCustomers && (
-          <TabButton current={activeTab} value="customers" onClick={setActiveTab}>
-            Clientes
-          </TabButton>
-        )}
-        {canViewInventory && (
-          <TabButton current={activeTab} value="inventory" onClick={setActiveTab}>
-            Inventario
-          </TabButton>
-        )}
-        {canViewTickets && (
-          <TabButton current={activeTab} value="tickets" onClick={setActiveTab}>
-            Tickets
-          </TabButton>
-        )}
-        {canViewWorkOrders && (
-          <TabButton current={activeTab} value="workOrders" onClick={setActiveTab}>
-            Órdenes de Trabajo
-          </TabButton>
-        )}
-        <TabButton current={activeTab} value="rut" onClick={setActiveTab}>
-          RUT
-        </TabButton>
-        {isAdmin && (
-          <>
-            <TabButton current={activeTab} value="reports" onClick={setActiveTab}>
-              Reportes operativos
-            </TabButton>
-            <TabButton current={activeTab} value="import" onClick={setActiveTab}>
-              Importacion
-            </TabButton>
-            <TabButton current={activeTab} value="users" onClick={setActiveTab}>
-              Usuarios
-            </TabButton>
-            <TabButton current={activeTab} value="audit" onClick={setActiveTab}>
-              Auditoria
-            </TabButton>
-          </>
-        )}
-      </nav>
-
-      {activeTab === 'prospects' && (
-        <ProspectsPanel
-          prospects={prospects}
-          plans={plans}
-          writeCompanyId={writeCompanyId}
-          permissions={permissions}
-          onCreated={() => void loadData()}
-        />
-      )}
-      {activeTab === 'installations' && canViewInstallations && (
-        <InstallationsPanel prospects={prospects} onChanged={() => void loadData()} />
-      )}
-      {activeTab === 'rut' && <RutPanel />}
-      {activeTab === 'customers' && canManageCustomers && (
-        <CustomersPanel customers={customers} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
-      )}
-      {activeTab === 'inventory' && canViewInventory && (
-        <InventoryPanel
-          inventory={inventory}
-          customers={customers}
-          workOrders={workOrders}
-          writeCompanyId={writeCompanyId}
-          permissions={permissions}
-          onChanged={() => void loadData()}
-        />
-      )}
-      {activeTab === 'tickets' && canViewTickets && (
-        <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} onChanged={() => void loadData()} />
-      )}
-      {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
-      {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}
-      {activeTab === 'import' && permissions.viewImport && (
-        <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
-      )}
-      {activeTab === 'users' && permissions.viewUsers && (
-        <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
-      )}
-      {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
     </main>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string | number }) {
+function Sidebar({
+  activeTab,
+  mainItems,
+  secondaryItems,
+  onNavigate,
+}: {
+  activeTab: Tab;
+  mainItems: NavItem[];
+  secondaryItems: NavItem[];
+  onNavigate: (tab: Tab) => void;
+}) {
+  const visibleSecondaryItems = secondaryItems.filter((item) => item.visible);
+
   return (
-    <article className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <aside className="sidebar">
+      <div className="brand">
+        <strong>CRM FiNet</strong>
+      </div>
+
+      <nav className="sidebar-nav" aria-label="Navegación principal">
+        {mainItems.filter((item) => item.visible).map((item) => (
+          <button
+            key={item.tab}
+            type="button"
+            className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
+            onClick={() => onNavigate(item.tab)}
+          >
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {visibleSecondaryItems.length > 0 && (
+        <nav className="sidebar-nav secondary-nav" aria-label="Administración">
+          <span className="nav-section-title">Administración</span>
+          {visibleSecondaryItems.map((item) => (
+            <button
+              key={item.tab}
+              type="button"
+              className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
+              onClick={() => onNavigate(item.tab)}
+            >
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+    </aside>
+  );
+}
+
+function DashboardHome({
+  summary,
+  prospects,
+  customers,
+  tickets,
+  workOrders,
+  currentCompanyName,
+  permissions,
+  onNavigate,
+}: {
+  summary: Summary | null;
+  prospects: Prospect[];
+  customers: Customer[];
+  tickets: Ticket[];
+  workOrders: WorkOrder[];
+  currentCompanyName: string;
+  permissions: DashboardPermissions;
+  onNavigate: (tab: Tab) => void;
+}) {
+  const pendingInstallations = workOrders.filter(
+    (order) => order.tipoOt === 'Instalacion' && !['Completada', 'Cerrada', 'Cancelada'].includes(order.estado),
+  ).length;
+  const openTickets = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
+  const stats = [
+    {
+      label: 'Prospectos activos',
+      value: summary?.metricas.prospectos ?? prospects.length,
+      hint: 'Resumen actual',
+    },
+    {
+      label: 'Clientes activos',
+      value: summary?.metricas.clientes ?? customers.length,
+      hint: currentCompanyName,
+    },
+    {
+      label: 'Instalaciones pendientes',
+      value: pendingInstallations,
+      hint: 'Órdenes por coordinar o cerrar',
+    },
+    {
+      label: 'Tickets abiertos',
+      value: openTickets,
+      hint: 'Casos en atención',
+    },
+  ];
+  const quickActions = [
+    {
+      label: 'Nuevo prospecto',
+      description: 'Registrar oportunidad comercial',
+      tab: 'prospects' as Tab,
+      visible: permissions.createProspects || permissions.viewProspects,
+    },
+    {
+      label: 'Crear ticket',
+      description: 'Atender solicitud de soporte',
+      tab: 'tickets' as Tab,
+      visible: permissions.viewTickets,
+    },
+    {
+      label: 'Agendar instalación',
+      description: 'Coordinar visita técnica',
+      tab: 'installations' as Tab,
+      visible: permissions.viewInstallations,
+    },
+    {
+      label: 'Nueva orden',
+      description: 'Revisar órdenes de trabajo',
+      tab: 'workOrders' as Tab,
+      visible: permissions.viewWorkOrders,
+    },
+  ];
+
+  return (
+    <section className="dashboard-home">
+      <div className="page-heading">
+        <h1>Dashboard operativo</h1>
+      </div>
+
+      <section className="stat-grid">
+        {stats.map((stat) => (
+          <StatCard key={stat.label} {...stat} />
+        ))}
+      </section>
+
+      <section className="panel stack dashboard-actions-panel">
+        <div className="section-heading">
+          <h2>Acciones rápidas</h2>
+        </div>
+        <div className="quick-actions">
+          {quickActions.filter((action) => action.visible).map((action) => (
+            <QuickActionCard key={action.label} {...action} onNavigate={onNavigate} />
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function StatCard({ label, value, hint }: { label: string; value: string | number; hint: string }) {
+  return (
+    <article className="stat-card">
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{hint}</small>
+      </div>
     </article>
   );
 }
 
-function TabButton({
-  current,
-  value,
-  onClick,
-  children,
+function QuickActionCard({
+  label,
+  description,
+  tab,
+  onNavigate,
 }: {
-  current: Tab;
-  value: Tab;
-  onClick: (tab: Tab) => void;
-  children: string;
+  label: string;
+  description: string;
+  tab: Tab;
+  onNavigate: (tab: Tab) => void;
 }) {
   return (
-    <button className={current === value ? 'tab active' : 'tab'} onClick={() => onClick(value)}>
-      {children}
+    <button type="button" className="quick-action-card" onClick={() => onNavigate(tab)}>
+      <strong>{label}</strong>
+      <span>{description}</span>
     </button>
+  );
+}
+
+function StatusBadge({ value }: { value?: string | null }) {
+  const normalized = (value ?? 'Sin dato').toLowerCase();
+  const tone = normalized.includes('cerrado') || normalized.includes('completada') || normalized.includes('resuelto') || normalized.includes('activo')
+    ? 'success'
+    : normalized.includes('alta') || normalized.includes('escalado') || normalized.includes('perdido')
+      ? 'danger'
+      : normalized.includes('media') || normalized.includes('pendiente') || normalized.includes('programada')
+        ? 'warning'
+        : 'neutral';
+
+  return <span className={`status-badge ${tone}`}>{value ?? 'Sin dato'}</span>;
+}
+
+function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <h2>{title}</h2>
+          <button type="button" className="secondary compact" onClick={onClose}>
+            Cerrar
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
   );
 }
 
@@ -490,25 +704,21 @@ function ProspectsPanel({
   plans,
   writeCompanyId,
   permissions,
+  onOpenInstallation,
   onCreated,
 }: {
   prospects: Prospect[];
   plans: Plan[];
   writeCompanyId: number;
   permissions: DashboardPermissions;
+  onOpenInstallation: (idProspecto: number) => void;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? prospects[0] ?? null;
-
-  useEffect(() => {
-    if (!selectedId && prospects[0]) {
-      setSelectedId(prospects[0].idProspecto);
-    }
-  }, [prospects, selectedId]);
+  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -633,7 +843,7 @@ function ProspectsPanel({
                   <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                    <button type="button" className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
                     </button>
                   </td>
@@ -642,14 +852,24 @@ function ProspectsPanel({
             </tbody>
           </table>
         </div>
-        {selectedProspect && (
+        <Modal
+          title="Gestionar prospecto"
+          open={Boolean(selectedProspect)}
+          onClose={() => setSelectedId(null)}
+        >
+          {selectedProspect && (
           <ProspectWorkflowPanel
             prospect={selectedProspect}
             plans={plans}
             permissions={permissions}
+            onOpenInstallation={() => {
+              setSelectedId(null);
+              onOpenInstallation(selectedProspect.idProspecto);
+            }}
             onChanged={onCreated}
           />
-        )}
+          )}
+        </Modal>
       </section>
     </section>
   );
@@ -659,11 +879,13 @@ function ProspectWorkflowPanel({
   prospect,
   plans,
   permissions,
+  onOpenInstallation,
   onChanged,
 }: {
   prospect: Prospect;
   plans: Plan[];
   permissions: DashboardPermissions;
+  onOpenInstallation: () => void;
   onChanged: () => void;
 }) {
   const [pipelineStatus, setPipelineStatus] = useState(prospect.estadoPipeline ?? 'Prospecto Nuevo');
@@ -719,8 +941,15 @@ function ProspectWorkflowPanel({
   }
 
   return (
-    <div className="workflow-panel">
-      <h3>{prospect.nombreCompleto}</h3>
+    <div className="workflow-panel modal-workflow">
+      <section className="customer-preview">
+        <h3>{prospect.nombreCompleto}</h3>
+        <p><strong>RUT:</strong> {prospect.rut ?? '-'}</p>
+        <p><strong>Teléfono:</strong> {prospect.telefono ?? '-'}</p>
+        <p><strong>Correo:</strong> {prospect.email ?? '-'}</p>
+        <p><strong>Estado:</strong> {prospect.estadoPipeline ?? '-'}</p>
+        <p><strong>Origen:</strong> {prospect.origenContacto ?? '-'}</p>
+      </section>
       <div className="workflow-grid">
         {permissions.manageProspectPipeline && <label>
           Actualizar estado del prospecto en el pipeline
@@ -853,8 +1082,13 @@ function ProspectWorkflowPanel({
           </button>
         </label>}
 
-        {permissions.createInstallOrders && (
-          <InstallOrderForm prospect={prospect} onChanged={onChanged} />
+        {permissions.createInstallOrders && prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente) && (
+          <label>
+            Agenda de instalación
+            <button type="button" onClick={onOpenInstallation}>
+              Generar instalación
+            </button>
+          </label>
         )}
       </div>
       {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
@@ -862,28 +1096,69 @@ function ProspectWorkflowPanel({
   );
 }
 
-function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; onChanged: () => void }) {
-  const installationProspects = prospects.filter((prospect) =>
-    prospect.estadoPipeline === 'Instalacion Programada' ||
-    (prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente)),
+function InstallationsPanel({
+  prospects,
+  workOrders,
+  focusedProspectId,
+  onFocusConsumed,
+  onChanged,
+}: {
+  prospects: Prospect[];
+  workOrders: WorkOrder[];
+  focusedProspectId: number | null;
+  onFocusConsumed: () => void;
+  onChanged: () => void;
+}) {
+  const installationProspects = useMemo(
+    () => prospects.filter((prospect) =>
+      prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente),
+    ),
+    [prospects],
+  );
+  const installationOrders = useMemo(
+    () => workOrders.filter((order) => order.tipoOt === 'Instalacion'),
+    [workOrders],
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const selectedProspect =
-    installationProspects.find((prospect) => prospect.idProspecto === selectedId) ??
-    installationProspects[0] ??
-    null;
+  const [modalOpen, setModalOpen] = useState(false);
+  const selectedProspect = installationProspects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
+  const prospectByCustomerCompany = useMemo(() => {
+    const map = new Map<string, Prospect>();
+
+    for (const prospect of prospects) {
+      if (prospect.idCliente && prospect.empresa?.idEmpresa) {
+        map.set(`${prospect.idCliente}:${prospect.empresa.idEmpresa}`, prospect);
+      }
+    }
+
+    return map;
+  }, [prospects]);
 
   useEffect(() => {
-    if (!selectedId && installationProspects[0]) {
-      setSelectedId(installationProspects[0].idProspecto);
+    if (!focusedProspectId) {
+      return;
     }
-  }, [installationProspects, selectedId]);
+
+    const focused = installationProspects.find((prospect) => prospect.idProspecto === focusedProspectId);
+
+    if (focused) {
+      setSelectedId(focused.idProspecto);
+      setModalOpen(true);
+    }
+
+    onFocusConsumed();
+  }, [focusedProspectId, installationProspects, onFocusConsumed]);
+
+  function openInstallModal(idProspecto: number) {
+    setSelectedId(idProspecto);
+    setModalOpen(true);
+  }
 
   return (
     <section className="workspace-grid">
       <section className="panel">
-        <h2>Instalaciones</h2>
-        <p className="detail-line">Selecciona un prospecto con cotización aceptada y factibilidad confirmada.</p>
+        <h2>Prospectos listos para instalación</h2>
+        <p className="detail-line">Agenda instalaciones para prospectos aceptados y con plan contratado.</p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -901,8 +1176,8 @@ function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; o
                   <td>{prospect.nombreCompleto ?? '-'}</td>
                   <td>{prospect.estadoPipeline ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
-                      Nueva Orden
+                    <button className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>
+                      Agendar instalación
                     </button>
                   </td>
                 </tr>
@@ -911,18 +1186,63 @@ function InstallationsPanel({ prospects, onChanged }: { prospects: Prospect[]; o
           </table>
         </div>
         {!installationProspects.length && (
-          <p className="inline-status">No hay prospectos habilitados para generar una Orden de Instalación.</p>
+          <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>
         )}
       </section>
 
       <section className="panel">
-        <h2>Nueva Orden</h2>
-        {selectedProspect ? (
-          <InstallOrderForm prospect={selectedProspect} onChanged={onChanged} />
-        ) : (
-          <p className="inline-status">Selecciona un prospecto que cumpla las precondiciones de CU-17.</p>
+        <h2>Agenda de instalaciones</h2>
+        <p className="detail-line">Visitas de instalación generadas y conectadas con órdenes de trabajo.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Orden</th>
+                <th>Cliente</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Técnico</th>
+                <th>Prioridad</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {installationOrders.map((order) => {
+                const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`);
+
+                return (
+                  <tr key={order.idOt}>
+                    <td>{order.idOt}</td>
+                    <td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td>
+                    <td>{formatDateOnly(order.fechaProgramada)}</td>
+                    <td>{order.horaVisita ?? '-'}</td>
+                    <td>{order.tecnico?.nombreCompleto ?? '-'}</td>
+                    <td>{order.prioridad}</td>
+                    <td>{order.estado}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!installationOrders.length && (
+          <p className="inline-status">No hay instalaciones agendadas.</p>
         )}
       </section>
+
+      <Modal title="Generar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
+        {selectedProspect ? (
+          <InstallOrderForm
+            prospect={selectedProspect}
+            onChanged={() => {
+              setModalOpen(false);
+              onChanged();
+            }}
+          />
+        ) : (
+          <p className="inline-status">Selecciona un prospecto aceptado para agendar la instalación.</p>
+        )}
+      </Modal>
     </section>
   );
 }
@@ -1058,7 +1378,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         idTecnico: Number(technicianId),
       });
       setStatus(
-        `Orden de Instalación OT ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
+        `Orden de Instalación ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
         `El prospecto avanzó a Instalación Programada.`,
       );
       setAvailability(null);
@@ -1071,7 +1391,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
 
   return (
     <div className="install-order-form">
-      <h3>Generando Orden de Instalación (CU-17)</h3>
+      <h3>Generar orden de instalación</h3>
       <p className="detail-line">
         Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
       </p>
@@ -1079,7 +1399,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
       )}
       {prospect.estadoPipeline !== 'Aceptado' && (
-        <p className="inline-status">La Orden de Instalación ya fue generada para este prospecto.</p>
+        <p className="inline-status">La orden de instalación ya fue generada para este prospecto.</p>
       )}
       <div className="install-form-grid">
         <label>
@@ -1238,23 +1558,16 @@ function CustomersPanel({
     puertoOlt: '',
     observaciones: '',
   });
+  const [managementOpen, setManagementOpen] = useState(false);
 
   const visibleCustomers = searchResults ?? customers;
-  const selectedCustomer =
-    visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? visibleCustomers[0] ?? null;
+  const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
   const contractOptions = selectedCustomer?.contratos ?? [];
   const customerCompanyId = scope !== 'consolidado'
     ? Number(scope)
     : selectedCustomer?.idEmpresa ?? contractOptions[0]?.idEmpresa ?? undefined;
-
-  useEffect(() => {
-    if (!selectedId && customers[0]) {
-      setSelectedId(customers[0].idCliente);
-      setStatusValue(customers[0].estado);
-    }
-  }, [customers, selectedId]);
 
   useEffect(() => {
     if (selectedCustomer) {
@@ -1310,7 +1623,8 @@ function CustomersPanel({
     try {
       const { data } = await api.get<Customer[]>('/customers', { params: { scope, query: term } });
       setSearchResults(data);
-      setSelectedId(data[0]?.idCliente ?? null);
+      setSelectedId(null);
+      setManagementOpen(false);
       setStatus(data.length ? `${data.length} cliente(s) encontrado(s)` : 'No se encontraron clientes');
     } catch (err) {
       setStatus(apiErrorMessage(err));
@@ -1320,8 +1634,23 @@ function CustomersPanel({
   function clearSearch() {
     setSearchTerm('');
     setSearchResults(null);
-    setSelectedId(customers[0]?.idCliente ?? null);
+    setSelectedId(null);
+    setManagementOpen(false);
     setStatus('');
+  }
+
+  function openCustomerManagement(customerId: number) {
+    setSelectedId(customerId);
+    setManagementOpen(true);
+    setStatus('');
+  }
+
+  function customerCompanyLabel(customer: Customer) {
+    return customer.empresas?.join(', ') || customer.empresa?.nombre || '-';
+  }
+
+  function customerMainPlan(customer: Customer) {
+    return customer.contratos?.find((contract) => contract.plan)?.plan?.nombreComercial ?? '-';
   }
 
   async function updateCustomerStatus() {
@@ -1462,37 +1791,42 @@ function CustomersPanel({
   }
 
   return (
-    <section className="workspace-grid">
-      <section className="panel">
-        <h2>Consultando historial completo del cliente</h2>
+    <section className="customers-module">
+      <section className="panel customers-list-panel">
+        <div className="section-heading">
+          <h2>Clientes</h2>
+          <p>Consulta y gestiona clientes registrados por RUT, nombre, teléfono o contrato.</p>
+        </div>
         <form className="customer-search" onSubmit={searchCustomers}>
           <label>
-            Buscar cliente por RUT, teléfono, nombre o número de contrato
+            Buscar cliente
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Ej.: 12345678-5, +569..., Ana Pérez o 25"
+              placeholder="Buscar por RUT, nombre, teléfono o contrato"
             />
           </label>
           <div className="button-row">
-            <button type="submit">Buscar cliente</button>
+            <button type="submit">Buscar</button>
             {searchResults && (
               <button type="button" className="secondary" onClick={clearSearch}>
-                Limpiar búsqueda
+                Limpiar
               </button>
             )}
           </div>
         </form>
+        {status && !managementOpen && <p className="inline-status">{status}</p>}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>RUT</th>
                 <th>Nombre</th>
-                <th>Teléfono</th>
-                <th>Estado</th>
+                <th>Empresa</th>
+                <th>Estado actual</th>
                 <th>Origen</th>
-                <th>Empresas</th>
+                <th>Servicio / Plan</th>
+                <th>Contacto</th>
                 <th></th>
               </tr>
             </thead>
@@ -1501,13 +1835,14 @@ function CustomersPanel({
                 <tr key={customer.idCliente}>
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
-                  <td>{customer.telefono ?? '-'}</td>
-                  <td>{customer.estado}</td>
+                  <td>{customerCompanyLabel(customer)}</td>
+                  <td><StatusBadge value={customer.estado} /></td>
                   <td>{customer.origenContacto ?? '-'}</td>
-                  <td>{customer.empresas?.join(', ') || customer.empresa?.nombre || '-'}</td>
+                  <td>{customerMainPlan(customer)}</td>
+                  <td>{customer.telefono ?? customer.email ?? '-'}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(customer.idCliente)}>
-                      Gestionar cliente
+                    <button className="secondary compact" onClick={() => openCustomerManagement(customer.idCliente)}>
+                      Gestionar
                     </button>
                   </td>
                 </tr>
@@ -1515,10 +1850,35 @@ function CustomersPanel({
             </tbody>
           </table>
         </div>
+        {!visibleCustomers.length && (
+          <p className="empty-state">
+            {searchResults ? 'No se encontraron clientes con los criterios ingresados.' : 'No hay clientes registrados para mostrar.'}
+          </p>
+        )}
       </section>
 
+      <Modal title="Gestionar cliente" open={managementOpen} onClose={() => setManagementOpen(false)}>
+        {selectedCustomer ? (
+          <div className="customer-management-modal">
+            <section className="customer-summary-grid">
+              <article className="customer-preview">
+                <h3>{selectedCustomer.nombreCompleto}</h3>
+                <p><strong>RUT:</strong> {selectedCustomer.rut ?? '-'}</p>
+                <p><strong>Empresa:</strong> {customerCompanyLabel(selectedCustomer)}</p>
+                <p><strong>Estado:</strong> {selectedCustomer.estado}</p>
+                <p><strong>Origen:</strong> {selectedCustomer.origenContacto ?? '-'}</p>
+              </article>
+              <article className="customer-preview">
+                <h3>Datos de contacto</h3>
+                <p><strong>Teléfono:</strong> {selectedCustomer.telefono ?? '-'}</p>
+                <p><strong>Correo:</strong> {selectedCustomer.email ?? '-'}</p>
+                <p><strong>Dirección:</strong> {String(selectedCustomer.datosTecnicos?.direccion ?? '-')}</p>
+                <p><strong>Plan principal:</strong> {customerMainPlan(selectedCustomer)}</p>
+              </article>
+            </section>
+
       <section className="panel stack">
-        <h2>Actualizando estado operativo del cliente</h2>
+        <h2>Estado operativo</h2>
         {selectedCustomer ? (
           <>
             <p className="detail-line">
@@ -1572,7 +1932,7 @@ function CustomersPanel({
       </section>
 
       <section className="panel stack full-width-panel">
-        <h2>Perfil individual de servicios contratados</h2>
+        <h2>Servicios contratados</h2>
         {selectedCustomer ? (
           <>
             <div className="table-wrap">
@@ -1643,7 +2003,7 @@ function CustomersPanel({
                       ))}
                       {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
                         <li key={`order-${order.idOt}`}>
-                          OT {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
+                          Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
                         </li>
                       ))}
                       {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
@@ -1794,6 +2154,11 @@ function CustomersPanel({
           <p className="inline-status">Selecciona un cliente para revisar sus servicios contratados.</p>
         )}
       </section>
+          </div>
+        ) : (
+          <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
+        )}
+      </Modal>
     </section>
   );
 }
@@ -1828,8 +2193,9 @@ function InventoryPanel({
   const [statusForm, setStatusForm] = useState({ estado: 'Disponible', motivo: '' });
   const [installForm, setInstallForm] = useState({ idCliente: '', idOt: '', macAddress: '', puertoOlt: '', modelo: '' });
   const [status, setStatus] = useState('');
+  const [managementOpen, setManagementOpen] = useState(false);
 
-  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? inventory[0] ?? null;
+  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? null;
   const eligibleCustomers = customers.filter(
     (customer) =>
       customer.idEmpresa === selectedUnit?.idEmpresa ||
@@ -1841,12 +2207,6 @@ function InventoryPanel({
       order.idCliente === Number(installForm.idCliente) &&
       order.idEmpresa === selectedUnit?.idEmpresa,
   );
-
-  useEffect(() => {
-    if (!selectedId && inventory[0]) {
-      setSelectedId(inventory[0].idUnidad);
-    }
-  }, [inventory, selectedId]);
 
   useEffect(() => {
     if (selectedUnit) {
@@ -1954,7 +2314,13 @@ function InventoryPanel({
                   <td>{unit.estado}</td>
                   <td>{unit.empresa?.nombre ?? `Empresa ${unit.idEmpresa ?? '-'}`}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(unit.idUnidad)}>
+                    <button
+                      className="secondary compact"
+                      onClick={() => {
+                        setSelectedId(unit.idUnidad);
+                        setManagementOpen(true);
+                      }}
+                    >
                       Gestionar
                     </button>
                   </td>
@@ -1964,8 +2330,9 @@ function InventoryPanel({
           </table>
         </div>
 
-        {selectedUnit && (
-          <div className="workflow-panel">
+        <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
+        {selectedUnit ? (
+          <div className="workflow-panel modal-workflow">
             <h3>{selectedUnit.numeroSerie}</h3>
             <p className="detail-line">
               Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
@@ -2067,7 +2434,7 @@ function InventoryPanel({
                   <option value="">Orden de instalación opcional</option>
                   {eligibleInstallOrders.map((order) => (
                     <option key={order.idOt} value={order.idOt}>
-                      OT {order.idOt} - {order.estado}
+                      Orden {order.idOt} - {order.estado}
                     </option>
                   ))}
                 </select>
@@ -2106,8 +2473,12 @@ function InventoryPanel({
                 </button>
               </label>}
             </div>
+            {status && <p className="inline-status">{status}</p>}
           </div>
+        ) : (
+          <p className="inline-status">Selecciona un equipo del inventario para gestionarlo.</p>
         )}
+        </Modal>
       </section>
     </section>
   );
@@ -2141,14 +2512,9 @@ function TicketsPanel({
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
   const [customerLookupStatus, setCustomerLookupStatus] = useState('');
+  const [managementOpen, setManagementOpen] = useState(false);
 
-  const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? tickets[0] ?? null;
-
-  useEffect(() => {
-    if (!selectedId && tickets[0]) {
-      setSelectedId(tickets[0].idTicket);
-    }
-  }, [tickets, selectedId]);
+  const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
 
   useEffect(() => {
     if (selectedTicket) {
@@ -2334,7 +2700,13 @@ function TicketsPanel({
                   <td>{ticket.prioridad}</td>
                   <td>{ticket.estado}</td>
                   <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(ticket.idTicket)}>
+                    <button
+                      className="secondary compact"
+                      onClick={() => {
+                        setSelectedId(ticket.idTicket);
+                        setManagementOpen(true);
+                      }}
+                    >
                       Gestionar
                     </button>
                   </td>
@@ -2344,10 +2716,18 @@ function TicketsPanel({
           </table>
         </div>
 
-        {selectedTicket && (permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) && (
-          <div className="workflow-panel">
-            <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
-            <div className="workflow-grid">
+        <Modal title="Gestionar ticket" open={managementOpen} onClose={() => setManagementOpen(false)}>
+          {selectedTicket ? (
+            <div className="workflow-panel modal-workflow">
+              <section className="customer-preview">
+                <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
+                <p><strong>Cliente:</strong> {selectedTicket.cliente?.nombreCompleto ?? '-'}</p>
+                <p><strong>Clasificación:</strong> {selectedTicket.categoria?.nombre ?? selectedTicket.idCategoria}</p>
+                <p><strong>Prioridad:</strong> {selectedTicket.prioridad}</p>
+                <p><strong>Estado:</strong> {selectedTicket.estado}</p>
+              </section>
+              {(permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) ? (
+              <div className="workflow-grid">
               {permissions.classifyTickets && <label>
                 Clasificacion
                 <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
@@ -2450,8 +2830,15 @@ function TicketsPanel({
                 </button>
               </label>}
             </div>
-          </div>
-        )}
+              ) : (
+                <p className="inline-status">No tienes permisos para modificar este ticket.</p>
+              )}
+              {status && <p className="inline-status">{status}</p>}
+            </div>
+          ) : (
+            <p className="inline-status">Selecciona un ticket para gestionarlo.</p>
+          )}
+        </Modal>
       </section>
     </section>
   );
@@ -2459,18 +2846,32 @@ function TicketsPanel({
 
 function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ potenciaOpticaDbm: '', observaciones: '' });
   const [status, setStatus] = useState('');
 
-  const installationOrders = workOrders.filter((order) => order.tipoOt === 'Instalacion');
-  const selectedOrder =
-    installationOrders.find((order) => order.idOt === selectedId) ?? installationOrders[0] ?? null;
+  const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
 
   useEffect(() => {
-    if (!selectedId && installationOrders[0]) {
-      setSelectedId(installationOrders[0].idOt);
+    setForm({ potenciaOpticaDbm: '', observaciones: '' });
+    setStatus('');
+  }, [selectedId]);
+
+  function ownerLabel(order: WorkOrder) {
+    if (order.prospecto?.idProspecto) {
+      return `Prospecto ${order.prospecto.idProspecto}`;
     }
-  }, [installationOrders, selectedId]);
+
+    if (order.idCliente) {
+      return `Cliente ${order.idCliente}`;
+    }
+
+    if (order.idTicket) {
+      return `Ticket ${order.idTicket}`;
+    }
+
+    return 'Sin asociado';
+  }
 
   async function completeInstallation() {
     if (!selectedOrder) {
@@ -2494,104 +2895,127 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
   }
 
   return (
-    <section className="workspace-grid">
-      <section className="panel">
-        <h2>Cerrando instalación y activando cliente</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Tipo</th>
-                <th>Prioridad</th>
-                <th>Estado</th>
-                <th>Conexión</th>
-                <th>Visita</th>
-                <th>Técnico</th>
-                <th></th>
+    <section className="panel full-width-panel stack">
+      <div className="section-heading">
+        <h2>Órdenes de Trabajo</h2>
+        <p>Listado operativo de visitas, soporte e instalaciones registradas.</p>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Tipo</th>
+              <th>Asociado</th>
+              <th>Fecha</th>
+              <th>Técnico</th>
+              <th>Prioridad</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {workOrders.map((order) => (
+              <tr key={order.idOt}>
+                <td>{order.idOt}</td>
+                <td>{order.tipoOt}</td>
+                <td>{ownerLabel(order)}</td>
+                <td>
+                  {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
+                  {order.horaVisita ? ` ${order.horaVisita}` : ''}
+                </td>
+                <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
+                <td><StatusBadge value={order.prioridad} /></td>
+                <td><StatusBadge value={order.estado} /></td>
+                <td>
+                  <button
+                    className="secondary compact"
+                    onClick={() => {
+                      setSelectedId(order.idOt);
+                      setModalOpen(true);
+                    }}
+                  >
+                    Gestionar
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {installationOrders.map((order) => (
-                <tr key={order.idOt}>
-                  <td>{order.idOt}</td>
-                  <td>{order.tipoOt}</td>
-                  <td>{order.prioridad}</td>
-                  <td>{order.estado}</td>
-                  <td>{formatConnectionType(order.tipoConexion)}</td>
-                  <td>
-                    {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
-                    {order.horaVisita ? ` ${order.horaVisita}` : ''}
-                  </td>
-                  <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
-                  <td>
-                    <button className="secondary compact" onClick={() => setSelectedId(order.idOt)}>
-                      Gestionar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!workOrders.length && <p className="empty-state">No hay órdenes de trabajo disponibles.</p>}
 
-      <section className="panel stack">
-        <h2>Calculando tiempo de conversión del prospecto</h2>
+      <Modal title="Gestionar orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedOrder ? (
-          <>
-            <p className="detail-line">
-              OT {selectedOrder.idOt} - {selectedOrder.tipoOt} - {selectedOrder.estado}
-            </p>
-            <p className="detail-line">
-              Tipo de conexión: {formatConnectionType(selectedOrder.tipoConexion)} - Visita:{' '}
-              {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
-              {selectedOrder.horaVisita ?? 'Sin hora'} - Técnico: {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}
-            </p>
-            {selectedOrder.observacionesAgenda && (
-              <p className="detail-line">Observaciones de agenda: {selectedOrder.observacionesAgenda}</p>
+          <div className="workflow-panel modal-workflow">
+            <section className="customer-preview">
+              <h3>Orden {selectedOrder.idOt}</h3>
+              <p><strong>Tipo:</strong> {selectedOrder.tipoOt}</p>
+              <p><strong>Asociado:</strong> {ownerLabel(selectedOrder)}</p>
+              <p><strong>Estado:</strong> {selectedOrder.estado}</p>
+              <p><strong>Técnico:</strong> {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
+              {selectedOrder.tipoConexion && (
+                <p><strong>Conexión:</strong> {formatConnectionType(selectedOrder.tipoConexion)}</p>
+              )}
+              <p>
+                <strong>Visita:</strong>{' '}
+                {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
+                {selectedOrder.horaVisita ?? 'Sin hora'}
+              </p>
+              {selectedOrder.observacionesAgenda && (
+                <p><strong>Observaciones de agenda:</strong> {selectedOrder.observacionesAgenda}</p>
+              )}
+            </section>
+
+            {selectedOrder.tipoOt === 'Instalacion' ? (
+              <>
+                <div className="history-grid">
+                  <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
+                  <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
+                  <HistoryBox
+                    title="Tiempo de conversión"
+                    value={
+                      selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
+                        ? 'Pendiente'
+                        : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
+                    }
+                  />
+                </div>
+                {!selectedOrder.prospecto?.fechaCreacion && (
+                  <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
+                )}
+                <div className="workflow-grid">
+                  <label>
+                    Potencia óptica dBm
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.potenciaOpticaDbm}
+                      onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Observaciones
+                    <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
+                  onClick={completeInstallation}
+                >
+                  Confirmar instalación y activar cliente
+                </button>
+              </>
+            ) : (
+              <p className="inline-status">Esta orden no requiere cierre de instalación desde este panel.</p>
             )}
-            <div className="history-grid">
-              <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
-              <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
-              <HistoryBox
-                title="Tiempo de conversión"
-                value={
-                  selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
-                    ? 'Pendiente'
-                    : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
-                }
-              />
-            </div>
-            {!selectedOrder.prospecto?.fechaCreacion && (
-              <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
-            )}
-            <label>
-              Potencia optica dBm
-              <input
-                type="number"
-                step="0.01"
-                value={form.potenciaOpticaDbm}
-                onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-              />
-            </label>
-            <label>
-              Observaciones
-              <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
-            </label>
-            <button
-              type="button"
-              disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
-              onClick={completeInstallation}
-            >
-              Confirmar instalación y activar cliente
-            </button>
             {status && <p className="inline-status">{status}</p>}
-          </>
+          </div>
         ) : (
-          <p className="inline-status">No hay ordenes de trabajo pendientes.</p>
+          <p className="inline-status">Selecciona una orden de trabajo para gestionarla.</p>
         )}
-      </section>
+      </Modal>
     </section>
   );
 }
@@ -2650,104 +3074,86 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
       link.download = `reporte-${type}.${format}`;
       link.click();
       URL.revokeObjectURL(url);
-      setStatus('Reporte generado');
+      setStatus('Reporte generado correctamente');
     } catch (err) {
       setStatus(apiErrorMessage(err));
     }
   }
 
   return (
-    <section className="panel narrow stack">
-      <h2>Exportando reportes operativos</h2>
-      <label>
-        Tipo de reporte
-        <select value={type} onChange={(event) => setType(event.target.value)}>
-          <option value="clientes">Clientes</option>
-          <option value="prospectos">Prospectos</option>
-          <option value="tickets">Tickets</option>
-          <option value="inventario">Inventario</option>
-        </select>
-      </label>
-      <label>
-        Período desde
-        <input
-          type="date"
-          min={reportMinimumDate}
-          max={today}
-          value={dateFrom}
-          onChange={(event) => setDateFrom(event.target.value)}
-        />
-      </label>
-      <label>
-        Período hasta
-        <input
-          type="date"
-          min={reportMinimumDate}
-          max={today}
-          value={dateTo}
-          onChange={(event) => setDateTo(event.target.value)}
-        />
-      </label>
-      <small>Periodo permitido: desde {formatDateOnly(reportMinimumDate)} hasta hoy.</small>
-      <label>
-        Alcance
-        <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}>
-          <option value="consolidado">Consolidado: todas las empresas</option>
-          <option value="empresa">Una empresa</option>
-        </select>
-      </label>
-      <label>
-        Empresa
-        <select
-          value={companyId}
-          disabled={scopeMode === 'consolidado'}
-          onChange={(event) => setCompanyId(event.target.value)}
-        >
-          <option value="">Seleccionar empresa</option>
-          {companies.map((company) => (
-            <option key={company.idEmpresa} value={company.idEmpresa}>
-              {company.nombre}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Formato
-        <select value={format} onChange={(event) => setFormat(event.target.value)}>
-          <option value="csv">CSV</option>
-          <option value="xlsx">XLSX</option>
-        </select>
-      </label>
-      <button type="button" onClick={exportReport}>
-        Generar Reporte
-      </button>
-      {status && <p className="inline-status">{status}</p>}
-    </section>
-  );
-}
-
-function RutPanel() {
-  const [rut, setRut] = useState('');
-  const [result, setResult] = useState('');
-
-  async function validate() {
-    try {
-      const { data } = await api.post('/rut/validate', { rut });
-      setResult(data.valid ? `Valido: ${data.normalized}` : `Rechazado: ${data.reason}`);
-    } catch (err) {
-      setResult(apiErrorMessage(err));
-    }
-  }
-
-  return (
-    <section className="panel narrow stack">
-      <h2>Validar RUT</h2>
-      <label>
-        RUT
-        <input value={rut} onChange={(event) => setRut(event.target.value)} />
-      </label>
-      <button onClick={validate}>Validar</button>
-      {result && <p className="inline-status">{result}</p>}
+    <section className="reports-shell">
+      <div className="panel report-card">
+        <div className="section-heading centered">
+          <span className="eyebrow">Exportación</span>
+          <h2>Reportes operativos</h2>
+          <p>Genera reportes por tipo, período, alcance y formato.</p>
+        </div>
+        <div className="report-form-grid">
+          <label>
+            Tipo de reporte
+            <select value={type} onChange={(event) => setType(event.target.value)}>
+              <option value="clientes">Clientes</option>
+              <option value="prospectos">Prospectos</option>
+              <option value="tickets">Tickets</option>
+              <option value="inventario">Inventario</option>
+            </select>
+          </label>
+          <label>
+            Formato
+            <select value={format} onChange={(event) => setFormat(event.target.value)}>
+              <option value="csv">CSV</option>
+              <option value="xlsx">XLSX</option>
+            </select>
+          </label>
+          <label>
+            Período desde
+            <input
+              type="date"
+              min={reportMinimumDate}
+              max={today}
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+            />
+          </label>
+          <label>
+            Período hasta
+            <input
+              type="date"
+              min={reportMinimumDate}
+              max={today}
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+            />
+          </label>
+          <label>
+            Alcance
+            <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}>
+              <option value="consolidado">Consolidado: todas las empresas</option>
+              <option value="empresa">Una empresa</option>
+            </select>
+          </label>
+          <label>
+            Empresa
+            <select
+              value={companyId}
+              disabled={scopeMode === 'consolidado'}
+              onChange={(event) => setCompanyId(event.target.value)}
+            >
+              <option value="">Seleccionar empresa</option>
+              {companies.map((company) => (
+                <option key={company.idEmpresa} value={company.idEmpresa}>
+                  {company.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <small className="report-help">Periodo permitido: desde {formatDateOnly(reportMinimumDate)} hasta hoy.</small>
+        <button type="button" className="report-button" onClick={exportReport}>
+          Generar reporte
+        </button>
+        {status && <p className="inline-status">{status}</p>}
+      </div>
     </section>
   );
 }
