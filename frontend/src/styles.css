@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 :root {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -911,5 +911,61 @@ input[readonly] {
 
   .select-label {
     min-width: 0;
+  }
+}
+
+.dashboard-insights,
+.advanced-summary-grid,
+.advanced-forms-grid,
+.advanced-tables-grid,
+.billing-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.billing-stats,
+.advanced-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.billing-module,
+.inventory-advanced {
+  display: grid;
+  gap: 16px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compact-list {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-list-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e2ebe7;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfdfc;
+}
+
+.compact-list-item span {
+  color: #66736d;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 820px) {
+  .dashboard-insights,
+  .advanced-summary-grid,
+  .advanced-forms-grid,
+  .advanced-tables-grid,
+  .billing-stats {
+    grid-template-columns: 1fr;
   }
 }

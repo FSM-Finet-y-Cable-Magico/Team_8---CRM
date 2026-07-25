@@ -16,4 +16,6 @@ export const ACCESS_ROLES = {
   UPDATE_TICKET_STATUS: ['Administrador', 'Soporte', 'Terreno'],
   VIEW_WORK_ORDERS: ['Administrador', 'Soporte', 'Terreno'],
   COMPLETE_INSTALLATION: ['Administrador', 'Soporte', 'Terreno'],
+  VIEW_BILLING: ['Administrador', 'Comercial', 'Soporte'],
+  MANAGE_BILLING: ['Administrador', 'Comercial'],
 } as const satisfies Record<string, readonly RoleName[]>;

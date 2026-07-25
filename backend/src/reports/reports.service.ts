@@ -7,7 +7,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 
 type ReportFormat = 'csv' | 'xlsx';
-type ReportType = 'clientes' | 'prospectos' | 'tickets' | 'inventario';
+type ReportType = 'clientes' | 'prospectos' | 'tickets' | 'inventario' | 'cobranza' | 'materiales';
 
 @Injectable()
 export class ReportsService {
@@ -115,6 +115,77 @@ export class ReportsService {
         bodega: row.idBodegaActual,
         empresa: row.idEmpresa,
       }));
+    }
+
+    if (type === 'cobranza') {
+      const rows = await this.prisma.factura.findMany({
+        where: {
+          ...(period ? { fechaLimitePago: period } : {}),
+          ...('idEmpresa' in where ? { contrato: { is: { idEmpresa: where.idEmpresa } } } : {}),
+        },
+        orderBy: { fechaLimitePago: 'desc' },
+        include: {
+          pagos: true,
+          contrato: {
+            include: {
+              cliente: true,
+              plan: true,
+            },
+          },
+        },
+      });
+
+      return rows.map((row) => {
+        const pagado = row.pagos.reduce((total, pago) => total + Number(pago.monto), 0);
+        const monto = Number(row.monto ?? 0);
+
+        return {
+          factura: row.idFactura,
+          contrato: row.idContrato,
+          cliente: row.contrato?.cliente?.nombreCompleto,
+          rut: row.contrato?.cliente?.rut,
+          plan: row.contrato?.plan?.nombreComercial,
+          vencimiento: row.fechaLimitePago.toISOString().slice(0, 10),
+          estado: row.estado,
+          monto,
+          pagado,
+          saldo: Math.max(0, monto - pagado),
+          empresa: row.contrato?.idEmpresa,
+        };
+      });
+    }
+
+    if (type === 'materiales') {
+      const orders = await this.prisma.ordenTrabajo.findMany({
+        where,
+        select: { idOt: true, idEmpresa: true, tipoOt: true, fechaCompletada: true, fechaProgramada: true },
+        take: 1000,
+      });
+      const orderById = new Map(orders.map((order) => [order.idOt, order]));
+      const rows = orders.length
+        ? await this.prisma.usoMaterialOt.findMany({
+            where: { idOt: { in: orders.map((order) => order.idOt) } },
+            orderBy: { idUso: 'desc' },
+          })
+        : [];
+      const typeIds = [...new Set(rows.map((row) => row.idTipoEquipo).filter((id): id is number => Boolean(id)))];
+      const types = typeIds.length ? await this.prisma.tipoEquipo.findMany({ where: { idTipoEquipo: { in: typeIds } } }) : [];
+      const typeById = new Map(types.map((type) => [type.idTipoEquipo, type]));
+
+      return rows.map((row) => {
+        const order = row.idOt ? orderById.get(row.idOt) : null;
+
+        return {
+          uso: row.idUso,
+          orden: row.idOt,
+          empresa: order?.idEmpresa,
+          tipo_trabajo: order?.tipoOt,
+          fecha_ot: order?.fechaCompletada?.toISOString() ?? order?.fechaProgramada?.toISOString().slice(0, 10),
+          material: row.idTipoEquipo ? typeById.get(row.idTipoEquipo)?.nombre ?? row.idTipoEquipo : null,
+          unidad: row.idUnidad,
+          cantidad: Number(row.cantidad),
+        };
+      });
     }
 
     throw new BadRequestException('Reporte no soportado');

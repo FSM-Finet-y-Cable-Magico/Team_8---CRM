@@ -17,7 +17,7 @@ export class ReportsController {
   @Roles(...ACCESS_ROLES.ADMIN_ONLY)
   async export(
     @CurrentUser() user: AuthUser,
-    @Query('type') type: 'clientes' | 'prospectos' | 'tickets' | 'inventario',
+    @Query('type') type: 'clientes' | 'prospectos' | 'tickets' | 'inventario' | 'cobranza' | 'materiales',
     @Query('format') format: 'csv' | 'xlsx' = 'csv',
     @Query('scope') scope = 'consolidado',
     @Res() response: Response,

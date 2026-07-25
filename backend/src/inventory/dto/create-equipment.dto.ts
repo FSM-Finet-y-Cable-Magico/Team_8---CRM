@@ -31,6 +31,16 @@ export class CreateEquipmentDto {
   idBodegaActual?: number;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  numeroPoste?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  idCajaNap?: number;
+
+  @IsOptional()
   @IsDateString()
   fechaAdquisicion?: string;
 }

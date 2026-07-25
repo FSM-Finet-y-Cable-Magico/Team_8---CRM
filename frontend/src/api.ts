@@ -144,7 +144,9 @@ export type InventoryUnit = {
   idEmpresa: number | null;
   idTipoEquipo: number | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
   numeroSerie: string;
+  numeroPoste?: string | null;
   modelo: string | null;
   estado: string;
   idClienteInstalado: number | null;
@@ -154,11 +156,118 @@ export type InventoryUnit = {
   macAddress?: string | null;
   puertoOlt?: string | null;
   tipoEquipo?: {
+    idTipoEquipo?: number;
     nombre: string;
     categoria: string | null;
   } | null;
 };
 
+export type BillingOverview = {
+  fechaCorteCalculo: string;
+  reglaCorteDias: number;
+  modoNotificacion: string;
+  metricas: {
+    clientesMorosos: number;
+    facturasVencidas: number;
+    clientesProgramadosCorte: number;
+  };
+  morosos: Array<{
+    idFactura: number;
+    idContrato: number;
+    monto: number;
+    pagado: number;
+    saldo: number;
+    fechaLimitePago: string;
+    diasAtraso: number;
+    estadoFactura: string;
+    cliente: {
+      idCliente: number;
+      rut: string | null;
+      nombreCompleto: string;
+      telefono: string | null;
+      email: string | null;
+      estado: string;
+      empresa: string | null;
+    };
+    contrato: {
+      idContrato: number;
+      estado: string;
+      plan: string | null;
+    };
+  }>;
+  cortesProgramados: BillingOverview['morosos'];
+  notificaciones: Array<{
+    idNotificacion: string;
+    idCliente: number | null;
+    idPlantilla: number | null;
+    canal: string | null;
+    fechaEnvio: string | null;
+    estadoEnvio: string | null;
+  }>;
+};
+
+export type AdvancedInventory = {
+  consumibles: Array<{
+    idStock: number;
+    idTipoEquipo: number | null;
+    idBodega: number | null;
+    cantidadDisponible: number;
+    umbralMinimo: number | null;
+    tipoEquipo?: {
+      idTipoEquipo: number;
+      nombre: string;
+      categoria: string | null;
+    } | null;
+    bodega?: {
+      idBodega: number;
+      nombre: string;
+      idEmpresa: number | null;
+    } | null;
+  }>;
+  alertasStock: AdvancedInventory['consumibles'];
+  cajasNap: Array<{
+    idCajaNap: number;
+    idEmpresa: number | null;
+    identificadorUnico: string | null;
+    numeroPoste: string | null;
+    zona: string | null;
+    capacidadPuertos: number | null;
+  }>;
+  transferencias: Array<{
+    idTransferencia: number;
+    idEmpresaOrigen: number | null;
+    idEmpresaDestino: number | null;
+    fechaTransferencia: string | null;
+    observaciones: string | null;
+  }>;
+  usoMateriales: Array<{
+    idUso: number;
+    idOt: number | null;
+    idTipoEquipo: number | null;
+    cantidad: number;
+    tipoEquipo?: {
+      nombre: string;
+      categoria: string | null;
+    } | null;
+  }>;
+  evidencias: Array<{
+    idFoto: number;
+    idOt: number | null;
+    urlCloudinary: string;
+    formato: string | null;
+    tamanoKb: number | null;
+    fechaSubida: string | null;
+  }>;
+  mantenciones: Array<{
+    idHistorial: string;
+    idUnidad: number | null;
+    motivo: string | null;
+    fechaHora: string | null;
+    unidad?: {
+      numeroSerie: string;
+    } | null;
+  }>;
+};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;
@@ -169,6 +278,7 @@ export type Ticket = {
   idTicket: number;
   idCliente: number | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
   idCategoria: number;
   codigoSeguimiento: string | null;
   prioridad: string;
@@ -185,6 +295,7 @@ export type WorkOrder = {
   idTecnico: number | null;
   idTicket: number | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
   tipoOt: string;
   prioridad: string;
   estado: string;

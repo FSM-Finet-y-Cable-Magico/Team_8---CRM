@@ -7,6 +7,7 @@ export type DashboardPermissions = {
   viewInstallations: boolean;
   viewCustomers: boolean;
   viewInventory: boolean;
+  viewBilling: boolean;
   viewTickets: boolean;
   viewWorkOrders: boolean;
   viewReports: boolean;
@@ -23,6 +24,7 @@ export type DashboardPermissions = {
   createInstallOrders: boolean;
   manageServices: boolean;
   manageInventory: boolean;
+  manageBilling: boolean;
   installEquipment: boolean;
   createTickets: boolean;
   classifyTickets: boolean;
@@ -47,6 +49,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   viewInstallations: ['Administrador', 'Comercial', 'Soporte'],
   viewCustomers: ['Administrador', 'Comercial', 'Soporte'],
   viewInventory: ['Administrador', 'Soporte', 'Terreno', 'Inventario'],
+  viewBilling: ['Administrador', 'Comercial', 'Soporte'],
   viewTickets: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
   viewWorkOrders: ['Administrador', 'Soporte', 'Terreno'],
   viewReports: ['Administrador'],
@@ -63,6 +66,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   createInstallOrders: ['Administrador', 'Comercial', 'Soporte'],
   manageServices: ['Administrador', 'Comercial', 'Soporte'],
   manageInventory: ['Administrador', 'Soporte'],
+  manageBilling: ['Administrador', 'Comercial'],
   installEquipment: ['Administrador', 'Soporte', 'Terreno'],
   createTickets: ['Administrador', 'Comercial', 'Soporte'],
   classifyTickets: ['Administrador', 'Soporte'],

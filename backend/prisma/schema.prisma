@@ -371,3 +371,104 @@ model ServicioContratado {
 
   @@map("servicio_contratado")
 }
+
+model PlantillaNotificacion {
+  idPlantilla    Int      @id @default(autoincrement()) @map("id_plantilla")
+  tipoEvento     String?  @map("tipo_evento") @db.VarChar(60)
+  canal          String   @db.VarChar(20)
+  contenidoTexto String?  @map("contenido_texto")
+  activa         Boolean? @default(true)
+
+  @@map("plantilla_notificacion")
+}
+
+model LogNotificacion {
+  idNotificacion BigInt    @id @default(autoincrement()) @map("id_notificacion")
+  idCliente       Int?      @map("id_cliente")
+  idPlantilla     Int?      @map("id_plantilla")
+  canal           String?   @db.VarChar(20)
+  fechaEnvio      DateTime? @map("fecha_envio")
+  estadoEnvio     String?   @map("estado_envio") @db.VarChar(20)
+
+  @@map("log_notificacion")
+}
+
+model StockConsumible {
+  idStock             Int     @id @default(autoincrement()) @map("id_stock")
+  idTipoEquipo        Int?    @map("id_tipo_equipo")
+  idBodega            Int?    @map("id_bodega")
+  cantidadDisponible  Decimal @map("cantidad_disponible") @db.Decimal(10, 2)
+  umbralMinimo        Decimal? @map("umbral_minimo") @db.Decimal(10, 2)
+
+  @@map("stock_consumible")
+}
+
+model CajaNap {
+  idCajaNap        Int      @id @default(autoincrement()) @map("id_caja_nap")
+  idEmpresa        Int?     @map("id_empresa")
+  idMufa           Int?     @map("id_mufa")
+  identificadorUnico String? @unique @map("identificador_unico") @db.VarChar(50)
+  numeroPoste      String?  @map("numero_poste") @db.VarChar(30)
+  zona             String?  @db.VarChar(80)
+  capacidadPuertos Int?     @map("capacidad_puertos") @db.SmallInt
+  latitud          Decimal? @db.Decimal(9, 6)
+  longitud         Decimal? @db.Decimal(9, 6)
+
+  @@map("caja_nap")
+}
+
+model BajaEquipo {
+  idBaja               Int       @id @default(autoincrement()) @map("id_baja")
+  idUnidad             Int?      @map("id_unidad")
+  idUsuario            Int?      @map("id_usuario")
+  motivoBaja           String    @map("motivo_baja")
+  tipoBaja             String?   @map("tipo_baja") @db.VarChar(20)
+  donacionDestinatario String?   @map("donacion_destinatario") @db.VarChar(150)
+  fechaBaja            DateTime? @map("fecha_baja") @db.Date
+
+  @@map("baja_equipo")
+}
+
+model ListaNegra {
+  idVetado          Int       @id @default(autoincrement()) @map("id_vetado")
+  idCliente         Int?      @map("id_cliente")
+  rutVetado         String    @map("rut_vetado") @db.VarChar(12)
+  direccionVetada   String?   @map("direccion_vetada")
+  motivo            String
+  fechaRegistro     DateTime? @map("fecha_registro") @db.Date
+  idUsuarioRegistro Int?      @map("id_usuario_registro")
+
+  @@map("lista_negra")
+}
+
+model EvidenciaFoto {
+  idFoto        Int       @id @default(autoincrement()) @map("id_foto")
+  idOt          Int?      @map("id_ot")
+  urlCloudinary String    @map("url_cloudinary")
+  formato       String?   @db.VarChar(5)
+  tamanoKb      Int?      @map("tamano_kb")
+  fechaSubida   DateTime? @map("fecha_subida")
+
+  @@map("evidencia_foto")
+}
+
+model TransferenciaEquipo {
+  idTransferencia   Int       @id @default(autoincrement()) @map("id_transferencia")
+  idEmpresaOrigen   Int?      @map("id_empresa_origen")
+  idEmpresaDestino  Int?      @map("id_empresa_destino")
+  idUsuarioRegistro Int?      @map("id_usuario_registro")
+  fechaTransferencia DateTime? @map("fecha_transferencia") @db.Date
+  observaciones     String?
+
+  @@map("transferencia_equipo")
+}
+
+model UsoMaterialOt {
+  idUso        Int     @id @default(autoincrement()) @map("id_uso")
+  idOt         Int?    @map("id_ot")
+  idTipoEquipo Int?    @map("id_tipo_equipo")
+  idUnidad     Int?    @map("id_unidad")
+  cantidad     Decimal @db.Decimal(10, 2)
+
+  @@map("uso_material_ot")
+}

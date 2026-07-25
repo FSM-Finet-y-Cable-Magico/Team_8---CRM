@@ -13,16 +13,34 @@ const commercial: AuthUser = {
 describe('CompaniesService', () => {
   it('limits the summary to the company assigned to a non-admin user', async () => {
     const prisma = {
-      cliente: { count: jest.fn().mockResolvedValue(17) },
+      cliente: {
+        count: jest
+          .fn()
+          .mockResolvedValueOnce(17)
+          .mockResolvedValueOnce(2)
+          .mockResolvedValueOnce(15),
+      },
       prospecto: { count: jest.fn().mockResolvedValue(11) },
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1, nombre: 'FiNet Limitada' }]) },
+      ordenTrabajo: { count: jest.fn().mockResolvedValue(0) },
+      ticket: {
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      unidadEquipo: { count: jest.fn().mockResolvedValue(0) },
+      servicioContratado: { count: jest.fn().mockResolvedValue(0) },
+      contrato: {
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      categoriaFalla: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new CompaniesService(prisma as never);
 
     const result = await service.summary(commercial, 'consolidado');
 
     expect(result.scope).toBe('1');
-    expect(result.metricas).toEqual({ clientes: 17, prospectos: 11 });
+    expect(result.metricas).toEqual(expect.objectContaining({ clientes: 17, prospectos: 11 }));
     expect(prisma.cliente.count).toHaveBeenCalledWith({
       where: {
         OR: [
