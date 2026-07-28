@@ -11,11 +11,15 @@ import {
   CustomerService,
   InstallAvailability,
   InventoryUnit,
+  MonitoringStatus,
   Plan,
+  PortalCustomer,
   Prospect,
   Role,
   Ticket,
   TicketCategory,
+  TvipCredentialSummary,
+  TvipGenerationResult,
   UserRow,
   WorkOrder,
 } from './api';
@@ -137,11 +141,11 @@ function formatDateOnly(value?: string | null) {
 
 function formatConnectionType(value?: WorkOrder['tipoConexion']) {
   if (value === 'Fibra Optica') {
-    return 'Fibra Ã“ptica';
+    return 'Fibra Óptica';
   }
 
   if (value === 'Television') {
-    return 'TelevisiÃ³n';
+    return 'Televisión';
   }
 
   return 'Sin dato';
@@ -218,15 +222,35 @@ export default function App() {
     const stored = localStorage.getItem('finet_user');
     return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
+  const [portalMode, setPortalMode] = useState(() => window.location.pathname.startsWith('/portal'));
+
+  if (portalMode) {
+    return (
+      <CustomerPortal
+        onBack={() => {
+          window.history.pushState(null, '', '/');
+          setPortalMode(false);
+        }}
+      />
+    );
+  }
 
   if (!user) {
-    return <LoginScreen onLogin={setUser} />;
+    return (
+      <LoginScreen
+        onLogin={setUser}
+        onOpenPortal={() => {
+          window.history.pushState(null, '', '/portal');
+          setPortalMode(true);
+        }}
+      />
+    );
   }
 
   return <Dashboard user={user} onLogout={() => setUser(null)} />;
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+function LoginScreen({ onLogin, onOpenPortal }: { onLogin: (user: AuthUser) => void; onOpenPortal: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -255,8 +279,8 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
       <section className="login-card" aria-label="Acceso al sistema CRM">
         <section className="login-panel">
           <div className="login-heading">
-            <h1>Sistema de GestiÃ³n CRM</h1>
-            <p>FiNet y Cable MÃ¡gico Litoral Â· AdministraciÃ³n comercial, clientes y soporte.</p>
+            <h1>Sistema de Gestión CRM</h1>
+            <p>FiNet y Cable Mágico Litoral · Administración comercial, clientes y soporte.</p>
           </div>
           <form onSubmit={submit} className="stack" autoComplete="off">
             <label>
@@ -270,13 +294,13 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
               />
             </label>
             <label>
-              ContraseÃ±a
+              Contraseña
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 type="password"
                 autoComplete="off"
-                placeholder="Ingresa tu contraseÃ±a"
+                placeholder="Ingresa tu contraseña"
               />
             </label>
             {error && <p className="alert">{error}</p>}
@@ -284,7 +308,296 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </form>
+          <button type="button" className="secondary portal-entry-button" onClick={onOpenPortal}>
+            Ingresar al portal cliente
+          </button>
         </section>
+      </section>
+    </main>
+  );
+}
+
+function CustomerPortal({ onBack }: { onBack: () => void }) {
+  const [token, setToken] = useState(() => localStorage.getItem('finet_portal_token') ?? '');
+  const [customer, setCustomer] = useState<PortalCustomer | null>(() => {
+    const stored = localStorage.getItem('finet_portal_customer');
+    return stored ? JSON.parse(stored) as PortalCustomer : null;
+  });
+  const [loginForm, setLoginForm] = useState({ rut: '', password: '' });
+  const [services, setServices] = useState<CustomerService[]>([]);
+  const [contracts, setContracts] = useState<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
+  const [tvip, setTvip] = useState<TvipCredentialSummary[]>([]);
+  const [ticketForm, setTicketForm] = useState({ idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
+  const [wifiForm, setWifiForm] = useState({ idServicio: '', nuevaContrasena: '', observaciones: '' });
+  const [temporaryTvPassword, setTemporaryTvPassword] = useState<{ idContrato: number; password: string } | null>(null);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const auth = (value = token) => ({ headers: { Authorization: `Bearer ${value}` } });
+
+  useEffect(() => {
+    if (token) {
+      void loadPortalData(token, true);
+    }
+  }, []);
+
+  async function login(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setStatus('');
+
+    try {
+      const { data } = await api.post<{ portalToken: string; customer: PortalCustomer }>('/portal/login', {
+        rut: normalizeRutInput(loginForm.rut),
+        password: loginForm.password,
+      });
+      localStorage.setItem('finet_portal_token', data.portalToken);
+      localStorage.setItem('finet_portal_customer', JSON.stringify(data.customer));
+      setToken(data.portalToken);
+      setCustomer(data.customer);
+      await loadPortalData(data.portalToken, true);
+      setStatus('Sesion portal iniciada');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadPortalData(nextToken = token, silent = false) {
+    try {
+      const [servicesResult, contractsResult, ticketsResult, categoriesResult, tvipResult] = await Promise.all([
+        api.get<CustomerService[]>('/portal/services', auth(nextToken)),
+        api.get<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>('/portal/contracts', auth(nextToken)),
+        api.get<Ticket[]>('/portal/tickets', auth(nextToken)),
+        api.get<TicketCategory[]>('/portal/ticket-categories', auth(nextToken)),
+        api.get<TvipCredentialSummary[]>('/portal/tvip', auth(nextToken)),
+      ]);
+      setServices(servicesResult.data);
+      setContracts(contractsResult.data);
+      setTickets(ticketsResult.data);
+      setCategories(categoriesResult.data);
+      setTvip(tvipResult.data);
+      if (!silent) {
+        setStatus('Portal actualizado');
+      }
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function createPortalTicket(event: FormEvent) {
+    event.preventDefault();
+
+    if (!ticketForm.idCategoria || ticketForm.descripcion.trim().length < 10) {
+      setStatus('Selecciona categoría y describe el problema con al menos 10 caracteres.');
+      return;
+    }
+
+    try {
+      await api.post('/portal/tickets', {
+        idCategoria: Number(ticketForm.idCategoria),
+        idServicio: ticketForm.idServicio ? Number(ticketForm.idServicio) : undefined,
+        prioridad: ticketForm.prioridad,
+        descripcion: ticketForm.descripcion.trim(),
+      }, auth());
+      setTicketForm({ idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
+      await loadPortalData(token, true);
+      setStatus('Ticket creado desde portal');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function requestWifiChange(event: FormEvent) {
+    event.preventDefault();
+
+    if (!wifiForm.idServicio) {
+      setStatus('Selecciona el servicio para registrar la solicitud Wi-Fi.');
+      return;
+    }
+
+    try {
+      const { data } = await api.post<{ mensaje: string }>('/portal/wifi-change-request', {
+        idServicio: Number(wifiForm.idServicio),
+        nuevaContrasena: wifiForm.nuevaContrasena.trim() || undefined,
+        observaciones: wifiForm.observaciones.trim() || undefined,
+      }, auth());
+      setWifiForm({ idServicio: '', nuevaContrasena: '', observaciones: '' });
+      await loadPortalData(token, true);
+      setStatus(data.mensaje);
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function regeneratePortalTvip(idContrato: number) {
+    try {
+      const { data } = await api.post<TvipGenerationResult>('/portal/tvip/regenerate', { idContrato }, auth());
+      setTemporaryTvPassword({ idContrato, password: data.temporaryPassword });
+      await loadPortalData(token, true);
+      setStatus('Credencial TV IP generada. La clave temporal se muestra solo una vez.');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  function logoutPortal() {
+    localStorage.removeItem('finet_portal_token');
+    localStorage.removeItem('finet_portal_customer');
+    setToken('');
+    setCustomer(null);
+    setServices([]);
+    setContracts([]);
+    setTickets([]);
+    setTvip([]);
+    setStatus('');
+  }
+
+  if (!token || !customer) {
+    return (
+      <main className="login-shell portal-login-shell">
+        <section className="login-card" aria-label="Acceso Portal Cliente">
+          <section className="login-panel">
+            <div className="login-heading">
+              <h1>Portal Cliente</h1>
+              <p>Consulta tus servicios, tickets y solicitudes técnicas.</p>
+            </div>
+            <form className="stack" onSubmit={login}>
+              <label>
+                RUT
+                <input value={loginForm.rut} onChange={(event) => setLoginForm({ ...loginForm, rut: event.target.value })} placeholder="12345678-5" />
+              </label>
+              <label>
+                Contraseña portal
+                <input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} />
+              </label>
+              <button className="login-button" disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar al portal'}</button>
+            </form>
+            {status && <p className="inline-status">{status}</p>}
+            <button type="button" className="secondary portal-entry-button" onClick={onBack}>Volver al CRM interno</button>
+          </section>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="portal-shell">
+      <header className="portal-topbar">
+        <div>
+          <span className="eyebrow">Portal Cliente</span>
+          <h1>{customer.nombreCompleto}</h1>
+          <p>{customer.rut ?? 'Sin RUT'} - Estado: {customer.estado}</p>
+        </div>
+        <div className="button-row">
+          <button type="button" className="secondary" onClick={() => void loadPortalData()}>Actualizar</button>
+          <button type="button" className="secondary" onClick={logoutPortal}>Cerrar portal</button>
+          <button type="button" className="secondary" onClick={onBack}>CRM interno</button>
+        </div>
+      </header>
+      {status && <p className="inline-status">{status}</p>}
+      <section className="portal-grid">
+        <article className="panel stack">
+          <h2>Mis servicios</h2>
+          {!services.length && <p className="inline-status">No hay servicios contratados registrados.</p>}
+          {services.map((service) => (
+            <section className="compact-list-item" key={service.idServicio}>
+              <strong>{service.tipoServicio} - {service.estadoOperativo}</strong>
+              <span>Plan: {service.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}</span>
+              <span>Direccion: {service.direccion?.direccionCompleta ?? 'Sin direccion'}</span>
+            </section>
+          ))}
+        </article>
+        <article className="panel stack">
+          <h2>Mis contratos</h2>
+          {!contracts.length && <p className="inline-status">No hay contratos visibles.</p>}
+          {contracts.map((contract) => (
+            <section className="compact-list-item" key={contract.idContrato}>
+              <strong>Contrato {contract.idContrato} - {contract.estado}</strong>
+              <span>{contract.plan?.nombreComercial ?? 'Sin plan'}</span>
+            </section>
+          ))}
+        </article>
+        <form className="panel stack" onSubmit={createPortalTicket}>
+          <h2>Crear ticket</h2>
+          <label>
+            Servicio
+            <select value={ticketForm.idServicio} onChange={(event) => setTicketForm({ ...ticketForm, idServicio: event.target.value })}>
+              <option value="">Ticket general</option>
+              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select value={ticketForm.idCategoria} onChange={(event) => setTicketForm({ ...ticketForm, idCategoria: event.target.value })}>
+              <option value="">Seleccionar</option>
+              {categories.map((category) => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+            </select>
+          </label>
+          <label>
+            Prioridad
+            <select value={ticketForm.prioridad} onChange={(event) => setTicketForm({ ...ticketForm, prioridad: event.target.value })}>
+              <option value="Alta">Alta</option>
+              <option value="Media">Media</option>
+              <option value="Baja">Baja</option>
+            </select>
+          </label>
+          <label>
+            Descripción
+            <textarea value={ticketForm.descripcion} onChange={(event) => setTicketForm({ ...ticketForm, descripcion: event.target.value })} />
+          </label>
+          <button disabled={!ticketForm.idCategoria}>Crear ticket</button>
+        </form>
+        <form className="panel stack" onSubmit={requestWifiChange}>
+          <h2>Solicitud cambio Wi-Fi</h2>
+          <p className="detail-line">El portal registra la solicitud para revisión técnica; no cambia el router automáticamente.</p>
+          <label>
+            Servicio
+            <select value={wifiForm.idServicio} onChange={(event) => setWifiForm({ ...wifiForm, idServicio: event.target.value })}>
+              <option value="">Seleccionar servicio</option>
+              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
+            </select>
+          </label>
+          <label>
+            Nueva clave sugerida
+            <input type="password" value={wifiForm.nuevaContrasena} onChange={(event) => setWifiForm({ ...wifiForm, nuevaContrasena: event.target.value })} />
+          </label>
+          <label>
+            Observaciones
+            <textarea value={wifiForm.observaciones} onChange={(event) => setWifiForm({ ...wifiForm, observaciones: event.target.value })} />
+          </label>
+          <button disabled={!wifiForm.idServicio}>Registrar solicitud</button>
+        </form>
+        <article className="panel stack">
+          <h2>Mis tickets</h2>
+          {!tickets.length && <p className="inline-status">No tienes tickets registrados.</p>}
+          {tickets.map((ticket) => (
+            <section className="compact-list-item" key={ticket.idTicket}>
+              <strong>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</strong>
+              <span>{ticket.categoria?.nombre ?? 'Sin categoría'} - {ticket.prioridad} - {ticket.estado}</span>
+              <span>{ticket.descripcion ?? '-'}</span>
+            </section>
+          ))}
+        </article>
+        <article className="panel stack">
+          <h2>TV IP</h2>
+          {!tvip.length && <p className="inline-status">Tu plan actual no incluye TV IP.</p>}
+          {tvip.map((credential) => (
+            <section className="compact-list-item" key={credential.idContrato}>
+              <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
+              <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
+              <button type="button" className="secondary compact" onClick={() => void regeneratePortalTvip(credential.idContrato)}>
+                {credential.credencial ? 'Regenerar credencial' : 'Generar credencial'}
+              </button>
+              {temporaryTvPassword?.idContrato === credential.idContrato && (
+                <p className="inline-status">Password temporal: <strong>{temporaryTvPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.</p>
+              )}
+            </section>
+          ))}
+        </article>
       </section>
     </main>
   );
@@ -402,12 +715,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory },
     { tab: 'billing', label: 'Cobranza', visible: canViewBilling },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets },
-    { tab: 'workOrders', label: 'Ã“rdenes de Trabajo', visible: canViewWorkOrders },
+    { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders },
     { tab: 'reports', label: 'Reportes', visible: permissions.viewReports },
-    { tab: 'audit', label: 'AuditorÃ­a', visible: permissions.viewAudit },
+    { tab: 'audit', label: 'Auditoría', visible: permissions.viewAudit },
   ];
   const secondaryNavItems: NavItem[] = [
-    { tab: 'import', label: 'ImportaciÃ³n', visible: permissions.viewImport },
+    { tab: 'import', label: 'Importación', visible: permissions.viewImport },
     { tab: 'users', label: 'Usuarios', visible: permissions.viewUsers },
   ];
 
@@ -543,7 +856,7 @@ function Sidebar({
         <strong>CRM FiNet</strong>
       </div>
 
-      <nav className="sidebar-nav" aria-label="NavegaciÃ³n principal">
+      <nav className="sidebar-nav" aria-label="Navegación principal">
         {mainItems.filter((item) => item.visible).map((item) => (
           <button
             key={item.tab}
@@ -557,8 +870,8 @@ function Sidebar({
       </nav>
 
       {visibleSecondaryItems.length > 0 && (
-        <nav className="sidebar-nav secondary-nav" aria-label="AdministraciÃ³n">
-          <span className="nav-section-title">AdministraciÃ³n</span>
+        <nav className="sidebar-nav secondary-nav" aria-label="Administración">
+          <span className="nav-section-title">Administración</span>
           {visibleSecondaryItems.map((item) => (
             <button
               key={item.tab}
@@ -654,14 +967,14 @@ function DashboardHome({
       visible: permissions.viewTickets,
     },
     {
-      label: 'Agendar instalaciÃ³n',
-      description: 'Coordinar visita tÃ©cnica',
+      label: 'Agendar instalación',
+      description: 'Coordinar visita técnica',
       tab: 'installations' as Tab,
       visible: permissions.viewInstallations,
     },
     {
       label: 'Nueva orden',
-      description: 'Revisar Ã³rdenes de trabajo',
+      description: 'Revisar órdenes de trabajo',
       tab: 'workOrders' as Tab,
       visible: permissions.viewWorkOrders,
     },
@@ -683,7 +996,7 @@ function DashboardHome({
         <article className="panel stack">
           <div className="section-heading">
             <h2>Alertas de vencimiento</h2>
-            <p>Contratos con vencimiento dentro de los proximos 7 dias.</p>
+            <p>Contratos con vencimiento dentro de los próximos 7 días.</p>
           </div>
           {(summary?.alertasVencimiento?.length ?? 0) > 0 ? (
             <div className="compact-list">
@@ -691,7 +1004,7 @@ function DashboardHome({
                 <div key={alert.idContrato} className="compact-list-item">
                   <strong>{alert.cliente}</strong>
                   <span>{alert.plan ?? 'Plan sin detalle'} - vence {formatDateOnly(alert.fechaVencimiento)}</span>
-                  <StatusBadge value={`${alert.diasRestantes} dia(s)`} />
+                  <StatusBadge value={`${alert.diasRestantes} día(s)`} />
                 </div>
               ))}
             </div>
@@ -703,7 +1016,7 @@ function DashboardHome({
         <article className="panel stack">
           <div className="section-heading">
             <h2>Tickets cerrados por falla</h2>
-            <p>Resumen mensual por categoria de soporte.</p>
+            <p>Resumen mensual por categoría de soporte.</p>
           </div>
           {(summary?.ticketsCerradosPorTipo?.length ?? 0) > 0 ? (
             <div className="compact-list">
@@ -722,7 +1035,7 @@ function DashboardHome({
 
       <section className="panel stack dashboard-actions-panel">
         <div className="section-heading">
-          <h2>Acciones rÃ¡pidas</h2>
+          <h2>Acciones rápidas</h2>
         </div>
         <div className="quick-actions">
           {quickActions.filter((action) => action.visible).map((action) => (
@@ -936,7 +1249,7 @@ function ProspectsPanel({
       )}
 
       <section className="panel">
-        <h2>GestiÃ³n de Prospectos</h2>
+        <h2>Gestión de Prospectos</h2>
         <div className="table-wrap">
           <table>
             <thead>
@@ -1043,10 +1356,10 @@ function ProspectWorkflowPanel({
       window.open(objectUrl, '_blank');
       setStatus(
         data.envioEmail === 'sent'
-          ? `CotizaciÃ³n generada y enviada automÃ¡ticamente a ${prospect.email}`
+          ? `Cotización generada y enviada automáticamente a ${prospect.email}`
           : data.envioEmail === 'failed'
-            ? 'CotizaciÃ³n generada, pero el servidor de correo rechazÃ³ el envÃ­o.'
-            : 'CotizaciÃ³n generada. Configura SMTP para enviarla automÃ¡ticamente por correo.',
+            ? 'Cotización generada, pero el servidor de correo rechazó el envío.'
+            : 'Cotización generada. Configura SMTP para enviarla automáticamente por correo.',
       );
       onChanged();
     } catch (err) {
@@ -1060,7 +1373,7 @@ function ProspectWorkflowPanel({
       <section className="customer-preview">
         <h3>{prospect.nombreCompleto}</h3>
         <p><strong>RUT:</strong> {prospect.rut ?? '-'}</p>
-        <p><strong>TelÃ©fono:</strong> {prospect.telefono ?? '-'}</p>
+        <p><strong>Teléfono:</strong> {prospect.telefono ?? '-'}</p>
         <p><strong>Correo:</strong> {prospect.email ?? '-'}</p>
         <p><strong>Estado:</strong> {prospect.estadoPipeline ?? '-'}</p>
         <p><strong>Origen:</strong> {prospect.origenContacto ?? '-'}</p>
@@ -1102,7 +1415,7 @@ function ProspectWorkflowPanel({
         </label>}
 
         {permissions.verifyFeasibility && <label>
-          Verificando factibilidad tÃ©cnica de instalaciÃ³n
+          Verificando factibilidad técnica de instalación
           <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
             <option value="Factible">Factible</option>
             <option value="No Factible">No Factible</option>
@@ -1121,7 +1434,7 @@ function ProspectWorkflowPanel({
         </label>}
 
         {permissions.generateQuotes && <label>
-          Generando cotizaciÃ³n en formato PDF
+          Generando cotización en formato PDF
           <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
             <option value="">Seleccionar plan</option>
             {planOptions.map((plan) => (
@@ -1135,12 +1448,12 @@ function ProspectWorkflowPanel({
             disabled={!quotePlanId}
             onClick={() => void generateQuote()}
           >
-            Generar CotizaciÃ³n
+            Generar Cotización
           </button>
         </label>}
 
         {permissions.recordProspectLoss && <label>
-          Registrando motivo de pÃ©rdida de prospecto
+          Registrando motivo de pérdida de prospecto
           <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
             {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
               <option key={item} value={item}>
@@ -1199,9 +1512,9 @@ function ProspectWorkflowPanel({
 
         {permissions.createInstallOrders && prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente) && (
           <label>
-            Agenda de instalaciÃ³n
+            Agenda de instalación
             <button type="button" onClick={onOpenInstallation}>
-              Generar instalaciÃ³n
+              Generar instalación
             </button>
           </label>
         )}
@@ -1272,7 +1585,7 @@ function InstallationsPanel({
   return (
     <section className="workspace-grid">
       <section className="panel">
-        <h2>Prospectos listos para instalaciÃ³n</h2>
+        <h2>Prospectos listos para instalación</h2>
         <p className="detail-line">Agenda instalaciones para prospectos aceptados y con plan contratado.</p>
         <div className="table-wrap">
           <table>
@@ -1292,7 +1605,7 @@ function InstallationsPanel({
                   <td>{prospect.estadoPipeline ?? '-'}</td>
                   <td>
                     <button className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>
-                      Agendar instalaciÃ³n
+                      Agendar instalación
                     </button>
                   </td>
                 </tr>
@@ -1301,13 +1614,13 @@ function InstallationsPanel({
           </table>
         </div>
         {!installationProspects.length && (
-          <p className="inline-status">No hay prospectos habilitados para generar una orden de instalaciÃ³n.</p>
+          <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>
         )}
       </section>
 
       <section className="panel">
         <h2>Agenda de instalaciones</h2>
-        <p className="detail-line">Visitas de instalaciÃ³n generadas y conectadas con Ã³rdenes de trabajo.</p>
+        <p className="detail-line">Visitas de instalación generadas y conectadas con órdenes de trabajo.</p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -1316,7 +1629,7 @@ function InstallationsPanel({
                 <th>Cliente</th>
                 <th>Fecha</th>
                 <th>Hora</th>
-                <th>TÃ©cnico</th>
+                <th>Técnico</th>
                 <th>Prioridad</th>
                 <th>Estado</th>
               </tr>
@@ -1345,7 +1658,7 @@ function InstallationsPanel({
         )}
       </section>
 
-      <Modal title="Generar instalaciÃ³n" open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title="Generar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedProspect ? (
           <InstallOrderForm
             prospect={selectedProspect}
@@ -1355,7 +1668,7 @@ function InstallationsPanel({
             }}
           />
         ) : (
-          <p className="inline-status">Selecciona un prospecto aceptado para agendar la instalaciÃ³n.</p>
+          <p className="inline-status">Selecciona un prospecto aceptado para agendar la instalación.</p>
         )}
       </Modal>
     </section>
@@ -1403,15 +1716,15 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
 
   function validateRequiredFields() {
     if (!form.tipoConexion || !form.fechaProgramada || !form.horaVisita) {
-      return 'Completa tipo de conexiÃ³n, fecha y hora de la visita.';
+      return 'Completa tipo de conexión, fecha y hora de la visita.';
     }
 
     if (form.fechaProgramada < today) {
-      return 'La fecha de instalaciÃ³n no puede ser anterior a hoy.';
+      return 'La fecha de instalación no puede ser anterior a hoy.';
     }
 
     if (form.fechaProgramada > latestInstallDate) {
-      return 'La fecha de instalaciÃ³n no puede superar un aÃ±o desde hoy.';
+      return 'La fecha de instalación no puede superar un año desde hoy.';
     }
 
     return '';
@@ -1463,13 +1776,13 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
       horaVisita: alternative.horaVisita,
       tecnicosDisponibles: alternative.tecnicosDisponibles,
       alternativas: [],
-      mensaje: 'Horario alternativo seleccionado. Confirma el tÃ©cnico asignado.',
+      mensaje: 'Horario alternativo seleccionado. Confirma el técnico asignado.',
     });
     setTechnicianId(
       alternative.tecnicosDisponibles[0] ? String(alternative.tecnicosDisponibles[0].idTecnico) : '',
     );
     setError('');
-    setStatus('Horario alternativo seleccionado. Confirma el tÃ©cnico asignado.');
+    setStatus('Horario alternativo seleccionado. Confirma el técnico asignado.');
   }
 
   async function createInstallOrder() {
@@ -1483,7 +1796,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
     }
 
     if (!technicianId) {
-      setError('Verifica la disponibilidad y selecciona un tÃ©cnico antes de crear la orden.');
+      setError('Verifica la disponibilidad y selecciona un técnico antes de crear la orden.');
       return;
     }
 
@@ -1493,8 +1806,8 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         idTecnico: Number(technicianId),
       });
       setStatus(
-        `Orden de InstalaciÃ³n ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
-        `El prospecto avanzÃ³ a InstalaciÃ³n Programada.`,
+        `Orden de Instalación ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
+        `El prospecto avanzó a Instalación Programada.`,
       );
       setAvailability(null);
       setTechnicianId('');
@@ -1506,7 +1819,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
 
   return (
     <div className="install-order-form">
-      <h3>Generar orden de instalaciÃ³n</h3>
+      <h3>Generar orden de instalación</h3>
       <p className="detail-line">
         Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
       </p>
@@ -1514,11 +1827,11 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
       )}
       {prospect.estadoPipeline !== 'Aceptado' && (
-        <p className="inline-status">La orden de instalaciÃ³n ya fue generada para este prospecto.</p>
+        <p className="inline-status">La orden de instalación ya fue generada para este prospecto.</p>
       )}
       <div className="install-form-grid">
         <label>
-          Tipo de conexiÃ³n
+          Tipo de conexión
           <select
             value={form.tipoConexion}
             disabled={!canCreate}
@@ -1527,9 +1840,9 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
               setError('');
             }}
           >
-            <option value="">Seleccionar tipo de conexiÃ³n</option>
-            <option value="Fibra Optica">Fibra Ã“ptica</option>
-            <option value="Television">TelevisiÃ³n</option>
+            <option value="">Seleccionar tipo de conexión</option>
+            <option value="Fibra Optica">Fibra Óptica</option>
+            <option value="Television">Televisión</option>
           </select>
         </label>
         <label>
@@ -1575,12 +1888,12 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
         </label>
       </div>
       <button type="button" className="secondary" disabled={!canCreate} onClick={() => void checkAvailability()}>
-        Verificar disponibilidad tÃ©cnica
+        Verificar disponibilidad técnica
       </button>
 
       {availability?.tecnicosDisponibles.length ? (
         <label>
-          TÃ©cnico asignado
+          Técnico asignado
           <select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>
             {availability.tecnicosDisponibles.map((technician) => (
               <option key={technician.idTecnico} value={technician.idTecnico}>
@@ -1602,7 +1915,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
                 className="secondary compact"
                 onClick={() => selectAlternative(alternative)}
               >
-                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} tÃ©cnico(s))
+                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} técnico(s))
               </button>
             ))}
           </div>
@@ -1610,7 +1923,7 @@ function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChang
       )}
 
       <button type="button" disabled={!canCreate || !technicianId} onClick={() => void createInstallOrder()}>
-        Generar Orden de InstalaciÃ³n
+        Generar Orden de Instalación
       </button>
       {error && <p className="alert">{error}</p>}
       {status && <p className="inline-status">{status}</p>}
@@ -1674,6 +1987,10 @@ function CustomersPanel({
     observaciones: '',
   });
   const [managementOpen, setManagementOpen] = useState(false);
+  const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
+  const [serviceMonitoringStatus, setServiceMonitoringStatus] = useState<MonitoringStatus | null>(null);
+  const [tvipCredentials, setTvipCredentials] = useState<TvipCredentialSummary[]>([]);
+  const [tvipTempPassword, setTvipTempPassword] = useState<{ idContrato: number; usuario: string | null; password: string } | null>(null);
 
   const visibleCustomers = searchResults ?? customers;
   const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
@@ -1695,6 +2012,12 @@ function CustomersPanel({
         idContrato: selectedCustomer.contratos?.[0] ? String(selectedCustomer.contratos[0].idContrato) : '',
       });
       void loadServicesForCustomer(selectedCustomer.idCliente, true);
+      if (permissions.viewMonitoring) {
+        void loadCustomerMonitoring(selectedCustomer.idCliente, true);
+      }
+      if (permissions.manageTvip) {
+        void loadCustomerTvip(selectedCustomer.idCliente, true);
+      }
     }
   }, [selectedCustomer?.idCliente]);
 
@@ -1702,6 +2025,10 @@ function CustomersPanel({
     if (!selectedService) {
       setServiceUpdateForm(emptyServiceForm());
       return;
+    }
+
+    if (permissions.viewMonitoring) {
+      void loadServiceMonitoring(selectedService.idServicio, true);
     }
 
     const technicalData = selectedService.datosTecnicos ?? {};
@@ -1818,6 +2145,75 @@ function CustomersPanel({
     }
   }
 
+
+  async function loadCustomerMonitoring(idCliente = selectedCustomer?.idCliente, silent = false) {
+    if (!idCliente) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<MonitoringStatus>(`/monitoring/customers/${idCliente}/status`);
+      setMonitoringStatus(data);
+      if (!silent) {
+        setStatus('Monitoreo del cliente actualizado');
+      }
+    } catch (err) {
+      setMonitoringStatus(null);
+      if (!silent) {
+        setStatus(apiErrorMessage(err));
+      }
+    }
+  }
+
+  async function loadServiceMonitoring(idServicio = selectedService?.idServicio, silent = false) {
+    if (!idServicio) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<MonitoringStatus>(`/monitoring/services/${idServicio}/status`);
+      setServiceMonitoringStatus(data);
+      if (!silent) {
+        setStatus('Monitoreo del servicio actualizado');
+      }
+    } catch (err) {
+      setServiceMonitoringStatus(null);
+      if (!silent) {
+        setStatus(apiErrorMessage(err));
+      }
+    }
+  }
+
+  async function loadCustomerTvip(idCliente = selectedCustomer?.idCliente, silent = false) {
+    if (!idCliente) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<TvipCredentialSummary[]>(`/tvip/customer/${idCliente}`);
+      setTvipCredentials(data);
+      if (!silent) {
+        setStatus('Credenciales TV IP actualizadas');
+      }
+    } catch (err) {
+      setTvipCredentials([]);
+      if (!silent) {
+        setStatus(apiErrorMessage(err));
+      }
+    }
+  }
+
+  async function regenerateTvipCredential(idContrato: number) {
+    try {
+      const { data } = await api.post<TvipGenerationResult>(`/tvip/contracts/${idContrato}/regenerate`);
+      setTvipTempPassword({ idContrato, usuario: data.usuarioTvip, password: data.temporaryPassword });
+      await loadCustomerTvip(selectedCustomer?.idCliente, true);
+      setStatus('Credencial TV IP generada. La contraseña temporal se muestra solo una vez.');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
   async function createService(event: FormEvent) {
     event.preventDefault();
 
@@ -1910,7 +2306,7 @@ function CustomersPanel({
       <section className="panel customers-list-panel">
         <div className="section-heading">
           <h2>Clientes</h2>
-          <p>Consulta y gestiona clientes registrados por RUT, nombre, telÃ©fono o contrato.</p>
+          <p>Consulta y gestiona clientes registrados por RUT, nombre, teléfono o contrato.</p>
         </div>
         <form className="customer-search" onSubmit={searchCustomers}>
           <label>
@@ -1918,7 +2314,7 @@ function CustomersPanel({
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Buscar por RUT, nombre, telÃ©fono o contrato"
+              placeholder="Buscar por RUT, nombre, teléfono o contrato"
             />
           </label>
           <div className="button-row">
@@ -1985,12 +2381,54 @@ function CustomersPanel({
               </article>
               <article className="customer-preview">
                 <h3>Datos de contacto</h3>
-                <p><strong>TelÃ©fono:</strong> {selectedCustomer.telefono ?? '-'}</p>
+                <p><strong>Teléfono:</strong> {selectedCustomer.telefono ?? '-'}</p>
                 <p><strong>Correo:</strong> {selectedCustomer.email ?? '-'}</p>
-                <p><strong>DirecciÃ³n:</strong> {String(selectedCustomer.datosTecnicos?.direccion ?? '-')}</p>
+                <p><strong>Dirección:</strong> {String(selectedCustomer.datosTecnicos?.direccion ?? '-')}</p>
                 <p><strong>Plan principal:</strong> {customerMainPlan(selectedCustomer)}</p>
               </article>
             </section>
+
+            {(permissions.viewMonitoring || permissions.manageTvip) && (
+              <section className="customer-extra-grid">
+                {permissions.viewMonitoring && (
+                  <article className="customer-preview stack">
+                    <div className="section-heading compact-heading">
+                      <h3>Monitoreo de conexión</h3>
+                      <button type="button" className="secondary compact" onClick={() => void loadCustomerMonitoring()}>
+                        Actualizar
+                      </button>
+                    </div>
+                    <MonitoringStatusView status={monitoringStatus} />
+                  </article>
+                )}
+                {permissions.manageTvip && (
+                  <article className="customer-preview stack">
+                    <div className="section-heading compact-heading">
+                      <h3>TV IP</h3>
+                      <button type="button" className="secondary compact" onClick={() => void loadCustomerTvip()}>
+                        Actualizar
+                      </button>
+                    </div>
+                    {!tvipCredentials.length && <p className="inline-status">El cliente no tiene contratos con plan TV IP.</p>}
+                    {tvipCredentials.map((credential) => (
+                      <section className="compact-list-item" key={credential.idContrato}>
+                        <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
+                        <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
+                        <span>Generada: {formatDateTime(credential.credencial?.fechaGeneracion)}</span>
+                        <button type="button" className="secondary compact" onClick={() => void regenerateTvipCredential(credential.idContrato)}>
+                          {credential.credencial ? 'Regenerar' : 'Generar'} credencial
+                        </button>
+                        {tvipTempPassword?.idContrato === credential.idContrato && (
+                          <p className="inline-status">
+                            Password temporal: <strong>{tvipTempPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.
+                          </p>
+                        )}
+                      </section>
+                    ))}
+                  </article>
+                )}
+              </section>
+            )}
 
       <section className="panel stack">
         <h2>Estado operativo</h2>
@@ -2108,6 +2546,17 @@ function CustomersPanel({
                       {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
                     </ul>
                   </section>
+                  {permissions.viewMonitoring && (
+                    <section className="history-list">
+                      <div className="section-heading compact-heading">
+                        <h3>Monitoreo del servicio</h3>
+                        <button type="button" className="secondary compact" onClick={() => void loadServiceMonitoring()}>
+                          Actualizar
+                        </button>
+                      </div>
+                      <MonitoringStatusView status={serviceMonitoringStatus} />
+                    </section>
+                  )}
                   <section className="history-list">
                     <h3>Solicitudes y visitas asociadas</h3>
                     <ul>
@@ -2221,7 +2670,7 @@ function CustomersPanel({
                       onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, ipAsignada: event.target.value })}
                     />
                     <textarea
-                      placeholder="Observaciones tecnicas"
+                      placeholder="Observaciones técnicas"
                       value={serviceUpdateForm.observacionesTecnicas}
                       onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, observacionesTecnicas: event.target.value })}
                     />
@@ -2348,7 +2797,7 @@ function BillingPanel({
       <section className="stat-grid billing-stats">
         <StatCard label="Clientes morosos" value={overview?.metricas.clientesMorosos ?? 0} hint="Con deuda vencida" />
         <StatCard label="Facturas vencidas" value={overview?.metricas.facturasVencidas ?? 0} hint="Pendientes de pago" />
-        <StatCard label="Programados para corte" value={overview?.metricas.clientesProgramadosCorte ?? 0} hint={`Regla: ${overview?.reglaCorteDias ?? 5} dia(s)`} />
+        <StatCard label="Programados para corte" value={overview?.metricas.clientesProgramadosCorte ?? 0} hint={`Regla: ${overview?.reglaCorteDias ?? 5} día(s)`} />
         <StatCard label="Notificacion" value={overview?.modoNotificacion ?? 'mock'} hint="Modo de envio actual" />
       </section>
 
@@ -2389,7 +2838,7 @@ function BillingPanel({
                   <td>{row.contrato.plan ?? '-'}</td>
                   <td>{formatDateOnly(row.fechaLimitePago)}</td>
                   <td>${row.saldo.toLocaleString('es-CL')}</td>
-                  <td>{row.diasAtraso} dia(s)</td>
+                  <td>{row.diasAtraso} día(s)</td>
                   <td><StatusBadge value={row.cliente.estado} /></td>
                   <td>
                     {permissions.manageBilling && (
@@ -2418,7 +2867,7 @@ function BillingPanel({
       <section className="panel stack">
         <div className="section-heading">
           <h2>Clientes programados para corte</h2>
-          <p>Clientes cuya deuda supera la regla de dias configurada para corte.</p>
+          <p>Clientes cuya deuda supera la regla de días configurada para corte.</p>
         </div>
         <div className="table-wrap">
           <table>
@@ -2525,6 +2974,33 @@ function BillingPanel({
     </section>
   );
 }
+function MonitoringStatusView({ status }: { status: MonitoringStatus | null }) {
+  if (!status) {
+    return <p className="inline-status">Sin datos de monitoreo cargados.</p>;
+  }
+
+  return (
+    <div className="monitoring-status-card">
+      <p><strong>Estado:</strong> {status.estadoConexion}</p>
+      <p>{status.mensaje}</p>
+      <p><strong>Última medición:</strong> {formatDateTime(status.ultimaMedicion?.timestampMedicion)}</p>
+      <p><strong>Potencia óptica:</strong> {status.ultimaMedicion?.potenciaActualDbm ?? 'No disponible'} dBm</p>
+      <p><strong>Latencia:</strong> {status.latenciaEstado}</p>
+      <p><strong>Equipo:</strong> {status.equipo?.numeroSerie ?? 'Sin equipo asociado'}</p>
+      <p><strong>Caja NAP:</strong> {status.cajaNap?.identificadorUnico ?? status.cajaNap?.zona ?? 'Sin dato'}</p>
+      {status.historial.length > 0 && (
+        <ul className="compact-list">
+          {status.historial.slice(0, 4).map((event) => (
+            <li key={event.idHistorialOnt}>
+              {event.evento ?? 'Evento'} - {formatDateTime(event.timestamp)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function HistoryBox({ title, value }: { title: string; value: string | number }) {
   return (
     <article className="history-box">
@@ -3094,7 +3570,7 @@ function InventoryPanel({
                   <option value="Correctiva">Correctiva</option>
                 </select>
                 <input
-                  placeholder="Descripcion de la mantencion"
+                  placeholder="Descripción de la mantencion"
                   value={advancedUnitForm.maintenanceDesc}
                   onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceDesc: event.target.value })}
                 />
@@ -3147,7 +3623,7 @@ function InventoryPanel({
 
               {permissions.installEquipment && <label>
                 Asociando serie, MAC y puerto OLT al cliente
-                <input value={selectedUnit.numeroSerie} readOnly aria-label="NÃºmero de serie asociado" />
+                <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
                 <select
                   value={installForm.idCliente}
                   onChange={(event) => setInstallForm({ ...installForm, idCliente: event.target.value, idOt: '' })}
@@ -3160,7 +3636,7 @@ function InventoryPanel({
                   ))}
                 </select>
                 <select value={installForm.idOt} onChange={(event) => setInstallForm({ ...installForm, idOt: event.target.value })}>
-                  <option value="">Orden de instalaciÃ³n opcional</option>
+                  <option value="">Orden de instalación opcional</option>
                   {eligibleInstallOrders.map((order) => (
                     <option key={order.idOt} value={order.idOt}>
                       Orden {order.idOt} - {order.estado}
@@ -3184,7 +3660,7 @@ function InventoryPanel({
                     !macPattern.test(installForm.macAddress.trim())
                       ? setStatus('Ingresa una MAC valida, por ejemplo AA:BB:CC:DD:EE:FF.')
                       : !installForm.puertoOlt.trim()
-                        ? setStatus('Ingresa el puerto OLT asociado a la instalaciÃ³n.')
+                        ? setStatus('Ingresa el puerto OLT asociado a la instalación.')
                       : void run(
                           () =>
                             api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
@@ -3245,6 +3721,7 @@ function TicketsPanel({
     estadoFinalServicio: 'Activo',
     observaciones: '',
   });
+  const [technicalNote, setTechnicalNote] = useState('');
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
@@ -3258,6 +3735,7 @@ function TicketsPanel({
       setCategoryId(String(selectedTicket.idCategoria));
       setPriority(selectedTicket.prioridad);
       setTicketStatus(selectedTicket.estado);
+      setTechnicalNote('');
     }
   }, [selectedTicket?.idTicket]);
 
@@ -3277,7 +3755,7 @@ function TicketsPanel({
     if (!rutPattern.test(rut)) {
       setCustomerPreview(null);
       setTicketServices([]);
-      setCustomerLookupStatus('Ingresa un RUT vÃ¡lido para consultar al cliente.');
+      setCustomerLookupStatus('Ingresa un RUT válido para consultar al cliente.');
       return;
     }
 
@@ -3309,7 +3787,7 @@ function TicketsPanel({
           }
 
           if (!createForm.idCategoria) {
-            setStatus('Selecciona una categoria de falla.');
+            setStatus('Selecciona una categoría de falla.');
             return;
           }
 
@@ -3359,7 +3837,7 @@ function TicketsPanel({
           <section className="customer-preview">
             <h3>{customerPreview.nombreCompleto}</h3>
             <p><strong>RUT:</strong> {customerPreview.rut ?? '-'}</p>
-            <p><strong>TelÃ©fono:</strong> {customerPreview.telefono ?? '-'}</p>
+            <p><strong>Teléfono:</strong> {customerPreview.telefono ?? '-'}</p>
             <p><strong>Correo:</strong> {customerPreview.email ?? '-'}</p>
             <p><strong>Estado:</strong> {customerPreview.estado}</p>
           </section>
@@ -3400,7 +3878,7 @@ function TicketsPanel({
           </select>
         </label>
         <label>
-          Descripcion
+          Descripción
           <textarea
             value={createForm.descripcion}
             onChange={(event) => setCreateForm({ ...createForm, descripcion: event.target.value })}
@@ -3459,7 +3937,7 @@ function TicketsPanel({
               <section className="customer-preview">
                 <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
                 <p><strong>Cliente:</strong> {selectedTicket.cliente?.nombreCompleto ?? '-'}</p>
-                <p><strong>ClasificaciÃ³n:</strong> {selectedTicket.categoria?.nombre ?? selectedTicket.idCategoria}</p>
+                <p><strong>Clasificación:</strong> {selectedTicket.categoria?.nombre ?? selectedTicket.idCategoria}</p>
                 <p><strong>Prioridad:</strong> {selectedTicket.prioridad}</p>
                 <p><strong>Estado:</strong> {selectedTicket.estado}</p>
               </section>
@@ -3570,6 +4048,39 @@ function TicketsPanel({
               ) : (
                 <p className="inline-status">No tienes permisos para modificar este ticket.</p>
               )}
+              {permissions.registerTechnicalNotes && (
+                <section className="history-list full-width-panel">
+                  <h3>Observaciones técnicas</h3>
+                  {selectedTicket.observacionesTecnicas?.length ? (
+                    <ul className="compact-list">
+                      {selectedTicket.observacionesTecnicas.map((note) => (
+                        <li key={note.metadata}>
+                          <strong>{note.metadata}</strong>: {note.texto}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="inline-status">No hay observaciones técnicas registradas.</p>
+                  )}
+                  <textarea
+                    value={technicalNote}
+                    onChange={(event) => setTechnicalNote(event.target.value)}
+                    placeholder="Agregar observación técnica sin cerrar el ticket"
+                  />
+                  <button
+                    type="button"
+                    disabled={technicalNote.trim().length < 3}
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/tickets/${selectedTicket.idTicket}/technical-notes`, { observacion: technicalNote.trim() }),
+                        'Observación técnica registrada',
+                      ).then(() => setTechnicalNote(''))
+                    }
+                  >
+                    Registrar observacion
+                  </button>
+                </section>
+              )}
               {status && <p className="inline-status">{status}</p>}
             </div>
           ) : (
@@ -3621,9 +4132,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
         observaciones: form.observaciones,
       });
       setStatus(
-        `InstalaciÃ³n completada. Fecha de creaciÃ³n: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
-        `Fecha de conversiÃ³n: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
-        `Tiempo de conversiÃ³n calculado: ${data.prospect.tiempoConversionDias} dÃ­a(s).`,
+        `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
+        `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
+        `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
       );
       onChanged();
     } catch (err) {
@@ -3634,7 +4145,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
   return (
     <section className="panel full-width-panel stack">
       <div className="section-heading">
-        <h2>Ã“rdenes de Trabajo</h2>
+        <h2>Órdenes de Trabajo</h2>
         <p>Listado operativo de visitas, soporte e instalaciones registradas.</p>
       </div>
       <div className="table-wrap">
@@ -3645,7 +4156,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               <th>Tipo</th>
               <th>Asociado</th>
               <th>Fecha</th>
-              <th>TÃ©cnico</th>
+              <th>Técnico</th>
               <th>Prioridad</th>
               <th>Estado</th>
               <th></th>
@@ -3680,7 +4191,7 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
           </tbody>
         </table>
       </div>
-      {!workOrders.length && <p className="empty-state">No hay Ã³rdenes de trabajo disponibles.</p>}
+      {!workOrders.length && <p className="empty-state">No hay órdenes de trabajo disponibles.</p>}
 
       <Modal title="Gestionar orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedOrder ? (
@@ -3690,9 +4201,9 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               <p><strong>Tipo:</strong> {selectedOrder.tipoOt}</p>
               <p><strong>Asociado:</strong> {ownerLabel(selectedOrder)}</p>
               <p><strong>Estado:</strong> {selectedOrder.estado}</p>
-              <p><strong>TÃ©cnico:</strong> {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
+              <p><strong>Técnico:</strong> {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
               {selectedOrder.tipoConexion && (
-                <p><strong>ConexiÃ³n:</strong> {formatConnectionType(selectedOrder.tipoConexion)}</p>
+                <p><strong>Conexión:</strong> {formatConnectionType(selectedOrder.tipoConexion)}</p>
               )}
               <p>
                 <strong>Visita:</strong>{' '}
@@ -3707,23 +4218,23 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
             {selectedOrder.tipoOt === 'Instalacion' ? (
               <>
                 <div className="history-grid">
-                  <HistoryBox title="Fecha de creaciÃ³n del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
-                  <HistoryBox title="Fecha de conversiÃ³n" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
+                  <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
+                  <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
                   <HistoryBox
-                    title="Tiempo de conversiÃ³n"
+                    title="Tiempo de conversión"
                     value={
                       selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
                         ? 'Pendiente'
-                        : `${selectedOrder.prospecto.tiempoConversionDias} dÃ­a(s)`
+                        : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
                     }
                   />
                 </div>
                 {!selectedOrder.prospecto?.fechaCreacion && (
-                  <p className="alert">No se puede completar la instalaciÃ³n: falta la fecha de creaciÃ³n del prospecto.</p>
+                  <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
                 )}
                 <div className="workflow-grid">
                   <label>
-                    Potencia Ã³ptica dBm
+                    Potencia óptica dBm
                     <input
                       type="number"
                       step="0.01"
@@ -3741,11 +4252,11 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                   disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
                   onClick={completeInstallation}
                 >
-                  Confirmar instalaciÃ³n y activar cliente
+                  Confirmar instalación y activar cliente
                 </button>
               </>
             ) : (
-              <p className="inline-status">Esta orden no requiere cierre de instalaciÃ³n desde este panel.</p>
+              <p className="inline-status">Esta orden no requiere cierre de instalación desde este panel.</p>
             )}
             {status && <p className="inline-status">{status}</p>}
           </div>
@@ -3821,9 +4332,9 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
     <section className="reports-shell">
       <div className="panel report-card">
         <div className="section-heading centered">
-          <span className="eyebrow">ExportaciÃ³n</span>
+          <span className="eyebrow">Exportación</span>
           <h2>Reportes operativos</h2>
-          <p>Genera reportes por tipo, perÃ­odo, alcance y formato.</p>
+          <p>Genera reportes por tipo, período, alcance y formato.</p>
         </div>
         <div className="report-form-grid">
           <label>
@@ -3845,7 +4356,7 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
             </select>
           </label>
           <label>
-            PerÃ­odo desde
+            Período desde
             <input
               type="date"
               min={reportMinimumDate}
@@ -3855,7 +4366,7 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
             />
           </label>
           <label>
-            PerÃ­odo hasta
+            Período hasta
             <input
               type="date"
               min={reportMinimumDate}

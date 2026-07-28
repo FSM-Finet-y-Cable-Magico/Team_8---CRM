@@ -25,6 +25,9 @@ export type DashboardPermissions = {
   manageServices: boolean;
   manageInventory: boolean;
   manageBilling: boolean;
+  manageTvip: boolean;
+  viewMonitoring: boolean;
+  registerTechnicalNotes: boolean;
   installEquipment: boolean;
   createTickets: boolean;
   classifyTickets: boolean;
@@ -67,6 +70,9 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   manageServices: ['Administrador', 'Comercial', 'Soporte'],
   manageInventory: ['Administrador', 'Soporte'],
   manageBilling: ['Administrador', 'Comercial'],
+  manageTvip: ['Administrador', 'Comercial', 'Soporte'],
+  viewMonitoring: ['Administrador', 'Soporte', 'Terreno'],
+  registerTechnicalNotes: ['Administrador', 'Soporte', 'Terreno'],
   installEquipment: ['Administrador', 'Soporte', 'Terreno'],
   createTickets: ['Administrador', 'Comercial', 'Soporte'],
   classifyTickets: ['Administrador', 'Soporte'],

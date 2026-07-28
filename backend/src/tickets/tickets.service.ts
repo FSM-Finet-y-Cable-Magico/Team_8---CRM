@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
+import { TechnicalNoteDto } from './dto/technical-note.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
 import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -43,6 +44,7 @@ export class TicketsService {
       ...ticket,
       cliente: ticket.idCliente ? customerById.get(ticket.idCliente) ?? null : null,
       categoria: categoryById.get(ticket.idCategoria) ?? null,
+      observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
     }));
   }
 
@@ -63,58 +65,24 @@ export class TicketsService {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
-    const categoria = await this.prisma.categoriaFalla.findUnique({ where: { idCategoria: dto.idCategoria } });
-
-    if (!categoria) {
-      throw new BadRequestException('Categoria seleccionada invalida');
-    }
-
-    const servicio = dto.idServicio
-      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } })
-      : null;
-
-    if (dto.idServicio && !servicio) {
-      throw new BadRequestException('El servicio contratado indicado no existe');
-    }
-
-    if (
-      servicio &&
-      (servicio.idCliente !== cliente.idCliente || servicio.idEmpresa !== cliente.idEmpresa)
-    ) {
-      throw new BadRequestException('El servicio contratado no corresponde al cliente seleccionado');
-    }
-
-    const ticket = await this.prisma.ticket.create({
-      data: {
-        idCliente: cliente.idCliente,
-        idEmpresa: cliente.idEmpresa,
-        idServicio: servicio?.idServicio,
-        idUsuarioAsignado: currentUser.idUsuario,
-        idCategoria: dto.idCategoria,
-        codigoSeguimiento: this.trackingCode(),
-        prioridad: dto.prioridad,
-        estado: 'Abierto',
-        descripcion: dto.descripcion,
-        fechaCreacion: new Date(),
-        origen: dto.origen ?? 'CRM',
-      },
-    });
-
-    await this.auditService.record({
+    return this.createForCustomer(cliente.idCliente, dto, {
       idUsuario: currentUser.idUsuario,
+      idUsuarioAsignado: currentUser.idUsuario,
       accion: 'CREAR_TICKET',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: ticket.idTicket,
-      valorNuevo: {
-        idCliente: cliente.idCliente,
-        rut: cliente.rut,
-        categoria: categoria.nombre,
-        prioridad: dto.prioridad,
-        idServicio: servicio?.idServicio,
-      },
+      origen: dto.origen ?? 'CRM',
     });
+  }
 
-    return ticket;
+  async createForPortal(
+    idCliente: number,
+    dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
+  ) {
+    return this.createForCustomer(idCliente, dto, {
+      idUsuario: null,
+      idUsuarioAsignado: null,
+      accion: 'CREAR_TICKET_PORTAL',
+      origen: 'Portal',
+    });
   }
 
   async updateCategory(idTicket: number, dto: UpdateTicketCategoryDto, currentUser: AuthUser) {
@@ -266,6 +234,101 @@ export class TicketsService {
     return result;
   }
 
+  async technicalNotes(idTicket: number, currentUser: AuthUser) {
+    const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    return this.extractTechnicalNotes(ticket.descripcion);
+  }
+
+  async addTechnicalNote(idTicket: number, dto: TechnicalNoteDto, currentUser: AuthUser) {
+    const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    const block = this.technicalNoteBlock(dto.observacion, currentUser.nombreCompleto);
+    const updated = await this.prisma.ticket.update({
+      where: { idTicket },
+      data: {
+        descripcion: `${ticket.descripcion ?? ''}\n\n${block}`.trim(),
+      },
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'REGISTRAR_OBSERVACION_TECNICA_TICKET',
+      entidadAfectada: 'ticket',
+      idEntidadAfectada: idTicket,
+      valorNuevo: {
+        estado: ticket.estado,
+        observacion: dto.observacion,
+      },
+    });
+
+    return {
+      ...updated,
+      observacionesTecnicas: this.extractTechnicalNotes(updated.descripcion),
+    };
+  }
+
+  private async createForCustomer(
+    idCliente: number,
+    dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
+    options: { idUsuario: number | null; idUsuarioAsignado: number | null; accion: string; origen: string },
+  ) {
+    const cliente = await this.prisma.cliente.findUnique({ where: { idCliente } });
+
+    if (!cliente) {
+      throw new BadRequestException('El cliente indicado no existe');
+    }
+
+    const categoria = await this.prisma.categoriaFalla.findUnique({ where: { idCategoria: dto.idCategoria } });
+
+    if (!categoria) {
+      throw new BadRequestException('Categoria seleccionada invalida');
+    }
+
+    const servicio = dto.idServicio
+      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } })
+      : null;
+
+    if (dto.idServicio && !servicio) {
+      throw new BadRequestException('El servicio contratado indicado no existe');
+    }
+
+    if (servicio && servicio.idCliente !== cliente.idCliente) {
+      throw new BadRequestException('El servicio contratado no corresponde al cliente seleccionado');
+    }
+
+    const ticket = await this.prisma.ticket.create({
+      data: {
+        idCliente: cliente.idCliente,
+        idEmpresa: servicio?.idEmpresa ?? cliente.idEmpresa,
+        idServicio: servicio?.idServicio,
+        idUsuarioAsignado: options.idUsuarioAsignado,
+        idCategoria: dto.idCategoria,
+        codigoSeguimiento: this.trackingCode(),
+        prioridad: dto.prioridad,
+        estado: 'Abierto',
+        descripcion: dto.descripcion,
+        fechaCreacion: new Date(),
+        origen: options.origen,
+      },
+    });
+
+    await this.auditService.record({
+      idUsuario: options.idUsuario,
+      accion: options.accion,
+      entidadAfectada: 'ticket',
+      idEntidadAfectada: ticket.idTicket,
+      valorNuevo: {
+        idCliente: cliente.idCliente,
+        rut: cliente.rut,
+        categoria: categoria.nombre,
+        prioridad: dto.prioridad,
+        idServicio: servicio?.idServicio,
+        origen: options.origen,
+      },
+    });
+
+    return ticket;
+  }
+
   private async getTicketOrThrow(idTicket: number, currentUser: AuthUser) {
     const ticket = await this.prisma.ticket.findUnique({ where: { idTicket } });
 
@@ -304,5 +367,25 @@ export class TicketsService {
 
   private trackingCode() {
     return `TK-${Date.now().toString(36).toUpperCase().slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+  }
+
+  private technicalNoteBlock(observation: string, author: string) {
+    return `[Observacion tecnica - ${new Date().toISOString()} - ${author}]\n${observation.trim()}`;
+  }
+
+  private extractTechnicalNotes(description: string | null) {
+    if (!description) {
+      return [];
+    }
+
+    const regex = /\[Observacion tecnica - ([^\]]+)\]\n([\s\S]*?)(?=\n\n\[Observacion tecnica - |\n\nDiagnostico tecnico:|$)/g;
+    const notes: Array<{ metadata: string; texto: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(description)) !== null) {
+      notes.push({ metadata: match[1], texto: match[2].trim() });
+    }
+
+    return notes;
   }
 }

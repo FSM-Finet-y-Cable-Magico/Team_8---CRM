@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -7,7 +7,9 @@ import { CompaniesModule } from './companies/companies.module';
 import { CustomersModule } from './customers/customers.module';
 import { ImportsModule } from './imports/imports.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 import { PlansModule } from './plans/plans.module';
+import { PortalModule } from './portal/portal.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProspectsModule } from './prospects/prospects.module';
 import { ReportsModule } from './reports/reports.module';
@@ -15,6 +17,7 @@ import { RutModule } from './rut/rut.module';
 import { SecurityModule } from './security/security.module';
 import { ServicesModule } from './services/services.module';
 import { TicketsModule } from './tickets/tickets.module';
+import { TvipModule } from './tvip/tvip.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
@@ -27,6 +30,9 @@ import { AppController } from './app.controller';
     AuditModule,
     AuthModule,
     BillingModule,
+    PortalModule,
+    TvipModule,
+    MonitoringModule,
     UsersModule,
     CompaniesModule,
     CustomersModule,

@@ -268,6 +268,82 @@ export type AdvancedInventory = {
     } | null;
   }>;
 };
+export type TechnicalNote = {
+  metadata: string;
+  texto: string;
+};
+
+export type TvipCredentialSummary = {
+  idContrato: number;
+  estadoContrato: string;
+  plan: {
+    idPlan: number;
+    nombreComercial: string;
+    tipoPlan: string;
+  } | null;
+  incluyeTv: boolean;
+  credencial: {
+    idCredencial: number;
+    usuarioTvip: string | null;
+    fechaGeneracion: string | null;
+  } | null;
+  puedeGenerar: boolean;
+};
+
+export type TvipGenerationResult = {
+  idCredencial: number;
+  idContrato: number | null;
+  usuarioTvip: string | null;
+  fechaGeneracion: string | null;
+  temporaryPassword: string;
+  aviso: string;
+};
+
+export type MonitoringStatus = {
+  estadoConexion: string;
+  mensaje: string;
+  latenciaMs: number | null;
+  latenciaEstado: string;
+  fuente: string;
+  ventanaDatoRecienteHoras: number;
+  ultimaMedicion: {
+    idMonitoreo: string;
+    idUnidad: number | null;
+    idCliente: number | null;
+    idCajaNap: number | null;
+    potenciaActualDbm: number | null;
+    timestampMedicion: string | null;
+    estadoConexion: string | null;
+  } | null;
+  equipo: {
+    idUnidad: number;
+    numeroSerie: string;
+    modelo: string | null;
+    estado: string;
+  } | null;
+  cajaNap: {
+    idCajaNap: number;
+    identificadorUnico: string | null;
+    zona: string | null;
+    numeroPoste: string | null;
+  } | null;
+  historial: Array<{
+    idHistorialOnt: string;
+    idUnidad: number | null;
+    evento: string | null;
+    timestamp: string | null;
+  }>;
+};
+
+export type PortalCustomer = {
+  idCliente: number;
+  rut: string | null;
+  nombreCompleto: string;
+  email: string | null;
+  telefono: string | null;
+  estado: string;
+  idEmpresa: number | null;
+};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;
@@ -286,6 +362,7 @@ export type Ticket = {
   descripcion: string | null;
   cliente?: Customer | null;
   categoria?: TicketCategory | null;
+  observacionesTecnicas?: TechnicalNote[];
 };
 
 export type WorkOrder = {
@@ -325,8 +402,9 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('finet_token');
+  const hasAuthorization = Boolean(config.headers?.Authorization ?? config.headers?.authorization);
 
-  if (token) {
+  if (token && !hasAuthorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 

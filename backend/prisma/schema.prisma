@@ -472,3 +472,93 @@ model UsoMaterialOt {
 
   @@map("uso_material_ot")
 }
+model SesionPortal {
+  idSesion        BigInt    @id @default(autoincrement()) @map("id_sesion")
+  idCliente       Int?      @map("id_cliente")
+  token           String    @db.VarChar(255)
+  fechaInicio     DateTime? @map("fecha_inicio")
+  fechaExpiracion DateTime? @map("fecha_expiracion")
+  ipOrigen        String?   @map("ip_origen") @db.Inet
+
+  @@map("sesion_portal")
+}
+
+model IntentoFallido {
+  idIntento      BigInt    @id @default(autoincrement()) @map("id_intento")
+  idEmpresa      Int?      @map("id_empresa")
+  ipAddress      String    @map("ip_address") @db.Inet
+  rutIntentado   String?   @map("rut_intentado") @db.VarChar(12)
+  timestamp      DateTime? @default(now())
+  bloqueadoHasta DateTime? @map("bloqueado_hasta")
+
+  @@map("intento_fallido")
+}
+
+model CredencialesTvip {
+  idCredencial     Int       @id @default(autoincrement()) @map("id_credencial")
+  idContrato       Int?      @unique @map("id_contrato")
+  usuarioTvip      String?   @map("usuario_tvip") @db.VarChar(80)
+  passwordTvipHash String?   @map("password_tvip_hash") @db.VarChar(72)
+  fechaGeneracion  DateTime? @map("fecha_generacion")
+
+  @@map("credenciales_tvip")
+}
+
+model Olt {
+  idOlt     Int     @id @default(autoincrement()) @map("id_olt")
+  idEmpresa Int?    @map("id_empresa")
+  nombre    String? @db.VarChar(80)
+  ubicacion String? @db.VarChar(200)
+  ipGestion String? @map("ip_gestion") @db.Inet
+
+  @@map("olt")
+}
+
+model TarjetaPon {
+  idTarjeta     Int  @id @default(autoincrement()) @map("id_tarjeta")
+  idOlt         Int? @map("id_olt")
+  numeroTarjeta Int? @map("numero_tarjeta") @db.SmallInt
+  totalPuertos  Int? @map("total_puertos") @db.SmallInt
+
+  @@map("tarjeta_pon")
+}
+
+model Mufa {
+  idMufa        Int     @id @default(autoincrement()) @map("id_mufa")
+  idTarjetaPon Int?    @map("id_tarjeta_pon")
+  identificador String? @db.VarChar(50)
+  ubicacion     String? @db.VarChar(200)
+
+  @@map("mufa")
+}
+
+model PuertoNap {
+  idPuerto          Int     @id @default(autoincrement()) @map("id_puerto")
+  idCajaNap         Int?    @map("id_caja_nap")
+  numeroPuerto      Int?    @map("numero_puerto") @db.SmallInt
+  estado            String? @db.VarChar(10)
+  idClienteAsociado Int?    @map("id_cliente_asociado")
+
+  @@map("puerto_nap")
+}
+
+model MonitoreoOnt {
+  idMonitoreo       BigInt    @id @default(autoincrement()) @map("id_monitoreo")
+  idUnidad          Int?      @map("id_unidad")
+  idCliente         Int?      @map("id_cliente")
+  idCajaNap         Int?      @map("id_caja_nap")
+  potenciaActualDbm Decimal?  @map("potencia_actual_dbm") @db.Decimal(5, 2)
+  timestampMedicion DateTime? @default(now()) @map("timestamp_medicion")
+  estadoConexion    String?   @map("estado_conexion") @db.VarChar(15)
+
+  @@map("monitoreo_ont")
+}
+
+model HistorialConexionOnt {
+  idHistorialOnt BigInt    @id @default(autoincrement()) @map("id_historial_ont")
+  idUnidad       Int?      @map("id_unidad")
+  evento         String?   @db.VarChar(15)
+  timestamp      DateTime? @default(now())
+
+  @@map("historial_conexion_ont")
+}
