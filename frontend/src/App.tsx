@@ -1,5 +1,31 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
+  BarChart3,
+  Boxes,
+  Building2,
+  CalendarPlus,
+  ChevronDown,
+  CircleCheckBig,
+  ClipboardList,
+  FileClock,
+  FileUp,
+  HandCoins,
+  House,
+  LogOut,
+  Router,
+  Settings,
+  Ticket as TicketIcon,
+  TrendingDown,
+  UserCog,
+  UserRoundPlus,
+  Users,
+  Wifi,
+  Wrench,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import {
   api,
   apiErrorMessage,
   AdvancedInventory,
@@ -43,6 +69,7 @@ type NavItem = {
   tab: Tab;
   label: string;
   visible: boolean;
+  icon: LucideIcon;
 };
 
 type Summary = {
@@ -149,6 +176,48 @@ function formatConnectionType(value?: WorkOrder['tipoConexion']) {
   }
 
   return 'Sin dato';
+}
+
+function normalizeWorkOrderValue(value?: string | null) {
+  return (value ?? '')
+    .trim()
+    .toLocaleLowerCase('es-CL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function formatWorkOrderValue(value?: string | null) {
+  const normalized = normalizeWorkOrderValue(value);
+  const knownLabels: Record<string, string> = {
+    instalacion: 'Instalación',
+    reparacion: 'Reparación',
+    mantenimiento: 'Mantenimiento',
+    soporte: 'Soporte',
+    alta: 'Alta',
+    media: 'Media',
+    baja: 'Baja',
+    critica: 'Crítica',
+    urgente: 'Urgente',
+    pendiente: 'Pendiente',
+    abierto: 'Abierto',
+    programada: 'Programada',
+    escalado: 'Escalado',
+    resuelto: 'Resuelto',
+    cerrado: 'Cerrado',
+    completada: 'Completada',
+    cerrada: 'Cerrada',
+    cancelada: 'Cancelada',
+    'en progreso': 'En progreso',
+  };
+
+  if (!normalized) {
+    return 'Sin dato';
+  }
+
+  return knownLabels[normalized] ?? normalized
+    .split(/\s+/)
+    .map((word) => `${word.charAt(0).toLocaleUpperCase('es-CL')}${word.slice(1)}`)
+    .join(' ');
 }
 
 function formatDateTime(value?: string | null) {
@@ -606,6 +675,7 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [scope, setScope] = useState('consolidado');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -707,21 +777,27 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   const currentCompanyName = companies.find((company) => company.idEmpresa === writeCompanyId)?.nombre ?? 'FiNet Limitada';
+  const userInitials = user.nombreCompleto
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
   const mainNavItems: NavItem[] = [
-    { tab: 'dashboard', label: 'Dashboard', visible: true },
-    { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects },
-    { tab: 'customers', label: 'Clientes', visible: canManageCustomers },
-    { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations },
-    { tab: 'inventory', label: 'Inventario', visible: canViewInventory },
-    { tab: 'billing', label: 'Cobranza', visible: canViewBilling },
-    { tab: 'tickets', label: 'Tickets', visible: canViewTickets },
-    { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders },
-    { tab: 'reports', label: 'Reportes', visible: permissions.viewReports },
-    { tab: 'audit', label: 'Auditoría', visible: permissions.viewAudit },
+    { tab: 'dashboard', label: 'Dashboard', visible: true, icon: House },
+    { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects, icon: UserRoundPlus },
+    { tab: 'customers', label: 'Clientes', visible: canManageCustomers, icon: Users },
+    { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
+    { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
+    { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
+    { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
+    { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
+    { tab: 'reports', label: 'Reportes', visible: permissions.viewReports, icon: BarChart3 },
+    { tab: 'audit', label: 'Auditoría', visible: permissions.viewAudit, icon: FileClock },
   ];
   const secondaryNavItems: NavItem[] = [
-    { tab: 'import', label: 'Importación', visible: permissions.viewImport },
-    { tab: 'users', label: 'Usuarios', visible: permissions.viewUsers },
+    { tab: 'import', label: 'Importación', visible: permissions.viewImport, icon: FileUp },
+    { tab: 'users', label: 'Usuarios', visible: permissions.viewUsers, icon: UserCog },
   ];
 
   return (
@@ -735,11 +811,11 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
       <section className="crm-main">
         <header className="topbar">
-          <div className="topbar-actions">
+          <div className="topbar-context">
             {isAdmin && (
-              <label className="select-label compact-label">
-                Alcance
-                <select value={scope} onChange={(event) => setScope(event.target.value)}>
+              <div className="company-scope-control">
+                <Building2 size={18} strokeWidth={1.8} aria-hidden="true" />
+                <select aria-label="Seleccionar empresa" value={scope} onChange={(event) => setScope(event.target.value)}>
                   <option value="consolidado">Consolidado</option>
                   {companies.map((company) => (
                     <option key={company.idEmpresa} value={company.idEmpresa}>
@@ -747,19 +823,71 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
             )}
-            <div className="company-chip">
-              <span>Empresa actual</span>
+            <div className="active-company" aria-label={`Empresa activa: ${currentCompanyName}`}>
               <strong>{currentCompanyName}</strong>
-              <i aria-hidden="true" />
+              <span className="company-status-dot" aria-hidden="true" />
             </div>
-            <span className="user-chip">{user.nombreCompleto}</span>
-            <button className="secondary" onClick={logout}>
-              Salir
-            </button>
+            <details className="profile-menu">
+              <summary className="profile-trigger" aria-label="Abrir menú de perfil">
+                <span className="profile-avatar" aria-hidden="true">{userInitials || 'U'}</span>
+                <ChevronDown size={16} strokeWidth={1.8} aria-hidden="true" />
+              </summary>
+              <div className="profile-dropdown">
+                <header className="profile-summary">
+                  <span className="profile-avatar profile-avatar-large" aria-hidden="true">{userInitials || 'U'}</span>
+                  <span>
+                    <strong>{user.nombreCompleto}</strong>
+                    <small>{user.email ?? 'Sin correo registrado'}</small>
+                  </span>
+                </header>
+                <button
+                  type="button"
+                  className="profile-menu-item"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    setSettingsOpen(true);
+                  }}
+                >
+                  <Settings size={18} strokeWidth={1.8} aria-hidden="true" />
+                  Configuración
+                </button>
+                <button type="button" className="profile-menu-item danger" onClick={logout}>
+                  <LogOut size={18} strokeWidth={1.8} aria-hidden="true" />
+                  Cerrar sesión
+                </button>
+              </div>
+            </details>
           </div>
         </header>
+
+        <Modal title="Configuración" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+          <section className="user-settings-card">
+            <header className="user-settings-heading">
+              <span className="profile-avatar profile-avatar-settings" aria-hidden="true">{userInitials || 'U'}</span>
+              <div>
+                <span className="eyebrow">Perfil activo</span>
+                <h3>{user.nombreCompleto}</h3>
+                <p>Información de la sesión actual.</p>
+              </div>
+            </header>
+            <dl className="user-settings-details">
+              <div>
+                <dt>Correo</dt>
+                <dd>{user.email ?? 'Sin correo registrado'}</dd>
+              </div>
+              <div>
+                <dt>Empresa</dt>
+                <dd>{currentCompanyName}</dd>
+              </div>
+              <div>
+                <dt>Rol</dt>
+                <dd>{user.roles.join(', ') || 'Sin rol asignado'}</dd>
+              </div>
+            </dl>
+          </section>
+        </Modal>
 
         {message && <p className="alert app-alert">{message}</p>}
 
@@ -771,7 +899,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               customers={customers}
               tickets={tickets}
               workOrders={workOrders}
-              currentCompanyName={currentCompanyName}
               permissions={permissions}
               onNavigate={setActiveTab}
             />
@@ -852,38 +979,52 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <strong>CRM FiNet</strong>
+      <div className="brand" aria-label="smartCRM">
+        <Wifi className="brand-icon" size={34} strokeWidth={2.35} aria-hidden="true" />
+        <strong>
+          <span>smart</span>CRM
+        </strong>
       </div>
 
-      <nav className="sidebar-nav" aria-label="Navegación principal">
-        {mainItems.filter((item) => item.visible).map((item) => (
-          <button
-            key={item.tab}
-            type="button"
-            className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
-            onClick={() => onNavigate(item.tab)}
-          >
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </nav>
-
-      {visibleSecondaryItems.length > 0 && (
-        <nav className="sidebar-nav secondary-nav" aria-label="Administración">
-          <span className="nav-section-title">Administración</span>
-          {visibleSecondaryItems.map((item) => (
-            <button
-              key={item.tab}
-              type="button"
-              className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
-              onClick={() => onNavigate(item.tab)}
-            >
-              <span>{item.label}</span>
-            </button>
-          ))}
+      <div className="sidebar-menu">
+        <nav className="sidebar-nav" aria-label="Navegación principal">
+          {mainItems.filter((item) => item.visible).map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.tab}
+                type="button"
+                className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
+                onClick={() => onNavigate(item.tab)}
+                aria-current={activeTab === item.tab ? 'page' : undefined}
+              >
+                <Icon className="sidebar-item-icon" size={19} strokeWidth={1.8} aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
-      )}
+
+        {visibleSecondaryItems.length > 0 && (
+          <nav className="sidebar-nav secondary-nav" aria-label="Administración">
+            {visibleSecondaryItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.tab}
+                  type="button"
+                  className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
+                  onClick={() => onNavigate(item.tab)}
+                  aria-current={activeTab === item.tab ? 'page' : undefined}
+                >
+                  <Icon className="sidebar-item-icon" size={19} strokeWidth={1.8} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
+      </div>
     </aside>
   );
 }
@@ -894,7 +1035,6 @@ function DashboardHome({
   customers,
   tickets,
   workOrders,
-  currentCompanyName,
   permissions,
   onNavigate,
 }: {
@@ -903,10 +1043,12 @@ function DashboardHome({
   customers: Customer[];
   tickets: Ticket[];
   workOrders: WorkOrder[];
-  currentCompanyName: string;
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
 }) {
+  const [expiryFilter, setExpiryFilter] = useState<'overdue' | 'upcoming'>('upcoming');
+  const [alertsModalOpen, setAlertsModalOpen] = useState(false);
+  const [selectedAlertKey, setSelectedAlertKey] = useState<string | null>(null);
   const pendingInstallations = workOrders.filter(
     (order) => order.tipoOt === 'Instalacion' && !['Completada', 'Cerrada', 'Cancelada'].includes(order.estado),
   ).length;
@@ -915,70 +1057,114 @@ function DashboardHome({
     {
       label: 'Prospectos activos',
       value: summary?.metricas.prospectos ?? prospects.length,
-      hint: 'Resumen actual',
+      description: 'Oportunidades registradas',
+      icon: UserRoundPlus,
+      tone: 'mint' as const,
     },
     {
       label: 'Clientes activos',
       value: summary?.metricas.clientes ?? customers.length,
-      hint: currentCompanyName,
+      description: 'Clientes de la vista actual',
+      icon: Users,
+      tone: 'teal' as const,
     },
     {
       label: 'Instalaciones pendientes',
       value: summary?.metricas.instalacionesPendientes ?? pendingInstallations,
-      hint: 'Ordenes por coordinar o cerrar',
+      description: 'Por coordinar o finalizar',
+      icon: Wrench,
+      tone: 'blue' as const,
     },
     {
       label: 'Tickets abiertos',
       value: summary?.metricas.ticketsAbiertos ?? openTickets,
-      hint: 'Casos en atencion',
+      description: 'Casos todavía en atención',
+      icon: TicketIcon,
+      tone: 'orange' as const,
     },
     {
       label: 'Clientes morosos',
       value: summary?.metricas.clientesMorosos ?? 0,
-      hint: 'Cobranza vigente',
+      description: 'Con deuda o suspensión',
+      icon: HandCoins,
+      tone: 'rose' as const,
     },
     {
       label: 'Inventario disponible',
       value: summary?.metricas.inventarioDisponible ?? 0,
-      hint: 'Equipos listos para asignar',
+      description: 'Equipos listos para asignar',
+      icon: Boxes,
+      tone: 'violet' as const,
     },
     {
       label: 'Instalaciones del mes',
       value: summary?.metricas.instalacionesMensuales ?? 0,
-      hint: 'Completadas en el periodo',
+      description: 'Completadas durante el mes',
+      icon: CircleCheckBig,
+      tone: 'green' as const,
     },
     {
       label: 'Churn mensual',
       value: `${summary?.metricas.churnRateMensual ?? 0}%`,
-      hint: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) del mes`,
+      description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`,
+      icon: TrendingDown,
+      tone: 'amber' as const,
     },
   ];
   const quickActions = [
     {
       label: 'Nuevo prospecto',
       description: 'Registrar oportunidad comercial',
+      icon: UserRoundPlus,
+      tone: 'mint' as const,
       tab: 'prospects' as Tab,
       visible: permissions.createProspects || permissions.viewProspects,
     },
     {
       label: 'Crear ticket',
       description: 'Atender solicitud de soporte',
+      icon: TicketIcon,
+      tone: 'orange' as const,
       tab: 'tickets' as Tab,
       visible: permissions.viewTickets,
     },
     {
       label: 'Agendar instalación',
       description: 'Coordinar visita técnica',
+      icon: CalendarPlus,
+      tone: 'blue' as const,
       tab: 'installations' as Tab,
       visible: permissions.viewInstallations,
     },
     {
       label: 'Nueva orden',
       description: 'Revisar órdenes de trabajo',
+      icon: ClipboardList,
+      tone: 'violet' as const,
       tab: 'workOrders' as Tab,
       visible: permissions.viewWorkOrders,
     },
   ];
+  const expiryAlerts = summary?.alertasVencimiento ?? [];
+  const overdueAlerts = expiryAlerts.filter((alert) => alert.diasRestantes < 0);
+  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= 7);
+  const filteredExpiryAlerts = expiryFilter === 'overdue' ? overdueAlerts : upcomingAlerts;
+  const selectedAlert = filteredExpiryAlerts.find((alert) => expiryAlertKey(alert) === selectedAlertKey)
+    ?? filteredExpiryAlerts[0]
+    ?? null;
+  const selectedCustomer = selectedAlert?.idCliente
+    ? customers.find((customer) => customer.idCliente === selectedAlert.idCliente) ?? null
+    : null;
+
+  function selectExpiryFilter(filter: 'overdue' | 'upcoming') {
+    setExpiryFilter(filter);
+    setSelectedAlertKey(null);
+  }
+
+  function openExpiryDetails(alert?: ExpiryAlert) {
+    setSelectedAlertKey(alert ? expiryAlertKey(alert) : null);
+    setAlertsModalOpen(true);
+  }
 
   return (
     <section className="dashboard-home">
@@ -988,29 +1174,106 @@ function DashboardHome({
 
       <section className="stat-grid">
         {stats.map((stat) => (
-          <StatCard key={stat.label} {...stat} />
+          <DashboardStatCard key={stat.label} {...stat} />
         ))}
       </section>
 
       <section className="dashboard-insights">
-        <article className="panel stack">
-          <div className="section-heading">
-            <h2>Alertas de vencimiento</h2>
-            <p>Contratos con vencimiento dentro de los próximos 7 días.</p>
-          </div>
-          {(summary?.alertasVencimiento?.length ?? 0) > 0 ? (
-            <div className="compact-list">
-              {summary?.alertasVencimiento?.slice(0, 5).map((alert) => (
-                <div key={alert.idContrato} className="compact-list-item">
-                  <strong>{alert.cliente}</strong>
-                  <span>{alert.plan ?? 'Plan sin detalle'} - vence {formatDateOnly(alert.fechaVencimiento)}</span>
-                  <StatusBadge value={`${alert.diasRestantes} día(s)`} />
-                </div>
-              ))}
+        <article className="panel stack expiry-panel">
+          <div className="expiry-panel-header">
+            <div className="section-heading">
+              <h2>Alertas de vencimiento</h2>
+              <p>Revisa contratos vencidos o próximos a vencer.</p>
             </div>
+            <div className="expiry-filters" role="group" aria-label="Filtrar alertas de vencimiento">
+              <button
+                type="button"
+                className={expiryFilter === 'overdue' ? 'expiry-filter active' : 'expiry-filter'}
+                aria-pressed={expiryFilter === 'overdue'}
+                onClick={() => selectExpiryFilter('overdue')}
+              >
+                Vencidos
+                <span>{overdueAlerts.length}</span>
+              </button>
+              <button
+                type="button"
+                className={expiryFilter === 'upcoming' ? 'expiry-filter active' : 'expiry-filter'}
+                aria-pressed={expiryFilter === 'upcoming'}
+                onClick={() => selectExpiryFilter('upcoming')}
+              >
+                Próximos 7 días
+                <span>{upcomingAlerts.length}</span>
+              </button>
+            </div>
+          </div>
+          {filteredExpiryAlerts.length > 0 ? (
+            <>
+              <div className="expiry-alert-list">
+                {filteredExpiryAlerts.slice(0, 4).map((alert) => (
+                  <div
+                    key={expiryAlertKey(alert)}
+                    className={`expiry-alert-item expiry-alert-item-${expiryUrgency(alert.diasRestantes)}`}
+                  >
+                    <div className="expiry-alert-copy">
+                      <button type="button" className="expiry-client-link" onClick={() => openExpiryDetails(alert)}>
+                        {alert.cliente}
+                      </button>
+                      <span>{alert.plan ?? 'Plan sin detalle'} · {formatDateOnly(alert.fechaVencimiento)}</span>
+                    </div>
+                    <ExpiryBadge days={alert.diasRestantes} />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="expiry-view-more" onClick={() => openExpiryDetails()}>
+                Ver más
+                <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            </>
           ) : (
-            <p className="empty-state">No hay vencimientos criticos para mostrar.</p>
+            <p className="empty-state">
+              {expiryFilter === 'overdue'
+                ? 'No hay contratos vencidos para mostrar.'
+                : 'No hay contratos próximos a vencer durante los próximos 7 días.'}
+            </p>
           )}
+
+          <Modal
+            title={expiryFilter === 'overdue' ? 'Contratos vencidos' : 'Próximos vencimientos'}
+            open={alertsModalOpen}
+            onClose={() => setAlertsModalOpen(false)}
+          >
+            <div className="expiry-modal-layout">
+              <section className="expiry-modal-list-panel" aria-label="Clientes con alertas">
+                <p>
+                  {filteredExpiryAlerts.length} cliente(s) en esta lista
+                </p>
+                <div className="expiry-modal-list">
+                  {filteredExpiryAlerts.map((alert) => (
+                    <button
+                      key={expiryAlertKey(alert)}
+                      type="button"
+                      className={expiryAlertKey(alert) === expiryAlertKey(selectedAlert)
+                        ? `expiry-modal-item expiry-alert-item-${expiryUrgency(alert.diasRestantes)} selected`
+                        : `expiry-modal-item expiry-alert-item-${expiryUrgency(alert.diasRestantes)}`}
+                      onClick={() => setSelectedAlertKey(expiryAlertKey(alert))}
+                    >
+                      <span>
+                        <strong>{alert.cliente}</strong>
+                        <small>{alert.rut ?? 'RUT no registrado'} · {alert.plan ?? 'Plan sin detalle'}</small>
+                      </span>
+                      <ExpiryBadge days={alert.diasRestantes} />
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {selectedAlert ? (
+                <ExpiryCustomerCard alert={selectedAlert} customer={selectedCustomer} />
+              ) : (
+                <p className="empty-state">Selecciona un cliente para revisar sus datos.</p>
+              )}
+            </div>
+          </Modal>
         </article>
 
         <article className="panel stack">
@@ -1033,7 +1296,7 @@ function DashboardHome({
         </article>
       </section>
 
-      <section className="panel stack dashboard-actions-panel">
+      <section className="dashboard-actions">
         <div className="section-heading">
           <h2>Acciones rápidas</h2>
         </div>
@@ -1044,6 +1307,112 @@ function DashboardHome({
         </div>
       </section>
     </section>
+  );
+}
+
+type ExpiryAlert = NonNullable<Summary['alertasVencimiento']>[number];
+
+function expiryAlertKey(alert?: ExpiryAlert | null) {
+  return alert ? `${alert.idContrato}-${alert.fechaVencimiento}` : '';
+}
+
+function expiryUrgency(days: number) {
+  if (days < 0) return 'overdue';
+  if (days <= 1) return 'critical';
+  if (days <= 3) return 'near';
+  if (days <= 5) return 'soon';
+  return 'scheduled';
+}
+
+function expiryLabel(days: number) {
+  if (days < 0) {
+    const overdueDays = Math.abs(days);
+    return `${overdueDays} día${overdueDays === 1 ? '' : 's'} vencido`;
+  }
+
+  if (days === 0) return 'Vence hoy';
+  if (days === 1) return 'Vence mañana';
+  return `Vence en ${days} días`;
+}
+
+function ExpiryBadge({ days }: { days: number }) {
+  return <span className={`expiry-badge expiry-badge-${expiryUrgency(days)}`}>{expiryLabel(days)}</span>;
+}
+
+function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryAlert; customer: Customer | null }) {
+  const company = customer?.empresa?.nombre ?? customer?.empresas?.join(', ') ?? 'Sin empresa registrada';
+
+  return (
+    <article className="expiry-customer-card">
+      <header>
+        <span className="expiry-customer-avatar" aria-hidden="true">
+          <Users size={21} strokeWidth={1.8} />
+        </span>
+        <div>
+          <h3>{customer?.nombreCompleto ?? alert.cliente}</h3>
+        </div>
+        <StatusBadge value={customer?.estado ?? alert.estado} />
+      </header>
+
+      <dl className="expiry-customer-data">
+        <div>
+          <dt>RUT</dt>
+          <dd>{customer?.rut ?? alert.rut ?? 'No registrado'}</dd>
+        </div>
+        <div>
+          <dt>Teléfono</dt>
+          <dd>{customer?.telefono ?? 'No registrado'}</dd>
+        </div>
+        <div>
+          <dt>Correo</dt>
+          <dd>{customer?.email ?? 'No registrado'}</dd>
+        </div>
+        <div>
+          <dt>Empresa</dt>
+          <dd>{company}</dd>
+        </div>
+        <div>
+          <dt>Origen</dt>
+          <dd>{customer?.origenContacto ?? 'No registrado'}</dd>
+        </div>
+      </dl>
+
+      <div className="expiry-contract-card">
+        <span>Contrato #{alert.idContrato}</span>
+        <strong>{alert.plan ?? 'Plan sin detalle'}</strong>
+        <small>Vencimiento: {formatDateOnly(alert.fechaVencimiento)}</small>
+        <ExpiryBadge days={alert.diasRestantes} />
+      </div>
+    </article>
+  );
+}
+
+type StatCardTone = 'mint' | 'teal' | 'blue' | 'orange' | 'rose' | 'violet' | 'green' | 'amber';
+
+function DashboardStatCard({
+  label,
+  value,
+  description,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  description: string;
+  icon: LucideIcon;
+  tone: StatCardTone;
+}) {
+  return (
+    <article className={`dashboard-stat-card dashboard-stat-card-${tone}`}>
+      <span className="dashboard-stat-card-icon" aria-hidden="true">
+        <Icon size={21} strokeWidth={1.8} />
+      </span>
+      <div className="dashboard-stat-card-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{description}</small>
+      </div>
+    </article>
   );
 }
 
@@ -1062,31 +1431,43 @@ function StatCard({ label, value, hint }: { label: string; value: string | numbe
 function QuickActionCard({
   label,
   description,
+  icon: Icon,
+  tone,
   tab,
   onNavigate,
 }: {
   label: string;
   description: string;
+  icon: LucideIcon;
+  tone: StatCardTone;
   tab: Tab;
   onNavigate: (tab: Tab) => void;
 }) {
   return (
-    <button type="button" className="quick-action-card" onClick={() => onNavigate(tab)}>
-      <strong>{label}</strong>
-      <span>{description}</span>
+    <button type="button" className={`quick-action-card quick-action-card-${tone}`} onClick={() => onNavigate(tab)}>
+      <span className="quick-action-icon" aria-hidden="true">
+        <Icon size={20} strokeWidth={1.8} />
+      </span>
+      <span className="quick-action-copy">
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <ArrowRight className="quick-action-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
     </button>
   );
 }
 
 function StatusBadge({ value }: { value?: string | null }) {
   const normalized = (value ?? 'Sin dato').toLowerCase();
-  const tone = normalized.includes('cerrado') || normalized.includes('completada') || normalized.includes('resuelto') || normalized.includes('activo')
-    ? 'success'
-    : normalized.includes('alta') || normalized.includes('escalado') || normalized.includes('perdido')
-      ? 'danger'
-      : normalized.includes('media') || normalized.includes('pendiente') || normalized.includes('programada')
-        ? 'warning'
-        : 'neutral';
+  const tone = normalized.includes('crítica') || normalized.includes('critica')
+    ? 'critical'
+    : normalized.includes('cerrad') || normalized.includes('completad') || normalized.includes('resuelt') || normalized.includes('activ')
+      ? 'success'
+      : normalized.includes('alta') || normalized.includes('urgente') || normalized.includes('escalado') || normalized.includes('perdido') || normalized.includes('cancelad')
+        ? 'danger'
+        : normalized.includes('media') || normalized.includes('pendiente') || normalized.includes('programada') || normalized.includes('abierto') || normalized.includes('progreso')
+          ? 'warning'
+          : 'neutral';
 
   return <span className={`status-badge ${tone}`}>{value ?? 'Sin dato'}</span>;
 }
@@ -1102,6 +1483,22 @@ function Modal({
   onClose: () => void;
   children: ReactNode;
 }) {
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -1117,11 +1514,11 @@ function Modal({
       >
         <header className="modal-header">
           <h2>{title}</h2>
-          <button type="button" className="secondary compact" onClick={onClose}>
-            Cerrar
+          <button type="button" className="modal-close-button" aria-label="Cerrar modal" onClick={onClose}>
+            <X size={20} strokeWidth={1.8} aria-hidden="true" />
           </button>
         </header>
-        {children}
+        <div className="modal-content">{children}</div>
       </section>
     </div>
   );
@@ -1179,8 +1576,8 @@ function ProspectsPanel({
   return (
     <section className="workspace-grid">
       {permissions.createProspects && (
-        <form className="panel stack" onSubmit={submit}>
-          <h2>Registrando nuevo prospecto comercial</h2>
+        <form className="stack prospect-create-form" onSubmit={submit}>
+          <h2>Registro</h2>
           <label>
             RUT
             <input
@@ -1248,7 +1645,7 @@ function ProspectsPanel({
         </form>
       )}
 
-      <section className="panel">
+      <section className="prospects-list-section">
         <h2>Gestión de Prospectos</h2>
         <div className="table-wrap">
           <table>
@@ -1286,16 +1683,16 @@ function ProspectsPanel({
           onClose={() => setSelectedId(null)}
         >
           {selectedProspect && (
-          <ProspectWorkflowPanel
-            prospect={selectedProspect}
-            plans={plans}
-            permissions={permissions}
-            onOpenInstallation={() => {
-              setSelectedId(null);
-              onOpenInstallation(selectedProspect.idProspecto);
-            }}
-            onChanged={onCreated}
-          />
+            <ProspectWorkflowPanel
+              prospect={selectedProspect}
+              plans={plans}
+              permissions={permissions}
+              onOpenInstallation={() => {
+                setSelectedId(null);
+                onOpenInstallation(selectedProspect.idProspecto);
+              }}
+              onChanged={onCreated}
+            />
           )}
         </Modal>
       </section>
@@ -1369,156 +1766,250 @@ function ProspectWorkflowPanel({
   }
 
   return (
-    <div className="workflow-panel modal-workflow">
-      <section className="customer-preview">
-        <h3>{prospect.nombreCompleto}</h3>
-        <p><strong>RUT:</strong> {prospect.rut ?? '-'}</p>
-        <p><strong>Teléfono:</strong> {prospect.telefono ?? '-'}</p>
-        <p><strong>Correo:</strong> {prospect.email ?? '-'}</p>
-        <p><strong>Estado:</strong> {prospect.estadoPipeline ?? '-'}</p>
-        <p><strong>Origen:</strong> {prospect.origenContacto ?? '-'}</p>
+    <div className="workflow-panel modal-workflow prospect-workflow">
+      <section className="prospect-overview">
+        <header className="prospect-overview-header">
+          <span className="prospect-avatar" aria-hidden="true">
+            <UserRoundPlus size={22} strokeWidth={1.8} />
+          </span>
+          <div>
+            <h3>{prospect.nombreCompleto}</h3>
+            <p>{prospect.rut ?? 'RUT no registrado'}</p>
+          </div>
+          <StatusBadge value={prospect.estadoPipeline} />
+        </header>
+        <dl className="prospect-overview-data">
+          <div>
+            <dt>Teléfono</dt>
+            <dd>{prospect.telefono ?? 'No registrado'}</dd>
+          </div>
+          <div>
+            <dt>Correo</dt>
+            <dd>{prospect.email ?? 'No registrado'}</dd>
+          </div>
+          <div>
+            <dt>Origen</dt>
+            <dd>{prospect.origenContacto ?? 'No registrado'}</dd>
+          </div>
+        </dl>
       </section>
-      <div className="workflow-grid">
-        {permissions.manageProspectPipeline && <label>
-          Actualizar estado del prospecto en el pipeline
-          <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
-            {prospect.estadoPipeline === 'Perdido' && (
-              <option value="Perdido" disabled>
-                Perdido - selecciona un estado para reactivar
-              </option>
-            )}
-            {[
-              'Prospecto Nuevo',
-              'Contactado',
-              'En Factibilidad',
-              'Cotizacion Enviada',
-              'Aceptado',
-              'Instalacion Programada',
-              'Servicio Activo',
-            ].map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() =>
-              void runAction(
-                () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: pipelineStatus }),
-                prospect.estadoPipeline === 'Perdido' ? 'Prospecto reactivado y pipeline actualizado' : 'Pipeline actualizado',
-              )
-            }
-          >
-            Actualizar Estado
-          </button>
-        </label>}
 
-        {permissions.verifyFeasibility && <label>
-          Verificando factibilidad técnica de instalación
-          <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
-            <option value="Factible">Factible</option>
-            <option value="No Factible">No Factible</option>
-          </select>
-          <button
-            type="button"
-            onClick={() =>
-              void runAction(
-                () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
-                'Factibilidad registrada',
-              )
-            }
-          >
-            Registrar factibilidad
-          </button>
-        </label>}
+      <div className="workflow-grid prospect-action-grid">
+        {permissions.manageProspectPipeline && (
+          <section className="prospect-action-card prospect-action-card-mint">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <ClipboardList size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Estado del prospecto</h4>
+                <p>Actualiza su avance dentro del pipeline.</p>
+              </div>
+            </header>
+            <label>
+              Estado
+              <select value={pipelineStatus} onChange={(event) => setPipelineStatus(event.target.value)}>
+                {prospect.estadoPipeline === 'Perdido' && (
+                  <option value="Perdido" disabled>
+                    Perdido - selecciona un estado para reactivar
+                  </option>
+                )}
+                {[
+                  'Prospecto Nuevo',
+                  'Contactado',
+                  'En Factibilidad',
+                  'Cotizacion Enviada',
+                  'Aceptado',
+                  'Instalacion Programada',
+                  'Servicio Activo',
+                ].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                void runAction(
+                  () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: pipelineStatus }),
+                  prospect.estadoPipeline === 'Perdido' ? 'Prospecto reactivado y pipeline actualizado' : 'Pipeline actualizado',
+                )
+              }
+            >
+              Actualizar estado
+            </button>
+          </section>
+        )}
 
-        {permissions.generateQuotes && <label>
-          Generando cotización en formato PDF
-          <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
-            <option value="">Seleccionar plan</option>
-            {planOptions.map((plan) => (
-              <option key={plan.idPlan} value={plan.idPlan}>
-                {plan.nombreComercial}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={!quotePlanId}
-            onClick={() => void generateQuote()}
-          >
-            Generar Cotización
-          </button>
-        </label>}
+        {permissions.verifyFeasibility && (
+          <section className="prospect-action-card prospect-action-card-blue">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <Wrench size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Factibilidad técnica</h4>
+                <p>Registra el resultado de la evaluación.</p>
+              </div>
+            </header>
+            <label>
+              Resultado
+              <select value={feasibilityResult} onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}>
+                <option value="Factible">Factible</option>
+                <option value="No Factible">No Factible</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() =>
+                void runAction(
+                  () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
+                  'Factibilidad registrada',
+                )
+              }
+            >
+              Registrar factibilidad
+            </button>
+          </section>
+        )}
 
-        {permissions.recordProspectLoss && <label>
-          Registrando motivo de pérdida de prospecto
-          <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
-            {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() =>
-              void runAction(
-                () => api.post(`/prospects/${prospect.idProspecto}/loss`, { motivo: lossReason }),
-                'Motivo de perdida registrado',
-              )
-            }
-          >
-            Marcar como Perdido
-          </button>
-        </label>}
+        {permissions.generateQuotes && (
+          <section className="prospect-action-card prospect-action-card-violet">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <FileClock size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Generar cotización</h4>
+                <p>Crea el documento PDF para el cliente.</p>
+              </div>
+            </header>
+            <label>
+              Plan a cotizar
+              <select value={quotePlanId} onChange={(event) => setQuotePlanId(event.target.value)}>
+                <option value="">Seleccionar plan</option>
+                {planOptions.map((plan) => (
+                  <option key={plan.idPlan} value={plan.idPlan}>
+                    {plan.nombreComercial}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" disabled={!quotePlanId} onClick={() => void generateQuote()}>
+              Generar cotización
+            </button>
+          </section>
+        )}
 
-        {permissions.contractPlans && <label>
-          Registrando tipo de plan contratado por el cliente
-          <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
-            <option value="">Seleccionar plan</option>
-            {planOptions.map((plan) => (
-              <option key={plan.idPlan} value={plan.idPlan}>
-                {plan.nombreComercial}
-              </option>
-            ))}
-          </select>
-          <input
-            min="1"
-            max="28"
-            type="number"
-            value={dueDay}
-            onChange={(event) => setDueDay(Number(event.target.value))}
-          />
-          <button
-            type="button"
-            disabled={!contractPlanId}
-            onClick={() =>
-              void runAction(
-                () =>
-                  api.post(`/prospects/${prospect.idProspecto}/contracts`, {
-                    planId: Number(contractPlanId),
-                    diaVencimiento: dueDay,
-                  }),
-                'Plan contratado registrado',
-              )
-            }
-          >
-            Registrar plan contratado
-          </button>
-        </label>}
+        {permissions.recordProspectLoss && (
+          <section className="prospect-action-card prospect-action-card-loss">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <TrendingDown size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Marcar como perdido</h4>
+                <p>Indica por qué no continuará la oportunidad.</p>
+              </div>
+            </header>
+            <label>
+              Motivo
+              <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
+                {['Sin cobertura', 'Precio', 'No responde', 'Competencia', 'Otro'].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() =>
+                void runAction(
+                  () => api.post(`/prospects/${prospect.idProspecto}/loss`, { motivo: lossReason }),
+                  'Motivo de perdida registrado',
+                )
+              }
+            >
+              Marcar como perdido
+            </button>
+          </section>
+        )}
+
+        {permissions.contractPlans && (
+          <section className="prospect-action-card prospect-action-card-contract prospect-action-card-orange">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <HandCoins size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Registrar contratación</h4>
+                <p>Asocia el plan contratado y su día de vencimiento.</p>
+              </div>
+            </header>
+            <div className="prospect-contract-fields">
+              <label>
+                Plan contratado
+                <select value={contractPlanId} onChange={(event) => setContractPlanId(event.target.value)}>
+                  <option value="">Seleccionar plan</option>
+                  {planOptions.map((plan) => (
+                    <option key={plan.idPlan} value={plan.idPlan}>
+                      {plan.nombreComercial}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Día de vencimiento
+                <input
+                  min="1"
+                  max="28"
+                  type="number"
+                  value={dueDay}
+                  onChange={(event) => setDueDay(Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              disabled={!contractPlanId}
+              onClick={() =>
+                void runAction(
+                  () =>
+                    api.post(`/prospects/${prospect.idProspecto}/contracts`, {
+                      planId: Number(contractPlanId),
+                      diaVencimiento: dueDay,
+                    }),
+                  'Plan contratado registrado',
+                )
+              }
+            >
+              Registrar plan contratado
+            </button>
+          </section>
+        )}
 
         {permissions.createInstallOrders && prospect.estadoPipeline === 'Aceptado' && Boolean(prospect.idCliente) && (
-          <label>
-            Agenda de instalación
+          <section className="prospect-action-card prospect-action-card-installation prospect-action-card-green">
+            <header className="prospect-action-header">
+              <span className="prospect-action-icon" aria-hidden="true">
+                <CalendarPlus size={19} strokeWidth={1.8} />
+              </span>
+              <div>
+                <h4>Agendar instalación</h4>
+                <p>Continúa el proceso coordinando la visita técnica.</p>
+              </div>
+            </header>
             <button type="button" onClick={onOpenInstallation}>
               Generar instalación
             </button>
-          </label>
+          </section>
         )}
       </div>
+
       {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
     </div>
   );
@@ -2303,10 +2794,9 @@ function CustomersPanel({
 
   return (
     <section className="customers-module">
-      <section className="panel customers-list-panel">
+      <section className="customers-list-panel">
         <div className="section-heading">
           <h2>Clientes</h2>
-          <p>Consulta y gestiona clientes registrados por RUT, nombre, teléfono o contrato.</p>
         </div>
         <form className="customer-search" onSubmit={searchCustomers}>
           <label>
@@ -2371,353 +2861,408 @@ function CustomersPanel({
       <Modal title="Gestionar cliente" open={managementOpen} onClose={() => setManagementOpen(false)}>
         {selectedCustomer ? (
           <div className="customer-management-modal">
-            <section className="customer-summary-grid">
-              <article className="customer-preview">
-                <h3>{selectedCustomer.nombreCompleto}</h3>
-                <p><strong>RUT:</strong> {selectedCustomer.rut ?? '-'}</p>
-                <p><strong>Empresa:</strong> {customerCompanyLabel(selectedCustomer)}</p>
-                <p><strong>Estado:</strong> {selectedCustomer.estado}</p>
-                <p><strong>Origen:</strong> {selectedCustomer.origenContacto ?? '-'}</p>
-              </article>
-              <article className="customer-preview">
-                <h3>Datos de contacto</h3>
-                <p><strong>Teléfono:</strong> {selectedCustomer.telefono ?? '-'}</p>
-                <p><strong>Correo:</strong> {selectedCustomer.email ?? '-'}</p>
-                <p><strong>Dirección:</strong> {String(selectedCustomer.datosTecnicos?.direccion ?? '-')}</p>
-                <p><strong>Plan principal:</strong> {customerMainPlan(selectedCustomer)}</p>
-              </article>
+            <section className="customer-profile-overview">
+              <header className="customer-profile-header">
+                <span className="customer-profile-avatar" aria-hidden="true">
+                  <Users size={22} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <h3>{selectedCustomer.nombreCompleto}</h3>
+                  <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
+                </div>
+                <StatusBadge value={selectedCustomer.estado} />
+              </header>
+              <dl className="customer-profile-data">
+                <div>
+                  <dt>Empresa</dt>
+                  <dd>{customerCompanyLabel(selectedCustomer)}</dd>
+                </div>
+                <div>
+                  <dt>Origen</dt>
+                  <dd>{selectedCustomer.origenContacto ?? 'No registrado'}</dd>
+                </div>
+                <div>
+                  <dt>Teléfono</dt>
+                  <dd>{selectedCustomer.telefono ?? 'No registrado'}</dd>
+                </div>
+                <div>
+                  <dt>Correo</dt>
+                  <dd>{selectedCustomer.email ?? 'No registrado'}</dd>
+                </div>
+                <div>
+                  <dt>Dirección</dt>
+                  <dd>{String(selectedCustomer.datosTecnicos?.direccion ?? 'No registrada')}</dd>
+                </div>
+                <div>
+                  <dt>Plan principal</dt>
+                  <dd>{customerMainPlan(selectedCustomer)}</dd>
+                </div>
+              </dl>
             </section>
 
             {(permissions.viewMonitoring || permissions.manageTvip) && (
-              <section className="customer-extra-grid">
-                {permissions.viewMonitoring && (
-                  <article className="customer-preview stack">
-                    <div className="section-heading compact-heading">
-                      <h3>Monitoreo de conexión</h3>
-                      <button type="button" className="secondary compact" onClick={() => void loadCustomerMonitoring()}>
-                        Actualizar
-                      </button>
-                    </div>
-                    <MonitoringStatusView status={monitoringStatus} />
-                  </article>
-                )}
-                {permissions.manageTvip && (
-                  <article className="customer-preview stack">
-                    <div className="section-heading compact-heading">
-                      <h3>TV IP</h3>
-                      <button type="button" className="secondary compact" onClick={() => void loadCustomerTvip()}>
-                        Actualizar
-                      </button>
-                    </div>
-                    {!tvipCredentials.length && <p className="inline-status">El cliente no tiene contratos con plan TV IP.</p>}
-                    {tvipCredentials.map((credential) => (
-                      <section className="compact-list-item" key={credential.idContrato}>
-                        <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
-                        <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
-                        <span>Generada: {formatDateTime(credential.credencial?.fechaGeneracion)}</span>
-                        <button type="button" className="secondary compact" onClick={() => void regenerateTvipCredential(credential.idContrato)}>
-                          {credential.credencial ? 'Regenerar' : 'Generar'} credencial
-                        </button>
-                        {tvipTempPassword?.idContrato === credential.idContrato && (
-                          <p className="inline-status">
-                            Password temporal: <strong>{tvipTempPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.
-                          </p>
-                        )}
-                      </section>
-                    ))}
-                  </article>
-                )}
-              </section>
-            )}
-
-      <section className="panel stack">
-        <h2>Estado operativo</h2>
-        {selectedCustomer ? (
-          <>
-            <p className="detail-line">
-              {selectedCustomer.nombreCompleto} - {selectedCustomer.rut ?? 'sin RUT'}
-            </p>
-            <p className="detail-line">
-              Origen: {selectedCustomer.origenContacto ?? 'Sin dato'} - Servicios registrados: {services.length}
-            </p>
-            <label>
-              Estado operativo
-              <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
-                {['Activo', 'Suspendido', 'En Mantencion', 'Moroso', 'Baja'].map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="button-row">
-              <button type="button" onClick={updateCustomerStatus}>
-                Cambiar Estado Operativo
-              </button>
-              <button type="button" className="secondary" onClick={loadHistory}>
-                Ver Historial
-              </button>
-            </div>
-            {status && <p className="inline-status">{status}</p>}
-            {history && (
-              <div className="history-grid">
-                <HistoryBox title="Contratos" value={history.contratos.length} />
-                <HistoryBox title="Servicios" value={history.servicios.length} />
-                <HistoryBox title="Tickets" value={history.tickets.length} />
-                <HistoryBox title="OTs" value={history.ordenes.length} />
-                <HistoryBox title="Equipos" value={history.equipos.length} />
-                <section className="history-list">
-                  <h3>Ultimos movimientos</h3>
-                  <ul>
-                    {history.auditoria.slice(0, 6).map((row) => (
-                      <li key={row.idLog}>
-                        {row.accion} {row.fechaHora ? new Date(row.fechaHora).toLocaleString() : ''}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              </div>
-            )}
-          </>
-        ) : (
-          <p className="inline-status">No hay clientes para gestionar.</p>
-        )}
-      </section>
-
-      <section className="panel stack full-width-panel">
-        <h2>Servicios contratados</h2>
-        {selectedCustomer ? (
-          <>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Servicio</th>
-                    <th>Estado</th>
-                    <th>Plan</th>
-                    <th>Direccion</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {services.map((service) => (
-                    <tr key={service.idServicio}>
-                      <td>{service.tipoServicio}</td>
-                      <td>{service.estadoOperativo}</td>
-                      <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
-                      <td>{service.direccion?.direccionCompleta ?? '-'}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary compact"
-                          onClick={() => setSelectedServiceId(service.idServicio)}
-                        >
-                          Ver perfil
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {!services.length && (
-              <p className="inline-status">Este cliente aun no tiene servicios contratados registrados.</p>
-            )}
-
-            {selectedService && (
-              <div className="workflow-panel">
-                <h3>Servicio #{selectedService.idServicio}</h3>
-                <p className="detail-line">
-                  {selectedService.tipoServicio} - {selectedService.estadoOperativo}
-                  {selectedService.contrato?.plan ? ` - ${selectedService.contrato.plan.nombreComercial}` : ''}
-                </p>
-                <div className="history-grid">
-                  <HistoryBox title="Equipos instalados" value={selectedService.equipos?.length ?? 0} />
-                  <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
-                  <HistoryBox title="OTs" value={selectedService.ordenes?.length ?? 0} />
-                  <HistoryBox title="Direccion" value={selectedService.direccion?.comuna ?? 'Sin dato'} />
-                  <section className="history-list">
-                    <h3>Datos tecnicos del servicio</h3>
-                    <ul>
-                      {technicalEntries(selectedService.datosTecnicos).map((entry) => (
-                        <li key={entry}>{entry}</li>
-                      ))}
-                      {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
-                    </ul>
-                  </section>
-                  {permissions.viewMonitoring && (
-                    <section className="history-list">
-                      <div className="section-heading compact-heading">
-                        <h3>Monitoreo del servicio</h3>
-                        <button type="button" className="secondary compact" onClick={() => void loadServiceMonitoring()}>
-                          Actualizar
-                        </button>
-                      </div>
-                      <MonitoringStatusView status={serviceMonitoringStatus} />
-                    </section>
-                  )}
-                  <section className="history-list">
-                    <h3>Solicitudes y visitas asociadas</h3>
-                    <ul>
-                      {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
-                        <li key={`ticket-${ticket.idTicket}`}>
-                          Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
-                        </li>
-                      ))}
-                      {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
-                        <li key={`order-${order.idOt}`}>
-                          Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
-                        </li>
-                      ))}
-                      {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
-                        <li>No hay solicitudes ni visitas asociadas.</li>
-                      )}
-                    </ul>
+              <details className="customer-modal-section">
+                <summary>
+                  <span className="customer-section-icon customer-section-icon-blue" aria-hidden="true">
+                    <Wifi size={19} strokeWidth={1.8} />
+                  </span>
+                  <span>
+                    <strong>Conectividad y TV IP</strong>
+                    <small>Monitoreo de conexión y credenciales del servicio.</small>
+                  </span>
+                  <ChevronDown size={18} strokeWidth={1.8} aria-hidden="true" />
+                </summary>
+                <div className="customer-modal-section-content">
+                  <section className="customer-extra-grid">
+                    {permissions.viewMonitoring && (
+                      <article className="customer-feature-card stack">
+                        <div className="section-heading compact-heading">
+                          <h3>Monitoreo de conexión</h3>
+                          <button type="button" className="secondary compact" onClick={() => void loadCustomerMonitoring()}>
+                            Actualizar
+                          </button>
+                        </div>
+                        <MonitoringStatusView status={monitoringStatus} />
+                      </article>
+                    )}
+                    {permissions.manageTvip && (
+                      <article className="customer-feature-card stack">
+                        <div className="section-heading compact-heading">
+                          <h3>TV IP</h3>
+                          <button type="button" className="secondary compact" onClick={() => void loadCustomerTvip()}>
+                            Actualizar
+                          </button>
+                        </div>
+                        {!tvipCredentials.length && <p className="inline-status">El cliente no tiene contratos con plan TV IP.</p>}
+                        {tvipCredentials.map((credential) => (
+                          <section className="compact-list-item" key={credential.idContrato}>
+                            <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
+                            <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
+                            <span>Generada: {formatDateTime(credential.credencial?.fechaGeneracion)}</span>
+                            <button type="button" className="secondary compact" onClick={() => void regenerateTvipCredential(credential.idContrato)}>
+                              {credential.credencial ? 'Regenerar' : 'Generar'} credencial
+                            </button>
+                            {tvipTempPassword?.idContrato === credential.idContrato && (
+                              <p className="inline-status">
+                                Password temporal: <strong>{tvipTempPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.
+                              </p>
+                            )}
+                          </section>
+                        ))}
+                      </article>
+                    )}
                   </section>
                 </div>
-              </div>
+              </details>
             )}
 
-            {permissions.manageServices && (
-              <div className="workflow-grid">
-                <form className="stack" onSubmit={createService}>
-                  <h3>Registrar servicio adicional</h3>
-                  <label>
-                    Contrato asociado
-                    <select
-                      value={serviceCreateForm.idContrato}
-                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, idContrato: event.target.value })}
-                    >
-                      <option value="">Sin contrato especifico</option>
-                      {contractOptions.map((contract) => (
-                        <option key={contract.idContrato} value={contract.idContrato}>
-                          Contrato {contract.idContrato} - {contract.plan?.nombreComercial ?? 'sin plan'}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Tipo de servicio
-                    <select
-                      value={serviceCreateForm.tipoServicio}
-                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tipoServicio: event.target.value })}
-                    >
-                      {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    Estado operativo
-                    <select
-                      value={serviceCreateForm.estadoOperativo}
-                      onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, estadoOperativo: event.target.value })}
-                    >
-                      {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                    </select>
-                  </label>
-                  <input
-                    placeholder="Tecnologia, ej: Fibra Optica"
-                    value={serviceCreateForm.tecnologia}
-                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tecnologia: event.target.value })}
-                  />
-                  <input
-                    placeholder="Velocidad o caracteristica comercial"
-                    value={serviceCreateForm.velocidad}
-                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, velocidad: event.target.value })}
-                  />
-                  <textarea
-                    placeholder="Observaciones del servicio"
-                    value={serviceCreateForm.observaciones}
-                    onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, observaciones: event.target.value })}
-                  />
-                  <button type="submit">Registrar servicio</button>
-                </form>
-
-                {selectedService && (
-                  <form className="stack" onSubmit={updateService}>
-                    <h3>Actualizar perfil tecnico</h3>
+      <details className="customer-modal-section">
+              <summary>
+                <span className="customer-section-icon" aria-hidden="true">
+                  <UserCog size={19} strokeWidth={1.8} />
+                </span>
+                <span>
+                  <strong>Estado e historial</strong>
+                  <small>Gestiona el estado operativo y revisa la actividad del cliente.</small>
+                </span>
+                <ChevronDown size={18} strokeWidth={1.8} aria-hidden="true" />
+              </summary>
+              <div className="customer-modal-section-content customer-operational-section">
+                {selectedCustomer ? (
+                  <>
+                    <p className="detail-line">
+                      Origen: {selectedCustomer.origenContacto ?? 'Sin dato'} - Servicios registrados: {services.length}
+                    </p>
                     <label>
                       Estado operativo
-                      <select
-                        value={serviceUpdateForm.estadoOperativo}
-                        onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, estadoOperativo: event.target.value })}
-                      >
-                        {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                      <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                        {['Activo', 'Suspendido', 'En Mantencion', 'Moroso', 'Baja'].map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
                       </select>
                     </label>
-                    <label>
-                      Tipo de servicio
-                      <select
-                        value={serviceUpdateForm.tipoServicio}
-                        onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, tipoServicio: event.target.value })}
-                      >
-                        {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                      </select>
-                    </label>
-                    <input
-                      placeholder="MAC del servicio"
-                      value={serviceUpdateForm.macAddress}
-                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, macAddress: event.target.value })}
-                    />
-                    <input
-                      placeholder="Puerto OLT / nodo"
-                      value={serviceUpdateForm.puertoOlt}
-                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, puertoOlt: event.target.value })}
-                    />
-                    <input
-                      placeholder="IP asignada"
-                      value={serviceUpdateForm.ipAsignada}
-                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, ipAsignada: event.target.value })}
-                    />
-                    <textarea
-                      placeholder="Observaciones técnicas"
-                      value={serviceUpdateForm.observacionesTecnicas}
-                      onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, observacionesTecnicas: event.target.value })}
-                    />
-                    <button type="submit">Actualizar perfil de servicio</button>
-                  </form>
+                    <div className="button-row">
+                      <button type="button" onClick={updateCustomerStatus}>
+                        Cambiar Estado Operativo
+                      </button>
+                      <button type="button" className="secondary" onClick={loadHistory}>
+                        Ver Historial
+                      </button>
+                    </div>
+                    {status && <p className="inline-status">{status}</p>}
+                    {history && (
+                      <div className="history-grid">
+                        <HistoryBox title="Contratos" value={history.contratos.length} />
+                        <HistoryBox title="Servicios" value={history.servicios.length} />
+                        <HistoryBox title="Tickets" value={history.tickets.length} />
+                        <HistoryBox title="OTs" value={history.ordenes.length} />
+                        <HistoryBox title="Equipos" value={history.equipos.length} />
+                        <section className="history-list">
+                          <h3>Ultimos movimientos</h3>
+                          <ul>
+                            {history.auditoria.slice(0, 6).map((row) => (
+                              <li key={row.idLog}>
+                                {row.accion} {row.fechaHora ? new Date(row.fechaHora).toLocaleString() : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="inline-status">No hay clientes para gestionar.</p>
                 )}
               </div>
-            )}
+            </details>
 
-            {permissions.manageServices && selectedService && (
-              <form className="stack" onSubmit={attachEquipment}>
-                <h3>Asociar equipo instalado al servicio</h3>
-                <div className="workflow-grid">
-                  <input
-                    placeholder="Numero de serie existente"
-                    value={equipmentForm.numeroSerie}
-                    onChange={(event) => setEquipmentForm({ ...equipmentForm, numeroSerie: event.target.value })}
-                  />
-                  <input
-                    placeholder="Modelo opcional"
-                    value={equipmentForm.modelo}
-                    onChange={(event) => setEquipmentForm({ ...equipmentForm, modelo: event.target.value })}
-                  />
-                  <input
-                    placeholder="MAC AA:BB:CC:DD:EE:FF"
-                    value={equipmentForm.macAddress}
-                    onChange={(event) => setEquipmentForm({ ...equipmentForm, macAddress: event.target.value })}
-                  />
-                  <input
-                    placeholder="Puerto OLT / nodo"
-                    value={equipmentForm.puertoOlt}
-                    onChange={(event) => setEquipmentForm({ ...equipmentForm, puertoOlt: event.target.value })}
-                  />
-                </div>
-                <textarea
-                  placeholder="Observaciones de instalacion"
-                  value={equipmentForm.observaciones}
-                  onChange={(event) => setEquipmentForm({ ...equipmentForm, observaciones: event.target.value })}
-                />
-                <button type="submit">Asociar equipo</button>
-              </form>
-            )}
-          </>
-        ) : (
-          <p className="inline-status">Selecciona un cliente para revisar sus servicios contratados.</p>
-        )}
-      </section>
+            <details className="customer-modal-section">
+              <summary>
+                <span className="customer-section-icon customer-section-icon-violet" aria-hidden="true">
+                  <Router size={19} strokeWidth={1.8} />
+                </span>
+                <span>
+                  <strong>Servicios contratados</strong>
+                  <small>{services.length} servicio(s) registrado(s), perfiles técnicos y equipos.</small>
+                </span>
+                <ChevronDown size={18} strokeWidth={1.8} aria-hidden="true" />
+              </summary>
+              <div className="customer-modal-section-content customer-services-section">
+                {selectedCustomer ? (
+                  <>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Servicio</th>
+                            <th>Estado</th>
+                            <th>Plan</th>
+                            <th>Direccion</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {services.map((service) => (
+                            <tr key={service.idServicio}>
+                              <td>{service.tipoServicio}</td>
+                              <td>{service.estadoOperativo}</td>
+                              <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
+                              <td>{service.direccion?.direccionCompleta ?? '-'}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  onClick={() => setSelectedServiceId(service.idServicio)}
+                                >
+                                  Ver perfil
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {!services.length && (
+                      <p className="inline-status">Este cliente aun no tiene servicios contratados registrados.</p>
+                    )}
+
+                    {selectedService && (
+                      <div className="workflow-panel customer-service-profile">
+                        <h3>Servicio #{selectedService.idServicio}</h3>
+                        <p className="detail-line">
+                          {selectedService.tipoServicio} - {selectedService.estadoOperativo}
+                          {selectedService.contrato?.plan ? ` - ${selectedService.contrato.plan.nombreComercial}` : ''}
+                        </p>
+                        <div className="history-grid">
+                          <HistoryBox title="Equipos instalados" value={selectedService.equipos?.length ?? 0} />
+                          <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
+                          <HistoryBox title="OTs" value={selectedService.ordenes?.length ?? 0} />
+                          <HistoryBox title="Direccion" value={selectedService.direccion?.comuna ?? 'Sin dato'} />
+                          <section className="history-list">
+                            <h3>Datos tecnicos del servicio</h3>
+                            <ul>
+                              {technicalEntries(selectedService.datosTecnicos).map((entry) => (
+                                <li key={entry}>{entry}</li>
+                              ))}
+                              {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
+                            </ul>
+                          </section>
+                          {permissions.viewMonitoring && (
+                            <section className="history-list">
+                              <div className="section-heading compact-heading">
+                                <h3>Monitoreo del servicio</h3>
+                                <button type="button" className="secondary compact" onClick={() => void loadServiceMonitoring()}>
+                                  Actualizar
+                                </button>
+                              </div>
+                              <MonitoringStatusView status={serviceMonitoringStatus} />
+                            </section>
+                          )}
+                          <section className="history-list">
+                            <h3>Solicitudes y visitas asociadas</h3>
+                            <ul>
+                              {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
+                                <li key={`ticket-${ticket.idTicket}`}>
+                                  Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
+                                </li>
+                              ))}
+                              {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
+                                <li key={`order-${order.idOt}`}>
+                                  Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
+                                </li>
+                              ))}
+                              {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
+                                <li>No hay solicitudes ni visitas asociadas.</li>
+                              )}
+                            </ul>
+                          </section>
+                        </div>
+                      </div>
+                    )}
+
+                    {permissions.manageServices && (
+                      <div className="workflow-grid customer-service-forms">
+                        <form className="stack customer-service-form" onSubmit={createService}>
+                          <h3>Registrar servicio adicional</h3>
+                          <label>
+                            Contrato asociado
+                            <select
+                              value={serviceCreateForm.idContrato}
+                              onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, idContrato: event.target.value })}
+                            >
+                              <option value="">Sin contrato especifico</option>
+                              {contractOptions.map((contract) => (
+                                <option key={contract.idContrato} value={contract.idContrato}>
+                                  Contrato {contract.idContrato} - {contract.plan?.nombreComercial ?? 'sin plan'}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Tipo de servicio
+                            <select
+                              value={serviceCreateForm.tipoServicio}
+                              onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tipoServicio: event.target.value })}
+                            >
+                              {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                            </select>
+                          </label>
+                          <label>
+                            Estado operativo
+                            <select
+                              value={serviceCreateForm.estadoOperativo}
+                              onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, estadoOperativo: event.target.value })}
+                            >
+                              {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                            </select>
+                          </label>
+                          <input
+                            placeholder="Tecnologia, ej: Fibra Optica"
+                            value={serviceCreateForm.tecnologia}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, tecnologia: event.target.value })}
+                          />
+                          <input
+                            placeholder="Velocidad o caracteristica comercial"
+                            value={serviceCreateForm.velocidad}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, velocidad: event.target.value })}
+                          />
+                          <textarea
+                            placeholder="Observaciones del servicio"
+                            value={serviceCreateForm.observaciones}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, observaciones: event.target.value })}
+                          />
+                          <button type="submit">Registrar servicio</button>
+                        </form>
+
+                        {selectedService && (
+                          <form className="stack customer-service-form" onSubmit={updateService}>
+                            <h3>Actualizar perfil tecnico</h3>
+                            <label>
+                              Estado operativo
+                              <select
+                                value={serviceUpdateForm.estadoOperativo}
+                                onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, estadoOperativo: event.target.value })}
+                              >
+                                {serviceStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              Tipo de servicio
+                              <select
+                                value={serviceUpdateForm.tipoServicio}
+                                onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, tipoServicio: event.target.value })}
+                              >
+                                {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                              </select>
+                            </label>
+                            <input
+                              placeholder="MAC del servicio"
+                              value={serviceUpdateForm.macAddress}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, macAddress: event.target.value })}
+                            />
+                            <input
+                              placeholder="Puerto OLT / nodo"
+                              value={serviceUpdateForm.puertoOlt}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, puertoOlt: event.target.value })}
+                            />
+                            <input
+                              placeholder="IP asignada"
+                              value={serviceUpdateForm.ipAsignada}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, ipAsignada: event.target.value })}
+                            />
+                            <textarea
+                              placeholder="Observaciones técnicas"
+                              value={serviceUpdateForm.observacionesTecnicas}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, observacionesTecnicas: event.target.value })}
+                            />
+                            <button type="submit">Actualizar perfil de servicio</button>
+                          </form>
+                        )}
+                      </div>
+                    )}
+
+                    {permissions.manageServices && selectedService && (
+                      <form className="stack customer-service-form customer-equipment-form" onSubmit={attachEquipment}>
+                        <h3>Asociar equipo instalado al servicio</h3>
+                        <div className="workflow-grid">
+                          <input
+                            placeholder="Numero de serie existente"
+                            value={equipmentForm.numeroSerie}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, numeroSerie: event.target.value })}
+                          />
+                          <input
+                            placeholder="Modelo opcional"
+                            value={equipmentForm.modelo}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, modelo: event.target.value })}
+                          />
+                          <input
+                            placeholder="MAC AA:BB:CC:DD:EE:FF"
+                            value={equipmentForm.macAddress}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, macAddress: event.target.value })}
+                          />
+                          <input
+                            placeholder="Puerto OLT / nodo"
+                            value={equipmentForm.puertoOlt}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, puertoOlt: event.target.value })}
+                          />
+                        </div>
+                        <textarea
+                          placeholder="Observaciones de instalacion"
+                          value={equipmentForm.observaciones}
+                          onChange={(event) => setEquipmentForm({ ...equipmentForm, observaciones: event.target.value })}
+                        />
+                        <button type="submit">Asociar equipo</button>
+                      </form>
+                    )}
+                  </>
+                ) : (
+                  <p className="inline-status">Selecciona un cliente para revisar sus servicios contratados.</p>
+                )}
+              </div>
+            </details>
           </div>
         ) : (
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
@@ -3411,278 +3956,278 @@ function InventoryPanel({
         </div>
 
         <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
-        {selectedUnit ? (
-          <div className="workflow-panel modal-workflow">
-            <h3>{selectedUnit.numeroSerie}</h3>
-            <p className="detail-line">
-              Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
-              {selectedUnit.clienteInstalado ? ` - Cliente: ${selectedUnit.clienteInstalado.nombreCompleto}` : ''}
-            </p>
-            {(selectedUnit.macAddress || selectedUnit.puertoOlt) && (
+          {selectedUnit ? (
+            <div className="workflow-panel modal-workflow">
+              <h3>{selectedUnit.numeroSerie}</h3>
               <p className="detail-line">
-                MAC: {selectedUnit.macAddress ?? '-'} - Puerto OLT: {selectedUnit.puertoOlt ?? '-'}
+                Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
+                {selectedUnit.clienteInstalado ? ` - Cliente: ${selectedUnit.clienteInstalado.nombreCompleto}` : ''}
               </p>
-            )}
-            <div className="workflow-grid">
-              {permissions.manageInventory && <label>
-                Estado logico
-                <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
-                  {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva', 'Bloqueado'].map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="Motivo del cambio de estado"
-                  value={statusForm.motivo}
-                  onChange={(event) => setStatusForm({ ...statusForm, motivo: event.target.value })}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.patch(`/inventory/equipment/${selectedUnitPayload()}/status`, statusForm),
-                      'Estado de equipo actualizado',
-                    )
-                  }
-                >
-                  Actualizar
-                </button>
-              </label>}
+              {(selectedUnit.macAddress || selectedUnit.puertoOlt) && (
+                <p className="detail-line">
+                  MAC: {selectedUnit.macAddress ?? '-'} - Puerto OLT: {selectedUnit.puertoOlt ?? '-'}
+                </p>
+              )}
+              <div className="workflow-grid">
+                {permissions.manageInventory && <label>
+                  Estado logico
+                  <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
+                    {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva', 'Bloqueado'].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="Motivo del cambio de estado"
+                    value={statusForm.motivo}
+                    onChange={(event) => setStatusForm({ ...statusForm, motivo: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void run(
+                        () => api.patch(`/inventory/equipment/${selectedUnitPayload()}/status`, statusForm),
+                        'Estado de equipo actualizado',
+                      )
+                    }
+                  >
+                    Actualizar
+                  </button>
+                </label>}
 
-              {permissions.manageInventory && <label>
-                Movimiento
-                <select
-                  value={movementForm.tipoMovimiento}
-                  onChange={(event) => setMovementForm({ ...movementForm, tipoMovimiento: event.target.value })}
-                >
-                  {['Compra', 'Devolucion', 'Asignacion', 'Descarte', 'Transferencia'].map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <select value={movementForm.idCliente} onChange={(event) => setMovementForm({ ...movementForm, idCliente: event.target.value })}>
-                  <option value="">Cliente opcional</option>
-                  {customers.map((customer) => (
-                    <option key={customer.idCliente} value={customer.idCliente}>
-                      {customer.nombreCompleto}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="ID empresa destino, ej: 2"
-                  value={movementForm.idEmpresaDestino}
-                  onChange={(event) => setMovementForm({ ...movementForm, idEmpresaDestino: event.target.value })}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () =>
-                        api.post('/inventory/movements', {
-                          idUnidad: selectedUnitPayload(),
-                          tipoMovimiento: movementForm.tipoMovimiento,
-                          idCliente: movementForm.idCliente ? Number(movementForm.idCliente) : undefined,
-                          idEmpresaDestino: movementForm.idEmpresaDestino ? Number(movementForm.idEmpresaDestino) : undefined,
-                          cantidad: 1,
-                        }),
-                      'Movimiento registrado',
-                    )
-                  }
-                >
-                  Registrar
-                </button>
-              </label>}
-              {permissions.manageInventory && <label>
-                Bloquear equipo por uso malicioso
-                <input
-                  placeholder="Motivo del bloqueo"
-                  value={advancedUnitForm.blockReason}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, blockReason: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!advancedUnitForm.blockReason.trim()}
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/inventory/equipment/${selectedUnitPayload()}/block`, { motivo: advancedUnitForm.blockReason.trim() }),
-                      'Equipo bloqueado y baja registrada',
-                    )
-                  }
-                >
-                  Bloquear
-                </button>
-              </label>}
+                {permissions.manageInventory && <label>
+                  Movimiento
+                  <select
+                    value={movementForm.tipoMovimiento}
+                    onChange={(event) => setMovementForm({ ...movementForm, tipoMovimiento: event.target.value })}
+                  >
+                    {['Compra', 'Devolucion', 'Asignacion', 'Descarte', 'Transferencia'].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <select value={movementForm.idCliente} onChange={(event) => setMovementForm({ ...movementForm, idCliente: event.target.value })}>
+                    <option value="">Cliente opcional</option>
+                    {customers.map((customer) => (
+                      <option key={customer.idCliente} value={customer.idCliente}>
+                        {customer.nombreCompleto}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="ID empresa destino, ej: 2"
+                    value={movementForm.idEmpresaDestino}
+                    onChange={(event) => setMovementForm({ ...movementForm, idEmpresaDestino: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void run(
+                        () =>
+                          api.post('/inventory/movements', {
+                            idUnidad: selectedUnitPayload(),
+                            tipoMovimiento: movementForm.tipoMovimiento,
+                            idCliente: movementForm.idCliente ? Number(movementForm.idCliente) : undefined,
+                            idEmpresaDestino: movementForm.idEmpresaDestino ? Number(movementForm.idEmpresaDestino) : undefined,
+                            cantidad: 1,
+                          }),
+                        'Movimiento registrado',
+                      )
+                    }
+                  >
+                    Registrar
+                  </button>
+                </label>}
+                {permissions.manageInventory && <label>
+                  Bloquear equipo por uso malicioso
+                  <input
+                    placeholder="Motivo del bloqueo"
+                    value={advancedUnitForm.blockReason}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, blockReason: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    disabled={!advancedUnitForm.blockReason.trim()}
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/block`, { motivo: advancedUnitForm.blockReason.trim() }),
+                        'Equipo bloqueado y baja registrada',
+                      )
+                    }
+                  >
+                    Bloquear
+                  </button>
+                </label>}
 
-              {permissions.manageInventory && <label>
-                Diagnosticar equipo devuelto
-                <select
-                  value={advancedUnitForm.diagnosisResult}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, diagnosisResult: event.target.value })}
-                >
-                  <option value="Funciona">Funciona</option>
-                  <option value="Danado">Danado</option>
-                  <option value="Bloqueado">Bloqueado</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/inventory/equipment/${selectedUnitPayload()}/diagnosis`, { resultado: advancedUnitForm.diagnosisResult }),
-                      'Diagnostico de equipo registrado',
-                    )
-                  }
-                >
-                  Registrar diagnostico
-                </button>
-              </label>}
+                {permissions.manageInventory && <label>
+                  Diagnosticar equipo devuelto
+                  <select
+                    value={advancedUnitForm.diagnosisResult}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, diagnosisResult: event.target.value })}
+                  >
+                    <option value="Funciona">Funciona</option>
+                    <option value="Danado">Danado</option>
+                    <option value="Bloqueado">Bloqueado</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/diagnosis`, { resultado: advancedUnitForm.diagnosisResult }),
+                        'Diagnostico de equipo registrado',
+                      )
+                    }
+                  >
+                    Registrar diagnostico
+                  </button>
+                </label>}
 
-              {permissions.manageInventory && <label>
-                Transferir equipo entre empresas
-                <input
-                  placeholder="ID empresa destino"
-                  value={advancedUnitForm.transferCompanyId}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, transferCompanyId: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!advancedUnitForm.transferCompanyId}
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/inventory/equipment/${selectedUnitPayload()}/transfer`, { idEmpresaDestino: Number(advancedUnitForm.transferCompanyId) }),
-                      'Equipo transferido entre empresas',
-                    )
-                  }
-                >
-                  Transferir
-                </button>
-              </label>}
+                {permissions.manageInventory && <label>
+                  Transferir equipo entre empresas
+                  <input
+                    placeholder="ID empresa destino"
+                    value={advancedUnitForm.transferCompanyId}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, transferCompanyId: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    disabled={!advancedUnitForm.transferCompanyId}
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/transfer`, { idEmpresaDestino: Number(advancedUnitForm.transferCompanyId) }),
+                        'Equipo transferido entre empresas',
+                      )
+                    }
+                  >
+                    Transferir
+                  </button>
+                </label>}
 
-              {permissions.manageInventory && <label>
-                Registrar mantencion
-                <select
-                  value={advancedUnitForm.maintenanceType}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceType: event.target.value })}
-                >
-                  <option value="Preventiva">Preventiva</option>
-                  <option value="Correctiva">Correctiva</option>
-                </select>
-                <input
-                  placeholder="Descripción de la mantencion"
-                  value={advancedUnitForm.maintenanceDesc}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceDesc: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!advancedUnitForm.maintenanceDesc.trim()}
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/inventory/equipment/${selectedUnitPayload()}/maintenance`, {
-                        tipo: advancedUnitForm.maintenanceType,
-                        descripcion: advancedUnitForm.maintenanceDesc.trim(),
-                      }),
-                      'Mantencion registrada',
-                    )
-                  }
-                >
+                {permissions.manageInventory && <label>
                   Registrar mantencion
-                </button>
-              </label>}
+                  <select
+                    value={advancedUnitForm.maintenanceType}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceType: event.target.value })}
+                  >
+                    <option value="Preventiva">Preventiva</option>
+                    <option value="Correctiva">Correctiva</option>
+                  </select>
+                  <input
+                    placeholder="Descripción de la mantencion"
+                    value={advancedUnitForm.maintenanceDesc}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceDesc: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    disabled={!advancedUnitForm.maintenanceDesc.trim()}
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/maintenance`, {
+                          tipo: advancedUnitForm.maintenanceType,
+                          descripcion: advancedUnitForm.maintenanceDesc.trim(),
+                        }),
+                        'Mantencion registrada',
+                      )
+                    }
+                  >
+                    Registrar mantencion
+                  </button>
+                </label>}
 
-              {permissions.installEquipment && <label>
-                Adjuntar evidencia a orden de trabajo
-                <select value={advancedUnitForm.evidenceOt} onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceOt: event.target.value })}>
-                  <option value="">Seleccionar OT</option>
-                  {workOrders.map((order) => (
-                    <option key={order.idOt} value={order.idOt}>
-                      OT {order.idOt} - {order.tipoOt}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="URL o ruta local /uploads/..."
-                  value={advancedUnitForm.evidenceUrl}
-                  onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceUrl: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!advancedUnitForm.evidenceOt || !advancedUnitForm.evidenceUrl.trim()}
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/inventory/work-orders/${advancedUnitForm.evidenceOt}/evidence`, { url: advancedUnitForm.evidenceUrl.trim() }),
-                      'Evidencia adjuntada a la OT',
-                    )
-                  }
-                >
-                  Adjuntar evidencia
-                </button>
-              </label>}
+                {permissions.installEquipment && <label>
+                  Adjuntar evidencia a orden de trabajo
+                  <select value={advancedUnitForm.evidenceOt} onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceOt: event.target.value })}>
+                    <option value="">Seleccionar OT</option>
+                    {workOrders.map((order) => (
+                      <option key={order.idOt} value={order.idOt}>
+                        OT {order.idOt} - {order.tipoOt}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="URL o ruta local /uploads/..."
+                    value={advancedUnitForm.evidenceUrl}
+                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceUrl: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    disabled={!advancedUnitForm.evidenceOt || !advancedUnitForm.evidenceUrl.trim()}
+                    onClick={() =>
+                      void run(
+                        () => api.post(`/inventory/work-orders/${advancedUnitForm.evidenceOt}/evidence`, { url: advancedUnitForm.evidenceUrl.trim() }),
+                        'Evidencia adjuntada a la OT',
+                      )
+                    }
+                  >
+                    Adjuntar evidencia
+                  </button>
+                </label>}
 
 
-              {permissions.installEquipment && <label>
-                Asociando serie, MAC y puerto OLT al cliente
-                <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
-                <select
-                  value={installForm.idCliente}
-                  onChange={(event) => setInstallForm({ ...installForm, idCliente: event.target.value, idOt: '' })}
-                >
-                  <option value="">Seleccionar cliente</option>
-                  {eligibleCustomers.map((customer) => (
-                    <option key={customer.idCliente} value={customer.idCliente}>
-                      {customer.nombreCompleto} - {customer.rut ?? 'sin RUT'}
-                    </option>
-                  ))}
-                </select>
-                <select value={installForm.idOt} onChange={(event) => setInstallForm({ ...installForm, idOt: event.target.value })}>
-                  <option value="">Orden de instalación opcional</option>
-                  {eligibleInstallOrders.map((order) => (
-                    <option key={order.idOt} value={order.idOt}>
-                      Orden {order.idOt} - {order.estado}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="MAC AA:BB:CC:DD:EE:FF"
-                  value={installForm.macAddress}
-                  onChange={(event) => setInstallForm({ ...installForm, macAddress: event.target.value })}
-                />
-                <input
-                  placeholder="Puerto OLT, ej: OLT-1/1/3"
-                  value={installForm.puertoOlt}
-                  onChange={(event) => setInstallForm({ ...installForm, puertoOlt: event.target.value })}
-                />
-                <button
-                  type="button"
-                  disabled={!installForm.idCliente || !installForm.macAddress.trim() || !installForm.puertoOlt.trim()}
-                  onClick={() =>
-                    !macPattern.test(installForm.macAddress.trim())
-                      ? setStatus('Ingresa una MAC valida, por ejemplo AA:BB:CC:DD:EE:FF.')
-                      : !installForm.puertoOlt.trim()
-                        ? setStatus('Ingresa el puerto OLT asociado a la instalación.')
-                      : void run(
-                          () =>
-                            api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
-                              idCliente: Number(installForm.idCliente),
-                              idOt: installForm.idOt ? Number(installForm.idOt) : undefined,
-                              modelo: installForm.modelo.trim() || undefined,
-                              macAddress: installForm.macAddress.trim().toUpperCase(),
-                              puertoOlt: installForm.puertoOlt.trim(),
-                            }),
-                          'Equipo vinculado al cliente',
-                        )
-                  }
-                >
-                  Vincular
-                </button>
-              </label>}
+                {permissions.installEquipment && <label>
+                  Asociando serie, MAC y puerto OLT al cliente
+                  <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
+                  <select
+                    value={installForm.idCliente}
+                    onChange={(event) => setInstallForm({ ...installForm, idCliente: event.target.value, idOt: '' })}
+                  >
+                    <option value="">Seleccionar cliente</option>
+                    {eligibleCustomers.map((customer) => (
+                      <option key={customer.idCliente} value={customer.idCliente}>
+                        {customer.nombreCompleto} - {customer.rut ?? 'sin RUT'}
+                      </option>
+                    ))}
+                  </select>
+                  <select value={installForm.idOt} onChange={(event) => setInstallForm({ ...installForm, idOt: event.target.value })}>
+                    <option value="">Orden de instalación opcional</option>
+                    {eligibleInstallOrders.map((order) => (
+                      <option key={order.idOt} value={order.idOt}>
+                        Orden {order.idOt} - {order.estado}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="MAC AA:BB:CC:DD:EE:FF"
+                    value={installForm.macAddress}
+                    onChange={(event) => setInstallForm({ ...installForm, macAddress: event.target.value })}
+                  />
+                  <input
+                    placeholder="Puerto OLT, ej: OLT-1/1/3"
+                    value={installForm.puertoOlt}
+                    onChange={(event) => setInstallForm({ ...installForm, puertoOlt: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    disabled={!installForm.idCliente || !installForm.macAddress.trim() || !installForm.puertoOlt.trim()}
+                    onClick={() =>
+                      !macPattern.test(installForm.macAddress.trim())
+                        ? setStatus('Ingresa una MAC valida, por ejemplo AA:BB:CC:DD:EE:FF.')
+                        : !installForm.puertoOlt.trim()
+                          ? setStatus('Ingresa el puerto OLT asociado a la instalación.')
+                          : void run(
+                            () =>
+                              api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
+                                idCliente: Number(installForm.idCliente),
+                                idOt: installForm.idOt ? Number(installForm.idOt) : undefined,
+                                modelo: installForm.modelo.trim() || undefined,
+                                macAddress: installForm.macAddress.trim().toUpperCase(),
+                                puertoOlt: installForm.puertoOlt.trim(),
+                              }),
+                            'Equipo vinculado al cliente',
+                          )
+                    }
+                  >
+                    Vincular
+                  </button>
+                </label>}
+              </div>
+              {status && <p className="inline-status">{status}</p>}
             </div>
-            {status && <p className="inline-status">{status}</p>}
-          </div>
-        ) : (
-          <p className="inline-status">Selecciona un equipo del inventario para gestionarlo.</p>
-        )}
+          ) : (
+            <p className="inline-status">Selecciona un equipo del inventario para gestionarlo.</p>
+          )}
         </Modal>
       </section>
 
@@ -3776,7 +4321,7 @@ function TicketsPanel({
   return (
     <section className="workspace-grid">
       {permissions.createTickets && <form
-        className="panel stack"
+        className="ticket-create-form stack"
         onSubmit={(event) => {
           event.preventDefault();
           const rut = normalizeRutInput(createForm.rut);
@@ -3890,18 +4435,18 @@ function TicketsPanel({
         {status && <p className="inline-status">{status}</p>}
       </form>}
 
-      <section className="panel">
+      <section className="tickets-list-section">
         <h2>Tickets</h2>
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap tickets-table-wrap">
+          <table className="tickets-table operational-table">
             <thead>
               <tr>
                 <th>Codigo</th>
                 <th>Cliente</th>
                 <th>Categoria</th>
                 <th>Servicio</th>
-                <th>Prioridad</th>
-                <th>Estado</th>
+                <th className="operational-badge-column">Prioridad</th>
+                <th className="operational-badge-column">Estado</th>
                 <th></th>
               </tr>
             </thead>
@@ -3912,11 +4457,15 @@ function TicketsPanel({
                   <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
                   <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
                   <td>{ticket.idServicio ?? '-'}</td>
-                  <td>{ticket.prioridad}</td>
-                  <td>{ticket.estado}</td>
+                  <td className="operational-badge-column">
+                    <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
+                  </td>
+                  <td className="operational-badge-column">
+                    <StatusBadge value={formatWorkOrderValue(ticket.estado)} />
+                  </td>
                   <td>
                     <button
-                      className="secondary compact"
+                      className="secondary compact operational-manage-button"
                       onClick={() => {
                         setSelectedId(ticket.idTicket);
                         setManagementOpen(true);
@@ -3938,113 +4487,113 @@ function TicketsPanel({
                 <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
                 <p><strong>Cliente:</strong> {selectedTicket.cliente?.nombreCompleto ?? '-'}</p>
                 <p><strong>Clasificación:</strong> {selectedTicket.categoria?.nombre ?? selectedTicket.idCategoria}</p>
-                <p><strong>Prioridad:</strong> {selectedTicket.prioridad}</p>
-                <p><strong>Estado:</strong> {selectedTicket.estado}</p>
+                <p><strong>Prioridad:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.prioridad)} /></p>
+                <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.estado)} /></p>
               </section>
               {(permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) ? (
-              <div className="workflow-grid">
-              {permissions.classifyTickets && <label>
-                Clasificacion
-                <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                  {categories.map((category) => (
-                    <option key={category.idCategoria} value={category.idCategoria}>
-                      {category.nombre}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.patch(`/tickets/${selectedTicket.idTicket}/category`, { idCategoria: Number(categoryId) }),
-                      'Ticket clasificado',
-                    )
-                  }
-                >
-                  Clasificar
-                </button>
-              </label>}
+                <div className="workflow-grid">
+                  {permissions.classifyTickets && <label>
+                    Clasificacion
+                    <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+                      {categories.map((category) => (
+                        <option key={category.idCategoria} value={category.idCategoria}>
+                          {category.nombre}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void run(
+                          () => api.patch(`/tickets/${selectedTicket.idTicket}/category`, { idCategoria: Number(categoryId) }),
+                          'Ticket clasificado',
+                        )
+                      }
+                    >
+                      Clasificar
+                    </button>
+                  </label>}
 
-              {permissions.classifyTickets && <label>
-                Prioridad
-                <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-                  <option value="Alta">Alta</option>
-                  <option value="Media">Media</option>
-                  <option value="Baja">Baja</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.patch(`/tickets/${selectedTicket.idTicket}/priority`, { prioridad: priority }),
-                      'Prioridad actualizada',
-                    )
-                  }
-                >
-                  Actualizar
-                </button>
-              </label>}
+                  {permissions.classifyTickets && <label>
+                    Prioridad
+                    <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+                      <option value="Alta">Alta</option>
+                      <option value="Media">Media</option>
+                      <option value="Baja">Baja</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void run(
+                          () => api.patch(`/tickets/${selectedTicket.idTicket}/priority`, { prioridad: priority }),
+                          'Prioridad actualizada',
+                        )
+                      }
+                    >
+                      Actualizar
+                    </button>
+                  </label>}
 
-              {permissions.updateTicketStatus && <label>
-                Estado
-                <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
-                  {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.patch(`/tickets/${selectedTicket.idTicket}/status`, { estado: ticketStatus, comentario: comment }),
-                      'Estado de ticket actualizado',
-                    )
-                  }
-                >
-                  Cambiar estado
-                </button>
-              </label>}
+                  {permissions.updateTicketStatus && <label>
+                    Estado
+                    <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
+                      {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                    <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void run(
+                          () => api.patch(`/tickets/${selectedTicket.idTicket}/status`, { estado: ticketStatus, comentario: comment }),
+                          'Estado de ticket actualizado',
+                        )
+                      }
+                    >
+                      Cambiar estado
+                    </button>
+                  </label>}
 
-              {permissions.diagnoseTickets && <label>
-                Diagnostico tecnico
-                <input
-                  placeholder="Causa raiz"
-                  value={diagnosis.causaRaiz}
-                  onChange={(event) => setDiagnosis({ ...diagnosis, causaRaiz: event.target.value })}
-                />
-                <textarea
-                  placeholder="Problema detectado"
-                  value={diagnosis.descripcionProblema}
-                  onChange={(event) => setDiagnosis({ ...diagnosis, descripcionProblema: event.target.value })}
-                />
-                <textarea
-                  placeholder="Acciones realizadas"
-                  value={diagnosis.accionesRealizadas}
-                  onChange={(event) => setDiagnosis({ ...diagnosis, accionesRealizadas: event.target.value })}
-                />
-                <select
-                  value={diagnosis.estadoFinalServicio}
-                  onChange={(event) => setDiagnosis({ ...diagnosis, estadoFinalServicio: event.target.value })}
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="En Mantencion">En Mantencion</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void run(
-                      () => api.post(`/tickets/${selectedTicket.idTicket}/diagnosis`, diagnosis),
-                      'Diagnostico registrado',
-                    )
-                  }
-                >
-                  Registrar diagnostico
-                </button>
-              </label>}
-            </div>
+                  {permissions.diagnoseTickets && <label>
+                    Diagnostico tecnico
+                    <input
+                      placeholder="Causa raiz"
+                      value={diagnosis.causaRaiz}
+                      onChange={(event) => setDiagnosis({ ...diagnosis, causaRaiz: event.target.value })}
+                    />
+                    <textarea
+                      placeholder="Problema detectado"
+                      value={diagnosis.descripcionProblema}
+                      onChange={(event) => setDiagnosis({ ...diagnosis, descripcionProblema: event.target.value })}
+                    />
+                    <textarea
+                      placeholder="Acciones realizadas"
+                      value={diagnosis.accionesRealizadas}
+                      onChange={(event) => setDiagnosis({ ...diagnosis, accionesRealizadas: event.target.value })}
+                    />
+                    <select
+                      value={diagnosis.estadoFinalServicio}
+                      onChange={(event) => setDiagnosis({ ...diagnosis, estadoFinalServicio: event.target.value })}
+                    >
+                      <option value="Activo">Activo</option>
+                      <option value="En Mantencion">En Mantencion</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void run(
+                          () => api.post(`/tickets/${selectedTicket.idTicket}/diagnosis`, diagnosis),
+                          'Diagnostico registrado',
+                        )
+                      }
+                    >
+                      Registrar diagnostico
+                    </button>
+                  </label>}
+                </div>
               ) : (
                 <p className="inline-status">No tienes permisos para modificar este ticket.</p>
               )}
@@ -4099,6 +4648,8 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
   const [status, setStatus] = useState('');
 
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
+  const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
+  const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
 
   useEffect(() => {
     setForm({ potenciaOpticaDbm: '', observaciones: '' });
@@ -4143,13 +4694,13 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
   }
 
   return (
-    <section className="panel full-width-panel stack">
+    <section className="work-orders-panel stack">
       <div className="section-heading">
-        <h2>Órdenes de Trabajo</h2>
+        <h2>Órdenes de trabajo</h2>
         <p>Listado operativo de visitas, soporte e instalaciones registradas.</p>
       </div>
-      <div className="table-wrap">
-        <table>
+      <div className="table-wrap work-orders-table-wrap">
+        <table className="work-orders-table operational-table">
           <thead>
             <tr>
               <th>ID</th>
@@ -4157,27 +4708,27 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
               <th>Asociado</th>
               <th>Fecha</th>
               <th>Técnico</th>
-              <th>Prioridad</th>
-              <th>Estado</th>
+              <th className="operational-badge-column">Prioridad</th>
+              <th className="operational-badge-column">Estado</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {workOrders.map((order) => (
               <tr key={order.idOt}>
-                <td>{order.idOt}</td>
-                <td>{order.tipoOt}</td>
+                <td className="work-order-id">#{order.idOt}</td>
+                <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
                 <td>{ownerLabel(order)}</td>
                 <td>
                   {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
                   {order.horaVisita ? ` ${order.horaVisita}` : ''}
                 </td>
                 <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
-                <td><StatusBadge value={order.prioridad} /></td>
-                <td><StatusBadge value={order.estado} /></td>
+                <td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td>
+                <td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.estado)} /></td>
                 <td>
                   <button
-                    className="secondary compact"
+                    className="secondary compact operational-manage-button"
                     onClick={() => {
                       setSelectedId(order.idOt);
                       setModalOpen(true);
@@ -4195,28 +4746,73 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
 
       <Modal title="Gestionar orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedOrder ? (
-          <div className="workflow-panel modal-workflow">
-            <section className="customer-preview">
-              <h3>Orden {selectedOrder.idOt}</h3>
-              <p><strong>Tipo:</strong> {selectedOrder.tipoOt}</p>
-              <p><strong>Asociado:</strong> {ownerLabel(selectedOrder)}</p>
-              <p><strong>Estado:</strong> {selectedOrder.estado}</p>
-              <p><strong>Técnico:</strong> {selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
-              {selectedOrder.tipoConexion && (
-                <p><strong>Conexión:</strong> {formatConnectionType(selectedOrder.tipoConexion)}</p>
-              )}
-              <p>
-                <strong>Visita:</strong>{' '}
-                {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
-                {selectedOrder.horaVisita ?? 'Sin hora'}
-              </p>
-              {selectedOrder.observacionesAgenda && (
-                <p><strong>Observaciones de agenda:</strong> {selectedOrder.observacionesAgenda}</p>
-              )}
+          <div className="workflow-panel modal-workflow work-order-workflow">
+            <section className="work-order-overview">
+              <header className="work-order-overview-header">
+                <span className="work-order-overview-icon" aria-hidden="true">
+                  <ClipboardList size={23} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <p>Orden de trabajo</p>
+                  <h3>Orden #{selectedOrder.idOt}</h3>
+                </div>
+                <StatusBadge value={formatWorkOrderValue(selectedOrder.estado)} />
+              </header>
+
+              <dl className="work-order-overview-data">
+                <div>
+                  <dt>Tipo</dt>
+                  <dd>{formatWorkOrderValue(selectedOrder.tipoOt)}</dd>
+                </div>
+                <div>
+                  <dt>Asociado</dt>
+                  <dd>{ownerLabel(selectedOrder)}</dd>
+                </div>
+                <div>
+                  <dt>Técnico</dt>
+                  <dd>{selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</dd>
+                </div>
+                <div>
+                  <dt>Prioridad</dt>
+                  <dd><StatusBadge value={formatWorkOrderValue(selectedOrder.prioridad)} /></dd>
+                </div>
+                <div>
+                  <dt>Visita</dt>
+                  <dd>
+                    {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
+                    {selectedOrder.horaVisita ?? 'Sin hora'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Conexión</dt>
+                  <dd>{selectedOrder.tipoConexion ? formatConnectionType(selectedOrder.tipoConexion) : 'No registrada'}</dd>
+                </div>
+                {selectedOrder.observacionesAgenda && (
+                  <div className="work-order-overview-note">
+                    <dt>Observaciones de agenda</dt>
+                    <dd>{selectedOrder.observacionesAgenda}</dd>
+                  </div>
+                )}
+              </dl>
             </section>
 
-            {selectedOrder.tipoOt === 'Instalacion' ? (
-              <>
+            {selectedOrderIsInstallation ? (
+              <section className="work-order-completion">
+                <div className="work-order-section-heading">
+                  <span aria-hidden="true">
+                    {selectedOrderIsCompleted
+                      ? <CircleCheckBig size={21} strokeWidth={1.8} />
+                      : <Wrench size={21} strokeWidth={1.8} />}
+                  </span>
+                  <div>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Cierre de instalación'}</h3>
+                    <p>
+                      {selectedOrderIsCompleted
+                        ? 'La orden ya fue completada. Puedes consultar aquí los datos registrados.'
+                        : 'Registra los datos técnicos para confirmar la instalación y activar al cliente.'}
+                    </p>
+                  </div>
+                </div>
                 <div className="history-grid">
                   <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
                   <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
@@ -4232,31 +4828,49 @@ function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; o
                 {!selectedOrder.prospecto?.fechaCreacion && (
                   <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
                 )}
-                <div className="workflow-grid">
-                  <label>
-                    Potencia óptica dBm
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={form.potenciaOpticaDbm}
-                      onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-                    />
+                <div className="workflow-grid work-order-technical-grid">
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Potencia óptica</span>
+                    <span className="work-order-measurement">
+                      <input
+                        aria-label="Potencia óptica en dBm"
+                        type="number"
+                        step="0.01"
+                        placeholder="-19.50"
+                        value={form.potenciaOpticaDbm}
+                        onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
+                      />
+                      <span>dBm</span>
+                    </span>
                   </label>
-                  <label>
-                    Observaciones
-                    <textarea value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Observaciones</span>
+                    <textarea
+                      placeholder="Agrega observaciones técnicas"
+                      value={form.observaciones}
+                      onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
+                    />
                   </label>
                 </div>
                 <button
                   type="button"
-                  disabled={selectedOrder.estado === 'Completada' || !selectedOrder.prospecto?.fechaCreacion}
+                  className="work-order-complete-button"
+                  disabled={selectedOrderIsCompleted || !selectedOrder.prospecto?.fechaCreacion}
                   onClick={completeInstallation}
                 >
                   Confirmar instalación y activar cliente
                 </button>
-              </>
+              </section>
             ) : (
-              <p className="inline-status">Esta orden no requiere cierre de instalación desde este panel.</p>
+              <div className="work-order-information">
+                <span aria-hidden="true">
+                  <CircleCheckBig size={21} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <strong>Orden registrada</strong>
+                  <p>Esta orden no requiere cierre de instalación desde este panel.</p>
+                </div>
+              </div>
             )}
             {status && <p className="inline-status">{status}</p>}
           </div>
@@ -4330,11 +4944,12 @@ function ReportsPanel({ companies, initialScope }: { companies: Company[]; initi
 
   return (
     <section className="reports-shell">
-      <div className="panel report-card">
-        <div className="section-heading centered">
-          <span className="eyebrow">Exportación</span>
+      <div className="report-card">
+        <div className="section-heading centered report-heading">
+          <span className="report-heading-icon" aria-hidden="true">
+            <BarChart3 size={28} strokeWidth={1.8} />
+          </span>
           <h2>Reportes operativos</h2>
-          <p>Genera reportes por tipo, período, alcance y formato.</p>
         </div>
         <div className="report-form-grid">
           <label>
@@ -4436,9 +5051,19 @@ function ImportPanel({ writeCompanyId, onImported }: { writeCompanyId: number; o
   }
 
   return (
-    <form className="panel narrow stack" onSubmit={submit}>
-      <h2>Importacion masiva</h2>
-      <input accept=".csv,.xls,.xlsx" type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+    <form className="import-panel" onSubmit={submit}>
+      <div className="import-panel-heading">
+        <span className="import-panel-icon" aria-hidden="true">
+          <FileUp size={28} strokeWidth={1.8} />
+        </span>
+        <h2>Importación</h2>
+      </div>
+      <input
+        aria-label="Seleccionar archivo para importar"
+        accept=".csv,.xls,.xlsx"
+        type="file"
+        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+      />
       <button>Importar</button>
       {result && <p className="inline-status">{result}</p>}
     </form>
@@ -4459,7 +5084,7 @@ function UsersPanel({ users, roles, onUpdated }: { users: UserRow[]; roles: Role
   }
 
   return (
-    <section className="panel">
+    <section className="users-panel">
       <h2>Usuarios</h2>
       {status && <p className="inline-status">{status}</p>}
       <div className="table-wrap">
@@ -4501,8 +5126,8 @@ function UsersPanel({ users, roles, onUpdated }: { users: UserRow[]; roles: Role
 
 function AuditPanel({ audit }: { audit: AuditLog[] }) {
   return (
-    <section className="panel">
-      <h2>Auditoria</h2>
+    <section className="audit-panel">
+      <h2>Auditoría</h2>
       <div className="table-wrap">
         <table>
           <thead>

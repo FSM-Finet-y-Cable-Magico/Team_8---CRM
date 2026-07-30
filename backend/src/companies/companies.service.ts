@@ -112,6 +112,11 @@ export class CompaniesService {
         include: {
           cliente: true,
           plan: true,
+          facturas: {
+            where: { estado: { notIn: ['Pagada', 'Anulada'] } },
+            include: { pagos: true },
+            orderBy: { fechaLimitePago: 'asc' },
+          },
         },
         take: 200,
       }),
@@ -127,10 +132,16 @@ export class CompaniesService {
       : [];
     const categoryById = new Map(categories.map((category) => [category.idCategoria, category]));
     const churnBase = clientesActivos + churnBajasMensuales;
-    const alertasVencimiento = activeContracts
+    const contractAlerts = activeContracts
       .map((contract) => {
-        const nextDueDate = this.nextDueDate(todayDate, contract.diaVencimiento);
-        const daysUntilDue = Math.ceil((nextDueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+        const unpaidInvoice = contract.facturas.find((invoice) => {
+          const invoiceAmount = Number(invoice.monto ?? 0);
+          const paidAmount = invoice.pagos.reduce((total, payment) => total + Number(payment.monto), 0);
+
+          return invoiceAmount <= 0 || paidAmount < invoiceAmount;
+        });
+        const dueDate = unpaidInvoice?.fechaLimitePago ?? this.nextDueDate(todayDate, contract.diaVencimiento);
+        const daysUntilDue = Math.ceil((dueDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
 
         return {
           idContrato: contract.idContrato,
@@ -139,13 +150,21 @@ export class CompaniesService {
           rut: contract.cliente?.rut ?? null,
           plan: contract.plan?.nombreComercial ?? null,
           estado: contract.estado,
-          fechaVencimiento: nextDueDate.toISOString().slice(0, 10),
+          fechaVencimiento: dueDate.toISOString().slice(0, 10),
           diasRestantes: daysUntilDue,
         };
       })
-      .filter((item) => item.diasRestantes >= 0 && item.diasRestantes <= 7)
-      .sort((a, b) => a.diasRestantes - b.diasRestantes)
-      .slice(0, 20);
+      .filter((item) => item.diasRestantes <= 7);
+    const alertasVencimiento = [
+      ...contractAlerts
+        .filter((item) => item.diasRestantes < 0)
+        .sort((a, b) => a.diasRestantes - b.diasRestantes)
+        .slice(0, 50),
+      ...contractAlerts
+        .filter((item) => item.diasRestantes >= 0)
+        .sort((a, b) => a.diasRestantes - b.diasRestantes)
+        .slice(0, 50),
+    ];
 
     return {
       scope: effectiveScope,
