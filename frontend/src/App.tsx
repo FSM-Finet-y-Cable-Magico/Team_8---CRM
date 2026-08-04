@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -9,15 +9,20 @@ import {
   CircleCheckBig,
   ClipboardList,
   FileClock,
+  FileText,
   FileUp,
   HandCoins,
+  Headphones,
   House,
   LogOut,
+  MonitorPlay,
+  ReceiptText,
   Router,
   Settings,
   Ticket as TicketIcon,
   TrendingDown,
   UserCog,
+  UserRound,
   UserRoundPlus,
   Users,
   Wifi,
@@ -104,6 +109,21 @@ type Summary = {
     diasRestantes: number;
   }>;
 };
+
+type PortalContract = {
+  idContrato: number;
+  estado: string;
+  plan?: Plan | null;
+  servicios?: CustomerService[];
+  facturas?: Array<{
+    idFactura: number;
+    estado: string;
+    fechaLimitePago: string;
+    monto: number | string | null;
+  }>;
+};
+
+type PortalPage = 'summary' | 'services' | 'support' | 'tv';
 
 type ProspectFormState = {
   rut: string;
@@ -394,7 +414,7 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
   });
   const [loginForm, setLoginForm] = useState({ rut: '', password: '' });
   const [services, setServices] = useState<CustomerService[]>([]);
-  const [contracts, setContracts] = useState<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>([]);
+  const [contracts, setContracts] = useState<PortalContract[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [tvip, setTvip] = useState<TvipCredentialSummary[]>([]);
@@ -403,6 +423,8 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
   const [temporaryTvPassword, setTemporaryTvPassword] = useState<{ idContrato: number; password: string } | null>(null);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activePortalPage, setActivePortalPage] = useState<PortalPage>('summary');
+  const portalProfileMenuRef = useRef<HTMLDetailsElement>(null);
 
   const auth = (value = token) => ({ headers: { Authorization: `Bearer ${value}` } });
 
@@ -410,6 +432,39 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
     if (token) {
       void loadPortalData(token, true);
     }
+  }, []);
+
+  useEffect(() => {
+    if (status !== 'Sesión portal iniciada') {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setStatus(''), 3600);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  useEffect(() => {
+    function closeProfileMenuOnOutsideClick(event: PointerEvent) {
+      const menu = portalProfileMenuRef.current;
+      if (menu?.open && !menu.contains(event.target as Node)) {
+        menu.open = false;
+      }
+    }
+
+    function closeProfileMenuOnEscape(event: KeyboardEvent) {
+      const menu = portalProfileMenuRef.current;
+      if (event.key === 'Escape' && menu?.open) {
+        menu.open = false;
+        menu.querySelector<HTMLElement>('summary')?.focus();
+      }
+    }
+
+    document.addEventListener('pointerdown', closeProfileMenuOnOutsideClick);
+    document.addEventListener('keydown', closeProfileMenuOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeProfileMenuOnOutsideClick);
+      document.removeEventListener('keydown', closeProfileMenuOnEscape);
+    };
   }, []);
 
   async function login(event: FormEvent) {
@@ -427,7 +482,7 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
       setToken(data.portalToken);
       setCustomer(data.customer);
       await loadPortalData(data.portalToken, true);
-      setStatus('Sesion portal iniciada');
+      setStatus('Sesión portal iniciada');
     } catch (err) {
       setStatus(apiErrorMessage(err));
     } finally {
@@ -439,7 +494,7 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
     try {
       const [servicesResult, contractsResult, ticketsResult, categoriesResult, tvipResult] = await Promise.all([
         api.get<CustomerService[]>('/portal/services', auth(nextToken)),
-        api.get<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>('/portal/contracts', auth(nextToken)),
+        api.get<PortalContract[]>('/portal/contracts', auth(nextToken)),
         api.get<Ticket[]>('/portal/tickets', auth(nextToken)),
         api.get<TicketCategory[]>('/portal/ticket-categories', auth(nextToken)),
         api.get<TvipCredentialSummary[]>('/portal/tvip', auth(nextToken)),
@@ -523,6 +578,14 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
     setTickets([]);
     setTvip([]);
     setStatus('');
+    setActivePortalPage('summary');
+  }
+
+  function openPortalPage(page: PortalPage, targetId = `portal-${page}`) {
+    setActivePortalPage(page);
+    window.setTimeout(() => {
+      document.getElementById(targetId)?.scrollIntoView({ block: 'start' });
+    }, 0);
   }
 
   if (!token || !customer) {
@@ -553,120 +616,350 @@ function CustomerPortal({ onBack }: { onBack: () => void }) {
     );
   }
 
+  const customerFirstName = customer.nombreCompleto.split(/\s+/).filter(Boolean)[0] ?? 'cliente';
+  const primaryContract = contracts[0];
+  const primaryPlanName = primaryContract?.plan?.nombreComercial ?? services[0]?.contrato?.plan?.nombreComercial ?? 'Sin plan asociado';
+  const pendingInvoices = contracts
+    .flatMap((contract) => contract.facturas ?? [])
+    .filter((invoice) => !['pagada', 'anulada'].includes(normalizeWorkOrderValue(invoice.estado)));
+  const hasPendingPayments = pendingInvoices.length > 0;
+  const PaymentStatusIcon = hasPendingPayments ? FileClock : CircleCheckBig;
+
   return (
     <main className="portal-shell">
-      <header className="portal-topbar">
-        <div>
-          <span className="eyebrow">Portal Cliente</span>
-          <h1>{customer.nombreCompleto}</h1>
-          <p>{customer.rut ?? 'Sin RUT'} - Estado: {customer.estado}</p>
+      <aside className="portal-sidebar">
+        <div className="portal-brand" aria-label="Mi Portal">
+          <Wifi size={31} strokeWidth={2.2} aria-hidden="true" />
+          <strong><span>Mi</span> Portal</strong>
         </div>
-        <div className="button-row">
-          <button type="button" className="secondary" onClick={() => void loadPortalData()}>Actualizar</button>
-          <button type="button" className="secondary" onClick={logoutPortal}>Cerrar portal</button>
-          <button type="button" className="secondary" onClick={onBack}>CRM interno</button>
+
+        <nav className="portal-navigation" aria-label="Navegación del portal cliente">
+          <span className="portal-nav-label">Menú</span>
+          <button type="button" className={activePortalPage === 'summary' ? 'active' : ''} aria-current={activePortalPage === 'summary' ? 'page' : undefined} onClick={() => openPortalPage('summary')}>
+            <House size={19} strokeWidth={1.8} aria-hidden="true" />
+            Resumen
+          </button>
+          <button type="button" className={activePortalPage === 'services' ? 'active' : ''} aria-current={activePortalPage === 'services' ? 'page' : undefined} onClick={() => openPortalPage('services')}>
+            <Router size={19} strokeWidth={1.8} aria-hidden="true" />
+            Servicios
+          </button>
+          <button type="button" className={activePortalPage === 'support' ? 'active' : ''} aria-current={activePortalPage === 'support' ? 'page' : undefined} onClick={() => openPortalPage('support')}>
+            <TicketIcon size={19} strokeWidth={1.8} aria-hidden="true" />
+            Soporte
+          </button>
+          <button type="button" className={activePortalPage === 'tv' ? 'active' : ''} aria-current={activePortalPage === 'tv' ? 'page' : undefined} onClick={() => openPortalPage('tv')}>
+            <MonitorPlay size={19} strokeWidth={1.8} aria-hidden="true" />
+            TV IP
+          </button>
+        </nav>
+
+        <div className="portal-sidebar-footer">
+          <div className="portal-help-card">
+            <span aria-hidden="true"><Headphones size={20} strokeWidth={1.8} /></span>
+            <div>
+              <strong>¿Necesitas ayuda?</strong>
+              <small>Gestiona una solicitud desde Soporte.</small>
+            </div>
+          </div>
         </div>
-      </header>
-      {status && <p className="inline-status">{status}</p>}
-      <section className="portal-grid">
-        <article className="panel stack">
-          <h2>Mis servicios</h2>
-          {!services.length && <p className="inline-status">No hay servicios contratados registrados.</p>}
-          {services.map((service) => (
-            <section className="compact-list-item" key={service.idServicio}>
-              <strong>{service.tipoServicio} - {service.estadoOperativo}</strong>
-              <span>Plan: {service.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}</span>
-              <span>Direccion: {service.direccion?.direccionCompleta ?? 'Sin direccion'}</span>
-            </section>
-          ))}
-        </article>
-        <article className="panel stack">
-          <h2>Mis contratos</h2>
-          {!contracts.length && <p className="inline-status">No hay contratos visibles.</p>}
-          {contracts.map((contract) => (
-            <section className="compact-list-item" key={contract.idContrato}>
-              <strong>Contrato {contract.idContrato} - {contract.estado}</strong>
-              <span>{contract.plan?.nombreComercial ?? 'Sin plan'}</span>
-            </section>
-          ))}
-        </article>
-        <form className="panel stack" onSubmit={createPortalTicket}>
-          <h2>Crear ticket</h2>
-          <label>
-            Servicio
-            <select value={ticketForm.idServicio} onChange={(event) => setTicketForm({ ...ticketForm, idServicio: event.target.value })}>
-              <option value="">Ticket general</option>
-              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
-            </select>
-          </label>
-          <label>
-            Categoria
-            <select value={ticketForm.idCategoria} onChange={(event) => setTicketForm({ ...ticketForm, idCategoria: event.target.value })}>
-              <option value="">Seleccionar</option>
-              {categories.map((category) => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
-            </select>
-          </label>
-          <label>
-            Prioridad
-            <select value={ticketForm.prioridad} onChange={(event) => setTicketForm({ ...ticketForm, prioridad: event.target.value })}>
-              <option value="Alta">Alta</option>
-              <option value="Media">Media</option>
-              <option value="Baja">Baja</option>
-            </select>
-          </label>
-          <label>
-            Descripción
-            <textarea value={ticketForm.descripcion} onChange={(event) => setTicketForm({ ...ticketForm, descripcion: event.target.value })} />
-          </label>
-          <button disabled={!ticketForm.idCategoria}>Crear ticket</button>
-        </form>
-        <form className="panel stack" onSubmit={requestWifiChange}>
-          <h2>Solicitud cambio Wi-Fi</h2>
-          <p className="detail-line">El portal registra la solicitud para revisión técnica; no cambia el router automáticamente.</p>
-          <label>
-            Servicio
-            <select value={wifiForm.idServicio} onChange={(event) => setWifiForm({ ...wifiForm, idServicio: event.target.value })}>
-              <option value="">Seleccionar servicio</option>
-              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
-            </select>
-          </label>
-          <label>
-            Nueva clave sugerida
-            <input type="password" value={wifiForm.nuevaContrasena} onChange={(event) => setWifiForm({ ...wifiForm, nuevaContrasena: event.target.value })} />
-          </label>
-          <label>
-            Observaciones
-            <textarea value={wifiForm.observaciones} onChange={(event) => setWifiForm({ ...wifiForm, observaciones: event.target.value })} />
-          </label>
-          <button disabled={!wifiForm.idServicio}>Registrar solicitud</button>
-        </form>
-        <article className="panel stack">
-          <h2>Mis tickets</h2>
-          {!tickets.length && <p className="inline-status">No tienes tickets registrados.</p>}
-          {tickets.map((ticket) => (
-            <section className="compact-list-item" key={ticket.idTicket}>
-              <strong>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</strong>
-              <span>{ticket.categoria?.nombre ?? 'Sin categoría'} - {ticket.prioridad} - {ticket.estado}</span>
-              <span>{ticket.descripcion ?? '-'}</span>
-            </section>
-          ))}
-        </article>
-        <article className="panel stack">
-          <h2>TV IP</h2>
-          {!tvip.length && <p className="inline-status">Tu plan actual no incluye TV IP.</p>}
-          {tvip.map((credential) => (
-            <section className="compact-list-item" key={credential.idContrato}>
-              <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
-              <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
-              <button type="button" className="secondary compact" onClick={() => void regeneratePortalTvip(credential.idContrato)}>
-                {credential.credencial ? 'Regenerar credencial' : 'Generar credencial'}
-              </button>
-              {temporaryTvPassword?.idContrato === credential.idContrato && (
-                <p className="inline-status">Password temporal: <strong>{temporaryTvPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.</p>
-              )}
-            </section>
-          ))}
-        </article>
+      </aside>
+
+      <section className="portal-main">
+        <header className="portal-topbar">
+          <div className="portal-plan-context">
+            <span aria-hidden="true"><Router size={20} strokeWidth={1.8} /></span>
+            <div>
+              <small>Plan actual</small>
+              <strong>{primaryPlanName}</strong>
+            </div>
+            {primaryContract && <StatusBadge value={formatWorkOrderValue(primaryContract.estado)} />}
+          </div>
+
+          <div className="portal-topbar-actions">
+            <details ref={portalProfileMenuRef} className="portal-profile-menu">
+              <summary className="portal-profile" aria-label="Abrir información del cliente">
+                <span className="portal-profile-avatar" aria-hidden="true"><UserRound size={19} strokeWidth={1.8} /></span>
+                <span>
+                  <strong>{customer.nombreCompleto}</strong>
+                  <small>{customer.rut ?? 'Sin RUT registrado'}</small>
+                </span>
+                <ChevronDown className="portal-profile-chevron" size={17} strokeWidth={1.8} aria-hidden="true" />
+              </summary>
+
+              <div className="portal-profile-dropdown">
+                <div className="portal-profile-dropdown-header">
+                  <span className="portal-profile-dropdown-avatar" aria-hidden="true"><UserRound size={21} strokeWidth={1.8} /></span>
+                  <div>
+                    <small>Información del cliente</small>
+                    <strong>{customer.nombreCompleto}</strong>
+                    <span>{customer.rut ?? 'Sin RUT registrado'}</span>
+                  </div>
+                </div>
+
+                <dl className="portal-profile-details">
+                  <div>
+                    <dt>Estado</dt>
+                    <dd><StatusBadge value={formatWorkOrderValue(customer.estado)} /></dd>
+                  </div>
+                  <div>
+                    <dt>Plan actual</dt>
+                    <dd>{primaryPlanName}</dd>
+                  </div>
+                </dl>
+
+                <button type="button" className="portal-profile-logout" onClick={logoutPortal}>
+                  <LogOut size={17} strokeWidth={1.8} aria-hidden="true" />
+                  Cerrar sesión
+                </button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        {status === 'Sesión portal iniciada' ? (
+          <div className="portal-toast" role="status" aria-live="polite">
+            <span>{status}</span>
+            <button
+              type="button"
+              className="portal-toast-close"
+              aria-label="Cerrar notificación"
+              onClick={() => setStatus('')}
+            >
+              <X size={17} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </div>
+        ) : status ? (
+          <p className="inline-status portal-status-message" role="status" aria-live="polite">{status}</p>
+        ) : null}
+
+        {activePortalPage === 'summary' && (
+          <>
+        <section className={`portal-overview ${hasPendingPayments ? 'is-due' : 'is-current'}`} id="portal-summary">
+          <div className="portal-overview-copy">
+            <span>Hola, {customerFirstName}</span>
+            <div className="portal-payment-heading">
+              <span aria-hidden="true"><PaymentStatusIcon size={26} strokeWidth={1.8} /></span>
+              <div>
+                <h1>{hasPendingPayments ? 'Pago pendiente' : 'Todo al día'}</h1>
+              </div>
+            </div>
+            <p>
+              {hasPendingPayments
+                ? `${pendingInvoices.length === 1 ? 'Tienes una factura' : `Tienes ${pendingInvoices.length} facturas`} por pagar.`
+                : 'No tienes facturas pendientes en este momento.'}
+            </p>
+          </div>
+
+          <div className="portal-overview-visual" aria-hidden="true">
+            <span><ReceiptText size={48} strokeWidth={1.55} /></span>
+            <i />
+            <i />
+          </div>
+        </section>
+
+        <section className="portal-quick-section" aria-labelledby="portal-quick-title">
+          <div className="portal-section-title compact">
+            <div>
+              <span>Accesos directos</span>
+              <h2 id="portal-quick-title">¿Qué quieres gestionar?</h2>
+            </div>
+          </div>
+          <div className="portal-quick-grid">
+            <button type="button" onClick={() => openPortalPage('services')}>
+              <span aria-hidden="true"><Router size={22} strokeWidth={1.8} /></span>
+              <div><strong>Mis servicios</strong><small>Plan y dirección</small></div>
+              <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => openPortalPage('support', 'portal-ticket-create')}>
+              <span aria-hidden="true"><TicketIcon size={22} strokeWidth={1.8} /></span>
+              <div><strong>Solicitar soporte</strong><small>Crear un ticket</small></div>
+              <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => openPortalPage('support', 'portal-wifi-request')}>
+              <span aria-hidden="true"><Wifi size={22} strokeWidth={1.8} /></span>
+              <div><strong>Cambiar clave Wi-Fi</strong><small>Solicitud técnica</small></div>
+              <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => openPortalPage('tv')}>
+              <span aria-hidden="true"><MonitorPlay size={22} strokeWidth={1.8} /></span>
+              <div><strong>Administrar TV IP</strong><small>Credenciales de acceso</small></div>
+              <ArrowRight size={17} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </div>
+        </section>
+          </>
+        )}
+
+        {activePortalPage === 'services' && (
+        <section className="portal-section portal-page-section" id="portal-services">
+          <div className="portal-section-title">
+            <span className="portal-section-icon" aria-hidden="true"><Router size={21} strokeWidth={1.8} /></span>
+            <div>
+              <span>Mi cuenta</span>
+              <h2>Servicios y contratos</h2>
+              <p>Información de los servicios actualmente asociados a tu cuenta.</p>
+            </div>
+          </div>
+          <div className="portal-content-grid">
+            <article className="portal-content-card">
+              <header><h3>Mis servicios</h3><span>{services.length}</span></header>
+              <div className="portal-card-list">
+                {!services.length && <p className="inline-status">No hay servicios contratados registrados.</p>}
+                {services.map((service) => (
+                  <section className="portal-service-item" key={service.idServicio}>
+                    <span className="portal-item-icon" aria-hidden="true"><Router size={19} strokeWidth={1.8} /></span>
+                    <div>
+                      <strong>{service.tipoServicio}</strong>
+                      <small>{service.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}</small>
+                      <p>{service.direccion?.direccionCompleta ?? 'Sin dirección registrada'}</p>
+                    </div>
+                    <StatusBadge value={formatWorkOrderValue(service.estadoOperativo)} />
+                  </section>
+                ))}
+              </div>
+            </article>
+
+            <article className="portal-content-card">
+              <header><h3>Mis contratos</h3><span>{contracts.length}</span></header>
+              <div className="portal-card-list">
+                {!contracts.length && <p className="inline-status">No hay contratos visibles.</p>}
+                {contracts.map((contract) => (
+                  <section className="portal-contract-item" key={contract.idContrato}>
+                    <span className="portal-item-icon" aria-hidden="true"><FileText size={19} strokeWidth={1.8} /></span>
+                    <div>
+                      <strong>Contrato #{contract.idContrato}</strong>
+                      <small>{contract.plan?.nombreComercial ?? 'Sin plan asociado'}</small>
+                    </div>
+                    <StatusBadge value={formatWorkOrderValue(contract.estado)} />
+                  </section>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
+        )}
+
+        {activePortalPage === 'support' && (
+        <section className="portal-section portal-page-section" id="portal-support">
+          <div className="portal-section-title">
+            <span className="portal-section-icon" aria-hidden="true"><Headphones size={21} strokeWidth={1.8} /></span>
+            <div>
+              <span>Atención</span>
+              <h2>Soporte técnico</h2>
+              <p>Crea solicitudes y consulta el seguimiento de tus tickets.</p>
+            </div>
+          </div>
+
+          <div className="portal-content-grid portal-support-grid">
+            <form className="portal-content-card portal-form" id="portal-ticket-create" onSubmit={createPortalTicket}>
+              <header><h3>Crear ticket</h3><TicketIcon size={20} strokeWidth={1.8} aria-hidden="true" /></header>
+              <label>
+                Servicio
+                <select value={ticketForm.idServicio} onChange={(event) => setTicketForm({ ...ticketForm, idServicio: event.target.value })}>
+                  <option value="">Ticket general</option>
+                  {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
+                </select>
+              </label>
+              <label>
+                Categoría
+                <select value={ticketForm.idCategoria} onChange={(event) => setTicketForm({ ...ticketForm, idCategoria: event.target.value })}>
+                  <option value="">Seleccionar</option>
+                  {categories.map((category) => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+                </select>
+              </label>
+              <label>
+                Prioridad
+                <select value={ticketForm.prioridad} onChange={(event) => setTicketForm({ ...ticketForm, prioridad: event.target.value })}>
+                  <option value="Alta">Alta</option>
+                  <option value="Media">Media</option>
+                  <option value="Baja">Baja</option>
+                </select>
+              </label>
+              <label>
+                Descripción
+                <textarea value={ticketForm.descripcion} onChange={(event) => setTicketForm({ ...ticketForm, descripcion: event.target.value })} />
+              </label>
+              <button disabled={!ticketForm.idCategoria}>Crear ticket</button>
+            </form>
+
+            <form className="portal-content-card portal-form" id="portal-wifi-request" onSubmit={requestWifiChange}>
+              <header><h3>Solicitud de cambio Wi-Fi</h3><Wifi size={20} strokeWidth={1.8} aria-hidden="true" /></header>
+              <p className="portal-form-help">La solicitud será revisada por soporte técnico; no modifica el router automáticamente.</p>
+              <label>
+                Servicio
+                <select value={wifiForm.idServicio} onChange={(event) => setWifiForm({ ...wifiForm, idServicio: event.target.value })}>
+                  <option value="">Seleccionar servicio</option>
+                  {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
+                </select>
+              </label>
+              <label>
+                Nueva clave sugerida
+                <input type="password" value={wifiForm.nuevaContrasena} onChange={(event) => setWifiForm({ ...wifiForm, nuevaContrasena: event.target.value })} />
+              </label>
+              <label>
+                Observaciones
+                <textarea value={wifiForm.observaciones} onChange={(event) => setWifiForm({ ...wifiForm, observaciones: event.target.value })} />
+              </label>
+              <button disabled={!wifiForm.idServicio}>Registrar solicitud</button>
+            </form>
+
+            <article className="portal-content-card portal-ticket-history">
+              <header><h3>Mis tickets</h3><span>{tickets.length}</span></header>
+              <div className="portal-card-list">
+                {!tickets.length && <p className="inline-status">No tienes tickets registrados.</p>}
+                {tickets.map((ticket) => (
+                  <section className="portal-ticket-item" key={ticket.idTicket}>
+                    <div>
+                      <strong>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</strong>
+                      <small>{ticket.categoria?.nombre ?? 'Sin categoría'}</small>
+                      <p>{ticket.descripcion ?? 'Sin descripción'}</p>
+                    </div>
+                    <div className="portal-ticket-badges">
+                      <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
+                      <StatusBadge value={formatWorkOrderValue(ticket.estado)} />
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
+        )}
+
+        {activePortalPage === 'tv' && (
+        <section className="portal-section portal-page-section" id="portal-tv">
+          <div className="portal-section-title">
+            <span className="portal-section-icon" aria-hidden="true"><MonitorPlay size={21} strokeWidth={1.8} /></span>
+            <div>
+              <span>Entretenimiento</span>
+              <h2>TV IP</h2>
+              <p>Consulta o regenera las credenciales asociadas a tu plan.</p>
+            </div>
+          </div>
+
+          <article className="portal-content-card portal-tv-card">
+            <header><h3>Credenciales disponibles</h3><span>{tvip.length}</span></header>
+            <div className="portal-card-list">
+              {!tvip.length && <p className="inline-status">Tu plan actual no incluye TV IP.</p>}
+              {tvip.map((credential) => (
+                <section className="portal-tv-item" key={credential.idContrato}>
+                  <span className="portal-item-icon" aria-hidden="true"><MonitorPlay size={19} strokeWidth={1.8} /></span>
+                  <div>
+                    <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
+                    <small>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</small>
+                  </div>
+                  <button type="button" className="secondary compact" onClick={() => void regeneratePortalTvip(credential.idContrato)}>
+                    {credential.credencial ? 'Regenerar credencial' : 'Generar credencial'}
+                  </button>
+                  {temporaryTvPassword?.idContrato === credential.idContrato && (
+                    <p className="inline-status portal-temporary-password">Contraseña temporal: <strong>{temporaryTvPassword.password}</strong>. Guárdala ahora; no volverá a mostrarse.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+          </article>
+        </section>
+        )}
       </section>
     </main>
   );
