@@ -34,10 +34,14 @@ import {
   BillingOverview,
   Company,
   Customer,
+  CustomerRequest,
   CustomerService,
+  DigitalContract,
   InstallAvailability,
   InventoryUnit,
   MonitoringStatus,
+  OperationalObservation,
+  PaymentZone,
   Plan,
   PortalCustomer,
   Prospect,
@@ -48,6 +52,7 @@ import {
   TvipGenerationResult,
   UserRow,
   WorkOrder,
+  ZonePriceRule,
 } from './api';
 import { DashboardPermissions, getDashboardPermissions, hasPermission, normalizeUserRoles } from './permissions';
 
@@ -57,6 +62,7 @@ type Tab =
   | 'installations'
   | 'customers'
   | 'inventory'
+  | 'plans'
   | 'billing'
   | 'tickets'
   | 'workOrders'
@@ -87,7 +93,21 @@ type Summary = {
     ticketsCerradosMensuales?: number;
     churnRateMensual?: number;
     churnBajasMensuales?: number;
+    solicitudesAbiertas?: number;
+    solicitudesNoFactibles?: number;
   };
+  cambiosPlanRecientes?: Array<{
+    idCambioPlan: number;
+    idContrato: number;
+    cliente: string;
+    planAnterior: string | null;
+    planNuevo: string;
+    fechaRegistro: string | null;
+  }>;
+  origenCaptacion?: Array<{
+    origen: string;
+    total: number;
+  }>;
   ticketsCerradosPorTipo?: Array<{
     idCategoria: number;
     categoria: string;
@@ -727,7 +747,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     ] = await Promise.allSettled([
       api.get<Summary>('/companies/summary', { params: { scope } }),
       api.get<Prospect[]>('/prospects', { params: { scope } }),
-      api.get<Plan[]>('/plans', { params: { scope } }),
+      api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
       canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
       canViewInventory ? api.get<AdvancedInventory>('/inventory/advanced', { params: { scope } }) : Promise.resolve({ data: null as AdvancedInventory | null }),
@@ -789,6 +809,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     { tab: 'customers', label: 'Clientes', visible: canManageCustomers, icon: Users },
     { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
+    { tab: 'plans', label: 'Planes', visible: permissions.managePlans, icon: ClipboardList },
     { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
     { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
@@ -926,7 +947,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             />
           )}
           {activeTab === 'customers' && canManageCustomers && (
-            <CustomersPanel customers={customers} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
+            <CustomersPanel customers={customers} plans={plans} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
@@ -939,9 +960,20 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onChanged={() => void loadData()}
             />
           )}
+          {activeTab === 'plans' && permissions.managePlans && (
+            <PlansPanel
+              plans={plans}
+              companies={companies}
+              writeCompanyId={writeCompanyId}
+              onChanged={() => void loadData()}
+            />
+          )}
           {activeTab === 'billing' && canViewBilling && (
             <BillingPanel
               overview={billingOverview}
+              plans={plans}
+              scope={scope}
+              writeCompanyId={writeCompanyId}
               permissions={permissions}
               onChanged={() => void loadData()}
             />
@@ -2428,15 +2460,29 @@ type CustomerHistory = {
   tickets: Array<{ idTicket: number; estado: string; prioridad: string; descripcion: string | null }>;
   ordenes: Array<{ idOt: number; tipoOt: string; estado: string; observaciones: string | null }>;
   equipos: Array<{ idUnidad: number; numeroSerie: string; estado: string; modelo: string | null }>;
+  solicitudes?: CustomerRequest[];
+  observaciones?: OperationalObservation[];
+  cambiosPlan?: Array<{
+    idCambioPlan: number;
+    idContrato: number;
+    motivo: string;
+    fechaRegistro: string | null;
+    planAnterior?: Plan | null;
+    planNuevo?: Plan | null;
+  }>;
+  contratosDigitales?: DigitalContract[];
   auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
 };
 
 const serviceTypeOptions = ['Internet', 'Television', 'Internet + Television'];
 const serviceStatusOptions = ['Activo', 'Pendiente Instalacion', 'Suspendido', 'Baja'];
+const captureOriginOptions = ['Contacto directo', 'Recomendación', 'Página web', 'Redes sociales', 'WhatsApp', 'Campaña comercial', 'Terreno', 'Otro'];
+const equipmentModeOptions = ['Arriendo', 'Prestamo', 'Compra', 'Propio cliente', 'Propiedad empresa'];
 
 function emptyServiceForm() {
   return {
     idContrato: '',
+    idZonaPago: '',
     tipoServicio: 'Internet',
     estadoOperativo: 'Pendiente Instalacion',
     observaciones: '',
@@ -2446,16 +2492,21 @@ function emptyServiceForm() {
     puertoOlt: '',
     ipAsignada: '',
     observacionesTecnicas: '',
+    cajaNap: '',
+    numeroPoste: '',
+    caracteristicasComerciales: '',
   };
 }
 
 function CustomersPanel({
   customers,
+  plans,
   scope,
   permissions,
   onChanged,
 }: {
   customers: Customer[];
+  plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
   onChanged: () => void;
@@ -2476,7 +2527,41 @@ function CustomersPanel({
     macAddress: '',
     puertoOlt: '',
     observaciones: '',
+    modalidadAsignacion: 'Propiedad empresa',
+    valorArriendoMensual: '',
+    fechaInicioAsignacion: '',
   });
+  const [paymentZones, setPaymentZones] = useState<PaymentZone[]>([]);
+  const [customerTechnicalForm, setCustomerTechnicalForm] = useState({
+    tecnologiaPrincipal: '',
+    nodoPrincipal: '',
+    cajaNapPrincipal: '',
+    numeroPoste: '',
+    ipReferencia: '',
+    observacionesTecnicas: '',
+  });
+  const [requestForm, setRequestForm] = useState({
+    tipoSolicitud: 'Cambio de plan',
+    canalOrigen: 'CRM',
+    estado: 'Abierta',
+    factible: '',
+    motivoNoFactible: '',
+    descripcion: '',
+    observaciones: '',
+  });
+  const [changePlanForm, setChangePlanForm] = useState({
+    newPlanId: '',
+    fechaEfectiva: dateInputValue(new Date()),
+    motivo: '',
+    observaciones: '',
+  });
+  const [observationTarget, setObservationTarget] = useState<{
+    tipoEntidad: string;
+    idEntidad: number;
+    label: string;
+    idCliente?: number;
+    idEmpresa?: number | null;
+  } | null>(null);
   const [managementOpen, setManagementOpen] = useState(false);
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
   const [serviceMonitoringStatus, setServiceMonitoringStatus] = useState<MonitoringStatus | null>(null);
@@ -2502,6 +2587,14 @@ function CustomersPanel({
         ...emptyServiceForm(),
         idContrato: selectedCustomer.contratos?.[0] ? String(selectedCustomer.contratos[0].idContrato) : '',
       });
+      setCustomerTechnicalForm({
+        tecnologiaPrincipal: String(selectedCustomer.datosTecnicos?.tecnologiaPrincipal ?? ''),
+        nodoPrincipal: String(selectedCustomer.datosTecnicos?.nodoPrincipal ?? ''),
+        cajaNapPrincipal: String(selectedCustomer.datosTecnicos?.cajaNapPrincipal ?? ''),
+        numeroPoste: String(selectedCustomer.datosTecnicos?.numeroPoste ?? ''),
+        ipReferencia: String(selectedCustomer.datosTecnicos?.ipReferencia ?? ''),
+        observacionesTecnicas: String(selectedCustomer.datosTecnicos?.observacionesTecnicas ?? ''),
+      });
       void loadServicesForCustomer(selectedCustomer.idCliente, true);
       if (permissions.viewMonitoring) {
         void loadCustomerMonitoring(selectedCustomer.idCliente, true);
@@ -2526,6 +2619,7 @@ function CustomersPanel({
 
     setServiceUpdateForm({
       idContrato: selectedService.idContrato ? String(selectedService.idContrato) : '',
+      idZonaPago: selectedService.idZonaPago ? String(selectedService.idZonaPago) : '',
       tipoServicio: selectedService.tipoServicio,
       estadoOperativo: selectedService.estadoOperativo,
       observaciones: selectedService.observaciones ?? '',
@@ -2535,12 +2629,16 @@ function CustomersPanel({
       puertoOlt: String(technicalData.puertoOlt ?? ''),
       ipAsignada: String(technicalData.ipAsignada ?? ''),
       observacionesTecnicas: String(technicalData.observacionesTecnicas ?? ''),
+      cajaNap: String(technicalData.cajaNap ?? ''),
+      numeroPoste: String(technicalData.numeroPoste ?? ''),
+      caracteristicasComerciales: String(technicalData.caracteristicasComerciales ?? ''),
     });
   }, [selectedService?.idServicio]);
 
   useEffect(() => {
     setSearchResults(null);
     setSearchTerm('');
+    void loadPaymentZones(true);
   }, [scope]);
 
   async function searchCustomers(event: FormEvent) {
@@ -2615,6 +2713,125 @@ function CustomersPanel({
       const { data } = await api.get<CustomerHistory>(`/customers/${selectedCustomer.idCliente}/history`);
       setHistory(data);
       setStatus('Historial cargado');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function loadPaymentZones(silent = false) {
+    try {
+      const { data } = await api.get<PaymentZone[]>('/billing/zones', { params: { scope } });
+      setPaymentZones(data);
+    } catch (err) {
+      setPaymentZones([]);
+      if (!silent) {
+        setStatus(apiErrorMessage(err));
+      }
+    }
+  }
+
+  async function updateCustomerTechnicalData(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedCustomer) {
+      return;
+    }
+
+    try {
+      await api.patch(`/customers/${selectedCustomer.idCliente}/technical-data`, {
+        tecnologiaPrincipal: customerTechnicalForm.tecnologiaPrincipal.trim() || undefined,
+        nodoPrincipal: customerTechnicalForm.nodoPrincipal.trim() || undefined,
+        cajaNapPrincipal: customerTechnicalForm.cajaNapPrincipal.trim() || undefined,
+        numeroPoste: customerTechnicalForm.numeroPoste.trim() || undefined,
+        ipReferencia: customerTechnicalForm.ipReferencia.trim() || undefined,
+        observacionesTecnicas: customerTechnicalForm.observacionesTecnicas.trim() || undefined,
+      });
+      setStatus('Datos técnicos del cliente actualizados');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function createCustomerRequest(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedCustomer) {
+      return;
+    }
+
+    try {
+      await api.post<CustomerRequest>('/requests', {
+        idCliente: selectedCustomer.idCliente,
+        idServicio: selectedService?.idServicio,
+        idEmpresa: customerCompanyId,
+        tipoSolicitud: requestForm.tipoSolicitud.trim(),
+        canalOrigen: requestForm.canalOrigen,
+        estado: requestForm.estado,
+        factible: requestForm.factible === '' ? undefined : requestForm.factible === 'true',
+        motivoNoFactible: requestForm.motivoNoFactible.trim() || undefined,
+        descripcion: requestForm.descripcion.trim() || undefined,
+        observaciones: requestForm.observaciones.trim() || undefined,
+      });
+      setRequestForm({
+        tipoSolicitud: 'Cambio de plan',
+        canalOrigen: 'CRM',
+        estado: 'Abierta',
+        factible: '',
+        motivoNoFactible: '',
+        descripcion: '',
+        observaciones: '',
+      });
+      await loadHistory();
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService?.idServicio);
+      setStatus('Solicitud registrada en el historial del cliente');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function changeServicePlan(event: FormEvent) {
+    event.preventDefault();
+
+    if (!selectedService?.idContrato || !selectedCustomer) {
+      setStatus('Selecciona un servicio con contrato asociado.');
+      return;
+    }
+
+    try {
+      await api.post(`/contracts/${selectedService.idContrato}/change-plan`, {
+        newPlanId: Number(changePlanForm.newPlanId),
+        fechaEfectiva: changePlanForm.fechaEfectiva,
+        motivo: changePlanForm.motivo.trim(),
+        observaciones: changePlanForm.observaciones.trim() || undefined,
+      });
+      setChangePlanForm({ newPlanId: '', fechaEfectiva: dateInputValue(new Date()), motivo: '', observaciones: '' });
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
+      await loadHistory();
+      setStatus('Cambio de plan registrado con historial');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function generateDigitalContract(idContrato: number) {
+    try {
+      await api.post<DigitalContract>(`/contracts/${idContrato}/digital-contract`);
+      await loadHistory();
+      setStatus('Contrato digital generado con hash de integridad');
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function downloadDigitalContract(idContrato: number) {
+    try {
+      const { data } = await api.get<Blob>(`/contracts/${idContrato}/digital-contract/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(data);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setStatus('Contrato digital abierto para revisión');
     } catch (err) {
       setStatus(apiErrorMessage(err));
     }
@@ -2717,6 +2934,7 @@ function CustomersPanel({
         idCliente: selectedCustomer.idCliente,
         idEmpresa: customerCompanyId,
         idContrato: serviceCreateForm.idContrato ? Number(serviceCreateForm.idContrato) : undefined,
+        idZonaPago: serviceCreateForm.idZonaPago ? Number(serviceCreateForm.idZonaPago) : undefined,
         tipoServicio: serviceCreateForm.tipoServicio,
         estadoOperativo: serviceCreateForm.estadoOperativo,
         observaciones: serviceCreateForm.observaciones.trim() || undefined,
@@ -2726,6 +2944,9 @@ function CustomersPanel({
         puertoOlt: serviceCreateForm.puertoOlt.trim() || undefined,
         ipAsignada: serviceCreateForm.ipAsignada.trim() || undefined,
         observacionesTecnicas: serviceCreateForm.observacionesTecnicas.trim() || undefined,
+        cajaNap: serviceCreateForm.cajaNap.trim() || undefined,
+        numeroPoste: serviceCreateForm.numeroPoste.trim() || undefined,
+        caracteristicasComerciales: serviceCreateForm.caracteristicasComerciales.trim() || undefined,
       });
       setServiceCreateForm(emptyServiceForm());
       await loadServicesForCustomer(selectedCustomer.idCliente, true, data.idServicio);
@@ -2747,6 +2968,7 @@ function CustomersPanel({
       await api.patch<CustomerService>(`/services/${selectedService.idServicio}`, {
         tipoServicio: serviceUpdateForm.tipoServicio,
         estadoOperativo: serviceUpdateForm.estadoOperativo,
+        idZonaPago: serviceUpdateForm.idZonaPago ? Number(serviceUpdateForm.idZonaPago) : undefined,
         observaciones: serviceUpdateForm.observaciones.trim() || undefined,
         tecnologia: serviceUpdateForm.tecnologia.trim() || undefined,
         velocidad: serviceUpdateForm.velocidad.trim() || undefined,
@@ -2754,6 +2976,9 @@ function CustomersPanel({
         puertoOlt: serviceUpdateForm.puertoOlt.trim() || undefined,
         ipAsignada: serviceUpdateForm.ipAsignada.trim() || undefined,
         observacionesTecnicas: serviceUpdateForm.observacionesTecnicas.trim() || undefined,
+        cajaNap: serviceUpdateForm.cajaNap.trim() || undefined,
+        numeroPoste: serviceUpdateForm.numeroPoste.trim() || undefined,
+        caracteristicasComerciales: serviceUpdateForm.caracteristicasComerciales.trim() || undefined,
       });
       await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
       setStatus('Perfil de servicio actualizado');
@@ -2782,8 +3007,20 @@ function CustomersPanel({
         macAddress: equipmentForm.macAddress.trim() || undefined,
         puertoOlt: equipmentForm.puertoOlt.trim() || undefined,
         observaciones: equipmentForm.observaciones.trim() || undefined,
+        modalidadAsignacion: equipmentForm.modalidadAsignacion,
+        valorArriendoMensual: equipmentForm.valorArriendoMensual ? Number(equipmentForm.valorArriendoMensual) : undefined,
+        fechaInicioAsignacion: equipmentForm.fechaInicioAsignacion || undefined,
       });
-      setEquipmentForm({ numeroSerie: '', modelo: '', macAddress: '', puertoOlt: '', observaciones: '' });
+      setEquipmentForm({
+        numeroSerie: '',
+        modelo: '',
+        macAddress: '',
+        puertoOlt: '',
+        observaciones: '',
+        modalidadAsignacion: 'Propiedad empresa',
+        valorArriendoMensual: '',
+        fechaInicioAsignacion: '',
+      });
       await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
       setStatus('Equipo asociado al servicio contratado');
       onChanged();
@@ -2898,6 +3135,21 @@ function CustomersPanel({
                   <dd>{customerMainPlan(selectedCustomer)}</dd>
                 </div>
               </dl>
+              {permissions.manageObservations && (
+                <button
+                  type="button"
+                  className="secondary compact"
+                  onClick={() => setObservationTarget({
+                    tipoEntidad: 'Cliente',
+                    idEntidad: selectedCustomer.idCliente,
+                    idCliente: selectedCustomer.idCliente,
+                    idEmpresa: selectedCustomer.idEmpresa,
+                    label: selectedCustomer.nombreCompleto,
+                  })}
+                >
+                  Observaciones
+                </button>
+              )}
             </section>
 
             {(permissions.viewMonitoring || permissions.manageTvip) && (
@@ -2992,6 +3244,82 @@ function CustomersPanel({
                       </button>
                     </div>
                     {status && <p className="inline-status">{status}</p>}
+                    {permissions.manageServices && (
+                      <form className="stack customer-service-form" onSubmit={updateCustomerTechnicalData}>
+                        <h3>Datos técnicos generales del cliente</h3>
+                        <div className="workflow-grid">
+                          <input
+                            placeholder="Tecnología principal"
+                            value={customerTechnicalForm.tecnologiaPrincipal}
+                            onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, tecnologiaPrincipal: event.target.value })}
+                          />
+                          <input
+                            placeholder="Nodo principal"
+                            value={customerTechnicalForm.nodoPrincipal}
+                            onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, nodoPrincipal: event.target.value })}
+                          />
+                          <input
+                            placeholder="Caja NAP principal"
+                            value={customerTechnicalForm.cajaNapPrincipal}
+                            onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, cajaNapPrincipal: event.target.value })}
+                          />
+                          <input
+                            placeholder="Número de poste"
+                            value={customerTechnicalForm.numeroPoste}
+                            onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, numeroPoste: event.target.value })}
+                          />
+                          <input
+                            placeholder="IP de referencia"
+                            value={customerTechnicalForm.ipReferencia}
+                            onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, ipReferencia: event.target.value })}
+                          />
+                        </div>
+                        <textarea
+                          placeholder="Observaciones técnicas generales"
+                          value={customerTechnicalForm.observacionesTecnicas}
+                          onChange={(event) => setCustomerTechnicalForm({ ...customerTechnicalForm, observacionesTecnicas: event.target.value })}
+                        />
+                        <button type="submit">Guardar datos técnicos</button>
+                      </form>
+                    )}
+                    {permissions.manageCustomerRequests && (
+                      <form className="stack customer-service-form" onSubmit={createCustomerRequest}>
+                        <h3>Registrar solicitud del cliente</h3>
+                        <div className="workflow-grid">
+                          <input
+                            placeholder="Tipo de solicitud"
+                            value={requestForm.tipoSolicitud}
+                            onChange={(event) => setRequestForm({ ...requestForm, tipoSolicitud: event.target.value })}
+                          />
+                          <select
+                            value={requestForm.canalOrigen}
+                            onChange={(event) => setRequestForm({ ...requestForm, canalOrigen: event.target.value })}
+                          >
+                            {captureOriginOptions.map((origin) => <option key={origin} value={origin}>{origin}</option>)}
+                            <option value="CRM">CRM</option>
+                          </select>
+                          <select value={requestForm.estado} onChange={(event) => setRequestForm({ ...requestForm, estado: event.target.value })}>
+                            {['Abierta', 'En Gestion', 'Cerrada', 'No Factible', 'Cancelada'].map((item) => <option key={item} value={item}>{item}</option>)}
+                          </select>
+                          <select value={requestForm.factible} onChange={(event) => setRequestForm({ ...requestForm, factible: event.target.value })}>
+                            <option value="">Factibilidad pendiente</option>
+                            <option value="true">Factible</option>
+                            <option value="false">No factible</option>
+                          </select>
+                        </div>
+                        <input
+                          placeholder="Motivo no factible, si aplica"
+                          value={requestForm.motivoNoFactible}
+                          onChange={(event) => setRequestForm({ ...requestForm, motivoNoFactible: event.target.value })}
+                        />
+                        <textarea
+                          placeholder="Descripción u observaciones de la solicitud"
+                          value={requestForm.descripcion}
+                          onChange={(event) => setRequestForm({ ...requestForm, descripcion: event.target.value })}
+                        />
+                        <button type="submit">Registrar solicitud</button>
+                      </form>
+                    )}
                     {history && (
                       <div className="history-grid">
                         <HistoryBox title="Contratos" value={history.contratos.length} />
@@ -2999,6 +3327,8 @@ function CustomersPanel({
                         <HistoryBox title="Tickets" value={history.tickets.length} />
                         <HistoryBox title="OTs" value={history.ordenes.length} />
                         <HistoryBox title="Equipos" value={history.equipos.length} />
+                        <HistoryBox title="Solicitudes" value={history.solicitudes?.length ?? 0} />
+                        <HistoryBox title="Cambios de plan" value={history.cambiosPlan?.length ?? 0} />
                         <section className="history-list">
                           <h3>Ultimos movimientos</h3>
                           <ul>
@@ -3007,6 +3337,34 @@ function CustomersPanel({
                                 {row.accion} {row.fechaHora ? new Date(row.fechaHora).toLocaleString() : ''}
                               </li>
                             ))}
+                          </ul>
+                        </section>
+                        <section className="history-list">
+                          <h3>Solicitudes recientes</h3>
+                          <ul>
+                            {(history.solicitudes ?? []).slice(0, 6).map((request) => (
+                              <li key={request.idSolicitud}>
+                                {request.tipoSolicitud} - {request.estado}
+                                {request.factible === false ? ` - No factible: ${request.motivoNoFactible ?? 'sin motivo'}` : ''}
+                              </li>
+                            ))}
+                            {!history.solicitudes?.length && <li>Sin solicitudes registradas.</li>}
+                          </ul>
+                        </section>
+                        <section className="history-list">
+                          <h3>Cambios de plan y contratos digitales</h3>
+                          <ul>
+                            {(history.cambiosPlan ?? []).slice(0, 4).map((change) => (
+                              <li key={change.idCambioPlan}>
+                                Contrato {change.idContrato}: {change.planAnterior?.nombreComercial ?? '-'} a {change.planNuevo?.nombreComercial ?? '-'}
+                              </li>
+                            ))}
+                            {(history.contratosDigitales ?? []).slice(0, 4).map((document) => (
+                              <li key={document.idContratoDigital}>
+                                Contrato digital {document.idContrato} v{document.version} - {document.estadoFirma}
+                              </li>
+                            ))}
+                            {!history.cambiosPlan?.length && !history.contratosDigitales?.length && <li>Sin cambios ni documentos registrados.</li>}
                           </ul>
                         </section>
                       </div>
@@ -3089,6 +3447,33 @@ function CustomersPanel({
                               ))}
                               {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
                             </ul>
+                            {permissions.manageObservations && (
+                              <button
+                                type="button"
+                                className="secondary compact"
+                                onClick={() => setObservationTarget({
+                                  tipoEntidad: 'Servicio',
+                                  idEntidad: selectedService.idServicio,
+                                  idCliente: selectedService.idCliente,
+                                  idEmpresa: selectedService.idEmpresa,
+                                  label: `Servicio ${selectedService.idServicio}`,
+                                })}
+                              >
+                                Observaciones del servicio
+                              </button>
+                            )}
+                          </section>
+                          <section className="history-list">
+                            <h3>Equipos instalados</h3>
+                            <ul>
+                              {(selectedService.equipos ?? []).map((unit) => (
+                                <li key={unit.idUnidad}>
+                                  {unit.numeroSerie} - {unit.estado} - modalidad: {unit.modalidadAsignacion ?? 'Sin clasificar'}
+                                  {unit.valorArriendoMensual ? ` - $${Number(unit.valorArriendoMensual).toLocaleString('es-CL')}/mes` : ''}
+                                </li>
+                              ))}
+                              {!selectedService.equipos?.length && <li>Sin equipos asociados al servicio.</li>}
+                            </ul>
                           </section>
                           {permissions.viewMonitoring && (
                             <section className="history-list">
@@ -3104,6 +3489,11 @@ function CustomersPanel({
                           <section className="history-list">
                             <h3>Solicitudes y visitas asociadas</h3>
                             <ul>
+                              {(selectedService.solicitudes ?? []).slice(0, 4).map((request) => (
+                                <li key={`request-${request.idSolicitud}`}>
+                                  Solicitud {request.idSolicitud} - {request.tipoSolicitud} - {request.estado}
+                                </li>
+                              ))}
                               {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
                                 <li key={`ticket-${ticket.idTicket}`}>
                                   Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
@@ -3114,11 +3504,63 @@ function CustomersPanel({
                                   Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
                                 </li>
                               ))}
-                              {!selectedService.tickets?.length && !selectedService.ordenes?.length && (
+                              {!selectedService.solicitudes?.length && !selectedService.tickets?.length && !selectedService.ordenes?.length && (
                                 <li>No hay solicitudes ni visitas asociadas.</li>
                               )}
                             </ul>
                           </section>
+                          {selectedService.idContrato && (permissions.changeCustomerPlan || permissions.generateDigitalContract) && (
+                            <section className="history-list">
+                              <h3>Contrato del servicio</h3>
+                              <p>Contrato {selectedService.idContrato} - {selectedService.contrato?.plan?.nombreComercial ?? 'Sin plan'}</p>
+                              {permissions.generateDigitalContract && (
+                                <div className="button-row">
+                                  <button type="button" className="secondary compact" onClick={() => void generateDigitalContract(selectedService.idContrato ?? 0)}>
+                                    Generar contrato digital
+                                  </button>
+                                  <button type="button" className="secondary compact" onClick={() => void downloadDigitalContract(selectedService.idContrato ?? 0)}>
+                                    Descargar último contrato
+                                  </button>
+                                </div>
+                              )}
+                              {permissions.changeCustomerPlan && (
+                                <form className="stack" onSubmit={changeServicePlan}>
+                                  <select
+                                    value={changePlanForm.newPlanId}
+                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, newPlanId: event.target.value })}
+                                    required
+                                  >
+                                    <option value="">Seleccionar nuevo plan</option>
+                                    {plans
+                                      .filter((plan) => plan.activo !== false && (!selectedService.idEmpresa || !plan.idEmpresa || plan.idEmpresa === selectedService.idEmpresa))
+                                      .map((plan) => (
+                                        <option key={plan.idPlan} value={plan.idPlan}>
+                                          {plan.nombreComercial} - ${Number(plan.precioMensual).toLocaleString('es-CL')}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <input
+                                    type="date"
+                                    value={changePlanForm.fechaEfectiva}
+                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, fechaEfectiva: event.target.value })}
+                                    required
+                                  />
+                                  <input
+                                    placeholder="Motivo del cambio"
+                                    value={changePlanForm.motivo}
+                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, motivo: event.target.value })}
+                                    required
+                                  />
+                                  <textarea
+                                    placeholder="Observaciones del cambio"
+                                    value={changePlanForm.observaciones}
+                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, observaciones: event.target.value })}
+                                  />
+                                  <button type="submit">Cambiar plan</button>
+                                </form>
+                              )}
+                            </section>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3137,6 +3579,20 @@ function CustomersPanel({
                               {contractOptions.map((contract) => (
                                 <option key={contract.idContrato} value={contract.idContrato}>
                                   Contrato {contract.idContrato} - {contract.plan?.nombreComercial ?? 'sin plan'}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Zona de pago
+                            <select
+                              value={serviceCreateForm.idZonaPago}
+                              onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, idZonaPago: event.target.value })}
+                            >
+                              <option value="">Sin zona definida</option>
+                              {paymentZones.map((zone) => (
+                                <option key={zone.idZonaPago} value={zone.idZonaPago}>
+                                  {zone.nombreZona} {zone.comuna ? `- ${zone.comuna}` : ''}
                                 </option>
                               ))}
                             </select>
@@ -3169,6 +3625,21 @@ function CustomersPanel({
                             value={serviceCreateForm.velocidad}
                             onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, velocidad: event.target.value })}
                           />
+                          <input
+                            placeholder="Caja NAP"
+                            value={serviceCreateForm.cajaNap}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, cajaNap: event.target.value })}
+                          />
+                          <input
+                            placeholder="Número de poste"
+                            value={serviceCreateForm.numeroPoste}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, numeroPoste: event.target.value })}
+                          />
+                          <textarea
+                            placeholder="Características comerciales relevantes"
+                            value={serviceCreateForm.caracteristicasComerciales}
+                            onChange={(event) => setServiceCreateForm({ ...serviceCreateForm, caracteristicasComerciales: event.target.value })}
+                          />
                           <textarea
                             placeholder="Observaciones del servicio"
                             value={serviceCreateForm.observaciones}
@@ -3198,6 +3669,20 @@ function CustomersPanel({
                                 {serviceTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                               </select>
                             </label>
+                            <label>
+                              Zona de pago
+                              <select
+                                value={serviceUpdateForm.idZonaPago}
+                                onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, idZonaPago: event.target.value })}
+                              >
+                                <option value="">Sin zona definida</option>
+                                {paymentZones.map((zone) => (
+                                  <option key={zone.idZonaPago} value={zone.idZonaPago}>
+                                    {zone.nombreZona} {zone.comuna ? `- ${zone.comuna}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
                             <input
                               placeholder="MAC del servicio"
                               value={serviceUpdateForm.macAddress}
@@ -3212,6 +3697,16 @@ function CustomersPanel({
                               placeholder="IP asignada"
                               value={serviceUpdateForm.ipAsignada}
                               onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, ipAsignada: event.target.value })}
+                            />
+                            <input
+                              placeholder="Caja NAP"
+                              value={serviceUpdateForm.cajaNap}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, cajaNap: event.target.value })}
+                            />
+                            <input
+                              placeholder="Número de poste"
+                              value={serviceUpdateForm.numeroPoste}
+                              onChange={(event) => setServiceUpdateForm({ ...serviceUpdateForm, numeroPoste: event.target.value })}
                             />
                             <textarea
                               placeholder="Observaciones técnicas"
@@ -3248,6 +3743,24 @@ function CustomersPanel({
                             value={equipmentForm.puertoOlt}
                             onChange={(event) => setEquipmentForm({ ...equipmentForm, puertoOlt: event.target.value })}
                           />
+                          <select
+                            value={equipmentForm.modalidadAsignacion}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, modalidadAsignacion: event.target.value })}
+                          >
+                            {equipmentModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                          </select>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Valor arriendo mensual"
+                            value={equipmentForm.valorArriendoMensual}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, valorArriendoMensual: event.target.value })}
+                          />
+                          <input
+                            type="date"
+                            value={equipmentForm.fechaInicioAsignacion}
+                            onChange={(event) => setEquipmentForm({ ...equipmentForm, fechaInicioAsignacion: event.target.value })}
+                          />
                         </div>
                         <textarea
                           placeholder="Observaciones de instalacion"
@@ -3268,28 +3781,326 @@ function CustomersPanel({
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
         )}
       </Modal>
+      <ObservationsModal
+        target={observationTarget}
+        onClose={() => setObservationTarget(null)}
+        onSaved={() => {
+          if (selectedCustomer) {
+            void loadHistory();
+          }
+        }}
+      />
+    </section>
+  );
+}
+
+function ObservationsModal({
+  target,
+  onClose,
+  onSaved,
+}: {
+  target: {
+    tipoEntidad: string;
+    idEntidad: number;
+    label: string;
+    idCliente?: number;
+    idEmpresa?: number | null;
+  } | null;
+  onClose: () => void;
+  onSaved?: () => void;
+}) {
+  const [observations, setObservations] = useState<OperationalObservation[]>([]);
+  const [note, setNote] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (!target) {
+      setObservations([]);
+      setNote('');
+      setStatus('');
+      return;
+    }
+
+    void loadObservations();
+  }, [target?.tipoEntidad, target?.idEntidad]);
+
+  async function loadObservations() {
+    if (!target) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<OperationalObservation[]>(`/observations/${target.tipoEntidad}/${target.idEntidad}`);
+      setObservations(data);
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function saveObservation(event: FormEvent) {
+    event.preventDefault();
+
+    if (!target || !note.trim()) {
+      return;
+    }
+
+    try {
+      await api.post<OperationalObservation>('/observations', {
+        tipoEntidad: target.tipoEntidad,
+        idEntidad: target.idEntidad,
+        idCliente: target.idCliente,
+        idEmpresa: target.idEmpresa ?? undefined,
+        observacion: note.trim(),
+        visibilidad: 'Interna',
+      });
+      setNote('');
+      await loadObservations();
+      setStatus('Observación registrada');
+      onSaved?.();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <Modal title={target ? `Observaciones - ${target.label}` : 'Observaciones'} open={Boolean(target)} onClose={onClose}>
+      {target && (
+        <section className="stack">
+          <form className="stack" onSubmit={saveObservation}>
+            <textarea
+              placeholder="Registrar observación contextual"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
+            <button type="submit">Registrar observación</button>
+          </form>
+          {status && <p className="inline-status">{status}</p>}
+          <div className="compact-list">
+            {observations.map((observation) => (
+              <section className="compact-list-item" key={observation.idObservacion}>
+                <strong>{formatDateTime(observation.fechaCreacion)}</strong>
+                <span>{observation.observacion}</span>
+                <small>{observation.usuario?.nombreCompleto ?? 'Sistema'} - {observation.visibilidad ?? 'Interna'}</small>
+              </section>
+            ))}
+            {!observations.length && <p className="empty-state">Sin observaciones registradas.</p>}
+          </div>
+        </section>
+      )}
+    </Modal>
+  );
+}
+
+function PlansPanel({
+  plans,
+  companies,
+  writeCompanyId,
+  onChanged,
+}: {
+  plans: Plan[];
+  companies: Company[];
+  writeCompanyId: number;
+  onChanged: () => void;
+}) {
+  const [status, setStatus] = useState('');
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [form, setForm] = useState({
+    idEmpresa: String(writeCompanyId),
+    nombreComercial: '',
+    tipoPlan: 'Internet',
+    tipoCliente: 'Residencial',
+    velocidadMbps: '',
+    precioMensual: '',
+    descripcion: '',
+    activo: true,
+  });
+
+  useEffect(() => {
+    if (!editingPlan) {
+      setForm((current) => ({ ...current, idEmpresa: String(writeCompanyId) }));
+    }
+  }, [writeCompanyId, editingPlan?.idPlan]);
+
+  function editPlan(plan: Plan) {
+    setEditingPlan(plan);
+    setForm({
+      idEmpresa: String(plan.idEmpresa ?? writeCompanyId),
+      nombreComercial: plan.nombreComercial,
+      tipoPlan: plan.tipoPlan,
+      tipoCliente: plan.tipoCliente,
+      velocidadMbps: plan.velocidadMbps === null ? '' : String(plan.velocidadMbps),
+      precioMensual: String(plan.precioMensual),
+      descripcion: plan.descripcion ?? '',
+      activo: plan.activo !== false,
+    });
+  }
+
+  function resetForm() {
+    setEditingPlan(null);
+    setForm({
+      idEmpresa: String(writeCompanyId),
+      nombreComercial: '',
+      tipoPlan: 'Internet',
+      tipoCliente: 'Residencial',
+      velocidadMbps: '',
+      precioMensual: '',
+      descripcion: '',
+      activo: true,
+    });
+  }
+
+  async function savePlan(event: FormEvent) {
+    event.preventDefault();
+    const payload = {
+      idEmpresa: Number(form.idEmpresa),
+      nombreComercial: form.nombreComercial.trim(),
+      tipoPlan: form.tipoPlan.trim(),
+      tipoCliente: form.tipoCliente.trim(),
+      velocidadMbps: form.velocidadMbps ? Number(form.velocidadMbps) : undefined,
+      precioMensual: Number(form.precioMensual),
+      descripcion: form.descripcion.trim() || undefined,
+      activo: form.activo,
+    };
+
+    try {
+      if (editingPlan) {
+        await api.patch(`/plans/${editingPlan.idPlan}`, payload);
+        setStatus('Plan actualizado');
+      } else {
+        await api.post('/plans', payload);
+        setStatus('Plan creado');
+      }
+
+      resetForm();
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function togglePlan(plan: Plan) {
+    try {
+      await api.patch(`/plans/${plan.idPlan}/${plan.activo === false ? 'activate' : 'deactivate'}`);
+      setStatus(plan.activo === false ? 'Plan activado' : 'Plan desactivado');
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  return (
+    <section className="plans-module stack">
+      <div className="page-heading">
+        <h1>Planes comerciales</h1>
+        <p>Administración de planes con valores manuales por empresa.</p>
+      </div>
+
+      {status && <p className="inline-status">{status}</p>}
+
+      <section className="panel stack">
+        <form className="workflow-grid" onSubmit={savePlan}>
+          <label>
+            Empresa
+            <select value={form.idEmpresa} onChange={(event) => setForm({ ...form, idEmpresa: event.target.value })}>
+              {companies.map((company) => (
+                <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>
+              ))}
+            </select>
+          </label>
+          <input placeholder="Nombre comercial" value={form.nombreComercial} onChange={(event) => setForm({ ...form, nombreComercial: event.target.value })} required />
+          <input placeholder="Tipo de plan" value={form.tipoPlan} onChange={(event) => setForm({ ...form, tipoPlan: event.target.value })} required />
+          <input placeholder="Tipo de cliente" value={form.tipoCliente} onChange={(event) => setForm({ ...form, tipoCliente: event.target.value })} required />
+          <input type="number" min="0" placeholder="Velocidad Mbps" value={form.velocidadMbps} onChange={(event) => setForm({ ...form, velocidadMbps: event.target.value })} />
+          <input type="number" min="0" placeholder="Precio mensual" value={form.precioMensual} onChange={(event) => setForm({ ...form, precioMensual: event.target.value })} required />
+          <textarea placeholder="Descripción" value={form.descripcion} onChange={(event) => setForm({ ...form, descripcion: event.target.value })} />
+          <label className="checkbox-row">
+            <input type="checkbox" checked={form.activo} onChange={(event) => setForm({ ...form, activo: event.target.checked })} />
+            Plan activo
+          </label>
+          <button type="submit">{editingPlan ? 'Guardar cambios' : 'Crear plan'}</button>
+          {editingPlan && <button type="button" className="secondary" onClick={resetForm}>Cancelar edición</button>}
+        </form>
+      </section>
+
+      <section className="panel stack">
+        <div className="section-heading">
+          <h2>Listado de planes</h2>
+          <p>Los planes inactivos no aparecen en flujos comerciales nuevos.</p>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Empresa</th>
+                <th>Tipo</th>
+                <th>Cliente</th>
+                <th>Velocidad</th>
+                <th>Precio</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {plans.map((plan) => (
+                <tr key={plan.idPlan}>
+                  <td>{plan.nombreComercial}</td>
+                  <td>{plan.empresa?.nombre ?? plan.idEmpresa ?? '-'}</td>
+                  <td>{plan.tipoPlan}</td>
+                  <td>{plan.tipoCliente}</td>
+                  <td>{plan.velocidadMbps ?? '-'}</td>
+                  <td>${Number(plan.precioMensual).toLocaleString('es-CL')}</td>
+                  <td><StatusBadge value={plan.activo === false ? 'Inactivo' : 'Activo'} /></td>
+                  <td>
+                    <div className="table-actions">
+                      <button type="button" className="secondary compact" onClick={() => editPlan(plan)}>Editar</button>
+                      <button type="button" className="secondary compact" onClick={() => void togglePlan(plan)}>
+                        {plan.activo === false ? 'Activar' : 'Desactivar'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   );
 }
 
 function BillingPanel({
   overview,
+  plans,
+  scope,
+  writeCompanyId,
   permissions,
   onChanged,
 }: {
   overview: BillingOverview | null;
+  plans: Plan[];
+  scope: string;
+  writeCompanyId: number;
   permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
   const [status, setStatus] = useState('');
   const [paymentTarget, setPaymentTarget] = useState<BillingOverview['morosos'][number] | null>(null);
   const [paymentForm, setPaymentForm] = useState({ monto: '', pasarela: 'Transferencia', codigoTransaccion: '' });
+  const [zones, setZones] = useState<PaymentZone[]>([]);
+  const [zoneRules, setZoneRules] = useState<ZonePriceRule[]>([]);
+  const [zoneForm, setZoneForm] = useState({ nombreZona: '', comuna: '', descripcion: '', diaVencimientoSugerido: '5' });
+  const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
 
   useEffect(() => {
     if (paymentTarget) {
       setPaymentForm({ monto: String(paymentTarget.saldo), pasarela: 'Transferencia', codigoTransaccion: '' });
     }
   }, [paymentTarget?.idFactura]);
+
+  useEffect(() => {
+    void loadZonesAndRules();
+  }, [scope]);
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -3300,6 +4111,56 @@ function BillingPanel({
     } catch (err) {
       setStatus(apiErrorMessage(err));
     }
+  }
+
+  async function loadZonesAndRules() {
+    try {
+      const [zonesResult, rulesResult] = await Promise.all([
+        api.get<PaymentZone[]>('/billing/zones', { params: { scope } }),
+        api.get<ZonePriceRule[]>('/billing/zone-rules', { params: { scope } }),
+      ]);
+      setZones(zonesResult.data);
+      setZoneRules(rulesResult.data);
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function createZone(event: FormEvent) {
+    event.preventDefault();
+
+    await run(
+      async () => {
+        await api.post('/billing/zones', {
+          idEmpresa: writeCompanyId,
+          nombreZona: zoneForm.nombreZona.trim(),
+          comuna: zoneForm.comuna.trim() || undefined,
+          descripcion: zoneForm.descripcion.trim() || undefined,
+          diaVencimientoSugerido: Number(zoneForm.diaVencimientoSugerido),
+        });
+        setZoneForm({ nombreZona: '', comuna: '', descripcion: '', diaVencimientoSugerido: '5' });
+        await loadZonesAndRules();
+      },
+      'Zona de pago registrada',
+    );
+  }
+
+  async function createZoneRule(event: FormEvent) {
+    event.preventDefault();
+
+    await run(
+      async () => {
+        await api.post('/billing/zone-rules', {
+          idPlan: Number(ruleForm.idPlan),
+          idZonaPago: Number(ruleForm.idZonaPago),
+          precioMensual: Number(ruleForm.precioMensual),
+          valorInstalacion: ruleForm.valorInstalacion ? Number(ruleForm.valorInstalacion) : undefined,
+        });
+        setRuleForm({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+        await loadZonesAndRules();
+      },
+      'Regla de precio por zona registrada',
+    );
   }
 
   async function registerPayment(event: FormEvent) {
@@ -3490,6 +4351,73 @@ function BillingPanel({
           </table>
         </div>
         {!notifications.length && <p className="empty-state">Aun no hay notificaciones de cobranza registradas.</p>}
+      </section>
+
+      <section className="panel stack">
+        <div className="section-heading">
+          <h2>Zonas de pago</h2>
+          <p>Configura vencimientos sugeridos y precios manuales por zona.</p>
+        </div>
+        {permissions.managePaymentZones && (
+          <div className="workflow-grid">
+            <form className="stack" onSubmit={createZone}>
+              <h3>Nueva zona</h3>
+              <input placeholder="Nombre de zona" value={zoneForm.nombreZona} onChange={(event) => setZoneForm({ ...zoneForm, nombreZona: event.target.value })} required />
+              <input placeholder="Comuna" value={zoneForm.comuna} onChange={(event) => setZoneForm({ ...zoneForm, comuna: event.target.value })} />
+              <input type="number" min="1" max="28" placeholder="Día vencimiento sugerido" value={zoneForm.diaVencimientoSugerido} onChange={(event) => setZoneForm({ ...zoneForm, diaVencimientoSugerido: event.target.value })} />
+              <textarea placeholder="Descripción" value={zoneForm.descripcion} onChange={(event) => setZoneForm({ ...zoneForm, descripcion: event.target.value })} />
+              <button type="submit">Crear zona</button>
+            </form>
+            <form className="stack" onSubmit={createZoneRule}>
+              <h3>Precio por zona</h3>
+              <select value={ruleForm.idPlan} onChange={(event) => setRuleForm({ ...ruleForm, idPlan: event.target.value })} required>
+                <option value="">Seleccionar plan</option>
+                {plans.filter((plan) => plan.activo !== false).map((plan) => (
+                  <option key={plan.idPlan} value={plan.idPlan}>{plan.nombreComercial}</option>
+                ))}
+              </select>
+              <select value={ruleForm.idZonaPago} onChange={(event) => setRuleForm({ ...ruleForm, idZonaPago: event.target.value })} required>
+                <option value="">Seleccionar zona</option>
+                {zones.map((zone) => (
+                  <option key={zone.idZonaPago} value={zone.idZonaPago}>{zone.nombreZona}</option>
+                ))}
+              </select>
+              <input type="number" min="0" placeholder="Precio mensual" value={ruleForm.precioMensual} onChange={(event) => setRuleForm({ ...ruleForm, precioMensual: event.target.value })} required />
+              <input type="number" min="0" placeholder="Valor instalación" value={ruleForm.valorInstalacion} onChange={(event) => setRuleForm({ ...ruleForm, valorInstalacion: event.target.value })} />
+              <button type="submit">Guardar regla</button>
+            </form>
+          </div>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Zona</th>
+                <th>Comuna</th>
+                <th>Vencimiento sugerido</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {zones.map((zone) => (
+                <tr key={zone.idZonaPago}>
+                  <td>{zone.nombreZona}</td>
+                  <td>{zone.comuna ?? '-'}</td>
+                  <td>{zone.diaVencimientoSugerido ?? '-'}</td>
+                  <td><StatusBadge value={zone.activo === false ? 'Inactiva' : 'Activa'} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="compact-list">
+          {zoneRules.slice(0, 6).map((rule) => (
+            <section className="compact-list-item" key={rule.idPlanZonaPrecio}>
+              <strong>{rule.plan?.nombreComercial ?? `Plan ${rule.idPlan}`}</strong>
+              <span>{rule.zonaPago?.nombreZona ?? `Zona ${rule.idZonaPago}`} - ${Number(rule.precioMensual).toLocaleString('es-CL')}</span>
+            </section>
+          ))}
+        </div>
       </section>
 
       <Modal title="Registrar pago" open={Boolean(paymentTarget)} onClose={() => setPaymentTarget(null)}>

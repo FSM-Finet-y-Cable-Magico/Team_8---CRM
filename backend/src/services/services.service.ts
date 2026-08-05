@@ -13,6 +13,7 @@ const SERVICE_INCLUDE = {
   empresa: true,
   contrato: { include: { plan: true } },
   direccion: true,
+  zonaPago: true,
   equipos: { orderBy: { idUnidad: 'desc' } },
   tickets: {
     orderBy: { fechaCreacion: 'desc' },
@@ -22,11 +23,23 @@ const SERVICE_INCLUDE = {
     orderBy: { fechaCreacion: 'desc' },
     take: 20,
   },
+  solicitudes: {
+    orderBy: { fechaCreacion: 'desc' },
+    take: 20,
+  },
 } satisfies Prisma.ServicioContratadoInclude;
 
 type ServiceTechnicalDataDto = Pick<
   CreateServiceDto | UpdateServiceDto,
-  'tecnologia' | 'velocidad' | 'macAddress' | 'puertoOlt' | 'ipAsignada' | 'observacionesTecnicas'
+  | 'tecnologia'
+  | 'velocidad'
+  | 'macAddress'
+  | 'puertoOlt'
+  | 'ipAsignada'
+  | 'observacionesTecnicas'
+  | 'cajaNap'
+  | 'numeroPoste'
+  | 'caracteristicasComerciales'
 >;
 
 @Injectable()
@@ -70,6 +83,7 @@ export class ServicesService {
     const idEmpresa = await this.resolveCompanyId(dto, customer, currentUser);
     await this.assertContract(dto.idContrato, dto.idCliente, idEmpresa);
     await this.assertAddress(dto.idDireccion, dto.idCliente);
+    await this.assertPaymentZone(dto.idZonaPago, idEmpresa);
 
     const created = await this.prisma.servicioContratado.create({
       data: {
@@ -77,6 +91,7 @@ export class ServicesService {
         idEmpresa,
         idContrato: dto.idContrato,
         idDireccion: dto.idDireccion,
+        idZonaPago: dto.idZonaPago,
         tipoServicio: dto.tipoServicio,
         estadoOperativo: dto.estadoOperativo,
         observaciones: dto.observaciones?.trim() || null,
@@ -104,12 +119,17 @@ export class ServicesService {
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
-    const data: Prisma.ServicioContratadoUpdateInput = {
+    const data: Prisma.ServicioContratadoUncheckedUpdateInput = {
       tipoServicio: dto.tipoServicio,
       estadoOperativo: dto.estadoOperativo,
       observaciones: dto.observaciones === undefined ? undefined : dto.observaciones.trim() || null,
+      idZonaPago: dto.idZonaPago,
     };
     const technicalData = this.technicalData(dto);
+
+    if (dto.idZonaPago !== undefined) {
+      await this.assertPaymentZone(dto.idZonaPago, service.idEmpresa);
+    }
 
     if (technicalData) {
       data.datosTecnicos = this.mergeTechnicalData(service.datosTecnicos, technicalData);
@@ -162,6 +182,10 @@ export class ServicesService {
       throw new BadRequestException('El equipo no pertenece a la empresa del servicio');
     }
 
+    if (['Bloqueado', 'Baja Definitiva'].includes(unit.estado)) {
+      throw new BadRequestException('Un equipo bloqueado o dado de baja no puede reasignarse');
+    }
+
     const technicalNotes = [
       unit.diagnosticoTecnico,
       dto.macAddress || dto.puertoOlt || dto.observaciones
@@ -180,6 +204,9 @@ export class ServicesService {
         modelo: dto.modelo?.trim() || unit.modelo,
         estado: 'Instalado',
         diagnosticoTecnico: technicalNotes || unit.diagnosticoTecnico,
+        modalidadAsignacion: dto.modalidadAsignacion ?? unit.modalidadAsignacion ?? 'Propiedad empresa',
+        valorArriendoMensual: dto.valorArriendoMensual,
+        fechaInicioAsignacion: dto.fechaInicioAsignacion ? new Date(dto.fechaInicioAsignacion) : unit.fechaInicioAsignacion,
       },
     });
 
@@ -197,6 +224,8 @@ export class ServicesService {
         idServicio,
         idCliente: service.idCliente,
         numeroSerie: updated.numeroSerie,
+        modalidadAsignacion: updated.modalidadAsignacion,
+        valorArriendoMensual: updated.valorArriendoMensual ? Number(updated.valorArriendoMensual) : null,
       },
     });
 
@@ -318,6 +347,9 @@ export class ServicesService {
       puertoOlt: dto.puertoOlt?.trim() || undefined,
       ipAsignada: dto.ipAsignada?.trim() || undefined,
       observacionesTecnicas: dto.observacionesTecnicas?.trim() || undefined,
+      cajaNap: dto.cajaNap?.trim() || undefined,
+      numeroPoste: dto.numeroPoste?.trim() || undefined,
+      caracteristicasComerciales: dto.caracteristicasComerciales?.trim() || undefined,
     };
     const clean = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
 
@@ -334,5 +366,21 @@ export class ServicesService {
         : {};
 
     return { ...currentObject, ...next } as Prisma.InputJsonObject;
+  }
+
+  private async assertPaymentZone(idZonaPago: number | undefined, idEmpresa: number | null) {
+    if (!idZonaPago) {
+      return;
+    }
+
+    const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago } });
+
+    if (!zone || zone.activo === false) {
+      throw new BadRequestException('Zona de pago inexistente o inactiva');
+    }
+
+    if (zone.idEmpresa && idEmpresa && zone.idEmpresa !== idEmpresa) {
+      throw new BadRequestException('La zona de pago no pertenece a la empresa del servicio');
+    }
   }
 }
