@@ -8,6 +8,7 @@ import {
   parseInstallOrderObservations,
 } from '../common/install-order-metadata';
 import { isAdministrator } from '../common/roles';
+import { generateWorkOrderCode } from '../common/work-order-code';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
@@ -544,7 +545,7 @@ export class ProspectsService {
         });
       }
 
-      const orden = await tx.ordenTrabajo.create({
+      const createdOrder = await tx.ordenTrabajo.create({
         data: {
           idEmpresa,
           idCliente,
@@ -563,6 +564,10 @@ export class ProspectsService {
           }),
           resueltoRemotamente: false,
         },
+      });
+      const orden = await tx.ordenTrabajo.update({
+        where: { idOt: createdOrder.idOt },
+        data: { codigoSeguimiento: generateWorkOrderCode(createdOrder.tipoOt, createdOrder.idOt) },
       });
 
       const updatedProspect = await tx.prospecto.update({
@@ -600,6 +605,7 @@ export class ProspectsService {
         tecnico: technician.nombreCompleto,
         prioridad: dto.prioridad ?? 'Media',
         idServicio: result.servicio?.idServicio,
+        codigoSeguimiento: result.orden.codigoSeguimiento,
       },
     });
 

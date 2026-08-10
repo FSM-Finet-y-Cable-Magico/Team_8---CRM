@@ -238,6 +238,7 @@ model OrdenTrabajo {
   idDireccion         Int?                @map("id_direccion")
   idServicio          Int?                @map("id_servicio")
   idTicket            Int?                @unique @map("id_ticket")
+  codigoSeguimiento   String?             @unique @map("codigo_seguimiento") @db.VarChar(32)
   tipoOt              String              @map("tipo_ot") @db.VarChar(20)
   prioridad           String              @db.VarChar(10)
   estado              String              @db.VarChar(25)

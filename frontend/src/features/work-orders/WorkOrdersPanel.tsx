@@ -44,6 +44,35 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
     return 'Sin asociado';
   }
 
+  function formatWorkOrderTicketCode(order: WorkOrder) {
+    const code = order.ticket?.codigoSeguimiento?.trim();
+
+    if (code) {
+      return code;
+    }
+
+    return '-';
+  }
+
+  function formatWorkOrderCode(order: WorkOrder) {
+    const code = order.codigoSeguimiento?.trim();
+
+    if (code) {
+      return code;
+    }
+
+    const normalizedType = normalizeWorkOrderValue(order.tipoOt);
+    const prefix = normalizedType.includes('instalacion')
+      ? 'INS'
+      : normalizedType.includes('reparacion')
+        ? 'REP'
+        : normalizedType.includes('soporte')
+          ? 'SOP'
+          : 'OTR';
+
+    return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
+  }
+
   async function completeInstallation() {
     if (!selectedOrder) {
       return;
@@ -98,7 +127,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
         <table className="work-orders-table operational-table">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Código OT</th>
               <th>Tipo</th>
               <th>Asociado</th>
               <th>Ticket</th>
@@ -112,10 +141,10 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
           <tbody>
             {workOrders.map((order) => (
               <tr key={order.idOt}>
-                <td className="work-order-id">#{order.idOt}</td>
+                <td className="work-order-id">{formatWorkOrderCode(order)}</td>
                 <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
                 <td>{ownerLabel(order)}</td>
-                <td>{order.ticket?.codigoSeguimiento ?? (order.idTicket ? `#${order.idTicket}` : '-')}</td>
+                <td>{formatWorkOrderTicketCode(order)}</td>
                 <td>
                   {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
                   {order.horaVisita ? ` ${order.horaVisita}` : ''}
@@ -151,12 +180,16 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 </span>
                 <div>
                   <p>Orden de trabajo</p>
-                  <h3>Orden #{selectedOrder.idOt}</h3>
+                  <h3>{formatWorkOrderCode(selectedOrder)}</h3>
                 </div>
                 <StatusBadge value={formatWorkOrderValue(selectedOrder.estado)} />
               </header>
 
               <dl className="work-order-overview-data">
+                <div>
+                  <dt>Código OT</dt>
+                  <dd>{formatWorkOrderCode(selectedOrder)}</dd>
+                </div>
                 <div>
                   <dt>Tipo</dt>
                   <dd>{formatWorkOrderValue(selectedOrder.tipoOt)}</dd>
@@ -167,7 +200,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 </div>
                 <div>
                   <dt>Ticket</dt>
-                  <dd>{selectedOrder.ticket?.codigoSeguimiento ?? (selectedOrder.idTicket ? `#${selectedOrder.idTicket}` : 'No asociado')}</dd>
+                  <dd>{formatWorkOrderTicketCode(selectedOrder)}</dd>
                 </div>
                 <div>
                   <dt>Técnico</dt>

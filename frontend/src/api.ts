@@ -452,6 +452,7 @@ export type WorkOrder = {
   idCliente: number | null;
   idTecnico: number | null;
   idTicket: number | null;
+  codigoSeguimiento: string | null;
   idServicio: number | null;
   idCajaNap?: number | null;
   tipoOt: string;

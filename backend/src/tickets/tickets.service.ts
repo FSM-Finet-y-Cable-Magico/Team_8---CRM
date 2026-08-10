@@ -2,6 +2,7 @@
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
+import { generateWorkOrderCode } from '../common/work-order-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -47,6 +48,7 @@ export class TicketsService {
               idTicket: true,
               idCliente: true,
               idServicio: true,
+              codigoSeguimiento: true,
               tipoOt: true,
               prioridad: true,
               estado: true,
@@ -186,7 +188,7 @@ export class TicketsService {
     const observations = this.buildTicketWorkOrderObservations(ticket, dto);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const order = await tx.ordenTrabajo.create({
+      const createdOrder = await tx.ordenTrabajo.create({
         data: {
           idEmpresa,
           idCliente: ticket.idCliente,
@@ -203,12 +205,16 @@ export class TicketsService {
           resueltoRemotamente: false,
         },
       });
+      const order = await tx.ordenTrabajo.update({
+        where: { idOt: createdOrder.idOt },
+        data: { codigoSeguimiento: generateWorkOrderCode(createdOrder.tipoOt, createdOrder.idOt) },
+      });
 
       const updatedTicket = await tx.ticket.update({
         where: { idTicket },
         data: {
           estado: 'Escalado',
-          descripcion: `${ticket.descripcion ?? ''}\n\nDerivado a terreno mediante OT #${order.idOt}`.trim(),
+          descripcion: `${ticket.descripcion ?? ''}\n\nDerivado a terreno mediante ${order.codigoSeguimiento ?? `OT #${order.idOt}`}`.trim(),
         },
       });
 
@@ -235,6 +241,7 @@ export class TicketsService {
       valorNuevo: {
         estado: result.ticket.estado,
         idOt: result.order.idOt,
+        codigoSeguimiento: result.order.codigoSeguimiento,
         tipoOt: result.order.tipoOt,
         idCliente: ticket.idCliente,
         idServicio: ticket.idServicio,

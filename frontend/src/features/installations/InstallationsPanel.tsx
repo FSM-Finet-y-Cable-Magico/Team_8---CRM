@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { type Prospect, type WorkOrder } from '../../api';
-import { formatDateOnly } from '../../lib';
+import { formatDateOnly, normalizeWorkOrderValue } from '../../lib';
 import { Modal } from '../../shared/components';
 import { InstallOrderForm } from './InstallOrderForm';
 
@@ -62,6 +62,25 @@ export function InstallationsPanel({
     setModalOpen(true);
   }
 
+  function formatInstallationOrderCode(order: WorkOrder) {
+    const code = order.codigoSeguimiento?.trim();
+
+    if (code) {
+      return code;
+    }
+
+    const normalizedType = normalizeWorkOrderValue(order.tipoOt);
+    const prefix = normalizedType.includes('instalacion')
+      ? 'INS'
+      : normalizedType.includes('reparacion')
+        ? 'REP'
+        : normalizedType.includes('soporte')
+          ? 'SOP'
+          : 'OTR';
+
+    return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
+  }
+
   return (
     <section className="workspace-grid">
       <section className="panel">
@@ -105,7 +124,7 @@ export function InstallationsPanel({
           <table>
             <thead>
               <tr>
-                <th>Orden</th>
+                <th>Código OT</th>
                 <th>Cliente</th>
                 <th>Fecha</th>
                 <th>Hora</th>
@@ -120,7 +139,7 @@ export function InstallationsPanel({
 
                 return (
                   <tr key={order.idOt}>
-                    <td>{order.idOt}</td>
+                    <td>{formatInstallationOrderCode(order)}</td>
                     <td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td>
                     <td>{formatDateOnly(order.fechaProgramada)}</td>
                     <td>{order.horaVisita ?? '-'}</td>
