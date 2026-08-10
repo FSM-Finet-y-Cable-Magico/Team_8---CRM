@@ -3,7 +3,6 @@ import {
   ArrowRight,
   BarChart3,
   Boxes,
-  Building2,
   CalendarPlus,
   ChevronDown,
   CircleCheckBig,
@@ -12,9 +11,7 @@ import {
   FileUp,
   HandCoins,
   House,
-  LogOut,
   Router,
-  Settings,
   Ticket as TicketIcon,
   TrendingDown,
   UserCog,
@@ -22,7 +19,6 @@ import {
   Users,
   Wifi,
   Wrench,
-  type LucideIcon,
 } from 'lucide-react';
 import {
   api,
@@ -82,6 +78,7 @@ import {
   validateProspectForm,
   type ProspectFormState,
 } from './lib';
+import { Sidebar, Topbar, type SidebarNavItem } from './layouts';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 import {
   DashboardStatCard,
@@ -111,12 +108,7 @@ type Tab =
   | 'users'
   | 'audit';
 
-type NavItem = {
-  tab: Tab;
-  label: string;
-  visible: boolean;
-  icon: LucideIcon;
-};
+type NavItem = SidebarNavItem<Tab>;
 
 type Summary = {
   scope: string;
@@ -623,58 +615,17 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       />
 
       <section className="crm-main">
-        <header className="topbar">
-          <div className="topbar-context">
-            {isAdmin && (
-              <div className="company-scope-control">
-                <Building2 size={18} strokeWidth={1.8} aria-hidden="true" />
-                <select aria-label="Seleccionar empresa" value={scope} onChange={(event) => setScope(event.target.value)}>
-                  <option value="consolidado">Consolidado</option>
-                  {companies.map((company) => (
-                    <option key={company.idEmpresa} value={company.idEmpresa}>
-                      {company.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className="active-company" aria-label={`Empresa activa: ${currentCompanyName}`}>
-              <strong>{currentCompanyName}</strong>
-              <span className="company-status-dot" aria-hidden="true" />
-            </div>
-            <details className="profile-menu">
-              <summary className="profile-trigger" aria-label="Abrir menú de perfil">
-                <span className="profile-avatar" aria-hidden="true">{userInitials || 'U'}</span>
-                <ChevronDown size={16} strokeWidth={1.8} aria-hidden="true" />
-              </summary>
-              <div className="profile-dropdown">
-                <header className="profile-summary">
-                  <span className="profile-avatar profile-avatar-large" aria-hidden="true">{userInitials || 'U'}</span>
-                  <span>
-                    <strong>{user.nombreCompleto}</strong>
-                    <small>{user.email ?? 'Sin correo registrado'}</small>
-                  </span>
-                </header>
-                <button
-                  type="button"
-                  className="profile-menu-item"
-                  onClick={(event) => {
-                    event.currentTarget.closest('details')?.removeAttribute('open');
-                    setSettingsOpen(true);
-                  }}
-                >
-                  <Settings size={18} strokeWidth={1.8} aria-hidden="true" />
-                  Configuración
-                </button>
-                <button type="button" className="profile-menu-item danger" onClick={logout}>
-                  <LogOut size={18} strokeWidth={1.8} aria-hidden="true" />
-                  Cerrar sesión
-                </button>
-              </div>
-            </details>
-          </div>
-        </header>
-
+        <Topbar
+          isAdmin={isAdmin}
+          scope={scope}
+          companies={companies}
+          currentCompanyName={currentCompanyName}
+          user={user}
+          userInitials={userInitials}
+          onScopeChange={setScope}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onLogout={logout}
+        />
         <Modal title="Configuración" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
           <section className="user-settings-card">
             <header className="user-settings-heading">
@@ -785,71 +736,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         </section>
       </section>
     </main>
-  );
-}
-
-function Sidebar({
-  activeTab,
-  mainItems,
-  secondaryItems,
-  onNavigate,
-}: {
-  activeTab: Tab;
-  mainItems: NavItem[];
-  secondaryItems: NavItem[];
-  onNavigate: (tab: Tab) => void;
-}) {
-  const visibleSecondaryItems = secondaryItems.filter((item) => item.visible);
-
-  return (
-    <aside className="sidebar">
-      <div className="brand" aria-label="smartCRM">
-        <Wifi className="brand-icon" size={34} strokeWidth={2.35} aria-hidden="true" />
-        <strong>
-          <span>smart</span>CRM
-        </strong>
-      </div>
-
-      <div className="sidebar-menu">
-        <nav className="sidebar-nav" aria-label="Navegación principal">
-          {mainItems.filter((item) => item.visible).map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.tab}
-                type="button"
-                className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
-                onClick={() => onNavigate(item.tab)}
-                aria-current={activeTab === item.tab ? 'page' : undefined}
-              >
-                <Icon className="sidebar-item-icon" size={19} strokeWidth={1.8} aria-hidden="true" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        {visibleSecondaryItems.length > 0 && (
-          <nav className="sidebar-nav secondary-nav" aria-label="Administración">
-            {visibleSecondaryItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.tab}
-                  type="button"
-                  className={activeTab === item.tab ? 'sidebar-item active' : 'sidebar-item'}
-                  onClick={() => onNavigate(item.tab)}
-                  aria-current={activeTab === item.tab ? 'page' : undefined}
-                >
-                  <Icon className="sidebar-item-icon" size={19} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        )}
-      </div>
-    </aside>
   );
 }
 
