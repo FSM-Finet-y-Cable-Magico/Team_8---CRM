@@ -57,6 +57,7 @@ import {
 import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
 import { BillingPanel } from './features/billing';
+import { DashboardHome } from './features/dashboard';
 import { ImportPanel } from './features/import';
 import { InstallationsPanel } from './features/installations';
 import { InventoryPanel } from './features/inventory';

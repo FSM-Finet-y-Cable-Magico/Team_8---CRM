@@ -39,6 +39,10 @@ type Tab =
   | 'users'
   | 'audit';
 
+type DashboardExpiryAlert = ExpiryCustomerAlert & {
+  idCliente?: number | null;
+};
+
 type Summary = {
   metricas: {
     clientes: number;
@@ -51,7 +55,7 @@ type Summary = {
     churnRateMensual?: number;
     churnBajasMensuales?: number;
   };
-  alertasVencimiento?: ExpiryCustomerAlert[];
+  alertasVencimiento?: DashboardExpiryAlert[];
   ticketsCerradosPorTipo?: Array<{
     idCategoria: number;
     categoria: string;
