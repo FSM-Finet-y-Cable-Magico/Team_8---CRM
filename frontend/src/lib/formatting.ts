@@ -1,4 +1,4 @@
-import type { WorkOrder } from '../api';
+﻿import type { WorkOrder } from '../api';
 
 export function formatConnectionType(value?: WorkOrder['tipoConexion']) {
   if (value === 'Fibra Optica') {

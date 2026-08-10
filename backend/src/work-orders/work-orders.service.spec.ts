@@ -56,6 +56,9 @@ describe('WorkOrdersService', () => {
           { idUsuario: 4, nombreCompleto: 'Terreno FiNet', email: 'terreno@finet.local' },
         ]),
       },
+      ticket: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     const service = new WorkOrdersService(
       prisma as unknown as PrismaService,

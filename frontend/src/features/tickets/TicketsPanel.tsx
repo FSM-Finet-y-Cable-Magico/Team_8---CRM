@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory } from '../../api';
+﻿import { useEffect, useState } from 'react';
+import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory, type UserRow } from '../../api';
 import { rutPattern } from '../../constants';
 import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
@@ -9,11 +9,13 @@ export function TicketsPanel({
   tickets,
   categories,
   permissions,
+  users = [],
   onChanged,
 }: {
   tickets: Ticket[];
   categories: TicketCategory[];
   permissions: DashboardPermissions;
+  users?: UserRow[];
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -29,6 +31,14 @@ export function TicketsPanel({
     estadoFinalServicio: 'Activo',
     observaciones: '',
   });
+  const [workOrderForm, setWorkOrderForm] = useState({
+    tipoOt: 'Reparacion',
+    idTecnico: '',
+    fechaProgramada: '',
+    horaVisita: '',
+    prioridad: '',
+    observaciones: '',
+  });
   const [technicalNote, setTechnicalNote] = useState('');
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
@@ -37,12 +47,27 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
+  const associatedWorkOrder = selectedTicket?.workOrders?.[0] ?? null;
+  const hasOpenWorkOrder = Boolean(
+    selectedTicket?.hasOpenWorkOrder
+      || (associatedWorkOrder && associatedWorkOrder.estado !== 'Completada'),
+  );
+  const ticketIsClosed = ['Resuelto', 'Cerrado'].includes(selectedTicket?.estado ?? '');
+  const directClosureBlocked = hasOpenWorkOrder && ['Resuelto', 'Cerrado'].includes(ticketStatus);
 
   useEffect(() => {
     if (selectedTicket) {
       setCategoryId(String(selectedTicket.idCategoria));
       setPriority(selectedTicket.prioridad);
       setTicketStatus(selectedTicket.estado);
+      setWorkOrderForm({
+        tipoOt: 'Reparacion',
+        idTecnico: '',
+        fechaProgramada: '',
+        horaVisita: '',
+        prioridad: selectedTicket.prioridad,
+        observaciones: '',
+      });
       setTechnicalNote('');
     }
   }, [selectedTicket?.idTicket]);
@@ -167,7 +192,7 @@ export function TicketsPanel({
           </label>
         )}
         <label>
-          Categoria
+          Categoría
           <select value={createForm.idCategoria} onChange={(event) => setCreateForm({ ...createForm, idCategoria: event.target.value })}>
             <option value="">Seleccionar</option>
             {categories.map((category) => (
@@ -204,10 +229,11 @@ export function TicketsPanel({
           <table className="tickets-table operational-table">
             <thead>
               <tr>
-                <th>Codigo</th>
+                <th>Código</th>
                 <th>Cliente</th>
-                <th>Categoria</th>
+                <th>Categoría</th>
                 <th>Servicio</th>
+                <th>OT</th>
                 <th className="operational-badge-column">Prioridad</th>
                 <th className="operational-badge-column">Estado</th>
                 <th></th>
@@ -220,6 +246,7 @@ export function TicketsPanel({
                   <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
                   <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
                   <td>{ticket.idServicio ?? '-'}</td>
+                  <td>{ticket.workOrders?.[0] ? `#${ticket.workOrders[0].idOt}` : '-'}</td>
                   <td className="operational-badge-column">
                     <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
                   </td>
@@ -253,10 +280,107 @@ export function TicketsPanel({
                 <p><strong>Prioridad:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.prioridad)} /></p>
                 <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.estado)} /></p>
               </section>
+              <section className="history-list full-width-panel">
+                <h3>Orden de trabajo asociada</h3>
+                {associatedWorkOrder ? (
+                  <div className="customer-preview">
+                    <p><strong>OT:</strong> #{associatedWorkOrder.idOt}</p>
+                    <p><strong>Tipo:</strong> {formatWorkOrderValue(associatedWorkOrder.tipoOt)}</p>
+                    <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(associatedWorkOrder.estado)} /></p>
+                    {hasOpenWorkOrder && (
+                      <p className="alert">El cierre debe realizarse desde la orden de trabajo asociada.</p>
+                    )}
+                  </div>
+                ) : permissions.classifyTickets && !ticketIsClosed ? (
+                  <div className="workflow-grid">
+                    <label>
+                      Tipo de orden
+                      <select
+                        value={workOrderForm.tipoOt}
+                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, tipoOt: event.target.value })}
+                      >
+                        <option value="Reparacion">Reparación</option>
+                        <option value="Soporte">Soporte</option>
+                      </select>
+                    </label>
+                    {users.length > 0 && (
+                      <label>
+                        Técnico asignado
+                        <select
+                          value={workOrderForm.idTecnico}
+                          onChange={(event) => setWorkOrderForm({ ...workOrderForm, idTecnico: event.target.value })}
+                        >
+                          <option value="">Sin asignar</option>
+                          {users.map((user) => (
+                            <option key={user.idUsuario} value={user.idUsuario}>
+                              {user.nombreCompleto}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label>
+                      Fecha de visita
+                      <input
+                        type="date"
+                        value={workOrderForm.fechaProgramada}
+                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, fechaProgramada: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Hora de visita
+                      <input
+                        type="time"
+                        value={workOrderForm.horaVisita}
+                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, horaVisita: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Prioridad
+                      <select
+                        value={workOrderForm.prioridad || selectedTicket.prioridad}
+                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, prioridad: event.target.value })}
+                      >
+                        <option value="Alta">Alta</option>
+                        <option value="Media">Media</option>
+                        <option value="Baja">Baja</option>
+                      </select>
+                    </label>
+                    <label>
+                      Observaciones para terreno
+                      <textarea
+                        value={workOrderForm.observaciones}
+                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, observaciones: event.target.value })}
+                        placeholder="Indicaciones para la visita técnica"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void run(
+                          () => api.post(`/tickets/${selectedTicket.idTicket}/work-order`, {
+                            tipoOt: workOrderForm.tipoOt,
+                            idTecnico: workOrderForm.idTecnico ? Number(workOrderForm.idTecnico) : undefined,
+                            fechaProgramada: workOrderForm.fechaProgramada || undefined,
+                            horaVisita: workOrderForm.horaVisita || undefined,
+                            prioridad: workOrderForm.prioridad || selectedTicket.prioridad,
+                            observaciones: workOrderForm.observaciones.trim() || undefined,
+                          }),
+                          'Orden de trabajo generada',
+                        )
+                      }
+                    >
+                      Generar orden de trabajo
+                    </button>
+                  </div>
+                ) : (
+                  <p className="inline-status">Este ticket no requiere una nueva orden de trabajo.</p>
+                )}
+              </section>
               {(permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) ? (
                 <div className="workflow-grid">
                   {permissions.classifyTickets && <label>
-                    Clasificacion
+                    Clasificación
                     <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
                       {categories.map((category) => (
                         <option key={category.idCategoria} value={category.idCategoria}>
@@ -307,8 +431,12 @@ export function TicketsPanel({
                       ))}
                     </select>
                     <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
+                    {directClosureBlocked && (
+                      <p className="alert">El cierre debe realizarse desde la orden de trabajo asociada.</p>
+                    )}
                     <button
                       type="button"
+                      disabled={directClosureBlocked}
                       onClick={() =>
                         void run(
                           () => api.patch(`/tickets/${selectedTicket.idTicket}/status`, { estado: ticketStatus, comentario: comment }),
@@ -321,9 +449,9 @@ export function TicketsPanel({
                   </label>}
 
                   {permissions.diagnoseTickets && <label>
-                    Diagnostico tecnico
+                    Diagnóstico técnico
                     <input
-                      placeholder="Causa raiz"
+                      placeholder="Causa raíz"
                       value={diagnosis.causaRaiz}
                       onChange={(event) => setDiagnosis({ ...diagnosis, causaRaiz: event.target.value })}
                     />
@@ -344,16 +472,20 @@ export function TicketsPanel({
                       <option value="Activo">Activo</option>
                       <option value="En Mantencion">En Mantencion</option>
                     </select>
+                    {hasOpenWorkOrder && (
+                      <p className="alert">Este ticket tiene una OT pendiente. Registra el cierre desde Órdenes de Trabajo.</p>
+                    )}
                     <button
                       type="button"
+                      disabled={hasOpenWorkOrder}
                       onClick={() =>
                         void run(
                           () => api.post(`/tickets/${selectedTicket.idTicket}/diagnosis`, diagnosis),
-                          'Diagnostico registrado',
+                          'Diagnóstico registrado',
                         )
                       }
                     >
-                      Registrar diagnostico
+                      Registrar diagnóstico
                     </button>
                   </label>}
                 </div>
@@ -389,7 +521,7 @@ export function TicketsPanel({
                       ).then(() => setTechnicalNote(''))
                     }
                   >
-                    Registrar observacion
+                    Registrar observación
                   </button>
                 </section>
               )}

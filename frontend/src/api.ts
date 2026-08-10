@@ -441,6 +441,8 @@ export type Ticket = {
   descripcion: string | null;
   cliente?: Customer | null;
   categoria?: TicketCategory | null;
+  workOrders?: WorkOrder[];
+  hasOpenWorkOrder?: boolean;
   observacionesTecnicas?: TechnicalNote[];
 };
 
@@ -479,6 +481,16 @@ export type WorkOrder = {
     fechaConversion: string | null;
     tiempoConversionDias: number | null;
     estadoPipeline: string | null;
+  } | null;
+  ticket?: {
+    idTicket: number;
+    idCliente: number | null;
+    idServicio: number | null;
+    idCategoria: number;
+    codigoSeguimiento: string | null;
+    prioridad: string;
+    estado: string;
+    descripcion: string | null;
   } | null;
 };
 
