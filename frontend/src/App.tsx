@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -22,7 +22,6 @@ import {
   Users,
   Wifi,
   Wrench,
-  X,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -69,7 +68,6 @@ import {
   emptyProspectForm,
   emptyServiceForm,
   expiryAlertKey,
-  expiryLabel,
   expiryUrgency,
   formatConnectionType,
   formatDateOnly,
@@ -84,6 +82,7 @@ import {
   type ProspectFormState,
 } from './lib';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
+import { DashboardStatCard, ExpiryBadge, Modal, QuickActionCard, StatCard, StatusBadge } from './shared/components';
 
 type Tab =
   | 'dashboard'
@@ -1192,10 +1191,6 @@ function DashboardHome({
 
 type ExpiryAlert = NonNullable<Summary['alertasVencimiento']>[number];
 
-function ExpiryBadge({ days }: { days: number }) {
-  return <span className={`expiry-badge expiry-badge-${expiryUrgency(days)}`}>{expiryLabel(days)}</span>;
-}
-
 function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryAlert; customer: Customer | null }) {
   const company = customer?.empresa?.nombre ?? customer?.empresas?.join(', ') ?? 'Sin empresa registrada';
 
@@ -1241,143 +1236,6 @@ function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryAlert; customer:
         <ExpiryBadge days={alert.diasRestantes} />
       </div>
     </article>
-  );
-}
-
-type StatCardTone = 'mint' | 'teal' | 'blue' | 'orange' | 'rose' | 'violet' | 'green' | 'amber';
-
-function DashboardStatCard({
-  label,
-  value,
-  description,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  description: string;
-  icon: LucideIcon;
-  tone: StatCardTone;
-}) {
-  return (
-    <article className={`dashboard-stat-card dashboard-stat-card-${tone}`}>
-      <span className="dashboard-stat-card-icon" aria-hidden="true">
-        <Icon size={21} strokeWidth={1.8} />
-      </span>
-      <div className="dashboard-stat-card-copy">
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{description}</small>
-      </div>
-    </article>
-  );
-}
-
-function StatCard({ label, value, hint }: { label: string; value: string | number; hint: string }) {
-  return (
-    <article className="stat-card">
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{hint}</small>
-      </div>
-    </article>
-  );
-}
-
-function QuickActionCard({
-  label,
-  description,
-  icon: Icon,
-  tone,
-  tab,
-  onNavigate,
-}: {
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  tone: StatCardTone;
-  tab: Tab;
-  onNavigate: (tab: Tab) => void;
-}) {
-  return (
-    <button type="button" className={`quick-action-card quick-action-card-${tone}`} onClick={() => onNavigate(tab)}>
-      <span className="quick-action-icon" aria-hidden="true">
-        <Icon size={20} strokeWidth={1.8} />
-      </span>
-      <span className="quick-action-copy">
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      <ArrowRight className="quick-action-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
-    </button>
-  );
-}
-
-function StatusBadge({ value }: { value?: string | null }) {
-  const normalized = (value ?? 'Sin dato').toLowerCase();
-  const tone = normalized.includes('crítica') || normalized.includes('critica')
-    ? 'critical'
-    : normalized.includes('cerrad') || normalized.includes('completad') || normalized.includes('resuelt') || normalized.includes('activ')
-      ? 'success'
-      : normalized.includes('alta') || normalized.includes('urgente') || normalized.includes('escalado') || normalized.includes('perdido') || normalized.includes('cancelad')
-        ? 'danger'
-        : normalized.includes('media') || normalized.includes('pendiente') || normalized.includes('programada') || normalized.includes('abierto') || normalized.includes('progreso')
-          ? 'warning'
-          : 'neutral';
-
-  return <span className={`status-badge ${tone}`}>{value ?? 'Sin dato'}</span>;
-}
-
-function Modal({
-  title,
-  open,
-  onClose,
-  children,
-}: {
-  title: string;
-  open: boolean;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousRootOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousRootOverflow;
-    };
-  }, [open]);
-
-  if (!open) {
-    return null;
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="modal-header">
-          <h2>{title}</h2>
-          <button type="button" className="modal-close-button" aria-label="Cerrar modal" onClick={onClose}>
-            <X size={20} strokeWidth={1.8} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="modal-content">{children}</div>
-      </section>
-    </div>
   );
 }
 
