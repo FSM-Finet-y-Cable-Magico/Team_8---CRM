@@ -54,7 +54,36 @@ import {
   WorkOrder,
   ZonePriceRule,
 } from './api';
-import { DashboardPermissions, getDashboardPermissions, hasPermission, normalizeUserRoles } from './permissions';
+import {
+  captureOriginOptions,
+  equipmentModeOptions,
+  macPattern,
+  reportMinimumDate,
+  rutPattern,
+  serviceStatusOptions,
+  serviceTypeOptions,
+} from './constants';
+import {
+  addYearsToInputDate,
+  dateInputValue,
+  emptyProspectForm,
+  emptyServiceForm,
+  expiryAlertKey,
+  expiryLabel,
+  expiryUrgency,
+  formatConnectionType,
+  formatDateOnly,
+  formatDateTime,
+  formatWorkOrderValue,
+  normalizeAuthUser,
+  normalizeRutInput,
+  normalizeWorkOrderValue,
+  settledData,
+  technicalEntries,
+  validateProspectForm,
+  type ProspectFormState,
+} from './lib';
+import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 
 type Tab =
   | 'dashboard'
@@ -124,187 +153,6 @@ type Summary = {
     diasRestantes: number;
   }>;
 };
-
-type ProspectFormState = {
-  rut: string;
-  nombreCompleto: string;
-  email: string;
-  telefono: string;
-  direccion: string;
-  origenContacto: string;
-};
-
-const emptyProspectForm: ProspectFormState = {
-  rut: '',
-  nombreCompleto: '',
-  email: '',
-  telefono: '',
-  direccion: '',
-  origenContacto: 'Formulario web',
-};
-
-const rutPattern = /^\d{7,8}-[\dkK]$/;
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const chileanMobilePattern = /^\+?56?9\d{8}$/;
-const macPattern = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
-const reportMinimumDate = '2020-01-01';
-
-function normalizeRutInput(value: string) {
-  return value.trim().replace(/\./g, '').toUpperCase();
-}
-
-function dateInputValue(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function addYearsToInputDate(value: string, years: number) {
-  const [year, month, day] = value.split('-').map(Number);
-  return dateInputValue(new Date(year + years, month - 1, day));
-}
-
-function parseDateValue(value?: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDateOnly(value?: string | null) {
-  const dateOnly = value?.slice(0, 10);
-
-  if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-    const [year, month, day] = dateOnly.split('-').map(Number);
-    return new Date(year, month - 1, day).toLocaleDateString('es-CL');
-  }
-
-  const date = parseDateValue(value);
-  return date ? date.toLocaleDateString('es-CL') : 'Sin dato';
-}
-
-function formatConnectionType(value?: WorkOrder['tipoConexion']) {
-  if (value === 'Fibra Optica') {
-    return 'Fibra Óptica';
-  }
-
-  if (value === 'Television') {
-    return 'Televisión';
-  }
-
-  return 'Sin dato';
-}
-
-function normalizeWorkOrderValue(value?: string | null) {
-  return (value ?? '')
-    .trim()
-    .toLocaleLowerCase('es-CL')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-function formatWorkOrderValue(value?: string | null) {
-  const normalized = normalizeWorkOrderValue(value);
-  const knownLabels: Record<string, string> = {
-    instalacion: 'Instalación',
-    reparacion: 'Reparación',
-    mantenimiento: 'Mantenimiento',
-    soporte: 'Soporte',
-    alta: 'Alta',
-    media: 'Media',
-    baja: 'Baja',
-    critica: 'Crítica',
-    urgente: 'Urgente',
-    pendiente: 'Pendiente',
-    abierto: 'Abierto',
-    programada: 'Programada',
-    escalado: 'Escalado',
-    resuelto: 'Resuelto',
-    cerrado: 'Cerrado',
-    completada: 'Completada',
-    cerrada: 'Cerrada',
-    cancelada: 'Cancelada',
-    'en progreso': 'En progreso',
-  };
-
-  if (!normalized) {
-    return 'Sin dato';
-  }
-
-  return knownLabels[normalized] ?? normalized
-    .split(/\s+/)
-    .map((word) => `${word.charAt(0).toLocaleUpperCase('es-CL')}${word.slice(1)}`)
-    .join(' ');
-}
-
-function formatDateTime(value?: string | null) {
-  const date = parseDateValue(value);
-  return date ? date.toLocaleString('es-CL') : 'Sin dato';
-}
-
-function technicalEntries(data?: Record<string, unknown> | null) {
-  return Object.entries(data ?? {})
-    .filter(([, value]) => value !== null && value !== undefined && value !== '')
-    .map(([key, value]) => `${key}: ${String(value)}`);
-}
-
-function normalizeAuthUser(user: AuthUser) {
-  return {
-    ...user,
-    roles: normalizeUserRoles(user.roles),
-  };
-}
-
-function settledData<T>(
-  result: PromiseSettledResult<{ data: T }>,
-  fallback: T,
-  errors: string[],
-) {
-  if (result.status === 'fulfilled') {
-    return result.value.data;
-  }
-
-  errors.push(apiErrorMessage(result.reason));
-  return fallback;
-}
-
-function validateProspectForm(form: ProspectFormState) {
-  const rut = normalizeRutInput(form.rut);
-  const nombreCompleto = form.nombreCompleto.trim();
-  const email = form.email.trim().toLowerCase();
-  const telefono = form.telefono.trim();
-  const direccion = form.direccion.trim();
-  const origenContacto = form.origenContacto.trim();
-
-  if (!rutPattern.test(rut)) {
-    return 'Ingresa el RUT con guion, por ejemplo 12345678-5.';
-  }
-
-  if (nombreCompleto.length < 5) {
-    return 'Ingresa nombre y apellido del prospecto.';
-  }
-
-  if (email && !emailPattern.test(email)) {
-    return 'Ingresa un correo valido, por ejemplo correo@ejemplo.cl.';
-  }
-
-  if (!chileanMobilePattern.test(telefono.replace(/\s/g, ''))) {
-    return 'Ingresa un celular chileno, por ejemplo +56912345678.';
-  }
-
-  if (direccion.length < 8) {
-    return 'Ingresa una direccion con calle, numero y comuna.';
-  }
-
-  if (!origenContacto) {
-    return 'Selecciona el origen de contacto del prospecto.';
-  }
-
-  return '';
-}
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => {
@@ -1343,29 +1191,6 @@ function DashboardHome({
 }
 
 type ExpiryAlert = NonNullable<Summary['alertasVencimiento']>[number];
-
-function expiryAlertKey(alert?: ExpiryAlert | null) {
-  return alert ? `${alert.idContrato}-${alert.fechaVencimiento}` : '';
-}
-
-function expiryUrgency(days: number) {
-  if (days < 0) return 'overdue';
-  if (days <= 1) return 'critical';
-  if (days <= 3) return 'near';
-  if (days <= 5) return 'soon';
-  return 'scheduled';
-}
-
-function expiryLabel(days: number) {
-  if (days < 0) {
-    const overdueDays = Math.abs(days);
-    return `${overdueDays} día${overdueDays === 1 ? '' : 's'} vencido`;
-  }
-
-  if (days === 0) return 'Vence hoy';
-  if (days === 1) return 'Vence mañana';
-  return `Vence en ${days} días`;
-}
 
 function ExpiryBadge({ days }: { days: number }) {
   return <span className={`expiry-badge expiry-badge-${expiryUrgency(days)}`}>{expiryLabel(days)}</span>;
@@ -2473,30 +2298,6 @@ type CustomerHistory = {
   contratosDigitales?: DigitalContract[];
   auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
 };
-
-const serviceTypeOptions = ['Internet', 'Television', 'Internet + Television'];
-const serviceStatusOptions = ['Activo', 'Pendiente Instalacion', 'Suspendido', 'Baja'];
-const captureOriginOptions = ['Contacto directo', 'Recomendación', 'Página web', 'Redes sociales', 'WhatsApp', 'Campaña comercial', 'Terreno', 'Otro'];
-const equipmentModeOptions = ['Arriendo', 'Prestamo', 'Compra', 'Propio cliente', 'Propiedad empresa'];
-
-function emptyServiceForm() {
-  return {
-    idContrato: '',
-    idZonaPago: '',
-    tipoServicio: 'Internet',
-    estadoOperativo: 'Pendiente Instalacion',
-    observaciones: '',
-    tecnologia: '',
-    velocidad: '',
-    macAddress: '',
-    puertoOlt: '',
-    ipAsignada: '',
-    observacionesTecnicas: '',
-    cajaNap: '',
-    numeroPoste: '',
-    caracteristicasComerciales: '',
-  };
-}
 
 function CustomersPanel({
   customers,
