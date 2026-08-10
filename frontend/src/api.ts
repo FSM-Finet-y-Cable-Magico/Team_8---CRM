@@ -466,8 +466,15 @@ export type WorkOrder = {
     nombreCompleto: string;
     email: string | null;
   } | null;
+  cliente?: {
+    idCliente: number;
+    rut: string | null;
+    nombreCompleto: string;
+  } | null;
   prospecto?: {
     idProspecto: number;
+    rut: string | null;
+    nombreCompleto: string | null;
     fechaCreacion: string | null;
     fechaConversion: string | null;
     tiempoConversionDias: number | null;

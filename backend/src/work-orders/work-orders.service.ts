@@ -24,7 +24,7 @@ export class WorkOrdersService {
     });
     const customerIds = [...new Set(orders.map((order) => order.idCliente).filter((id): id is number => id !== null))];
     const technicianIds = [...new Set(orders.map((order) => order.idTecnico).filter((id): id is number => id !== null))];
-    const [prospects, technicians] = await Promise.all([
+    const [prospects, customers, technicians] = await Promise.all([
       customerIds.length
         ? this.prisma.prospecto.findMany({
           where: { idCliente: { in: customerIds } },
@@ -33,11 +33,23 @@ export class WorkOrdersService {
             idProspecto: true,
             idCliente: true,
             idEmpresa: true,
+            rut: true,
+            nombreCompleto: true,
             fechaCreacion: true,
             fechaConversion: true,
             tiempoConversionDias: true,
             estadoPipeline: true,
           },
+          })
+        : Promise.resolve([]),
+      customerIds.length
+        ? this.prisma.cliente.findMany({
+            where: { idCliente: { in: customerIds } },
+            select: {
+              idCliente: true,
+              rut: true,
+              nombreCompleto: true,
+            },
           })
         : Promise.resolve([]),
       technicianIds.length
@@ -52,6 +64,7 @@ export class WorkOrdersService {
         : Promise.resolve([]),
     ]);
     const prospectByCustomerCompany = new Map<string, (typeof prospects)[number]>();
+    const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
 
     for (const prospect of prospects) {
@@ -72,6 +85,7 @@ export class WorkOrdersService {
         observacionesAgenda: metadata.observacionesAgenda,
         observacionesCierre: metadata.observacionesCierre,
         tecnico: order.idTecnico ? technicianById.get(order.idTecnico) ?? null : null,
+        cliente: order.idCliente ? customerById.get(order.idCliente) ?? null : null,
         prospecto: prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`) ?? null,
       };
     });

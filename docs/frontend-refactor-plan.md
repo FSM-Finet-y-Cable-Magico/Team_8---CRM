@@ -226,6 +226,7 @@ Dependencias de Login interno:
 - Generar conflictos de importacion circular entre features y componentes compartidos.
 - Romper Docker/HMR si se agregan nuevos entrypoints antes de separar correctamente el portal.
 - Sobrerrefactorizar: mover demasiadas piezas en un solo commit haria dificil detectar regresiones.
+- Pendiente UX/funcional: rediseñar la vista Gestionar cliente para que mantenga coherencia con Gestionar prospecto, incorporando bloques de acción claros y conectando botones actualmente no funcionales a sus flujos reales. No se aborda durante la extracción estructural de Fase 5C.
 
 ## 8. Estructura objetivo para frontend/
 
@@ -532,4 +533,3 @@ docs(frontend): actualiza guia de estructura modular
 ## 14. Recomendacion final
 
 La Fase 1 debe limitarse a utilidades puras. No conviene empezar por `CustomersPanel`, `ProspectWorkflowPanel` ni `CustomerPortal`, porque son bloques con alto acoplamiento de API, estado y modales. La extraccion debe avanzar desde piezas sin estado hacia componentes con mayor dependencia.
-

@@ -31,7 +31,26 @@ describe('WorkOrdersService', () => {
           },
         ]),
       },
-      prospecto: { findMany: jest.fn().mockResolvedValue([]) },
+      cliente: {
+        findMany: jest.fn().mockResolvedValue([
+          { idCliente: 10, nombreCompleto: 'Manolito Gamer', rut: '12345678-5' },
+        ]),
+      },
+      prospecto: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            idProspecto: 30,
+            idEmpresa: 1,
+            idCliente: 10,
+            rut: '12345678-5',
+            nombreCompleto: 'Manolito Gamer',
+            fechaCreacion: new Date('2026-07-01T00:00:00.000Z'),
+            fechaConversion: null,
+            tiempoConversionDias: null,
+            estadoPipeline: 'Instalacion Programada',
+          },
+        ]),
+      },
       usuario: {
         findMany: jest.fn().mockResolvedValue([
           { idUsuario: 4, nombreCompleto: 'Terreno FiNet', email: 'terreno@finet.local' },
@@ -51,6 +70,8 @@ describe('WorkOrdersService', () => {
         horaVisita: '11:00',
         observacionesAgenda: 'Llamar antes',
         tecnico: expect.objectContaining({ nombreCompleto: 'Terreno FiNet' }),
+        cliente: expect.objectContaining({ nombreCompleto: 'Manolito Gamer' }),
+        prospecto: expect.objectContaining({ nombreCompleto: 'Manolito Gamer' }),
       }),
     );
   });

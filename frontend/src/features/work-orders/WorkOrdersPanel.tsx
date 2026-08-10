@@ -27,11 +27,13 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
 
   function ownerLabel(order: WorkOrder) {
     if (order.prospecto?.idProspecto) {
-      return `Prospecto ${order.prospecto.idProspecto}`;
+      return order.prospecto.nombreCompleto?.trim()
+        || order.cliente?.nombreCompleto?.trim()
+        || `Prospecto #${order.prospecto.idProspecto}`;
     }
 
     if (order.idCliente) {
-      return `Cliente ${order.idCliente}`;
+      return order.cliente?.nombreCompleto?.trim() || `Cliente #${order.idCliente}`;
     }
 
     if (order.idTicket) {
