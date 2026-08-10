@@ -82,7 +82,18 @@ import {
   type ProspectFormState,
 } from './lib';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
-import { DashboardStatCard, ExpiryBadge, Modal, QuickActionCard, StatCard, StatusBadge } from './shared/components';
+import {
+  DashboardStatCard,
+  ExpiryBadge,
+  ExpiryCustomerCard,
+  HistoryBox,
+  Modal,
+  MonitoringStatusView,
+  QuickActionCard,
+  StatCard,
+  StatusBadge,
+  type ExpiryCustomerAlert,
+} from './shared/components';
 
 type Tab =
   | 'dashboard'
@@ -1040,7 +1051,7 @@ function DashboardHome({
     setSelectedAlertKey(null);
   }
 
-  function openExpiryDetails(alert?: ExpiryAlert) {
+  function openExpiryDetails(alert?: ExpiryCustomerAlert) {
     setSelectedAlertKey(alert ? expiryAlertKey(alert) : null);
     setAlertsModalOpen(true);
   }
@@ -1186,56 +1197,6 @@ function DashboardHome({
         </div>
       </section>
     </section>
-  );
-}
-
-type ExpiryAlert = NonNullable<Summary['alertasVencimiento']>[number];
-
-function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryAlert; customer: Customer | null }) {
-  const company = customer?.empresa?.nombre ?? customer?.empresas?.join(', ') ?? 'Sin empresa registrada';
-
-  return (
-    <article className="expiry-customer-card">
-      <header>
-        <span className="expiry-customer-avatar" aria-hidden="true">
-          <Users size={21} strokeWidth={1.8} />
-        </span>
-        <div>
-          <h3>{customer?.nombreCompleto ?? alert.cliente}</h3>
-        </div>
-        <StatusBadge value={customer?.estado ?? alert.estado} />
-      </header>
-
-      <dl className="expiry-customer-data">
-        <div>
-          <dt>RUT</dt>
-          <dd>{customer?.rut ?? alert.rut ?? 'No registrado'}</dd>
-        </div>
-        <div>
-          <dt>Teléfono</dt>
-          <dd>{customer?.telefono ?? 'No registrado'}</dd>
-        </div>
-        <div>
-          <dt>Correo</dt>
-          <dd>{customer?.email ?? 'No registrado'}</dd>
-        </div>
-        <div>
-          <dt>Empresa</dt>
-          <dd>{company}</dd>
-        </div>
-        <div>
-          <dt>Origen</dt>
-          <dd>{customer?.origenContacto ?? 'No registrado'}</dd>
-        </div>
-      </dl>
-
-      <div className="expiry-contract-card">
-        <span>Contrato #{alert.idContrato}</span>
-        <strong>{alert.plan ?? 'Plan sin detalle'}</strong>
-        <small>Vencimiento: {formatDateOnly(alert.fechaVencimiento)}</small>
-        <ExpiryBadge days={alert.diasRestantes} />
-      </div>
-    </article>
   );
 }
 
@@ -4106,42 +4067,6 @@ function BillingPanel({
     </section>
   );
 }
-function MonitoringStatusView({ status }: { status: MonitoringStatus | null }) {
-  if (!status) {
-    return <p className="inline-status">Sin datos de monitoreo cargados.</p>;
-  }
-
-  return (
-    <div className="monitoring-status-card">
-      <p><strong>Estado:</strong> {status.estadoConexion}</p>
-      <p>{status.mensaje}</p>
-      <p><strong>Última medición:</strong> {formatDateTime(status.ultimaMedicion?.timestampMedicion)}</p>
-      <p><strong>Potencia óptica:</strong> {status.ultimaMedicion?.potenciaActualDbm ?? 'No disponible'} dBm</p>
-      <p><strong>Latencia:</strong> {status.latenciaEstado}</p>
-      <p><strong>Equipo:</strong> {status.equipo?.numeroSerie ?? 'Sin equipo asociado'}</p>
-      <p><strong>Caja NAP:</strong> {status.cajaNap?.identificadorUnico ?? status.cajaNap?.zona ?? 'Sin dato'}</p>
-      {status.historial.length > 0 && (
-        <ul className="compact-list">
-          {status.historial.slice(0, 4).map((event) => (
-            <li key={event.idHistorialOnt}>
-              {event.evento ?? 'Evento'} - {formatDateTime(event.timestamp)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function HistoryBox({ title, value }: { title: string; value: string | number }) {
-  return (
-    <article className="history-box">
-      <span>{title}</span>
-      <strong>{value}</strong>
-    </article>
-  );
-}
-
 function InventoryAdvancedPanel({
   advancedInventory,
   workOrders,
