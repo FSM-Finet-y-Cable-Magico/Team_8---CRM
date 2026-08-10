@@ -31,8 +31,8 @@ export function LoginScreen({ onLogin, onOpenPortal }: { onLogin: (user: AuthUse
       <section className="login-card" aria-label="Acceso al sistema CRM">
         <section className="login-panel">
           <div className="login-heading">
-            <h1>Sistema de GestiÃ³n CRM</h1>
-            <p>FiNet y Cable MÃ¡gico Litoral Â· AdministraciÃ³n comercial, clientes y soporte.</p>
+            <h1>Sistema de Gestión CRM</h1>
+            <p>FiNet y Cable Mágico Litoral · Administración comercial, clientes y soporte.</p>
           </div>
           <form onSubmit={submit} className="stack" autoComplete="off">
             <label>
@@ -46,13 +46,13 @@ export function LoginScreen({ onLogin, onOpenPortal }: { onLogin: (user: AuthUse
               />
             </label>
             <label>
-              ContraseÃ±a
+              Contraseña
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 type="password"
                 autoComplete="off"
-                placeholder="Ingresa tu contraseÃ±a"
+                placeholder="Ingresa tu contraseña"
               />
             </label>
             {error && <p className="alert">{error}</p>}

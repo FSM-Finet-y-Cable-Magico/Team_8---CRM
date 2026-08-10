@@ -35,7 +35,7 @@ export function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryCustomerA
           <dd>{customer?.rut ?? alert.rut ?? 'No registrado'}</dd>
         </div>
         <div>
-          <dt>TelÃ©fono</dt>
+          <dt>Teléfono</dt>
           <dd>{customer?.telefono ?? 'No registrado'}</dd>
         </div>
         <div>

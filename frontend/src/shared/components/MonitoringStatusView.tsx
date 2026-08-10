@@ -10,8 +10,8 @@ export function MonitoringStatusView({ status }: { status: MonitoringStatus | nu
     <div className="monitoring-status-card">
       <p><strong>Estado:</strong> {status.estadoConexion}</p>
       <p>{status.mensaje}</p>
-      <p><strong>Ãšltima mediciÃ³n:</strong> {formatDateTime(status.ultimaMedicion?.timestampMedicion)}</p>
-      <p><strong>Potencia Ã³ptica:</strong> {status.ultimaMedicion?.potenciaActualDbm ?? 'No disponible'} dBm</p>
+      <p><strong>Última medición:</strong> {formatDateTime(status.ultimaMedicion?.timestampMedicion)}</p>
+      <p><strong>Potencia óptica:</strong> {status.ultimaMedicion?.potenciaActualDbm ?? 'No disponible'} dBm</p>
       <p><strong>Latencia:</strong> {status.latenciaEstado}</p>
       <p><strong>Equipo:</strong> {status.equipo?.numeroSerie ?? 'Sin equipo asociado'}</p>
       <p><strong>Caja NAP:</strong> {status.cajaNap?.identificadorUnico ?? status.cajaNap?.zona ?? 'Sin dato'}</p>

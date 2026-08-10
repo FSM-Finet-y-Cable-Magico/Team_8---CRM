@@ -1,6 +1,6 @@
 export function StatusBadge({ value }: { value?: string | null }) {
   const normalized = (value ?? 'Sin dato').toLowerCase();
-  const tone = normalized.includes('crÃ­tica') || normalized.includes('critica')
+  const tone = normalized.includes('crítica') || normalized.includes('critica')
     ? 'critical'
     : normalized.includes('cerrad') || normalized.includes('completad') || normalized.includes('resuelt') || normalized.includes('activ')
       ? 'success'
