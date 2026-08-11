@@ -3,6 +3,8 @@ import { PortalCustomer } from '../../api';
 export function PortalHome({
   customer,
   servicesCount,
+  contractsCount,
+  openTicketsCount,
   ticketsCount,
   tvipCount,
   status,
@@ -11,6 +13,8 @@ export function PortalHome({
 }: {
   customer: PortalCustomer;
   servicesCount: number;
+  contractsCount: number;
+  openTicketsCount: number;
   ticketsCount: number;
   tvipCount: number;
   status: string;
@@ -23,6 +27,7 @@ export function PortalHome({
         <span className="portal-eyebrow">Inicio portal</span>
         <h1>{customer.nombreCompleto}</h1>
         <p>{customer.rut ?? 'Sin RUT'} · Estado: {customer.estado}</p>
+        <p className="portal-muted">{customer.email ?? 'Sin correo'} · {customer.telefono ?? 'Sin teléfono registrado'}</p>
       </div>
       <div className="portal-actions">
         <button type="button" className="portal-secondary-button" onClick={onRefresh}>
@@ -38,7 +43,15 @@ export function PortalHome({
           <strong>{servicesCount}</strong>
         </article>
         <article>
-          <span>Tickets</span>
+          <span>Contratos</span>
+          <strong>{contractsCount}</strong>
+        </article>
+        <article>
+          <span>Tickets abiertos</span>
+          <strong>{openTicketsCount}</strong>
+        </article>
+        <article>
+          <span>Tickets totales</span>
           <strong>{ticketsCount}</strong>
         </article>
         <article>

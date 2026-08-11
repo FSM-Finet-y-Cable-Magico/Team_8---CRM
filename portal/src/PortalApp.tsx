@@ -3,6 +3,7 @@ import {
   api,
   apiErrorMessage,
   CustomerService,
+  PortalContract,
   PortalCustomer,
   Ticket,
   TicketCategory,
@@ -10,16 +11,24 @@ import {
   TvipGenerationResult,
 } from './api';
 import { PortalLogin } from './features/auth';
+import { PortalContracts } from './features/contracts';
 import { PortalHome } from './features/home';
 import { PortalServices } from './features/services';
-import { PortalTickets } from './features/tickets';
+import { PortalTicketFormValue, PortalTickets } from './features/tickets';
 import { PortalTvip } from './features/tvip';
+import { PortalWifiRequest, WifiRequestForm } from './features/wifi';
 
-type TicketForm = {
-  idCategoria: string;
-  idServicio: string;
-  prioridad: string;
-  descripcion: string;
+const emptyTicketForm: PortalTicketFormValue = {
+  idCategoria: '',
+  idServicio: '',
+  prioridad: 'Media',
+  descripcion: '',
+};
+
+const emptyWifiForm: WifiRequestForm = {
+  idServicio: '',
+  nuevaContrasena: '',
+  observaciones: '',
 };
 
 export function PortalApp() {
@@ -29,15 +38,12 @@ export function PortalApp() {
     return stored ? JSON.parse(stored) as PortalCustomer : null;
   });
   const [services, setServices] = useState<CustomerService[]>([]);
+  const [contracts, setContracts] = useState<PortalContract[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [tvip, setTvip] = useState<TvipCredentialSummary[]>([]);
-  const [ticketForm, setTicketForm] = useState<TicketForm>({
-    idCategoria: '',
-    idServicio: '',
-    prioridad: 'Media',
-    descripcion: '',
-  });
+  const [ticketForm, setTicketForm] = useState<PortalTicketFormValue>(emptyTicketForm);
+  const [wifiForm, setWifiForm] = useState<WifiRequestForm>(emptyWifiForm);
   const [temporaryTvPassword, setTemporaryTvPassword] = useState<{ idContrato: number; password: string } | null>(null);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
@@ -81,13 +87,15 @@ export function PortalApp() {
 
   async function loadPortalData(silent = false) {
     try {
-      const [servicesResult, ticketsResult, categoriesResult, tvipResult] = await Promise.all([
+      const [servicesResult, contractsResult, ticketsResult, categoriesResult, tvipResult] = await Promise.all([
         api.get<CustomerService[]>('/portal/services'),
+        api.get<PortalContract[]>('/portal/contracts'),
         api.get<Ticket[]>('/portal/tickets'),
         api.get<TicketCategory[]>('/portal/ticket-categories'),
         api.get<TvipCredentialSummary[]>('/portal/tvip'),
       ]);
       setServices(servicesResult.data);
+      setContracts(contractsResult.data);
       setTickets(ticketsResult.data);
       setCategories(categoriesResult.data);
       setTvip(tvipResult.data);
@@ -107,15 +115,41 @@ export function PortalApp() {
     }
 
     try {
-      await api.post('/portal/tickets', {
+      const { data } = await api.post<Ticket>('/portal/tickets', {
         idCategoria: Number(ticketForm.idCategoria),
         idServicio: ticketForm.idServicio ? Number(ticketForm.idServicio) : undefined,
         prioridad: ticketForm.prioridad,
         descripcion: ticketForm.descripcion.trim(),
       });
-      setTicketForm({ idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
+      setTicketForm(emptyTicketForm);
       await loadPortalData(true);
-      setStatus('Ticket creado desde portal');
+      setStatus(`Ticket ${data.codigoSeguimiento ?? data.idTicket} creado desde portal`);
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    }
+  }
+
+  async function requestWifiChange() {
+    if (!wifiForm.idServicio) {
+      setStatus('Selecciona el servicio para registrar la solicitud Wi-Fi.');
+      return;
+    }
+
+    if (wifiForm.nuevaContrasena.trim() && wifiForm.nuevaContrasena.trim().length < 8) {
+      setStatus('La nueva clave sugerida debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    try {
+      const { data } = await api.post<{ mensaje: string; ticket?: Ticket }>('/portal/wifi-change-request', {
+        idServicio: Number(wifiForm.idServicio),
+        nuevaContrasena: wifiForm.nuevaContrasena.trim() || undefined,
+        observaciones: wifiForm.observaciones.trim() || undefined,
+      });
+      setWifiForm(emptyWifiForm);
+      await loadPortalData(true);
+      const ticketCode = data.ticket?.codigoSeguimiento ? ` Ticket asociado: ${data.ticket.codigoSeguimiento}.` : '';
+      setStatus(`${data.mensaje}${ticketCode}`);
     } catch (err) {
       setStatus(apiErrorMessage(err));
     }
@@ -138,8 +172,13 @@ export function PortalApp() {
     setToken('');
     setCustomer(null);
     setServices([]);
+    setContracts([]);
     setTickets([]);
+    setCategories([]);
     setTvip([]);
+    setTicketForm(emptyTicketForm);
+    setWifiForm(emptyWifiForm);
+    setTemporaryTvPassword(null);
     setStatus('');
   }
 
@@ -147,11 +186,15 @@ export function PortalApp() {
     return <PortalLogin loading={loading} status={status} onLogin={login} />;
   }
 
+  const openTicketsCount = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
+
   return (
     <main className="portal-shell">
       <PortalHome
         customer={customer}
         servicesCount={services.length}
+        contractsCount={contracts.length}
+        openTicketsCount={openTicketsCount}
         ticketsCount={tickets.length}
         tvipCount={tvip.length}
         status={status}
@@ -160,6 +203,7 @@ export function PortalApp() {
       />
       <section className="portal-grid">
         <PortalServices services={services} />
+        <PortalContracts contracts={contracts} />
         <PortalTickets
           services={services}
           tickets={tickets}
@@ -167,6 +211,12 @@ export function PortalApp() {
           form={ticketForm}
           onFormChange={setTicketForm}
           onCreate={() => void createTicket()}
+        />
+        <PortalWifiRequest
+          services={services}
+          form={wifiForm}
+          onFormChange={setWifiForm}
+          onSubmit={() => void requestWifiChange()}
         />
         <PortalTvip
           credentials={tvip}

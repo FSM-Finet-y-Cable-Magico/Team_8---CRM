@@ -261,6 +261,36 @@ p {
   color: var(--portal-muted);
 }
 
+.portal-item-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.portal-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: #176552;
+  background: #e2f3ed;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.portal-soft-box {
+  display: grid;
+  gap: 5px;
+  margin-top: 4px;
+  border: 1px dashed #cbded6;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f4faf7;
+}
+
 @media (max-width: 860px) {
   .portal-header,
   .portal-grid,

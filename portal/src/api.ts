@@ -23,15 +23,45 @@ export type Plan = {
   nombreComercial: string;
   tipoPlan: string;
   velocidadMbps: number | null;
-  precioMensual: string;
+  precioMensual: string | number;
+};
+
+export type PortalInvoice = {
+  idFactura: number;
+  periodoMes: number;
+  periodoAnio: number;
+  monto: string | number | null;
+  fechaEmision: string | null;
+  fechaLimitePago: string;
+  estado: string;
+};
+
+export type PortalContract = {
+  idContrato: number;
+  idCliente: number | null;
+  idPlan: number | null;
+  idEmpresa: number | null;
+  idZonaPago?: number | null;
+  fechaInicio: string | null;
+  diaVencimiento: number | null;
+  estado: string;
+  fechaSuspension?: string | null;
+  plan?: Plan | null;
+  servicios?: CustomerService[];
+  facturas?: PortalInvoice[];
 };
 
 export type CustomerService = {
   idServicio: number;
+  idCliente?: number;
+  idEmpresa?: number | null;
   idContrato: number | null;
+  idDireccion?: number | null;
   tipoServicio: string;
   estadoOperativo: string;
   observaciones: string | null;
+  datosTecnicos?: Record<string, unknown> | null;
+  fechaCreacion?: string;
   contrato?: {
     idContrato: number;
     estado: string | null;
@@ -65,7 +95,17 @@ export type Ticket = {
   prioridad: string;
   estado: string;
   descripcion: string | null;
+  fechaCreacion?: string | null;
+  origen?: string | null;
   categoria?: TicketCategory | null;
+  servicio?: CustomerService | null;
+  workOrders?: Array<{
+    idOt: number;
+    codigoSeguimiento: string | null;
+    tipoOt: string;
+    estado: string;
+    fechaProgramada: string | null;
+  }>;
 };
 
 export type TvipCredentialSummary = {
