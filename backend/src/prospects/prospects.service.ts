@@ -8,6 +8,7 @@ import {
   parseInstallOrderObservations,
 } from '../common/install-order-metadata';
 import { isAdministrator } from '../common/roles';
+import { generateWorkOrderCode } from '../common/work-order-code';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
@@ -334,6 +335,18 @@ export class ProspectsService {
       throw new BadRequestException('El plan no pertenece a la empresa del prospecto');
     }
 
+    if (dto.idZonaPago) {
+      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
+
+      if (!zone || zone.activo === false) {
+        throw new BadRequestException('Zona de pago inexistente o inactiva');
+      }
+
+      if (zone.idEmpresa && prospect.idEmpresa && zone.idEmpresa !== prospect.idEmpresa) {
+        throw new BadRequestException('La zona de pago no pertenece a la empresa del prospecto');
+      }
+    }
+
     const fechaInicio = dto.fechaInicio ? new Date(dto.fechaInicio) : new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       let cliente = prospect.idCliente
@@ -367,8 +380,8 @@ export class ProspectsService {
           data: {
             idCliente: cliente.idCliente,
             direccionCompleta: prospect.direccion,
-            comuna: 'Por confirmar',
-            ciudad: 'Por confirmar',
+            comuna: dto.comuna?.trim() || 'Por confirmar',
+            ciudad: dto.ciudad?.trim() || 'Por confirmar',
             esPrincipal: true,
           },
         });
@@ -389,6 +402,7 @@ export class ProspectsService {
           idCliente: cliente.idCliente,
           idPlan: dto.planId,
           idEmpresa: prospect.idEmpresa,
+          idZonaPago: dto.idZonaPago,
           fechaInicio,
           diaVencimiento: dto.diaVencimiento,
           estado: 'Pendiente',
@@ -409,12 +423,15 @@ export class ProspectsService {
           idEmpresa: prospect.idEmpresa,
           idContrato: contrato.idContrato,
           idDireccion: direccion?.idDireccion,
+          idZonaPago: dto.idZonaPago,
           tipoServicio: this.serviceTypeFromPlan(plan.tipoPlan),
           estadoOperativo: 'Pendiente Instalacion',
           observaciones: `Servicio creado desde prospecto ${idProspecto}`,
           datosTecnicos: {
             plan: plan.nombreComercial,
             velocidadMbps: plan.velocidadMbps,
+            comuna: dto.comuna?.trim() || undefined,
+            ciudad: dto.ciudad?.trim() || undefined,
           },
         },
       });
@@ -528,7 +545,7 @@ export class ProspectsService {
         });
       }
 
-      const orden = await tx.ordenTrabajo.create({
+      const createdOrder = await tx.ordenTrabajo.create({
         data: {
           idEmpresa,
           idCliente,
@@ -547,6 +564,10 @@ export class ProspectsService {
           }),
           resueltoRemotamente: false,
         },
+      });
+      const orden = await tx.ordenTrabajo.update({
+        where: { idOt: createdOrder.idOt },
+        data: { codigoSeguimiento: generateWorkOrderCode(createdOrder.tipoOt, createdOrder.idOt) },
       });
 
       const updatedProspect = await tx.prospecto.update({
@@ -584,6 +605,7 @@ export class ProspectsService {
         tecnico: technician.nombreCompleto,
         prioridad: dto.prioridad ?? 'Media',
         idServicio: result.servicio?.idServicio,
+        codigoSeguimiento: result.orden.codigoSeguimiento,
       },
     });
 

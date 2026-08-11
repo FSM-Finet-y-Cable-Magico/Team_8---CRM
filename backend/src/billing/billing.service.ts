@@ -6,8 +6,11 @@ import { AuthUser } from '../common/auth.types';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
+import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { SendBillingNotificationDto } from './dto/send-billing-notification.dto';
+import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 
 const CLOSED_INVOICE_STATES = ['Pagada', 'Anulada'];
 
@@ -295,6 +298,153 @@ export class BillingService {
     return result;
   }
 
+  zones(currentUser: AuthUser, scope = 'consolidado') {
+    return this.prisma.zonaPago.findMany({
+      where: this.companyScope(currentUser, scope),
+      include: {
+        empresa: true,
+        precios: {
+          include: { plan: true },
+          orderBy: { idPlanZonaPrecio: 'desc' },
+          take: 20,
+        },
+      },
+      orderBy: { nombreZona: 'asc' },
+    });
+  }
+
+  async createZone(dto: CreatePaymentZoneDto, currentUser: AuthUser) {
+    const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
+    const created = await this.prisma.zonaPago.create({
+      data: {
+        idEmpresa,
+        nombreZona: dto.nombreZona.trim(),
+        comuna: dto.comuna?.trim() || null,
+        descripcion: dto.descripcion?.trim() || null,
+        diaVencimientoSugerido: dto.diaVencimientoSugerido,
+        activo: dto.activo ?? true,
+      },
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CREAR_ZONA_PAGO',
+      entidadAfectada: 'zona_pago',
+      idEntidadAfectada: created.idZonaPago,
+      valorNuevo: {
+        idEmpresa,
+        nombreZona: created.nombreZona,
+        diaVencimientoSugerido: created.diaVencimientoSugerido,
+      },
+    });
+
+    return created;
+  }
+
+  async updateZone(idZonaPago: number, dto: UpdatePaymentZoneDto, currentUser: AuthUser) {
+    const zone = await this.getZoneOrThrow(idZonaPago, currentUser);
+    const updated = await this.prisma.zonaPago.update({
+      where: { idZonaPago },
+      data: {
+        nombreZona: dto.nombreZona === undefined ? undefined : dto.nombreZona.trim(),
+        comuna: dto.comuna === undefined ? undefined : dto.comuna.trim() || null,
+        descripcion: dto.descripcion === undefined ? undefined : dto.descripcion.trim() || null,
+        diaVencimientoSugerido: dto.diaVencimientoSugerido,
+        activo: dto.activo,
+      },
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_ZONA_PAGO',
+      entidadAfectada: 'zona_pago',
+      idEntidadAfectada: idZonaPago,
+      valorAnterior: {
+        nombreZona: zone.nombreZona,
+        comuna: zone.comuna,
+        diaVencimientoSugerido: zone.diaVencimientoSugerido,
+        activo: zone.activo,
+      },
+      valorNuevo: {
+        nombreZona: updated.nombreZona,
+        comuna: updated.comuna,
+        diaVencimientoSugerido: updated.diaVencimientoSugerido,
+        activo: updated.activo,
+      },
+    });
+
+    return updated;
+  }
+
+  zoneRules(currentUser: AuthUser, scope = 'consolidado') {
+    const companyFilter = this.companyScope(currentUser, scope);
+
+    return this.prisma.planZonaPrecio.findMany({
+      where: companyFilter.idEmpresa
+        ? { zonaPago: { is: { idEmpresa: companyFilter.idEmpresa } } }
+        : {},
+      include: {
+        plan: { include: { empresa: true } },
+        zonaPago: { include: { empresa: true } },
+      },
+      orderBy: { idPlanZonaPrecio: 'desc' },
+      take: 150,
+    });
+  }
+
+  async createZoneRule(dto: CreateZoneRuleDto, currentUser: AuthUser) {
+    const [plan, zone] = await Promise.all([
+      this.prisma.plan.findUnique({ where: { idPlan: dto.idPlan } }),
+      this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } }),
+    ]);
+
+    if (!plan || !zone) {
+      throw new BadRequestException('Plan o zona de pago inexistente');
+    }
+
+    this.assertCompanyAccess(plan.idEmpresa, currentUser);
+    this.assertCompanyAccess(zone.idEmpresa, currentUser);
+
+    if (plan.idEmpresa && zone.idEmpresa && plan.idEmpresa !== zone.idEmpresa) {
+      throw new BadRequestException('El plan y la zona pertenecen a empresas distintas');
+    }
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (dto.activo !== false) {
+        await tx.planZonaPrecio.updateMany({
+          where: { idPlan: dto.idPlan, idZonaPago: dto.idZonaPago, activo: true },
+          data: { activo: false },
+        });
+      }
+
+      return tx.planZonaPrecio.create({
+        data: {
+          idPlan: dto.idPlan,
+          idZonaPago: dto.idZonaPago,
+          precioMensual: dto.precioMensual,
+          valorInstalacion: dto.valorInstalacion,
+          activo: dto.activo ?? true,
+        },
+        include: { plan: true, zonaPago: true },
+      });
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CREAR_REGLA_PRECIO_ZONA',
+      entidadAfectada: 'plan_zona_precio',
+      idEntidadAfectada: created.idPlanZonaPrecio,
+      valorNuevo: {
+        idPlan: created.idPlan,
+        idZonaPago: created.idZonaPago,
+        precioMensual: Number(created.precioMensual),
+        valorInstalacion: created.valorInstalacion ? Number(created.valorInstalacion) : null,
+      },
+    });
+
+    return created;
+  }
+
   private async overdueInvoiceRows(currentUser: AuthUser, scope: string) {
     const companyFilter = this.companyScope(currentUser, scope);
     const invoices = await this.prisma.factura.findMany({
@@ -402,6 +552,18 @@ export class BillingService {
     return customer;
   }
 
+  private async getZoneOrThrow(idZonaPago: number, currentUser: AuthUser) {
+    const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago } });
+
+    if (!zone) {
+      throw new NotFoundException('Zona de pago no encontrada');
+    }
+
+    this.assertCompanyAccess(zone.idEmpresa, currentUser);
+
+    return zone;
+  }
+
   private isInvoicePaid(invoice: { monto: Prisma.Decimal | null; pagos: Array<{ monto: Prisma.Decimal }> }) {
     const invoiceAmount = Number(invoice.monto ?? 0);
     return invoiceAmount > 0 && this.paidAmount(invoice.pagos) >= invoiceAmount;
@@ -444,6 +606,28 @@ export class BillingService {
     if (!currentUser.idEmpresa || idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El registro no pertenece a tu empresa');
     }
+  }
+
+  private resolveCompanyId(requestedCompanyId: number | undefined, currentUser: AuthUser) {
+    if (isAdministrator(currentUser.roles)) {
+      const idEmpresa = requestedCompanyId ?? currentUser.idEmpresa;
+
+      if (!idEmpresa) {
+        throw new BadRequestException('Debe indicar empresa');
+      }
+
+      return idEmpresa;
+    }
+
+    if (!currentUser.idEmpresa) {
+      throw new BadRequestException('El usuario no tiene empresa asociada');
+    }
+
+    if (requestedCompanyId && requestedCompanyId !== currentUser.idEmpresa) {
+      throw new BadRequestException('No puedes administrar zonas de otra empresa');
+    }
+
+    return currentUser.idEmpresa;
   }
 
   private companyScope(currentUser: AuthUser, scope: string): { idEmpresa?: number } {

@@ -280,6 +280,26 @@ describe('ProspectsService', () => {
       },
       ordenTrabajo: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 30, ...data })),
+        update: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({
+            idOt: 30,
+            idEmpresa: 1,
+            idCliente: 5,
+            idTecnico: 4,
+            idDireccion: 8,
+            idServicio: 18,
+            tipoOt: 'Instalacion',
+            prioridad: 'Media',
+            estado: 'Pendiente',
+            fechaProgramada: new Date(`${requestedDate}T00:00:00.000Z`),
+            observaciones: buildInstallOrderObservations({
+              tipoConexion: 'Fibra Optica',
+              horaVisita: '10:00',
+              observacionesAgenda: 'Coordinar acceso con conserjeria',
+            }),
+            codigoSeguimiento: data.codigoSeguimiento,
+          }),
+        ),
       },
       prospecto: {
         update: jest.fn().mockResolvedValue({
@@ -335,6 +355,10 @@ describe('ProspectsService', () => {
         }),
       }),
     );
+    expect(transaction.ordenTrabajo.update).toHaveBeenCalledWith({
+      where: { idOt: 30 },
+      data: { codigoSeguimiento: 'OT-INS-000030' },
+    });
     expect(result.prospecto.estadoPipeline).toBe('Instalacion Programada');
     expect(result.orden.tecnico.nombreCompleto).toBe('Tecnico FiNet');
     expect(audit.record).toHaveBeenCalledWith(

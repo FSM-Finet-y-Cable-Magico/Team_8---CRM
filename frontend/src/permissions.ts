@@ -25,9 +25,17 @@ export type DashboardPermissions = {
   manageServices: boolean;
   manageInventory: boolean;
   manageBilling: boolean;
+  managePaymentZones: boolean;
   manageTvip: boolean;
   viewMonitoring: boolean;
   registerTechnicalNotes: boolean;
+  managePlans: boolean;
+  manageContracts: boolean;
+  generateDigitalContract: boolean;
+  changeCustomerPlan: boolean;
+  manageObservations: boolean;
+  manageCustomerRequests: boolean;
+  manageEquipmentAssignmentMode: boolean;
   installEquipment: boolean;
   createTickets: boolean;
   classifyTickets: boolean;
@@ -70,9 +78,17 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   manageServices: ['Administrador', 'Comercial', 'Soporte'],
   manageInventory: ['Administrador', 'Soporte'],
   manageBilling: ['Administrador', 'Comercial'],
+  managePaymentZones: ['Administrador', 'Comercial'],
   manageTvip: ['Administrador', 'Comercial', 'Soporte'],
   viewMonitoring: ['Administrador', 'Soporte', 'Terreno'],
   registerTechnicalNotes: ['Administrador', 'Soporte', 'Terreno'],
+  managePlans: ['Administrador', 'Comercial'],
+  manageContracts: ['Administrador', 'Comercial'],
+  generateDigitalContract: ['Administrador', 'Comercial'],
+  changeCustomerPlan: ['Administrador', 'Comercial'],
+  manageObservations: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
+  manageCustomerRequests: ['Administrador', 'Comercial', 'Soporte'],
+  manageEquipmentAssignmentMode: ['Administrador', 'Soporte', 'Terreno', 'Inventario'],
   installEquipment: ['Administrador', 'Soporte', 'Terreno'],
   createTickets: ['Administrador', 'Comercial', 'Soporte'],
   classifyTickets: ['Administrador', 'Soporte'],
