@@ -226,7 +226,8 @@ Dependencias de Login interno:
 - Generar conflictos de importacion circular entre features y componentes compartidos.
 - Romper Docker/HMR si se agregan nuevos entrypoints antes de separar correctamente el portal.
 - Sobrerrefactorizar: mover demasiadas piezas en un solo commit haria dificil detectar regresiones.
-- Pendiente UX/funcional: rediseñar la vista Gestionar cliente para que mantenga coherencia con Gestionar prospecto, incorporando bloques de acción claros y conectando botones actualmente no funcionales a sus flujos reales. No se aborda durante la extracción estructural de Fase 5C.
+- Pendiente UX/funcional CustomersPanel: rediseñar Gestionar cliente para mantener coherencia con Gestionar prospecto. La gestión de clientes debe permitir generar orden de instalación desde un servicio del cliente y presentar acciones de forma secuencial según el estado del cliente/servicio, evitando mostrar todas las opciones simultáneamente.
+
 
 ## 8. Estructura objetivo para frontend/
 
