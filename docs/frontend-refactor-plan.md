@@ -26,11 +26,12 @@ La aplicacion levanta mediante `npm run docker:local`, usando:
 
 - `finet-crm-db` en PostgreSQL 15, puerto `5432`.
 - `finet-crm-backend`, puerto `3000`.
-- `finet-crm-frontend`, puerto `5173`.
+- `finet-crm-frontend`, CRM interno en puerto `5173`.
+- `finet-customer-portal`, Portal Cliente oficial en puerto `5174`.
 
 ## 2. Problema detectado con App.tsx
 
-`App.tsx` funciona, pero cumple demasiadas responsabilidades a la vez. El riesgo principal no es visual sino estructural: cualquier cambio pequeño en una vista obliga a tocar un archivo enorme donde tambien viven el portal, el login, el layout, los paneles, los modales y utilidades compartidas.
+`App.tsx` funciona, pero cumple demasiadas responsabilidades a la vez. El riesgo principal no es visual sino estructural: cualquier cambio pequeÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±o en una vista obliga a tocar un archivo enorme donde tambien viven el portal, el login, el layout, los paneles, los modales y utilidades compartidas.
 
 Problemas principales:
 
@@ -149,7 +150,7 @@ Estas utilidades son candidatas naturales para una primera extraccion porque no 
 Estado raiz en `App`:
 
 - `user`: sesion interna del CRM.
-- `portalMode`: determina si se renderiza Portal Cliente o CRM interno.
+- `portalMode`: eliminado en Fase 6C. El CRM ya no renderiza el Portal Cliente embebido; redirige a `portal/` mediante `VITE_PORTAL_URL`.
 
 Estado principal en `Dashboard`:
 
@@ -226,7 +227,7 @@ Dependencias de Login interno:
 - Generar conflictos de importacion circular entre features y componentes compartidos.
 - Romper Docker/HMR si se agregan nuevos entrypoints antes de separar correctamente el portal.
 - Sobrerrefactorizar: mover demasiadas piezas en un solo commit haria dificil detectar regresiones.
-- CustomersPanel fue extra�do estructuralmente y luego recibi� una fase UX/funcional controlada: Gestionar cliente ahora prioriza un flujo por servicio contratado, muestra acciones seg�n estado y permite generar una orden de instalaci�n desde un servicio pendiente. El cierre t�cnico se mantiene en �rdenes de Trabajo. Pendiente posterior: separar Portal Cliente como app independiente.
+- CustomersPanel fue extraÃƒÆ’Ã‚Â­do estructuralmente y luego recibiÃƒÆ’Ã‚Â³ una fase UX/funcional controlada: Gestionar cliente ahora prioriza un flujo por servicio contratado, muestra acciones segÃƒÆ’Ã‚Âºn estado y permite generar una orden de instalaciÃƒÆ’Ã‚Â³n desde un servicio pendiente. El cierre tÃƒÆ’Ã‚Â©cnico se mantiene en ÃƒÆ’Ã¢â‚¬Å“rdenes de Trabajo. El Portal Cliente fue separado en `portal/` y desacoplado del CRM en Fase 6C.
 
 
 ## 8. Estructura objetivo para frontend/
@@ -441,23 +442,25 @@ Validacion:
 
 ### Fase 6: crear app independiente Portal Cliente
 
-Crear carpeta `portal/` con Vite/React, aun sin cambiar backend.
+Estado actual: completada. La carpeta `portal/` contiene la app oficial para clientes, hecha con Vite/React y consumiendo los endpoints reales `/api/portal/*`.
 
 Validacion:
 
-- CRM interno sigue funcionando en `frontend/`.
-- Portal puede levantar separado en otro puerto local.
-- No se modifica la API backend.
+- CRM interno sigue funcionando en `frontend/` y puerto `5173`.
+- Portal Cliente funciona separado en `portal/` y puerto `5174`.
+- Backend compartido sigue en `3000`.
+- No se modifica la API backend para usar el portal independiente.
 
 ### Fase 7: desacoplar portal del CRM interno
 
-Mover `CustomerPortal` y sus tipos/servicios al nuevo proyecto `portal/`.
+Estado actual: completada en Fase 6C. `CustomerPortal` embebido fue retirado de `frontend/src/App.tsx`; el login del CRM abre el portal oficial usando `VITE_PORTAL_URL`.
 
 Validacion:
 
 - Login portal funciona separado.
-- Cliente ve sus servicios, contratos, tickets, TV IP y solicitud Wi-Fi.
+- Cliente ve sus servicios, contratos, tickets, TV IP y solicitud Wi-Fi desde `portal/`.
 - CRM interno ya no contiene codigo visual del portal.
+- Sesion CRM (`finet_token`, `finet_user`) y sesion portal (`finet_portal_token`, `finet_portal_customer`) quedan separadas.
 
 ### Fase 8: limpieza final y documentacion
 
@@ -534,3 +537,8 @@ docs(frontend): actualiza guia de estructura modular
 ## 14. Recomendacion final
 
 La Fase 1 debe limitarse a utilidades puras. No conviene empezar por `CustomersPanel`, `ProspectWorkflowPanel` ni `CustomerPortal`, porque son bloques con alto acoplamiento de API, estado y modales. La extraccion debe avanzar desde piezas sin estado hacia componentes con mayor dependencia.
+
+
+## Nota Fase 6C
+
+El Portal Cliente embebido fue desacoplado del CRM. portal/ es la app oficial para clientes en puerto 5174; el CRM interno corre en 5173 y abre el portal mediante VITE_PORTAL_URL. El backend compartido sigue en 3000.

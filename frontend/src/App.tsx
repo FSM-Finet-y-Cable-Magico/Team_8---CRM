@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -34,13 +34,10 @@ import {
   OperationalObservation,
   PaymentZone,
   Plan,
-  PortalCustomer,
   Prospect,
   Role,
   Ticket,
   TicketCategory,
-  TvipCredentialSummary,
-  TvipGenerationResult,
   UserRow,
   WorkOrder,
 } from './api';
@@ -75,7 +72,6 @@ import {
   formatDateTime,
   formatWorkOrderValue,
   normalizeAuthUser,
-  normalizeRutInput,
   settledData,
   technicalEntries,
 } from './lib';
@@ -162,320 +158,13 @@ export default function App() {
     const stored = localStorage.getItem('finet_user');
     return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
-  const [portalMode, setPortalMode] = useState(() => window.location.pathname.startsWith('/portal'));
-
-  if (portalMode) {
-    return (
-      <CustomerPortal
-        onBack={() => {
-          window.history.pushState(null, '', '/');
-          setPortalMode(false);
-        }}
-      />
-    );
-  }
 
   if (!user) {
-    return (
-      <LoginScreen
-        onLogin={setUser}
-        onOpenPortal={() => {
-          window.history.pushState(null, '', '/portal');
-          setPortalMode(true);
-        }}
-      />
-    );
+    return <LoginScreen onLogin={setUser} />;
   }
 
   return <Dashboard user={user} onLogout={() => setUser(null)} />;
 }
-
-function CustomerPortal({ onBack }: { onBack: () => void }) {
-  const [token, setToken] = useState(() => localStorage.getItem('finet_portal_token') ?? '');
-  const [customer, setCustomer] = useState<PortalCustomer | null>(() => {
-    const stored = localStorage.getItem('finet_portal_customer');
-    return stored ? JSON.parse(stored) as PortalCustomer : null;
-  });
-  const [loginForm, setLoginForm] = useState({ rut: '', password: '' });
-  const [services, setServices] = useState<CustomerService[]>([]);
-  const [contracts, setContracts] = useState<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>([]);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [categories, setCategories] = useState<TicketCategory[]>([]);
-  const [tvip, setTvip] = useState<TvipCredentialSummary[]>([]);
-  const [ticketForm, setTicketForm] = useState({ idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
-  const [wifiForm, setWifiForm] = useState({ idServicio: '', nuevaContrasena: '', observaciones: '' });
-  const [temporaryTvPassword, setTemporaryTvPassword] = useState<{ idContrato: number; password: string } | null>(null);
-  const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const auth = (value = token) => ({ headers: { Authorization: `Bearer ${value}` } });
-
-  useEffect(() => {
-    if (token) {
-      void loadPortalData(token, true);
-    }
-  }, []);
-
-  async function login(event: FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setStatus('');
-
-    try {
-      const { data } = await api.post<{ portalToken: string; customer: PortalCustomer }>('/portal/login', {
-        rut: normalizeRutInput(loginForm.rut),
-        password: loginForm.password,
-      });
-      localStorage.setItem('finet_portal_token', data.portalToken);
-      localStorage.setItem('finet_portal_customer', JSON.stringify(data.customer));
-      setToken(data.portalToken);
-      setCustomer(data.customer);
-      await loadPortalData(data.portalToken, true);
-      setStatus('Sesion portal iniciada');
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadPortalData(nextToken = token, silent = false) {
-    try {
-      const [servicesResult, contractsResult, ticketsResult, categoriesResult, tvipResult] = await Promise.all([
-        api.get<CustomerService[]>('/portal/services', auth(nextToken)),
-        api.get<Array<{ idContrato: number; estado: string; plan?: Plan | null; servicios?: CustomerService[] }>>('/portal/contracts', auth(nextToken)),
-        api.get<Ticket[]>('/portal/tickets', auth(nextToken)),
-        api.get<TicketCategory[]>('/portal/ticket-categories', auth(nextToken)),
-        api.get<TvipCredentialSummary[]>('/portal/tvip', auth(nextToken)),
-      ]);
-      setServices(servicesResult.data);
-      setContracts(contractsResult.data);
-      setTickets(ticketsResult.data);
-      setCategories(categoriesResult.data);
-      setTvip(tvipResult.data);
-      if (!silent) {
-        setStatus('Portal actualizado');
-      }
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  async function createPortalTicket(event: FormEvent) {
-    event.preventDefault();
-
-    if (!ticketForm.idCategoria || ticketForm.descripcion.trim().length < 10) {
-      setStatus('Selecciona categoría y describe el problema con al menos 10 caracteres.');
-      return;
-    }
-
-    try {
-      await api.post('/portal/tickets', {
-        idCategoria: Number(ticketForm.idCategoria),
-        idServicio: ticketForm.idServicio ? Number(ticketForm.idServicio) : undefined,
-        prioridad: ticketForm.prioridad,
-        descripcion: ticketForm.descripcion.trim(),
-      }, auth());
-      setTicketForm({ idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
-      await loadPortalData(token, true);
-      setStatus('Ticket creado desde portal');
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  async function requestWifiChange(event: FormEvent) {
-    event.preventDefault();
-
-    if (!wifiForm.idServicio) {
-      setStatus('Selecciona el servicio para registrar la solicitud Wi-Fi.');
-      return;
-    }
-
-    try {
-      const { data } = await api.post<{ mensaje: string }>('/portal/wifi-change-request', {
-        idServicio: Number(wifiForm.idServicio),
-        nuevaContrasena: wifiForm.nuevaContrasena.trim() || undefined,
-        observaciones: wifiForm.observaciones.trim() || undefined,
-      }, auth());
-      setWifiForm({ idServicio: '', nuevaContrasena: '', observaciones: '' });
-      await loadPortalData(token, true);
-      setStatus(data.mensaje);
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  async function regeneratePortalTvip(idContrato: number) {
-    try {
-      const { data } = await api.post<TvipGenerationResult>('/portal/tvip/regenerate', { idContrato }, auth());
-      setTemporaryTvPassword({ idContrato, password: data.temporaryPassword });
-      await loadPortalData(token, true);
-      setStatus('Credencial TV IP generada. La clave temporal se muestra solo una vez.');
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  function logoutPortal() {
-    localStorage.removeItem('finet_portal_token');
-    localStorage.removeItem('finet_portal_customer');
-    setToken('');
-    setCustomer(null);
-    setServices([]);
-    setContracts([]);
-    setTickets([]);
-    setTvip([]);
-    setStatus('');
-  }
-
-  if (!token || !customer) {
-    return (
-      <main className="login-shell portal-login-shell">
-        <section className="login-card" aria-label="Acceso Portal Cliente">
-          <section className="login-panel">
-            <div className="login-heading">
-              <h1>Portal Cliente</h1>
-              <p>Consulta tus servicios, tickets y solicitudes técnicas.</p>
-            </div>
-            <form className="stack" onSubmit={login}>
-              <label>
-                RUT
-                <input value={loginForm.rut} onChange={(event) => setLoginForm({ ...loginForm, rut: event.target.value })} placeholder="12345678-5" />
-              </label>
-              <label>
-                Contraseña portal
-                <input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} />
-              </label>
-              <button className="login-button" disabled={loading}>{loading ? 'Ingresando...' : 'Ingresar al portal'}</button>
-            </form>
-            {status && <p className="inline-status">{status}</p>}
-            <button type="button" className="secondary portal-entry-button" onClick={onBack}>Volver al CRM interno</button>
-          </section>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className="portal-shell">
-      <header className="portal-topbar">
-        <div>
-          <span className="eyebrow">Portal Cliente</span>
-          <h1>{customer.nombreCompleto}</h1>
-          <p>{customer.rut ?? 'Sin RUT'} - Estado: {customer.estado}</p>
-        </div>
-        <div className="button-row">
-          <button type="button" className="secondary" onClick={() => void loadPortalData()}>Actualizar</button>
-          <button type="button" className="secondary" onClick={logoutPortal}>Cerrar portal</button>
-          <button type="button" className="secondary" onClick={onBack}>CRM interno</button>
-        </div>
-      </header>
-      {status && <p className="inline-status">{status}</p>}
-      <section className="portal-grid">
-        <article className="panel stack">
-          <h2>Mis servicios</h2>
-          {!services.length && <p className="inline-status">No hay servicios contratados registrados.</p>}
-          {services.map((service) => (
-            <section className="compact-list-item" key={service.idServicio}>
-              <strong>{service.tipoServicio} - {service.estadoOperativo}</strong>
-              <span>Plan: {service.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}</span>
-              <span>Direccion: {service.direccion?.direccionCompleta ?? 'Sin direccion'}</span>
-            </section>
-          ))}
-        </article>
-        <article className="panel stack">
-          <h2>Mis contratos</h2>
-          {!contracts.length && <p className="inline-status">No hay contratos visibles.</p>}
-          {contracts.map((contract) => (
-            <section className="compact-list-item" key={contract.idContrato}>
-              <strong>Contrato {contract.idContrato} - {contract.estado}</strong>
-              <span>{contract.plan?.nombreComercial ?? 'Sin plan'}</span>
-            </section>
-          ))}
-        </article>
-        <form className="panel stack" onSubmit={createPortalTicket}>
-          <h2>Crear ticket</h2>
-          <label>
-            Servicio
-            <select value={ticketForm.idServicio} onChange={(event) => setTicketForm({ ...ticketForm, idServicio: event.target.value })}>
-              <option value="">Ticket general</option>
-              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
-            </select>
-          </label>
-          <label>
-            Categoria
-            <select value={ticketForm.idCategoria} onChange={(event) => setTicketForm({ ...ticketForm, idCategoria: event.target.value })}>
-              <option value="">Seleccionar</option>
-              {categories.map((category) => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
-            </select>
-          </label>
-          <label>
-            Prioridad
-            <select value={ticketForm.prioridad} onChange={(event) => setTicketForm({ ...ticketForm, prioridad: event.target.value })}>
-              <option value="Alta">Alta</option>
-              <option value="Media">Media</option>
-              <option value="Baja">Baja</option>
-            </select>
-          </label>
-          <label>
-            Descripción
-            <textarea value={ticketForm.descripcion} onChange={(event) => setTicketForm({ ...ticketForm, descripcion: event.target.value })} />
-          </label>
-          <button disabled={!ticketForm.idCategoria}>Crear ticket</button>
-        </form>
-        <form className="panel stack" onSubmit={requestWifiChange}>
-          <h2>Solicitud cambio Wi-Fi</h2>
-          <p className="detail-line">El portal registra la solicitud para revisión técnica; no cambia el router automáticamente.</p>
-          <label>
-            Servicio
-            <select value={wifiForm.idServicio} onChange={(event) => setWifiForm({ ...wifiForm, idServicio: event.target.value })}>
-              <option value="">Seleccionar servicio</option>
-              {services.map((service) => <option key={service.idServicio} value={service.idServicio}>Servicio {service.idServicio} - {service.tipoServicio}</option>)}
-            </select>
-          </label>
-          <label>
-            Nueva clave sugerida
-            <input type="password" value={wifiForm.nuevaContrasena} onChange={(event) => setWifiForm({ ...wifiForm, nuevaContrasena: event.target.value })} />
-          </label>
-          <label>
-            Observaciones
-            <textarea value={wifiForm.observaciones} onChange={(event) => setWifiForm({ ...wifiForm, observaciones: event.target.value })} />
-          </label>
-          <button disabled={!wifiForm.idServicio}>Registrar solicitud</button>
-        </form>
-        <article className="panel stack">
-          <h2>Mis tickets</h2>
-          {!tickets.length && <p className="inline-status">No tienes tickets registrados.</p>}
-          {tickets.map((ticket) => (
-            <section className="compact-list-item" key={ticket.idTicket}>
-              <strong>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</strong>
-              <span>{ticket.categoria?.nombre ?? 'Sin categoría'} - {ticket.prioridad} - {ticket.estado}</span>
-              <span>{ticket.descripcion ?? '-'}</span>
-            </section>
-          ))}
-        </article>
-        <article className="panel stack">
-          <h2>TV IP</h2>
-          {!tvip.length && <p className="inline-status">Tu plan actual no incluye TV IP.</p>}
-          {tvip.map((credential) => (
-            <section className="compact-list-item" key={credential.idContrato}>
-              <strong>{credential.plan?.nombreComercial ?? `Contrato ${credential.idContrato}`}</strong>
-              <span>Usuario: {credential.credencial?.usuarioTvip ?? 'Sin generar'}</span>
-              <button type="button" className="secondary compact" onClick={() => void regeneratePortalTvip(credential.idContrato)}>
-                {credential.credencial ? 'Regenerar credencial' : 'Generar credencial'}
-              </button>
-              {temporaryTvPassword?.idContrato === credential.idContrato && (
-                <p className="inline-status">Password temporal: <strong>{temporaryTvPassword.password}</strong>. Guardar ahora; no se volvera a mostrar.</p>
-              )}
-            </section>
-          ))}
-        </article>
-      </section>
-    </main>
-  );
-}
-
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [scope, setScope] = useState('consolidado');
