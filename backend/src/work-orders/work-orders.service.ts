@@ -131,24 +131,26 @@ export class WorkOrdersService {
       orderBy: { fechaCreacion: 'desc' },
     });
 
-    if (!prospect) {
-      throw new BadRequestException('No existe un prospecto asociado para calcular el tiempo de conversion');
+    if (!prospect && !order.idServicio) {
+      throw new BadRequestException('No existe un prospecto o servicio asociado para completar la instalacion');
     }
 
-    if (!prospect.fechaCreacion) {
+    if (prospect && !prospect.fechaCreacion) {
       throw new BadRequestException('No se puede completar la instalacion: falta la fecha de creacion del prospecto');
     }
 
     const conversionDate = new Date();
 
-    if (prospect.fechaCreacion.getTime() > conversionDate.getTime()) {
+    if (prospect?.fechaCreacion && prospect.fechaCreacion.getTime() > conversionDate.getTime()) {
       throw new BadRequestException('No se puede completar la instalacion: la fecha de creacion del prospecto es futura');
     }
 
-    const conversionDays = Math.max(
-      0,
-      Math.ceil((conversionDate.getTime() - prospect.fechaCreacion.getTime()) / (1000 * 60 * 60 * 24)),
-    );
+    const conversionDays = prospect?.fechaCreacion
+      ? Math.max(
+          0,
+          Math.ceil((conversionDate.getTime() - prospect.fechaCreacion.getTime()) / (1000 * 60 * 60 * 24)),
+        )
+      : null;
     const completionObservations = preserveInstallOrderMetadata(order.observaciones, dto.observaciones);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -189,15 +191,17 @@ export class WorkOrdersService {
         data: { estadoOperativo: 'Activo' },
       });
 
-      const updatedProspect = await tx.prospecto.update({
-        where: { idProspecto: prospect.idProspecto },
-        data: {
-          estadoPipeline: 'Servicio Activo',
-          motivoPerdida: null,
-          fechaConversion: conversionDate,
-          tiempoConversionDias: conversionDays,
-        },
-      });
+      const updatedProspect = prospect
+        ? await tx.prospecto.update({
+            where: { idProspecto: prospect.idProspecto },
+            data: {
+              estadoPipeline: 'Servicio Activo',
+              motivoPerdida: null,
+              fechaConversion: conversionDate,
+              tiempoConversionDias: conversionDays,
+            },
+          })
+        : null;
 
       await tx.historialOt.create({
         data: {
@@ -224,8 +228,8 @@ export class WorkOrdersService {
         idCliente: order.idCliente,
         estadoCliente: 'Activo',
         potenciaOpticaDbm: dto.potenciaOpticaDbm,
-        fechaCreacionProspecto: prospect.fechaCreacion.toISOString(),
-        fechaConversion: conversionDate.toISOString(),
+        fechaCreacionProspecto: prospect?.fechaCreacion?.toISOString() ?? null,
+        fechaConversion: prospect ? conversionDate.toISOString() : null,
         tiempoConversionDias: conversionDays,
         idServicio: order.idServicio,
       },

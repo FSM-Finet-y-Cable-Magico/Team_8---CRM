@@ -226,7 +226,7 @@ Dependencias de Login interno:
 - Generar conflictos de importacion circular entre features y componentes compartidos.
 - Romper Docker/HMR si se agregan nuevos entrypoints antes de separar correctamente el portal.
 - Sobrerrefactorizar: mover demasiadas piezas en un solo commit haria dificil detectar regresiones.
-- CustomersPanel fue extraÃ­do estructuralmente sin rediseÃ±o. Queda pendiente una fase UX/funcional posterior para transformar Gestionar cliente en un flujo secuencial coherente con Gestionar prospecto. El flujo futuro debe permitir: Cliente â†’ Servicio â†’ Orden de instalaciÃ³n â†’ OT â†’ Cierre tÃ©cnico, mostrando acciones segÃºn estado y evitando botones sin destino funcional.
+- CustomersPanel fue extraído estructuralmente y luego recibió una fase UX/funcional controlada: Gestionar cliente ahora prioriza un flujo por servicio contratado, muestra acciones según estado y permite generar una orden de instalación desde un servicio pendiente. El cierre técnico se mantiene en Órdenes de Trabajo. Pendiente posterior: separar Portal Cliente como app independiente.
 
 
 ## 8. Estructura objetivo para frontend/

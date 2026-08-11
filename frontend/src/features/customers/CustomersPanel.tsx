@@ -7,6 +7,7 @@ import {
   CustomerRequest,
   CustomerService,
   DigitalContract,
+  InstallAvailability,
   MonitoringStatus,
   OperationalObservation,
   PaymentZone,
@@ -16,12 +17,14 @@ import {
 } from '../../api';
 import { captureOriginOptions, equipmentModeOptions, serviceStatusOptions, serviceTypeOptions } from '../../constants';
 import {
+  addYearsToInputDate,
   dateInputValue,
   emptyServiceForm,
   formatConnectionType,
   formatDateOnly,
   formatDateTime,
   formatWorkOrderValue,
+  normalizeWorkOrderValue,
   normalizeRutInput,
   technicalEntries,
 } from '../../lib';
@@ -48,6 +51,48 @@ type CustomerHistory = {
   contratosDigitales?: DigitalContract[];
   auditoria: Array<{ idLog: string; accion: string; fechaHora: string | null }>;
 };
+type CustomerServiceWorkOrder = NonNullable<CustomerService['ordenes']>[number];
+
+const CLOSED_INSTALL_ORDER_STATES = ['completada', 'cancelada'];
+
+function emptyServiceInstallOrderForm() {
+  return {
+    tipoConexion: '',
+    fechaProgramada: '',
+    horaVisita: '',
+    prioridad: 'Media',
+    observaciones: '',
+  };
+}
+
+function normalizeServiceStatus(value?: string | null) {
+  return (value ?? '')
+    .trim()
+    .toLocaleLowerCase('es-CL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isPendingInstallationService(service?: CustomerService | null) {
+  const normalized = normalizeServiceStatus(service?.estadoOperativo);
+
+  return normalized === 'pendiente' || (normalized.includes('pendiente') && normalized.includes('instalacion'));
+}
+
+function isOpenInstallOrder(order: CustomerServiceWorkOrder) {
+  return normalizeWorkOrderValue(order.tipoOt) === 'instalacion' &&
+    !CLOSED_INSTALL_ORDER_STATES.includes(normalizeWorkOrderValue(order.estado));
+}
+
+function formatServiceWorkOrderCode(order?: CustomerServiceWorkOrder | null) {
+  const code = order?.codigoSeguimiento?.trim();
+
+  if (code) {
+    return code;
+  }
+
+  return order ? `OT-INS-${String(order.idOt).padStart(6, '0')}` : '-';
+}
 
 export function CustomersPanel({
   customers,
@@ -118,11 +163,29 @@ export function CustomersPanel({
   const [serviceMonitoringStatus, setServiceMonitoringStatus] = useState<MonitoringStatus | null>(null);
   const [tvipCredentials, setTvipCredentials] = useState<TvipCredentialSummary[]>([]);
   const [tvipTempPassword, setTvipTempPassword] = useState<{ idContrato: number; usuario: string | null; password: string } | null>(null);
+  const [installOrderForm, setInstallOrderForm] = useState(emptyServiceInstallOrderForm());
+  const [installAvailability, setInstallAvailability] = useState<InstallAvailability | null>(null);
+  const [installTechnicianId, setInstallTechnicianId] = useState('');
+  const [installOrderStatus, setInstallOrderStatus] = useState('');
+  const [installOrderError, setInstallOrderError] = useState('');
 
   const visibleCustomers = searchResults ?? customers;
   const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
+  const today = dateInputValue(new Date());
+  const latestInstallDate = addYearsToInputDate(today, 1);
+  const selectedServiceInstallOrders = useMemo(
+    () => (selectedService?.ordenes ?? []).filter((order) => normalizeWorkOrderValue(order.tipoOt) === 'instalacion'),
+    [selectedService?.idServicio, selectedService?.ordenes],
+  );
+  const selectedServicePendingInstallOrder =
+    selectedServiceInstallOrders.find((order) => isOpenInstallOrder(order)) ?? null;
+  const selectedServiceCanGenerateInstallOrder =
+    permissions.createInstallOrders &&
+    Boolean(selectedService) &&
+    isPendingInstallationService(selectedService) &&
+    !selectedServicePendingInstallOrder;
   const contractOptions = selectedCustomer?.contratos ?? [];
   const customerCompanyId = scope !== 'consolidado'
     ? Number(scope)
@@ -159,6 +222,11 @@ export function CustomersPanel({
   useEffect(() => {
     if (!selectedService) {
       setServiceUpdateForm(emptyServiceForm());
+      setInstallOrderForm(emptyServiceInstallOrderForm());
+      setInstallAvailability(null);
+      setInstallTechnicianId('');
+      setInstallOrderStatus('');
+      setInstallOrderError('');
       return;
     }
 
@@ -184,6 +252,11 @@ export function CustomersPanel({
       numeroPoste: String(technicalData.numeroPoste ?? ''),
       caracteristicasComerciales: String(technicalData.caracteristicasComerciales ?? ''),
     });
+    setInstallOrderForm(emptyServiceInstallOrderForm());
+    setInstallAvailability(null);
+    setInstallTechnicianId('');
+    setInstallOrderStatus('');
+    setInstallOrderError('');
   }, [selectedService?.idServicio]);
 
   useEffect(() => {
@@ -580,6 +653,145 @@ export function CustomersPanel({
     }
   }
 
+  function updateInstallOrderSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
+    setInstallOrderForm((current) => ({ ...current, [field]: value }));
+    setInstallAvailability(null);
+    setInstallTechnicianId('');
+    setInstallOrderStatus('');
+    setInstallOrderError('');
+  }
+
+  function validateServiceInstallOrderFields() {
+    if (!selectedService) {
+      return 'Selecciona un servicio para generar la orden de instalación.';
+    }
+
+    if (!isPendingInstallationService(selectedService)) {
+      return 'La orden de instalación solo puede generarse para servicios pendientes de instalación.';
+    }
+
+    if (selectedServicePendingInstallOrder) {
+      return `El servicio ya tiene la orden ${formatServiceWorkOrderCode(selectedServicePendingInstallOrder)} pendiente.`;
+    }
+
+    if (!installOrderForm.tipoConexion || !installOrderForm.fechaProgramada || !installOrderForm.horaVisita) {
+      return 'Completa tipo de conexión, fecha y hora de la visita.';
+    }
+
+    if (installOrderForm.fechaProgramada < today) {
+      return 'La fecha de instalación no puede ser anterior a hoy.';
+    }
+
+    if (installOrderForm.fechaProgramada > latestInstallDate) {
+      return 'La fecha de instalación no puede superar un año desde hoy.';
+    }
+
+    return '';
+  }
+
+  async function checkServiceInstallAvailability() {
+    setInstallOrderStatus('');
+    setInstallOrderError('');
+    const validationError = validateServiceInstallOrderFields();
+
+    if (validationError) {
+      setInstallOrderError(validationError);
+      return;
+    }
+
+    if (!selectedService) {
+      return;
+    }
+
+    try {
+      const { data } = await api.get<InstallAvailability>(
+        `/services/${selectedService.idServicio}/install-availability`,
+        {
+          params: {
+            fechaProgramada: installOrderForm.fechaProgramada,
+            horaVisita: installOrderForm.horaVisita,
+          },
+        },
+      );
+      setInstallAvailability(data);
+      setInstallTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
+
+      if (data.tecnicosDisponibles.length) {
+        setInstallOrderStatus(data.mensaje);
+      } else {
+        setInstallOrderError(data.mensaje);
+      }
+    } catch (err) {
+      setInstallAvailability(null);
+      setInstallTechnicianId('');
+      setInstallOrderError(apiErrorMessage(err));
+    }
+  }
+
+  function selectServiceInstallAlternative(alternative: InstallAvailability['alternativas'][number]) {
+    setInstallOrderForm((current) => ({
+      ...current,
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+    }));
+    setInstallAvailability({
+      fechaProgramada: alternative.fechaProgramada,
+      horaVisita: alternative.horaVisita,
+      tecnicosDisponibles: alternative.tecnicosDisponibles,
+      alternativas: [],
+      mensaje: 'Horario alternativo seleccionado. Confirma el técnico asignado.',
+    });
+    setInstallTechnicianId(
+      alternative.tecnicosDisponibles[0] ? String(alternative.tecnicosDisponibles[0].idTecnico) : '',
+    );
+    setInstallOrderError('');
+    setInstallOrderStatus('Horario alternativo seleccionado. Confirma el técnico asignado.');
+  }
+
+  async function createServiceInstallOrder() {
+    setInstallOrderStatus('');
+    setInstallOrderError('');
+    const validationError = validateServiceInstallOrderFields();
+
+    if (validationError) {
+      setInstallOrderError(validationError);
+      return;
+    }
+
+    if (!selectedService || !selectedCustomer) {
+      return;
+    }
+
+    if (!installTechnicianId) {
+      setInstallOrderError('Verifica la disponibilidad y selecciona un técnico antes de crear la orden.');
+      return;
+    }
+
+    try {
+      const { data } = await api.post<{
+        orden: {
+          idOt: number;
+          codigoSeguimiento: string | null;
+          tecnico: { nombreCompleto: string };
+        };
+        servicio: CustomerService;
+      }>(`/services/${selectedService.idServicio}/install-order`, {
+        ...installOrderForm,
+        idTecnico: Number(installTechnicianId),
+      });
+      setInstallOrderStatus(
+        `Orden ${data.orden.codigoSeguimiento ?? formatServiceWorkOrderCode(data.orden as CustomerServiceWorkOrder)} creada y asignada a ${data.orden.tecnico.nombreCompleto}.`,
+      );
+      setInstallOrderForm(emptyServiceInstallOrderForm());
+      setInstallAvailability(null);
+      setInstallTechnicianId('');
+      await loadServicesForCustomer(selectedCustomer.idCliente, true, data.servicio.idServicio);
+      onChanged();
+    } catch (err) {
+      setInstallOrderError(apiErrorMessage(err));
+    }
+  }
+
   return (
     <section className="customers-module">
       <section className="customers-list-panel">
@@ -700,6 +912,208 @@ export function CustomersPanel({
                 >
                   Observaciones
                 </button>
+              )}
+            </section>
+
+            <section className="workflow-panel customer-service-workflow">
+              <div className="section-heading">
+                <h3>Flujo por servicio contratado</h3>
+                <p>Selecciona un servicio para ver su etapa actual y ejecutar solo las acciones disponibles.</p>
+              </div>
+
+              {services.length ? (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Servicio</th>
+                        <th>Estado</th>
+                        <th>Plan</th>
+                        <th>Dirección</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {services.map((service) => (
+                        <tr key={`workflow-service-${service.idServicio}`}>
+                          <td>{service.tipoServicio}</td>
+                          <td><StatusBadge value={service.estadoOperativo} /></td>
+                          <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
+                          <td>{service.direccion?.direccionCompleta ?? '-'}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="secondary compact"
+                              onClick={() => setSelectedServiceId(service.idServicio)}
+                            >
+                              {selectedService?.idServicio === service.idServicio ? 'Seleccionado' : 'Ver perfil'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="inline-status">Este cliente aún no tiene servicios registrados para gestionar.</p>
+              )}
+
+              {selectedService && (
+                <article className="customer-feature-card stack">
+                  <header className="section-heading compact-heading">
+                    <div>
+                      <h3>Servicio #{selectedService.idServicio}</h3>
+                      <p>
+                        {selectedService.tipoServicio} - {selectedService.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}
+                      </p>
+                    </div>
+                    <StatusBadge value={selectedService.estadoOperativo} />
+                  </header>
+
+                  <div className="history-grid">
+                    <HistoryBox title="Dirección" value={selectedService.direccion?.direccionCompleta ?? 'Sin dirección'} />
+                    <HistoryBox title="Equipos" value={selectedService.equipos?.length ?? 0} />
+                    <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
+                    <HistoryBox title="Órdenes" value={selectedService.ordenes?.length ?? 0} />
+                  </div>
+
+                  {selectedServicePendingInstallOrder ? (
+                    <section className="history-list">
+                      <h3>Orden de instalación pendiente</h3>
+                      <p>
+                        {formatServiceWorkOrderCode(selectedServicePendingInstallOrder)} - {formatWorkOrderValue(selectedServicePendingInstallOrder.estado)}
+                      </p>
+                      <p className="detail-line">
+                        Visita: {formatDateOnly(selectedServicePendingInstallOrder.fechaProgramada)}.
+                        Técnico: {selectedServicePendingInstallOrder.idTecnico ? `Usuario ${selectedServicePendingInstallOrder.idTecnico}` : 'Sin asignar'}.
+                      </p>
+                      <p className="inline-status">El cierre técnico debe realizarse desde Órdenes de Trabajo.</p>
+                    </section>
+                  ) : isPendingInstallationService(selectedService) ? (
+                    <section className="history-list">
+                      <h3>Generar orden de instalación</h3>
+                      <p className="detail-line">
+                        El servicio está pendiente de instalación. Agenda la visita y luego ciérrala desde Órdenes de Trabajo.
+                      </p>
+                      {!permissions.createInstallOrders && (
+                        <p className="alert">No tienes permisos para generar órdenes de instalación.</p>
+                      )}
+                      <div className="install-form-grid">
+                        <label>
+                          Tipo de conexión
+                          <select
+                            value={installOrderForm.tipoConexion}
+                            disabled={!selectedServiceCanGenerateInstallOrder}
+                            onChange={(event) => {
+                              setInstallOrderForm((current) => ({ ...current, tipoConexion: event.target.value }));
+                              setInstallOrderError('');
+                            }}
+                          >
+                            <option value="">Seleccionar tipo de conexión</option>
+                            <option value="Fibra Optica">Fibra Óptica</option>
+                            <option value="Television">Televisión</option>
+                          </select>
+                        </label>
+                        <label>
+                          Fecha de la visita
+                          <input
+                            type="date"
+                            min={today}
+                            max={latestInstallDate}
+                            disabled={!selectedServiceCanGenerateInstallOrder}
+                            value={installOrderForm.fechaProgramada}
+                            onChange={(event) => updateInstallOrderSchedule('fechaProgramada', event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Hora de la visita
+                          <input
+                            type="time"
+                            disabled={!selectedServiceCanGenerateInstallOrder}
+                            value={installOrderForm.horaVisita}
+                            onChange={(event) => updateInstallOrderSchedule('horaVisita', event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Prioridad
+                          <select
+                            value={installOrderForm.prioridad}
+                            disabled={!selectedServiceCanGenerateInstallOrder}
+                            onChange={(event) => setInstallOrderForm((current) => ({ ...current, prioridad: event.target.value }))}
+                          >
+                            <option value="Alta">Alta</option>
+                            <option value="Media">Media</option>
+                            <option value="Baja">Baja</option>
+                          </select>
+                        </label>
+                        <label className="full-width-field">
+                          Observaciones de agenda
+                          <textarea
+                            maxLength={300}
+                            disabled={!selectedServiceCanGenerateInstallOrder}
+                            value={installOrderForm.observaciones}
+                            onChange={(event) => setInstallOrderForm((current) => ({ ...current, observaciones: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={!selectedServiceCanGenerateInstallOrder}
+                        onClick={() => void checkServiceInstallAvailability()}
+                      >
+                        Verificar disponibilidad técnica
+                      </button>
+
+                      {installAvailability?.tecnicosDisponibles.length ? (
+                        <label>
+                          Técnico asignado
+                          <select value={installTechnicianId} onChange={(event) => setInstallTechnicianId(event.target.value)}>
+                            {installAvailability.tecnicosDisponibles.map((technician) => (
+                              <option key={technician.idTecnico} value={technician.idTecnico}>
+                                {technician.nombreCompleto}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+
+                      {installAvailability && !installAvailability.tecnicosDisponibles.length && installAvailability.alternativas.length > 0 && (
+                        <div className="alternative-slots">
+                          <strong>Horarios alternativos sugeridos</strong>
+                          <div className="button-row">
+                            {installAvailability.alternativas.map((alternative) => (
+                              <button
+                                key={`${alternative.fechaProgramada}-${alternative.horaVisita}`}
+                                type="button"
+                                className="secondary compact"
+                                onClick={() => selectServiceInstallAlternative(alternative)}
+                              >
+                                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} técnico(s))
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={!selectedServiceCanGenerateInstallOrder || !installTechnicianId}
+                        onClick={() => void createServiceInstallOrder()}
+                      >
+                        Generar orden de instalación
+                      </button>
+                      {installOrderError && <p className="alert">{installOrderError}</p>}
+                      {installOrderStatus && <p className="inline-status">{installOrderStatus}</p>}
+                    </section>
+                  ) : normalizeServiceStatus(selectedService.estadoOperativo).includes('suspendido') ? (
+                    <p className="alert">Servicio suspendido. Revisa Cobranza antes de coordinar nuevas acciones operativas.</p>
+                  ) : normalizeServiceStatus(selectedService.estadoOperativo) === 'activo' ? (
+                    <p className="inline-status">Servicio activo. Las acciones disponibles se concentran en soporte, observaciones, equipos y datos técnicos.</p>
+                  ) : (
+                    <p className="inline-status">No hay acciones de instalación disponibles para el estado actual del servicio.</p>
+                  )}
+                </article>
               )}
             </section>
 

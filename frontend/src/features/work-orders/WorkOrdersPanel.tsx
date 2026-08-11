@@ -20,6 +20,9 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
   const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
   const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
   const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
+  const selectedOrderHasInstallContext = Boolean(selectedOrder?.prospecto?.fechaCreacion || selectedOrder?.idServicio);
+  const selectedOrderCanCompleteInstallation =
+    selectedOrderIsInstallation && !selectedOrderIsCompleted && selectedOrderHasInstallContext;
 
   useEffect(() => {
     setForm({ potenciaOpticaDbm: '', observaciones: '', estadoFinalServicio: 'Activo' });
@@ -83,11 +86,15 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
         potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
         observaciones: form.observaciones,
       });
-      setStatus(
-        `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
-        `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
-        `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
-      );
+      if (data.prospect) {
+        setStatus(
+          `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
+          `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
+          `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
+        );
+      } else {
+        setStatus('Instalación completada y servicio activado desde la orden de trabajo.');
+      }
       onChanged();
     } catch (err) {
       setStatus(apiErrorMessage(err));
@@ -259,8 +266,8 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                     }
                   />
                 </div>
-                {!selectedOrder.prospecto?.fechaCreacion && (
-                  <p className="alert">No se puede completar la instalación: falta la fecha de creación del prospecto.</p>
+                {!selectedOrderHasInstallContext && (
+                  <p className="alert">No se puede completar la instalación: falta prospecto o servicio asociado.</p>
                 )}
                 <div className="workflow-grid work-order-technical-grid">
                   <label className="work-order-technical-field">
@@ -289,7 +296,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 <button
                   type="button"
                   className="work-order-complete-button"
-                  disabled={selectedOrderIsCompleted || !selectedOrder.prospecto?.fechaCreacion}
+                  disabled={!selectedOrderCanCompleteInstallation}
                   onClick={completeInstallation}
                 >
                   Confirmar instalación y activar cliente
