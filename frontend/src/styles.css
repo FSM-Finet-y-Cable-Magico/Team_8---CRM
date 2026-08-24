@@ -3320,26 +3320,10 @@ button.profile-menu-item.danger:hover {
 .inventory-activity-grid .inventory-data-panel:last-child .compact-list-item strong { color: #66558e; }
 .inventory-activity-grid .compact-list-item span { color: #78877f; font-size: .78rem; }
 
-/* Actividad reciente: vuelve a un fondo neutral para no competir con el contenido. */
 .inventory-activity-grid .inventory-data-panel:first-child,
 .inventory-activity-grid .inventory-data-panel:last-child { background: #fff; }
 .inventory-activity-grid .compact-list-item strong { color: #384d44; }
 .inventory-activity-grid .inventory-data-panel:last-child .compact-list-item strong { color: #384d44; }
-
-/* Dashboard: superficies tonales, sin la repetición de tarjetas blancas. */
-.dashboard-home { gap: 24px; }
-.dashboard-home .stat-grid { gap: 12px; }
-.dashboard-stat-card-link {
-  border: 0;
-  border-left: 3px solid var(--stat-accent);
-  border-radius: 12px;
-  background: linear-gradient(100deg, color-mix(in srgb, var(--stat-soft) 88%, transparent), transparent 72%);
-  box-shadow: none;
-}
-.dashboard-stat-card-link:hover { border-color: var(--stat-accent); background: linear-gradient(100deg, var(--stat-soft), transparent 78%); box-shadow: none; }
-.dashboard-home .dashboard-insights .panel { border: 1px solid #dfe8e4; border-radius: 12px; background: rgba(250, 252, 251, .68); box-shadow: none; }
-.dashboard-home .quick-action-card { border: 0; border-bottom: 1px solid #d7e3de; border-radius: 0; background: transparent; box-shadow: none; }
-.dashboard-home .quick-action-card:hover { background: color-mix(in srgb, var(--action-soft) 48%, transparent); box-shadow: none; }
 
 @media (max-width: 760px) {
   .inventory-activity-grid .inventory-data-panel + .inventory-data-panel {
