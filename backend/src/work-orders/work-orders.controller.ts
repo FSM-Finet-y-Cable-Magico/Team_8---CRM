@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
+import { CompleteRepairOrderDto } from './dto/complete-repair-order.dto';
 import { WorkOrdersService } from './work-orders.service';
 
 @Controller('work-orders')
@@ -27,5 +28,15 @@ export class WorkOrdersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.workOrdersService.completeInstallation(id, dto, user);
+  }
+
+  @Patch(':id/complete-repair')
+  @Roles(...ACCESS_ROLES.UPDATE_TICKET_STATUS)
+  completeRepair(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CompleteRepairOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.workOrdersService.completeRepair(id, dto, user);
   }
 }

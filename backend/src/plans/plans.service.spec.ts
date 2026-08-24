@@ -11,11 +11,13 @@ const commercial: AuthUser = {
 };
 
 describe('PlansService', () => {
+  const audit = { record: jest.fn() };
+
   it('limita los planes a la empresa de un usuario no administrador', async () => {
     const prisma = {
       plan: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const service = new PlansService(prisma as never);
+    const service = new PlansService(prisma as never, audit as never);
 
     await service.list(commercial, 'consolidado');
 
@@ -27,7 +29,7 @@ describe('PlansService', () => {
   });
 
   it('rechaza usuarios no administradores sin empresa asignada', () => {
-    const service = new PlansService({} as never);
+    const service = new PlansService({} as never, audit as never);
 
     expect(() => service.list({ ...commercial, idEmpresa: null })).toThrow(BadRequestException);
   });

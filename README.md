@@ -50,16 +50,19 @@ npm run prisma:generate
 Desde la raiz del proyecto:
 
 ```powershell
-docker compose up --build
+npm run docker:local
 ```
 
 Servicios esperados:
 
 | Servicio | URL / puerto |
 | --- | --- |
-| Frontend | `http://localhost:5173` |
+| CRM interno | `http://localhost:5173` |
+| Portal Cliente | `http://localhost:5174` |
 | Backend API | `http://localhost:3000/api` |
 | PostgreSQL | `localhost:5432` o el valor definido en `POSTGRES_PORT` |
+
+El CRM interno es para empleados de FiNet/Cable Magico. El Portal Cliente es una app separada para clientes finales y se abre desde el login del CRM mediante `VITE_PORTAL_URL`.
 
 El contenedor de PostgreSQL carga automaticamente los scripts iniciales:
 
@@ -70,8 +73,6 @@ db/init/03_seed.sql
 db/init/04_seed_demo.sql
 ```
 
-
-
 Usuarios demo:
 
 ```text
@@ -81,12 +82,9 @@ soporte@finet.local    (rol Soporte)
 terreno@finet.local    (rol Terreno)
 ```
 
-
-
 Guia detallada: `docs/puesta-en-marcha-docker.md`.
 
 ---
-
 ## Puesta en marcha local sin Docker
 
 1. Agrega PostgreSQL 15 al PATH o usa la ruta absoluta:

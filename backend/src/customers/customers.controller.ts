@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { CustomersService } from './customers.service';
+import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
 @Controller('customers')
@@ -39,5 +40,15 @@ export class CustomersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.customersService.updateStatus(id, dto, user);
+  }
+
+  @Patch(':id/technical-data')
+  @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
+  updateTechnicalData(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCustomerTechnicalDataDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.customersService.updateTechnicalData(id, dto, user);
   }
 }

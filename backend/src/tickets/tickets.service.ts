@@ -2,9 +2,11 @@
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
+import { generateWorkOrderCode } from '../common/work-order-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { CreateTicketDto } from './dto/create-ticket.dto';
+import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
 import { TechnicalNoteDto } from './dto/technical-note.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
@@ -33,19 +35,56 @@ export class TicketsService {
 
     const customerIds = [...new Set(tickets.map((ticket) => ticket.idCliente).filter((id): id is number => Boolean(id)))];
     const categoryIds = [...new Set(tickets.map((ticket) => ticket.idCategoria))];
-    const [customers, categories] = await Promise.all([
+    const ticketIds = tickets.map((ticket) => ticket.idTicket);
+    const [customers, categories, workOrders] = await Promise.all([
       customerIds.length ? this.prisma.cliente.findMany({ where: { idCliente: { in: customerIds } } }) : [],
       categoryIds.length ? this.prisma.categoriaFalla.findMany({ where: { idCategoria: { in: categoryIds } } }) : [],
+      ticketIds.length
+        ? this.prisma.ordenTrabajo.findMany({
+            where: { idTicket: { in: ticketIds } },
+            orderBy: { fechaCreacion: 'desc' },
+            select: {
+              idOt: true,
+              idTicket: true,
+              idCliente: true,
+              idServicio: true,
+              codigoSeguimiento: true,
+              tipoOt: true,
+              prioridad: true,
+              estado: true,
+              fechaProgramada: true,
+              fechaCompletada: true,
+              observaciones: true,
+            },
+          })
+        : [],
     ]);
     const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
     const categoryById = new Map(categories.map((category) => [category.idCategoria, category]));
+    const workOrdersByTicket = new Map<number, typeof workOrders>();
 
-    return tickets.map((ticket) => ({
-      ...ticket,
-      cliente: ticket.idCliente ? customerById.get(ticket.idCliente) ?? null : null,
-      categoria: categoryById.get(ticket.idCategoria) ?? null,
-      observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
-    }));
+    for (const order of workOrders) {
+      if (!order.idTicket) {
+        continue;
+      }
+
+      const current = workOrdersByTicket.get(order.idTicket) ?? [];
+      current.push(order);
+      workOrdersByTicket.set(order.idTicket, current);
+    }
+
+    return tickets.map((ticket) => {
+      const ticketWorkOrders = workOrdersByTicket.get(ticket.idTicket) ?? [];
+
+      return {
+        ...ticket,
+        cliente: ticket.idCliente ? customerById.get(ticket.idCliente) ?? null : null,
+        categoria: categoryById.get(ticket.idCategoria) ?? null,
+        workOrders: ticketWorkOrders,
+        hasOpenWorkOrder: ticketWorkOrders.some((order) => order.estado !== 'Completada'),
+        observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
+      };
+    });
   }
 
   async create(dto: CreateTicketDto, currentUser: AuthUser) {
@@ -83,6 +122,136 @@ export class TicketsService {
       accion: 'CREAR_TICKET_PORTAL',
       origen: 'Portal',
     });
+  }
+
+  async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser) {
+    const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+
+    if (!ticket.idCliente) {
+      throw new BadRequestException('El ticket no tiene cliente asociado para generar una orden de trabajo');
+    }
+
+    if (['Resuelto', 'Cerrado'].includes(ticket.estado)) {
+      throw new BadRequestException('No se puede generar una orden de trabajo para un ticket ya cerrado o resuelto');
+    }
+
+    const existingOrder = await this.prisma.ordenTrabajo.findFirst({ where: { idTicket } });
+
+    if (existingOrder) {
+      throw new BadRequestException('Este ticket ya tiene una orden de trabajo asociada');
+    }
+
+    const cliente = await this.prisma.cliente.findUnique({ where: { idCliente: ticket.idCliente } });
+
+    if (!cliente) {
+      throw new BadRequestException('El cliente asociado al ticket no existe');
+    }
+
+    const idEmpresa = ticket.idEmpresa ?? cliente.idEmpresa;
+
+    if (!idEmpresa) {
+      throw new BadRequestException('El ticket no tiene empresa asociada');
+    }
+
+    const servicio = ticket.idServicio
+      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: ticket.idServicio } })
+      : null;
+
+    if (ticket.idServicio && !servicio) {
+      throw new BadRequestException('El servicio asociado al ticket no existe');
+    }
+
+    if (servicio && (servicio.idCliente !== ticket.idCliente || servicio.idEmpresa !== idEmpresa)) {
+      throw new BadRequestException('El servicio asociado al ticket no corresponde al cliente o empresa');
+    }
+
+    const technician = dto.idTecnico
+      ? await this.prisma.usuario.findUnique({ where: { idUsuario: dto.idTecnico } })
+      : null;
+
+    if (dto.idTecnico && !technician) {
+      throw new BadRequestException('El tecnico seleccionado no existe');
+    }
+
+    if (technician && technician.idEmpresa !== idEmpresa) {
+      throw new BadRequestException('El tecnico seleccionado no pertenece a la empresa del ticket');
+    }
+
+    const direccion = servicio?.idDireccion
+      ? await this.prisma.direccionServicio.findUnique({ where: { idDireccion: servicio.idDireccion } })
+      : await this.prisma.direccionServicio.findFirst({
+          where: { idCliente: ticket.idCliente, esPrincipal: true },
+          orderBy: { idDireccion: 'asc' },
+        });
+
+    const scheduledDate = dto.fechaProgramada ? this.parseScheduleDate(dto.fechaProgramada) : null;
+    const observations = this.buildTicketWorkOrderObservations(ticket, dto);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const createdOrder = await tx.ordenTrabajo.create({
+        data: {
+          idEmpresa,
+          idCliente: ticket.idCliente,
+          idTecnico: dto.idTecnico,
+          idDireccion: direccion?.idDireccion,
+          idServicio: ticket.idServicio,
+          idTicket,
+          tipoOt: dto.tipoOt ?? 'Reparacion',
+          prioridad: dto.prioridad ?? ticket.prioridad,
+          estado: 'Pendiente',
+          fechaCreacion: new Date(),
+          fechaProgramada: scheduledDate,
+          observaciones: observations,
+          resueltoRemotamente: false,
+        },
+      });
+      const order = await tx.ordenTrabajo.update({
+        where: { idOt: createdOrder.idOt },
+        data: { codigoSeguimiento: generateWorkOrderCode(createdOrder.tipoOt, createdOrder.idOt) },
+      });
+
+      const updatedTicket = await tx.ticket.update({
+        where: { idTicket },
+        data: {
+          estado: 'Escalado',
+          descripcion: `${ticket.descripcion ?? ''}\n\nDerivado a terreno mediante ${order.codigoSeguimiento ?? `OT #${order.idOt}`}`.trim(),
+        },
+      });
+
+      await tx.historialOt.create({
+        data: {
+          idOt: order.idOt,
+          idUsuario: currentUser.idUsuario,
+          estadoAnterior: null,
+          estadoNuevo: 'Pendiente',
+          observaciones: `OT generada desde ticket ${ticket.codigoSeguimiento ?? idTicket}`,
+          fechaHora: new Date(),
+        },
+      });
+
+      return { order, ticket: updatedTicket };
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'GENERAR_OT_DESDE_TICKET',
+      entidadAfectada: 'ticket',
+      idEntidadAfectada: idTicket,
+      valorAnterior: { estado: ticket.estado },
+      valorNuevo: {
+        estado: result.ticket.estado,
+        idOt: result.order.idOt,
+        codigoSeguimiento: result.order.codigoSeguimiento,
+        tipoOt: result.order.tipoOt,
+        idCliente: ticket.idCliente,
+        idServicio: ticket.idServicio,
+        idTecnico: dto.idTecnico,
+        fechaProgramada: dto.fechaProgramada,
+        horaVisita: dto.horaVisita,
+      },
+    });
+
+    return result;
   }
 
   async updateCategory(idTicket: number, dto: UpdateTicketCategoryDto, currentUser: AuthUser) {
@@ -138,6 +307,10 @@ export class TicketsService {
       throw new BadRequestException('Transicion de estado invalida');
     }
 
+    if (['Resuelto', 'Cerrado'].includes(dto.estado)) {
+      await this.assertNoPendingWorkOrderForClosure(idTicket);
+    }
+
     const updated = await this.prisma.ticket.update({
       where: { idTicket },
       data: {
@@ -161,6 +334,7 @@ export class TicketsService {
 
   async registerDiagnosis(idTicket: number, dto: RegisterDiagnosisDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    await this.assertNoPendingWorkOrderForClosure(idTicket);
 
     if (!dto.causaRaiz.trim()) {
       throw new BadRequestException('La causa raiz es obligatoria');
@@ -341,6 +515,48 @@ export class TicketsService {
     }
 
     return ticket;
+  }
+
+  private async assertNoPendingWorkOrderForClosure(idTicket: number) {
+    const pendingOrder = await this.prisma.ordenTrabajo.findFirst({
+      where: {
+        idTicket,
+        estado: { not: 'Completada' },
+      },
+    });
+
+    if (pendingOrder) {
+      throw new BadRequestException(
+        'El cierre debe realizarse desde la orden de trabajo asociada',
+      );
+    }
+  }
+
+  private parseScheduleDate(value: string) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Fecha de visita invalida');
+    }
+
+    const minimum = new Date('2020-01-01T00:00:00.000Z');
+
+    if (date < minimum) {
+      throw new BadRequestException('La fecha de visita debe ser posterior al 01-01-2020');
+    }
+
+    return date;
+  }
+
+  private buildTicketWorkOrderObservations(ticket: { codigoSeguimiento: string | null; descripcion: string | null }, dto: CreateTicketWorkOrderDto) {
+    return [
+      `Ticket=${ticket.codigoSeguimiento ?? 'Sin codigo'}`,
+      dto.horaVisita ? `HoraVisita=${dto.horaVisita}` : '',
+      ticket.descripcion ? `Reporte inicial: ${ticket.descripcion}` : '',
+      dto.observaciones?.trim() ? `Observaciones de agenda: ${dto.observaciones.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {

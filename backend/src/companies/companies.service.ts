@@ -42,6 +42,10 @@ export class CompaniesService {
       clientesActivos,
       ticketsCerrados,
       activeContracts,
+      solicitudesAbiertas,
+      solicitudesNoFactibles,
+      cambiosPlanRecientes,
+      origenCaptacion,
     ] = await Promise.all([
       this.prisma.cliente.count({ where: customerFilter }),
       this.prisma.prospecto.count({ where: companyFilter }),
@@ -120,6 +124,38 @@ export class CompaniesService {
         },
         take: 200,
       }),
+      this.prisma.solicitudCliente.count({
+        where: {
+          ...companyFilter,
+          estado: { notIn: ['Cerrada', 'Cancelada', 'No Factible'] },
+        },
+      }),
+      this.prisma.solicitudCliente.count({
+        where: {
+          ...companyFilter,
+          OR: [
+            { estado: 'No Factible' },
+            { factible: false },
+          ],
+        },
+      }),
+      this.prisma.historialCambioPlan.findMany({
+        where: companyFilter,
+        include: {
+          cliente: true,
+          planAnterior: true,
+          planNuevo: true,
+        },
+        orderBy: { fechaRegistro: 'desc' },
+        take: 8,
+      }),
+      this.prisma.cliente.groupBy({
+        by: ['origenContacto'],
+        where: customerFilter,
+        _count: { _all: true },
+        orderBy: { _count: { origenContacto: 'desc' } },
+        take: 8,
+      }),
     ]);
     const categoryCounts = ticketsCerrados.reduce<Record<number, number>>((accumulator, ticket) => {
       accumulator[ticket.idCategoria] = (accumulator[ticket.idCategoria] ?? 0) + 1;
@@ -181,7 +217,21 @@ export class CompaniesService {
         ticketsCerradosMensuales,
         churnRateMensual: churnBase ? Number(((churnBajasMensuales / churnBase) * 100).toFixed(2)) : 0,
         churnBajasMensuales,
+        solicitudesAbiertas,
+        solicitudesNoFactibles,
       },
+      cambiosPlanRecientes: cambiosPlanRecientes.map((change) => ({
+        idCambioPlan: change.idCambioPlan,
+        idContrato: change.idContrato,
+        cliente: change.cliente?.nombreCompleto ?? 'Cliente sin nombre',
+        planAnterior: change.planAnterior?.nombreComercial ?? null,
+        planNuevo: change.planNuevo.nombreComercial,
+        fechaRegistro: change.fechaRegistro,
+      })),
+      origenCaptacion: origenCaptacion.map((row) => ({
+        origen: row.origenContacto ?? 'Sin origen',
+        total: row._count._all,
+      })),
       ticketsCerradosPorTipo: Object.entries(categoryCounts).map(([idCategoria, total]) => ({
         idCategoria: Number(idCategoria),
         categoria: categoryById.get(Number(idCategoria))?.nombre ?? `Categoria ${idCategoria}`,

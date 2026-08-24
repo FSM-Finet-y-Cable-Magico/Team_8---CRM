@@ -1,4 +1,5 @@
-import { IsDateString, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsDateString, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class ContractPlanDto {
   @IsInt()
@@ -13,4 +14,20 @@ export class ContractPlanDto {
   @IsOptional()
   @IsDateString()
   fechaInicio?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  comuna?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  ciudad?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idZonaPago?: number;
 }
