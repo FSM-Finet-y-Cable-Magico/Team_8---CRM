@@ -112,7 +112,6 @@ export function CustomersPanel({
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [status, setStatus] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<Customer[] | null>(null);
   const [services, setServices] = useState<CustomerService[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
@@ -171,7 +170,20 @@ export function CustomersPanel({
   const [page, setPage] = useState(1);
   const [customerStatusFilter, setCustomerStatusFilter] = useState('');
 
-  const customerList = searchResults ?? customers;
+  const normalizedSearchTerm = normalizeWorkOrderValue(searchTerm);
+  const customerList = customers.filter((customer) => {
+    if (!normalizedSearchTerm) {
+      return true;
+    }
+
+    return [
+      customer.rut,
+      customer.nombreCompleto,
+      customer.telefono,
+      customer.email,
+      ...((customer.contratos ?? []).map((contract) => String(contract.idContrato))),
+    ].some((value) => normalizeWorkOrderValue(value).includes(normalizedSearchTerm));
+  });
   const customerStatusOptions = [...new Set(customerList.map((customer) => normalizeWorkOrderValue(customer.estado)).filter(Boolean))].sort();
   const visibleCustomers = customerStatusFilter
     ? customerList.filter((customer) => normalizeWorkOrderValue(customer.estado) === customerStatusFilter)
@@ -268,41 +280,11 @@ export function CustomersPanel({
   }, [selectedService?.idServicio]);
 
   useEffect(() => {
-    setSearchResults(null);
     setSearchTerm('');
     void loadPaymentZones(true);
   }, [scope]);
 
-  useEffect(() => { setPage(1); }, [customers.length, searchResults, customerStatusFilter]);
-
-  async function searchCustomers(event: FormEvent) {
-    event.preventDefault();
-    const term = searchTerm.trim();
-
-    if (!term) {
-      setSearchResults(null);
-      setStatus('');
-      return;
-    }
-
-    try {
-      const { data } = await api.get<Customer[]>('/customers', { params: { scope, query: term } });
-      setSearchResults(data);
-      setSelectedId(null);
-      setManagementOpen(false);
-      setStatus(data.length ? `${data.length} cliente(s) encontrado(s)` : 'No se encontraron clientes');
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  function clearSearch() {
-    setSearchTerm('');
-    setSearchResults(null);
-    setSelectedId(null);
-    setManagementOpen(false);
-    setStatus('');
-  }
+  useEffect(() => { setPage(1); }, [customers.length, searchTerm, customerStatusFilter]);
 
   function openCustomerManagement(customerId: number) {
     setSelectedId(customerId);
@@ -326,11 +308,6 @@ export function CustomersPanel({
     try {
       const { data } = await api.patch<Customer>(`/customers/${selectedCustomer.idCliente}/status`, { estado: statusValue });
       setStatusValue(data.estado);
-      setSearchResults((current) =>
-        current?.map((customer) =>
-          customer.idCliente === data.idCliente ? { ...customer, ...data } : customer,
-        ) ?? null,
-      );
       setStatus('Estado del cliente actualizado');
       onChanged();
     } catch (err) {
@@ -805,10 +782,10 @@ export function CustomersPanel({
   return (
     <section className="customers-module">
       <section className="customers-list-panel">
-        <div className="section-heading">
-          <h2>Clientes</h2>
+        <div className="section-heading customers-list-heading">
+          <h2>Clientes</h2><span>{visibleCustomers.length}</span>
         </div>
-        <form className="customer-search" onSubmit={searchCustomers}>
+        <div className="customer-search">
           <label>
             Buscar cliente
             <input
@@ -824,15 +801,7 @@ export function CustomersPanel({
               {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
             </select>
           </label>
-          <div className="button-row">
-            <button type="submit">Buscar</button>
-            {searchResults && (
-              <button type="button" className="secondary" onClick={clearSearch}>
-                Limpiar
-              </button>
-            )}
-          </div>
-        </form>
+        </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
         <div className="table-wrap customers-table-wrap">
           <table className="customers-table">
@@ -871,7 +840,7 @@ export function CustomersPanel({
         <TablePagination currentPage={page} totalItems={visibleCustomers.length} pageSize={pageSize} onPageChange={setPage} />
         {!visibleCustomers.length && (
           <p className="empty-state">
-            {searchResults ? 'No se encontraron clientes con los criterios ingresados.' : 'No hay clientes registrados para mostrar.'}
+            {searchTerm || customerStatusFilter ? 'No se encontraron clientes con los filtros seleccionados.' : 'No hay clientes registrados para mostrar.'}
           </p>
         )}
       </section>
