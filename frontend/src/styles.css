@@ -3292,6 +3292,10 @@ button.profile-menu-item.danger:hover {
   background: transparent;
 }
 
+.inventory-activity-grid .inventory-data-panel:first-child { background: linear-gradient(90deg, rgba(233, 246, 240, .65), transparent); }
+.inventory-activity-grid .inventory-data-panel:last-child { background: linear-gradient(90deg, rgba(242, 239, 251, .7), transparent); }
+.inventory-activity-grid .inventory-data-panel h3 { color: #49635a; font-weight: 650; }
+
 .inventory-activity-grid .inventory-data-panel + .inventory-data-panel {
   border-left: 1px solid #dce7e2;
 }
@@ -3312,6 +3316,9 @@ button.profile-menu-item.danger:hover {
 }
 
 .inventory-activity-grid .compact-list-item:last-child { border-bottom: 0; }
+.inventory-activity-grid .compact-list-item strong { color: #24725e; font-weight: 600; }
+.inventory-activity-grid .inventory-data-panel:last-child .compact-list-item strong { color: #66558e; }
+.inventory-activity-grid .compact-list-item span { color: #78877f; font-size: .78rem; }
 
 @media (max-width: 760px) {
   .inventory-activity-grid .inventory-data-panel + .inventory-data-panel {
