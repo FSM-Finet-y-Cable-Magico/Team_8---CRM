@@ -31,6 +31,8 @@ export function InstallationsPanel({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('');
+  const [historyPriorityFilter, setHistoryPriorityFilter] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
   const selectedProspect = installationProspects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const prospectByCustomerCompany = useMemo(() => {
@@ -52,15 +54,21 @@ export function InstallationsPanel({
     () => installationOrders.filter((order) => ['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado))),
     [installationOrders],
   );
-  const filteredInstallationOrders = historyFilter === 'active'
+  const historyBaseOrders = historyFilter === 'active'
     ? pendingInstallationOrders
     : historyFilter === 'completed'
       ? completedInstallationOrders
       : installationOrders;
+  const historyStatusOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.estado)).filter(Boolean))].sort();
+  const historyPriorityOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.prioridad)).filter(Boolean))].sort();
+  const filteredInstallationOrders = historyBaseOrders.filter((order) => (
+    (!historyStatusFilter || normalizeWorkOrderValue(order.estado) === historyStatusFilter)
+    && (!historyPriorityFilter || normalizeWorkOrderValue(order.prioridad) === historyPriorityFilter)
+  ));
   const historyPageSize = 20;
   const paginatedInstallationOrders = filteredInstallationOrders.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
 
-  useEffect(() => { setHistoryPage(1); }, [historyFilter, filteredInstallationOrders.length]);
+  useEffect(() => { setHistoryPage(1); }, [historyFilter, historyStatusFilter, historyPriorityFilter, filteredInstallationOrders.length]);
 
   useEffect(() => {
     if (!focusedProspectId) {
@@ -132,7 +140,22 @@ export function InstallationsPanel({
         </details>
       </div>
       <section className="installation-history">
-        <div className="installation-history-header"><h2>Historial de instalaciones</h2><div className="installation-history-filters"><button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button><button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button><button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button></div></div>
+        <div className="installation-history-header">
+          <h2>Historial de instalaciones</h2>
+          <div className="installation-history-filters">
+            <button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button>
+            <button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button>
+            <button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button>
+            <select aria-label="Filtrar historial por estado" value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value)}>
+              <option value="">Todos los estados</option>
+              {historyStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
+            </select>
+            <select aria-label="Filtrar historial por prioridad" value={historyPriorityFilter} onChange={(event) => setHistoryPriorityFilter(event.target.value)}>
+              <option value="">Todas las prioridades</option>
+              {historyPriorityOptions.map((priority) => <option key={priority} value={priority}>{formatWorkOrderValue(priority)}</option>)}
+            </select>
+          </div>
+        </div>
         <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{paginatedInstallationOrders.map((order) => { const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
         <TablePagination currentPage={historyPage} totalItems={filteredInstallationOrders.length} pageSize={historyPageSize} onPageChange={setHistoryPage} />
       </section>

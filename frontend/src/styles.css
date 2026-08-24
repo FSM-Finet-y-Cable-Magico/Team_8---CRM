@@ -3815,3 +3815,20 @@ button.profile-menu-item.danger:hover {
   .billing-summary-strip .stat-card:first-child { border-top: 0; }
   .billing-workspace-section .workflow-grid { grid-template-columns: 1fr; gap: 26px; }
 }
+
+/* Listados operativos: filtros visibles y valores consistentes. */
+.customers-list-panel .customer-search { grid-template-columns: minmax(260px, 1fr) minmax(185px, .45fr) auto; max-width: 1120px; }
+.customer-status-filter select { min-height: 40px; }
+.customers-table-wrap { width: min(1440px, 100%); margin: 0 auto; }
+.customers-table th,
+.customers-table td { text-align: center; }
+.customers-table .table-actions { justify-content: center; }
+.customer-current-status { color: #40524b; font-size: .82rem; font-weight: 500; }
+
+.installation-history-filters select { width: auto; min-width: 148px; min-height: 32px; border-color: #d8e5df; border-radius: 999px; padding: 0 30px 0 11px; color: #64736d; background-color: #fff; font-size: .75rem; }
+
+@media (max-width: 760px) {
+  .customers-list-panel .customer-search { grid-template-columns: 1fr; }
+  .customers-list-panel .customer-search .button-row { width: 100%; }
+  .installation-history-filters select { flex: 1 1 160px; }
+}

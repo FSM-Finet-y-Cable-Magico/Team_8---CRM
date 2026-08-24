@@ -169,8 +169,13 @@ export function CustomersPanel({
   const [installOrderStatus, setInstallOrderStatus] = useState('');
   const [installOrderError, setInstallOrderError] = useState('');
   const [page, setPage] = useState(1);
+  const [customerStatusFilter, setCustomerStatusFilter] = useState('');
 
-  const visibleCustomers = searchResults ?? customers;
+  const customerList = searchResults ?? customers;
+  const customerStatusOptions = [...new Set(customerList.map((customer) => normalizeWorkOrderValue(customer.estado)).filter(Boolean))].sort();
+  const visibleCustomers = customerStatusFilter
+    ? customerList.filter((customer) => normalizeWorkOrderValue(customer.estado) === customerStatusFilter)
+    : customerList;
   const pageSize = 20;
   const paginatedCustomers = visibleCustomers.slice((page - 1) * pageSize, page * pageSize);
   const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
@@ -268,7 +273,7 @@ export function CustomersPanel({
     void loadPaymentZones(true);
   }, [scope]);
 
-  useEffect(() => { setPage(1); }, [customers.length, searchResults]);
+  useEffect(() => { setPage(1); }, [customers.length, searchResults, customerStatusFilter]);
 
   async function searchCustomers(event: FormEvent) {
     event.preventDefault();
@@ -812,6 +817,13 @@ export function CustomersPanel({
               placeholder="Buscar por RUT, nombre, teléfono o contrato"
             />
           </label>
+          <label className="customer-status-filter">
+            Estado actual
+            <select value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
+              <option value="">Todos los estados</option>
+              {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
+            </select>
+          </label>
           <div className="button-row">
             <button type="submit">Buscar</button>
             {searchResults && (
@@ -822,8 +834,8 @@ export function CustomersPanel({
           </div>
         </form>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap customers-table-wrap">
+          <table className="customers-table">
             <thead>
               <tr>
                 <th>RUT</th>
@@ -842,7 +854,7 @@ export function CustomersPanel({
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
                   <td>{customerCompanyLabel(customer)}</td>
-                  <td><StatusBadge value={customer.estado} /></td>
+                  <td><span className="customer-current-status">{formatWorkOrderValue(customer.estado)}</span></td>
                   <td>{customer.origenContacto ?? '-'}</td>
                   <td>{customerMainPlan(customer)}</td>
                   <td>{customer.telefono ?? customer.email ?? '-'}</td>
