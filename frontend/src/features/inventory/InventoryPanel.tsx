@@ -202,7 +202,7 @@ export function InventoryPanel({
               )}
               </div>
               <div className="inventory-management-flow">
-                <details className="inventory-management-section" open>
+                <details className="inventory-management-section">
                   <summary><span>Operación del equipo<small>Estado, movimiento y bloqueo</small></span><ChevronDown size={17} /></summary>
                   <div className="inventory-management-section-content inventory-action-grid">
                 {permissions.manageInventory && <label>

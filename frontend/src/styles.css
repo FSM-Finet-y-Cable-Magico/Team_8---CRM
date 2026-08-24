@@ -3338,12 +3338,12 @@ button.profile-menu-item.danger:hover {
 .inventory-management-section > summary small { color: #74837c; font-size: .75rem; font-weight: 500; }
 .inventory-management-section > summary svg { color: #819089; transition: transform .18s ease; }
 .inventory-management-section[open] > summary svg { transform: rotate(180deg); }
-.inventory-management-section-content { padding: 14px 16px 16px; background: #f9fcfa; }
+.inventory-management-section-content { padding: 4px 18px 8px; background: transparent; }
 .inventory-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.inventory-action-grid > label { position: relative; display: grid; gap: 9px; min-width: 0; border: 1px solid #dfe8e4; border-radius: 12px; padding: 15px; color: #304139; background: #fff; font-size: .85rem; font-weight: 750; }
+.inventory-action-grid > label { position: relative; display: grid; gap: 9px; min-width: 0; border: 0; border-bottom: 1px solid #e1e9e5; border-radius: 0; padding: 14px 2px 16px; color: #304139; background: transparent; font-size: .85rem; font-weight: 750; }
 .inventory-action-grid > label input, .inventory-action-grid > label select { min-height: 40px; }
 .inventory-action-grid > label button { height: 42px; min-height: 42px; margin-top: 2px; font-size: .82rem; }
-.inventory-management-section:first-child .inventory-action-grid > label:last-child { border-color: #edd9cf; background: #fffaf7; }
+.inventory-management-section:first-child .inventory-action-grid > label:last-child { color: #784737; }
 
 @media (max-width: 680px) {
   .inventory-action-grid { grid-template-columns: 1fr; }
