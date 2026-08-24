@@ -12,7 +12,7 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
+import { type BillingOverview, type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
 import { expiryAlertKey, expiryUrgency, formatDateOnly } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import {
@@ -43,6 +43,12 @@ type DashboardExpiryAlert = ExpiryCustomerAlert & {
   idCliente?: number | null;
 };
 
+const clpFormatter = new Intl.NumberFormat('es-CL', {
+  style: 'currency',
+  currency: 'CLP',
+  maximumFractionDigits: 0,
+});
+
 type Summary = {
   metricas: {
     clientes: number;
@@ -68,6 +74,7 @@ export function DashboardHome({
   customers,
   tickets,
   workOrders,
+  billingOverview,
   permissions,
   onNavigate,
 }: {
@@ -76,6 +83,7 @@ export function DashboardHome({
   customers: Customer[];
   tickets: Ticket[];
   workOrders: WorkOrder[];
+  billingOverview: BillingOverview | null;
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
 }) {
@@ -86,6 +94,7 @@ export function DashboardHome({
     (order) => order.tipoOt === 'Instalacion' && !['Completada', 'Cerrada', 'Cancelada'].includes(order.estado),
   ).length;
   const openTickets = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
+  const overdueBalance = billingOverview?.morosos.reduce((total, invoice) => total + Number(invoice.saldo ?? 0), 0) ?? 0;
   const stats = [
     {
       label: 'Prospectos activos',
@@ -209,8 +218,13 @@ export function DashboardHome({
 
   return (
     <section className="dashboard-home">
-      <div className="page-heading">
-        <h1>Dashboard operativo</h1>
+      <div className="dashboard-overview-heading">
+        <div>
+          <span>Resumen operativo</span>
+          <h1>Panel general</h1>
+          <p>Una vista rápida del estado comercial, técnico y de atención.</p>
+        </div>
+        <span className="dashboard-overview-live">Actualizado en tiempo real</span>
       </div>
 
       <section className="stat-grid">
@@ -336,6 +350,43 @@ export function DashboardHome({
           )}
         </article>
       </section>
+
+      {permissions.viewBilling && (
+        <section className="dashboard-financial-summary" aria-label="Resumen de cobranza">
+          <div className="dashboard-financial-heading">
+            <div>
+              <span>Seguimiento financiero</span>
+              <h2>Resumen de cobranza</h2>
+            </div>
+            <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('billing')}>
+              Ver cobranza
+              <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="dashboard-financial-metrics">
+            <div>
+              <span>Saldo vencido</span>
+              <strong>{clpFormatter.format(overdueBalance)}</strong>
+              <small>Total pendiente de regularizar</small>
+            </div>
+            <div>
+              <span>Facturas vencidas</span>
+              <strong>{billingOverview?.metricas.facturasVencidas ?? 0}</strong>
+              <small>Documentos con atraso</small>
+            </div>
+            <div>
+              <span>Cortes programados</span>
+              <strong>{billingOverview?.metricas.clientesProgramadosCorte ?? 0}</strong>
+              <small>Requieren seguimiento</small>
+            </div>
+            <div>
+              <span>Clientes morosos</span>
+              <strong>{billingOverview?.metricas.clientesMorosos ?? summary?.metricas.clientesMorosos ?? 0}</strong>
+              <small>Con deuda o suspensión</small>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="dashboard-actions">
         <div className="section-heading">
