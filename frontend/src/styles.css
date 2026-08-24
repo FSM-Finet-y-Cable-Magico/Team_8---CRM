@@ -3261,7 +3261,7 @@ button.profile-menu-item.danger:hover {
 .table-pagination {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
   margin-top: 16px;
   color: #74817b;
@@ -3269,10 +3269,53 @@ button.profile-menu-item.danger:hover {
 }
 
 .table-pagination > div { display: flex; align-items: center; gap: 6px; }
+.table-pagination > span { display: none; }
 .table-pagination button { min-width: 34px; min-height: 34px; padding: 0 8px; }
 .table-pagination .table-pagination-page { border: 1px solid #dbe6e1; color: #53635c; background: #fff; }
 .table-pagination .table-pagination-page.active { border-color: #bbddcf; color: #176d58; background: #e7f5ee; font-weight: 800; }
 
 @media (max-width: 560px) {
   .table-pagination { align-items: flex-start; flex-direction: column; }
+}
+
+/* Actividad reciente: información compacta, sin el efecto de tarjetas anidadas. */
+.inventory-activity-grid {
+  gap: 0;
+  padding: 4px 0 0;
+  background: transparent;
+}
+
+.inventory-activity-grid .inventory-data-panel {
+  border: 0;
+  border-radius: 0;
+  padding: 14px 20px 8px;
+  background: transparent;
+}
+
+.inventory-activity-grid .inventory-data-panel + .inventory-data-panel {
+  border-left: 1px solid #dce7e2;
+}
+
+.inventory-activity-grid .inventory-data-panel h3 {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #dce7e2;
+}
+
+.inventory-activity-grid .compact-list { gap: 0; }
+
+.inventory-activity-grid .compact-list-item {
+  border: 0;
+  border-bottom: 1px solid #e4ece8;
+  border-radius: 0;
+  padding: 13px 2px;
+  background: transparent;
+}
+
+.inventory-activity-grid .compact-list-item:last-child { border-bottom: 0; }
+
+@media (max-width: 760px) {
+  .inventory-activity-grid .inventory-data-panel + .inventory-data-panel {
+    border-top: 1px solid #dce7e2;
+    border-left: 0;
+  }
 }

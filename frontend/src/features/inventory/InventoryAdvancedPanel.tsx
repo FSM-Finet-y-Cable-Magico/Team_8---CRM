@@ -127,7 +127,7 @@ export function InventoryAdvancedPanel({ advancedInventory, workOrders, writeCom
 
       <details className="inventory-advanced-section">
         <summary><span>Cajas NAP y actividad reciente <small>{cajasNap.length + transferencias.length + mantenciones.length}</small></span><ChevronDown size={17} /></summary>
-        <div className="inventory-advanced-section-content advanced-tables-grid">
+        <div className="inventory-advanced-section-content advanced-tables-grid inventory-activity-grid">
           <article className="inventory-data-panel stack">
             <h3>Cajas NAP</h3>
             <div className="compact-list">{cajasNap.map((box) => <div key={box.idCajaNap} className="compact-list-item"><strong>{box.identificadorUnico ?? `NAP ${box.idCajaNap}`}</strong><span>{box.zona ?? '-'} - Poste {box.numeroPoste ?? '-'}</span></div>)}</div>
