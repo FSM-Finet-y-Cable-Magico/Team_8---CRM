@@ -30,7 +30,6 @@ export function InstallationsPanel({
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [historyStatusFilter, setHistoryStatusFilter] = useState('');
   const [historyPriorityFilter, setHistoryPriorityFilter] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
@@ -54,21 +53,16 @@ export function InstallationsPanel({
     () => installationOrders.filter((order) => ['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado))),
     [installationOrders],
   );
-  const historyBaseOrders = historyFilter === 'active'
-    ? pendingInstallationOrders
-    : historyFilter === 'completed'
-      ? completedInstallationOrders
-      : installationOrders;
   const historyStatusOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.estado)).filter(Boolean))].sort();
   const historyPriorityOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.prioridad)).filter(Boolean))].sort();
-  const filteredInstallationOrders = historyBaseOrders.filter((order) => (
+  const filteredInstallationOrders = installationOrders.filter((order) => (
     (!historyStatusFilter || normalizeWorkOrderValue(order.estado) === historyStatusFilter)
     && (!historyPriorityFilter || normalizeWorkOrderValue(order.prioridad) === historyPriorityFilter)
   ));
   const historyPageSize = 20;
   const paginatedInstallationOrders = filteredInstallationOrders.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
 
-  useEffect(() => { setHistoryPage(1); }, [historyFilter, historyStatusFilter, historyPriorityFilter, filteredInstallationOrders.length]);
+  useEffect(() => { setHistoryPage(1); }, [historyStatusFilter, historyPriorityFilter, filteredInstallationOrders.length]);
 
   useEffect(() => {
     if (!focusedProspectId) {
@@ -144,9 +138,6 @@ export function InstallationsPanel({
           <h2>Historial de instalaciones</h2>
           <div className="installation-history-filters">
             <span className="installation-history-count">{filteredInstallationOrders.length} registros</span>
-            <button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button>
-            <button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button>
-            <button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button>
             <select aria-label="Filtrar historial por estado" value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value)}>
               <option value="">Todos los estados</option>
               {historyStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
