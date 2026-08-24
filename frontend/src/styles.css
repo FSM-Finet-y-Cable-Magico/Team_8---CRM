@@ -3370,7 +3370,8 @@ button.profile-menu-item.danger:hover {
 .plan-modal-intro span { color: #19725e; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
 .plan-modal-intro p { margin: 5px 0 0; color: #60716a; font-size: .85rem; }
 .plan-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
-.plan-form-grid label { display: grid; gap: 7px; color: #405149; font-size: .8rem; font-weight: 750; }
+.plan-form-grid label { display: grid; gap: 7px; color: #405149; font-size: .8rem; font-weight: 500; }
+.plan-form-grid input, .plan-form-grid select, .plan-form-grid textarea { font-weight: 400; }
 .plan-description-field { grid-column: 1 / -1; }
 .plan-form-grid textarea { min-height: 88px; resize: vertical; }
 .plan-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }

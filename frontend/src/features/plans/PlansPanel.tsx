@@ -25,7 +25,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
     const payload = { idEmpresa: Number(form.idEmpresa), nombreComercial: form.nombreComercial.trim(), tipoPlan: form.tipoPlan.trim(), tipoCliente: form.tipoCliente.trim(), velocidadMbps: form.velocidadMbps ? Number(form.velocidadMbps) : undefined, precioMensual: Number(form.precioMensual), descripcion: form.descripcion.trim() || undefined, activo: form.activo };
     try { if (editingPlan) { await api.patch(`/plans/${editingPlan.idPlan}`, payload); setStatus('Plan actualizado'); } else { await api.post('/plans', payload); setStatus('Plan creado'); } closeModal(); onChanged(); } catch (err) { setStatus(apiErrorMessage(err)); }
   }
-  async function togglePlan(plan: Plan) { try { await api.patch(`/plans/${plan.idPlan}/${plan.activo === false ? 'activate' : 'deactivate'}`); setStatus(plan.activo === false ? 'Plan activado' : 'Plan desactivado'); onChanged(); } catch (err) { setStatus(apiErrorMessage(err)); } }
+  async function togglePlan(plan: Plan) { try { await api.patch(`/plans/${plan.idPlan}/${plan.activo === false ? 'activate' : 'deactivate'}`); setStatus(''); onChanged(); } catch (err) { setStatus(apiErrorMessage(err)); } }
 
   return <section className="plans-module plans-catalog stack">
     <div className="page-heading plans-catalog-heading"><h1>Planes comerciales</h1><button type="button" onClick={openCreatePlan}><Plus size={17} />Crear plan</button></div>
