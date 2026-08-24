@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { type Prospect, type WorkOrder } from '../../api';
-import { formatDateOnly, normalizeWorkOrderValue } from '../../lib';
-import { Modal } from '../../shared/components';
+import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
+import { Modal, StatusBadge } from '../../shared/components';
 import { InstallOrderForm } from './InstallOrderForm';
 
 export function InstallationsPanel({
@@ -29,6 +30,7 @@ export function InstallationsPanel({
   );
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'completed'>('all');
   const selectedProspect = installationProspects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const prospectByCustomerCompany = useMemo(() => {
     const map = new Map<string, Prospect>();
@@ -41,6 +43,19 @@ export function InstallationsPanel({
 
     return map;
   }, [prospects]);
+  const pendingInstallationOrders = useMemo(
+    () => installationOrders.filter((order) => !['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado))),
+    [installationOrders],
+  );
+  const completedInstallationOrders = useMemo(
+    () => installationOrders.filter((order) => ['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado))),
+    [installationOrders],
+  );
+  const filteredInstallationOrders = historyFilter === 'active'
+    ? pendingInstallationOrders
+    : historyFilter === 'completed'
+      ? completedInstallationOrders
+      : installationOrders;
 
   useEffect(() => {
     if (!focusedProspectId) {
@@ -82,82 +97,40 @@ export function InstallationsPanel({
   }
 
   return (
-    <section className="workspace-grid">
-      <section className="panel">
-        <h2>Prospectos listos para instalación</h2>
-        <p className="detail-line">Agenda instalaciones para prospectos aceptados y con plan contratado.</p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>RUT</th>
-                <th>Prospecto</th>
-                <th>Estado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {installationProspects.map((prospect) => (
-                <tr key={prospect.idProspecto}>
-                  <td>{prospect.rut ?? '-'}</td>
-                  <td>{prospect.nombreCompleto ?? '-'}</td>
-                  <td>{prospect.estadoPipeline ?? '-'}</td>
-                  <td>
-                    <button className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>
-                      Agendar instalación
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!installationProspects.length && (
-          <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>
-        )}
+    <section className="installations-workspace">
+      <div className="installations-overview">
+        <details className="installation-collapsible">
+          <summary><h2>Pendientes de agendar</h2><span className="installation-count">{installationProspects.length}</span><ChevronDown size={18} /></summary>
+          <div className="installation-collapsible-content installation-queue">
+            {installationProspects.map((prospect) => (
+              <article className="installation-prospect-item" key={prospect.idProspecto}>
+                <div><strong>{prospect.nombreCompleto ?? 'Prospecto sin nombre'}</strong><span>{prospect.rut ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? 'Empresa sin asignar'}</span></div>
+                <button type="button" className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>Agendar</button>
+              </article>
+            ))}
+            {!installationProspects.length && <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>}
+          </div>
+        </details>
+        <details className="installation-collapsible">
+          <summary><h2>Agenda de instalaciones</h2><span className="installation-count">{pendingInstallationOrders.length}</span><ChevronDown size={18} /></summary>
+          <div className="installation-collapsible-content installation-agenda">
+            {pendingInstallationOrders.slice(0, 4).map((order) => {
+              const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`);
+              return <article className="installation-agenda-item" key={order.idOt}>
+                <div className="installation-visit-date"><strong>{formatDateOnly(order.fechaProgramada)}</strong><span>{order.horaVisita ?? 'Sin hora'}</span></div>
+                <div className="installation-visit-copy"><strong>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</strong><span>{formatInstallationOrderCode(order)} · {order.tecnico?.nombreCompleto ?? 'Técnico sin asignar'}</span></div>
+                <div className="installation-visit-badges"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /><span className="installation-status">{formatWorkOrderValue(order.estado)}</span></div>
+              </article>;
+            })}
+            {!pendingInstallationOrders.length && <p className="inline-status">No hay visitas activas en la agenda.</p>}
+          </div>
+        </details>
+      </div>
+      <section className="installation-history">
+        <div className="installation-history-header"><h2>Historial de instalaciones</h2><div className="installation-history-filters"><button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button><button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button><button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button></div></div>
+        <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{filteredInstallationOrders.map((order) => { const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
       </section>
-
-      <section className="panel">
-        <h2>Agenda de instalaciones</h2>
-        <p className="detail-line">Visitas de instalación generadas y conectadas con órdenes de trabajo.</p>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Código OT</th>
-                <th>Cliente</th>
-                <th>Fecha</th>
-                <th>Hora</th>
-                <th>Técnico</th>
-                <th>Prioridad</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {installationOrders.map((order) => {
-                const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`);
-
-                return (
-                  <tr key={order.idOt}>
-                    <td>{formatInstallationOrderCode(order)}</td>
-                    <td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td>
-                    <td>{formatDateOnly(order.fechaProgramada)}</td>
-                    <td>{order.horaVisita ?? '-'}</td>
-                    <td>{order.tecnico?.nombreCompleto ?? '-'}</td>
-                    <td>{order.prioridad}</td>
-                    <td>{order.estado}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {!installationOrders.length && (
-          <p className="inline-status">No hay instalaciones agendadas.</p>
-        )}
-      </section>
-
-      <Modal title="Generar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title="Agendar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedProspect ? (
           <InstallOrderForm
             prospect={selectedProspect}

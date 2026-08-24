@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, apiErrorMessage, type AdvancedInventory, type Customer, type InventoryUnit, type WorkOrder } from '../../api';
 import { macPattern } from '../../constants';
+import { formatWorkOrderValue } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal } from '../../shared/components';
 import { InventoryAdvancedPanel } from './InventoryAdvancedPanel';
@@ -78,9 +79,9 @@ export function InventoryPanel({
   }
 
   return (
-    <section className="workspace-grid">
+    <section className="inventory-workspace">
       {permissions.manageInventory && <form
-        className="panel stack"
+        className="inventory-create-form stack"
         onSubmit={(event) => {
           event.preventDefault();
 
@@ -102,7 +103,7 @@ export function InventoryPanel({
           );
         }}
       >
-        <h2>Nuevo equipo</h2>
+        <h2>Registrar equipo</h2>
         <label>
           Numero de serie
           <input
@@ -136,10 +137,13 @@ export function InventoryPanel({
         {status && <p className="inline-status">{status}</p>}
       </form>}
 
-      <section className="panel">
-        <h2>Visualizando inventario por empresa</h2>
+      <section className="inventory-list-section">
+        <div className="inventory-list-heading">
+          <h2>Equipos por empresa</h2>
+          <span>{inventory.length}</span>
+        </div>
         <div className="table-wrap">
-          <table>
+          <table className="operational-table inventory-table">
             <thead>
               <tr>
                 <th>Serie</th>
@@ -156,7 +160,7 @@ export function InventoryPanel({
                   <td>{unit.numeroSerie}</td>
                   <td>{unit.modelo ?? '-'}</td>
                   <td>{unit.tipoEquipo?.nombre ?? unit.idTipoEquipo ?? '-'}</td>
-                  <td>{unit.estado}</td>
+                  <td className="inventory-status-cell">{formatWorkOrderValue(unit.estado)}</td>
                   <td>{unit.empresa?.nombre ?? `Empresa ${unit.idEmpresa ?? '-'}`}</td>
                   <td>
                     <button

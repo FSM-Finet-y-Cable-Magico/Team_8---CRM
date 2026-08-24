@@ -9,6 +9,104 @@
   text-rendering: optimizeLegibility;
 }
 
+/* Ajustes UX/UI migrados a la arquitectura modular */
+.modal-card:has(.prospect-workflow) { width: min(800px, 100%); }
+.prospect-action-grid { grid-template-columns: 1fr; gap: 16px; }
+.prospect-action-card-contract, .prospect-action-card-installation { grid-column: auto; }
+.prospect-action-card-contract > button { width: 100%; min-width: 0; justify-self: stretch; }
+
+.modal-card:has(.install-order-form) { width: min(760px, 100%); }
+.modal-card:has(.install-order-form) .modal-header { margin-bottom: 8px; border-bottom: 0; }
+.install-order-form { gap: 16px; border: 0; padding: 0; background: transparent; }
+.install-order-form h3 { display: none; }
+.install-order-form > .detail-line { border: 1px solid #d8e9e2; border-radius: 14px; padding: 13px 15px; color: #2d4039; background: linear-gradient(135deg, #eff9f5, #fbfdfc); font-size: .84rem; }
+.install-order-form .install-form-grid { border: 1px solid #e0e9e5; border-radius: 14px; padding: 16px; background: #fbfdfc; }
+.install-order-form .install-form-grid label { color: #43524b; font-size: .82rem; font-weight: 700; }
+.install-order-form .install-form-grid input, .install-order-form .install-form-grid select, .install-order-form .install-form-grid textarea { border-color: #d6e1dc; background: #fff; }
+.install-order-form > button { min-height: 44px; font-weight: 750; }
+.install-order-form > button.secondary { border: 1px solid #c8ddd4; color: #1e725d; background: #edf6f2; }
+
+.installations-workspace { display: grid; gap: 34px; padding: 4px 2px; }
+.installations-overview { display: grid; gap: 14px; }
+.installation-collapsible, .inventory-advanced-section { overflow: hidden; border: 1px solid #dce6e1; border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(31, 40, 36, .04); }
+.installation-collapsible > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 16px 18px; color: #27352f; cursor: pointer; list-style: none; background: linear-gradient(135deg, #fbfdfc, #f5f9f7); }
+.installation-collapsible > summary::-webkit-details-marker, .inventory-advanced-section > summary::-webkit-details-marker { display: none; }
+.installation-collapsible > summary h2 { margin: 0; color: #17231e; font-size: 1.05rem; }
+.installation-collapsible > summary > svg, .inventory-advanced-section > summary > svg { color: #819089; transition: transform 180ms ease; }
+.installation-collapsible[open] > summary > svg, .inventory-advanced-section[open] > summary > svg { transform: rotate(180deg); }
+.installation-collapsible-content { padding: 16px 18px 18px; }
+.installation-queue, .installation-agenda { display: grid; gap: 10px; }
+.installation-prospect-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #dfe8e4; border-radius: 13px; padding: 13px 15px; background: #fbfdfc; }
+.installation-prospect-item strong, .installation-agenda-item strong { display: block; color: #1f2e28; font-size: .9rem; }
+.installation-prospect-item span, .installation-agenda-item span { color: #6c7b74; font-size: .78rem; }
+.installation-prospect-item button { min-height: 36px; padding: 0 13px; border: 1px solid #cce0d7; border-radius: 9px; color: #19735e; background: #f5faf7; font-size: .8rem; }
+.installation-agenda-item { display: grid; grid-template-columns: 128px minmax(0, 1fr) auto auto; align-items: center; gap: 14px; border: 1px solid #dfe8e4; border-radius: 13px; padding: 13px 15px; background: #fff; }
+.installation-agenda-date { border-right: 1px solid #dce7e2; padding-right: 14px; }
+.installation-agenda-date strong { font-size: .84rem; }
+.installation-status { color: #65736c; font-size: .78rem; font-weight: 650; text-align: right; }
+.installation-history { display: grid; gap: 14px; border-top: 1px solid #dfe7e3; padding-top: 26px; }
+.installation-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.installation-history-heading h2 { margin: 0; color: #17231e; font-size: 1.05rem; }
+.installation-history-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.installation-history-filters button { min-height: 32px; padding: 0 11px; border: 1px solid #d8e5df; border-radius: 999px; color: #64736d; background: #fff; font-size: .75rem; }
+.installation-history-filters button.active { border-color: #bde0d1; color: #176d59; background: #eaf6f0; }
+
+.inventory-workspace { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 34px; align-items: start; }
+.inventory-create-form, .inventory-list-section { min-width: 0; padding: 4px 2px; }
+.inventory-create-form h2, .inventory-list-heading h2 { margin: 0; color: #17231e; font-size: 1.1rem; }
+.inventory-create-form { gap: 15px; }
+.inventory-create-form label { color: #43524b; font-size: .82rem; font-weight: 700; }
+.inventory-create-form input { min-height: 44px; border-color: #d5e0db; background: rgba(255, 255, 255, .74); }
+.inventory-create-form button { min-height: 44px; font-weight: 750; }
+.inventory-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.inventory-list-heading > span, .installation-count { min-width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 0 8px; color: #1f715c; background: #e2f2ec; font-size: .75rem; font-weight: 800; }
+.inventory-list-section .table-wrap { margin-top: 14px; }
+.inventory-table th, .inventory-table td { padding-top: 12px; padding-bottom: 12px; }
+.inventory-status-cell { min-width: 130px; color: #4e5c56; font-size: .84rem; font-weight: 650; text-align: center; }
+
+.inventory-advanced { grid-column: 1 / -1; gap: 14px; margin-top: 8px; border-top: 1px solid #dfe7e3; padding-top: 28px; }
+.inventory-advanced-overview { display: grid; gap: 16px; }
+.inventory-advanced-heading { gap: 0; }
+.inventory-advanced-heading h2 { font-size: 1.14rem; }
+.inventory-advanced .stat-card { min-height: 74px; border-radius: 14px; padding: 15px; box-shadow: none; }
+.inventory-advanced .stat-card > div:last-child { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.inventory-advanced .stat-card strong { font-size: 1.45rem; }
+.inventory-advanced .stat-card small:empty { display: none; }
+.inventory-advanced-section > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; color: #26352f; cursor: pointer; list-style: none; background: linear-gradient(135deg, #fbfdfc, #f5f9f7); font-size: .9rem; font-weight: 750; }
+.inventory-advanced-section > summary > span { display: inline-flex; align-items: center; gap: 8px; }
+.inventory-advanced-section > summary small { min-width: 22px; border-radius: 999px; padding: 3px 7px; color: #1f715c; background: #e2f2ec; font-size: .68rem; text-align: center; }
+.inventory-advanced-section-content { padding: 16px 18px 18px; background: #fafcfb; }
+.inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.inventory-advanced-form, .inventory-data-panel { min-width: 0; border: 1px solid #e0e9e5; border-radius: 13px; padding: 15px; background: #fff; }
+.inventory-advanced-form h3, .inventory-data-panel h3 { margin: 0; color: #2a3832; font-size: .9rem; }
+.inventory-advanced-form { gap: 12px; }
+.inventory-advanced-form input, .inventory-advanced-form select { min-height: 42px; border-color: #d6e1dc; background: #fbfdfc; }
+.inventory-advanced-form button { min-height: 42px; margin-top: auto; font-size: .82rem; font-weight: 750; }
+.inventory-data-panel { gap: 14px; align-self: start; }
+.inventory-advanced-section-content.advanced-tables-grid { align-items: start; }
+.inventory-data-panel .table-wrap { margin-top: 0; }
+.inventory-data-panel .compact-list-item { padding: 11px 12px; }
+.inventory-low-stock-list { display: grid; gap: 8px; }
+.inventory-low-stock-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #f0d9cb; border-left: 4px solid #d37a59; border-radius: 9px; padding: 10px 12px; background: #fff8f4; }
+.inventory-low-stock-item strong { color: #54362d; font-size: .84rem; }
+.inventory-low-stock-item span { color: #8a6254; font-size: .75rem; text-align: right; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .inventory-workspace { grid-template-columns: 1fr; }
+  .inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: 1fr; }
+  .installation-agenda-item { grid-template-columns: 112px minmax(0, 1fr) auto; }
+  .installation-status { grid-column: 2 / -1; text-align: left; }
+}
+
+@media (max-width: 620px) {
+  .installation-history-heading { align-items: flex-start; flex-direction: column; }
+  .installation-agenda-item { grid-template-columns: 1fr auto; }
+  .installation-agenda-date { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid #dce7e2; padding: 0 0 9px; }
+  .installation-status { grid-column: 1; }
+  .inventory-low-stock-item { grid-template-columns: 1fr; }
+  .inventory-low-stock-item span { text-align: left; white-space: normal; }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -4289,4 +4387,21 @@ button.profile-menu-item.danger:hover {
   .portal-ticket-badges {
     justify-content: flex-start;
   }
+}
+
+/* Prioridad de las adaptaciones visuales del CRM modular. */
+.prospect-action-grid { grid-template-columns: 1fr; gap: 16px; }
+.prospect-action-card-contract, .prospect-action-card-installation { grid-column: auto; }
+.install-order-form { border: 0; padding: 0; background: transparent; gap: 16px; }
+.installations-workspace { display: grid; gap: 34px; padding: 4px 2px; }
+.installations-overview { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.inventory-workspace { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 34px; align-items: start; }
+.inventory-advanced { grid-column: 1 / -1; gap: 14px; margin-top: 8px; border-top: 1px solid #dfe7e3; padding-top: 28px; }
+.inventory-advanced .stat-card { min-height: 74px; border-radius: 14px; padding: 15px; box-shadow: none; }
+.inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.inventory-status-cell { text-align: center; }
+
+@media (max-width: 900px) {
+  .inventory-workspace { grid-template-columns: 1fr; }
+  .inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: 1fr; }
 }
