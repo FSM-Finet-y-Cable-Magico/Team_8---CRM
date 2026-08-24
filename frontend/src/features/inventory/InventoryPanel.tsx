@@ -187,8 +187,9 @@ export function InventoryPanel({
 
         <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
           {selectedUnit ? (
-            <div className="workflow-panel modal-workflow">
-              <h3>{selectedUnit.numeroSerie}</h3>
+            <div className="inventory-management-modal">
+              <div className="inventory-equipment-summary">
+                <div className="inventory-equipment-summary-heading"><span>{selectedUnit.numeroSerie.slice(0, 2)}</span><div><h3>{selectedUnit.numeroSerie}</h3><p>{selectedUnit.modelo ?? 'Modelo no registrado'} · {selectedUnit.tipoEquipo?.nombre ?? 'Equipo de inventario'}</p></div><strong>{formatWorkOrderValue(selectedUnit.estado)}</strong></div>
               <p className="detail-line">
                 Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
                 {selectedUnit.clienteInstalado ? ` - Cliente: ${selectedUnit.clienteInstalado.nombreCompleto}` : ''}
@@ -198,7 +199,9 @@ export function InventoryPanel({
                   MAC: {selectedUnit.macAddress ?? '-'} - Puerto OLT: {selectedUnit.puertoOlt ?? '-'}
                 </p>
               )}
-              <div className="workflow-grid">
+              </div>
+              <p className="inventory-management-intro">Sigue el orden sugerido: actualiza el estado, registra la revisión técnica si corresponde y finaliza vinculando o documentando el equipo.</p>
+              <div className="inventory-management-flow">
                 {permissions.manageInventory && <label>
                   Estado logico
                   <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
