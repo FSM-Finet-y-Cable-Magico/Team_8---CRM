@@ -3778,19 +3778,25 @@ button.profile-menu-item.danger:hover {
 .billing-workspace-section[open] > summary::after { transform: rotate(225deg) translateY(-1px); }
 .billing-workspace-section .panel { gap: 14px; border: 0; border-radius: 0; padding: 14px 0 18px; background: transparent; box-shadow: none; }
 .billing-workspace-section .section-heading { display: none; }
-.billing-workspace-section .table-wrap { width: min(1220px, 100%); margin: 0 auto; border-top: 1px solid #e1ebe6; }
+.billing-workspace-section .table-wrap { width: min(1440px, 100%); margin: 0 auto; border-top: 1px solid #e1ebe6; }
 .billing-workspace-section .table-wrap table { margin: 0 auto; }
 .billing-workspace-section .table-wrap th { padding-top: 13px; padding-bottom: 11px; color: #64756d; font-size: .69rem; }
 .billing-workspace-section .table-wrap td { padding-top: 10px; padding-bottom: 10px; }
-.billing-workspace-section .table-actions { justify-content: flex-end; }
+.billing-workspace-section .table-wrap th,
+.billing-workspace-section .table-wrap td { text-align: center; }
+.billing-section-actions { width: min(1440px, 100%); display: flex; justify-content: flex-end; margin: -2px auto 0; }
+.billing-section-actions .secondary { color: #537068; background: transparent; }
+.billing-section-actions .secondary:hover { color: #186d58; background: #edf7f2; }
+.billing-table-status { color: #3f514a; font-size: .82rem; font-weight: 500; }
+.billing-workspace-section .table-actions { justify-content: center; }
 .billing-workspace-section .table-actions .secondary { color: #456157; background: #edf2ef; }
 .billing-workspace-section .table-actions .secondary:hover { color: #1e6e59; background: #e1eee8; }
-.billing-workspace-section .empty-state { width: min(1220px, 100%); margin: 0 auto; }
+.billing-workspace-section .empty-state { width: min(1440px, 100%); margin: 0 auto; }
 .billing-workspace-section .table-pagination { margin-top: 12px; }
 .billing-workspace-section .workflow-grid { width: min(1120px, 100%); gap: 34px; margin: 0 auto; }
 .billing-workspace-section .workflow-grid form { gap: 11px; }
 .billing-workspace-section .workflow-grid h3 { margin: 0 0 2px; color: #334b41; font-size: .86rem; }
-.billing-workspace-section .compact-list { width: min(1220px, 100%); gap: 0; margin: 2px auto 0; }
+.billing-workspace-section .compact-list { width: min(1440px, 100%); gap: 0; margin: 2px auto 0; }
 .billing-workspace-section .compact-list-item { border: 0; border-top: 1px solid #e2ebe7; border-radius: 0; padding: 10px 0; background: transparent; }
 .billing-workspace-section .compact-list-item strong { color: #3f544b; font-size: .82rem; font-weight: 650; }
 .billing-workspace-section .compact-list-item span { color: #788780; font-size: .75rem; }

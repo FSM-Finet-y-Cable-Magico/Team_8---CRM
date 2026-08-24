@@ -38,6 +38,15 @@ export function BillingPanel({
     void loadZonesAndRules();
   }, [scope]);
 
+  useEffect(() => {
+    if (!status) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setStatus(''), 5000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
   async function run(action: () => Promise<unknown>, success: string) {
     try {
       setStatus('');
@@ -136,11 +145,6 @@ export function BillingPanel({
     <section className="billing-module stack">
       <header className="billing-page-header">
         <h1>Cobranza</h1>
-        {permissions.manageBilling && (
-          <button type="button" onClick={() => void run(() => api.post('/billing/refresh-delinquency'), 'Clientes morosos actualizados')}>
-            Actualizar morosidad
-          </button>
-        )}
       </header>
 
       <section className="billing-summary-strip">
@@ -152,13 +156,20 @@ export function BillingPanel({
 
       {status && <p className="inline-status">{status}</p>}
 
-      <details className="billing-workspace-section" open>
+      <details className="billing-workspace-section">
         <summary><span>Clientes morosos</span><strong>{morosos.length}</strong></summary>
         <section className="panel stack">
         <div className="section-heading">
           <h2>Clientes morosos</h2>
           <p>Facturas vencidas calculadas con fecha actual, pagos registrados y contrato asociado.</p>
         </div>
+          {permissions.manageBilling && (
+            <div className="billing-section-actions">
+              <button className="secondary compact" type="button" onClick={() => void run(() => api.post('/billing/refresh-delinquency'), 'Estados de morosidad sincronizados')}>
+                Sincronizar estados
+              </button>
+            </div>
+          )}
         <div className="table-wrap">
           <table>
             <thead>
@@ -182,7 +193,7 @@ export function BillingPanel({
                   <td>{formatDateOnly(row.fechaLimitePago)}</td>
                   <td>${row.saldo.toLocaleString('es-CL')}</td>
                   <td>{row.diasAtraso} día(s)</td>
-                  <td><StatusBadge value={row.cliente.estado} /></td>
+                  <td><span className="billing-table-status">{row.cliente.estado}</span></td>
                   <td>
                     {permissions.manageBilling && (
                       <div className="table-actions">
@@ -288,7 +299,7 @@ export function BillingPanel({
                   <td>{notification.idNotificacion}</td>
                   <td>{notification.idCliente ?? '-'}</td>
                   <td>{notification.canal ?? '-'}</td>
-                  <td><StatusBadge value={notification.estadoEnvio} /></td>
+                  <td><span className="billing-table-status">{notification.estadoEnvio ?? '-'}</span></td>
                   <td>{formatDateTime(notification.fechaEnvio)}</td>
                 </tr>
               ))}
