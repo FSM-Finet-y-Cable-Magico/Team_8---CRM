@@ -205,6 +205,35 @@ export function DashboardHome({
   const selectedCustomer = selectedAlert?.idCliente
     ? customers.find((customer) => customer.idCliente === selectedAlert.idCliente) ?? null
     : null;
+  const completedInstallations = workOrders.filter(
+    (order) => order.tipoOt === 'Instalacion' && ['Completada', 'Cerrada'].includes(order.estado),
+  ).length;
+  const inProgressInstallations = workOrders.filter(
+    (order) => order.tipoOt === 'Instalacion' && ['En progreso', 'En curso'].includes(order.estado),
+  ).length;
+  const installationSegments = [
+    { label: 'Pendientes', value: Number(summary?.metricas.instalacionesPendientes ?? pendingInstallations), tone: 'pending' },
+    { label: 'Completadas', value: completedInstallations, tone: 'completed' },
+    { label: 'En progreso', value: inProgressInstallations, tone: 'progress' },
+  ];
+  const installationTotal = Math.max(installationSegments.reduce((total, segment) => total + segment.value, 0), 1);
+  const installationChartSegments = installationSegments.map((segment, index) => ({
+    ...segment,
+    offset: installationSegments.slice(0, index).reduce((total, item) => total + item.value, 0),
+  }));
+  const activityBars = [
+    { label: 'Prospectos', value: Number(summary?.metricas.prospectos ?? prospects.length), tone: 'mint' },
+    { label: 'Clientes', value: Number(summary?.metricas.clientes ?? customers.length), tone: 'teal' },
+    { label: 'Tickets', value: Number(summary?.metricas.ticketsAbiertos ?? openTickets), tone: 'orange' },
+    { label: 'Órdenes', value: workOrders.length, tone: 'violet' },
+  ];
+  const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
+  const keyIndicators = [
+    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Completadas durante el mes', tone: 'green', tab: 'installations' as Tab },
+    { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'billing' as Tab },
+    { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
+    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'billing' as Tab },
+  ];
 
   function selectExpiryFilter(filter: 'overdue' | 'upcoming') {
     setExpiryFilter(filter);
@@ -228,12 +257,71 @@ export function DashboardHome({
       </div>
 
       <section className="stat-grid">
-        {stats.map((stat) => (
+        {stats.slice(0, 6).map((stat) => (
           <DashboardStatCard key={stat.label} {...stat} onClick={() => onNavigate(stat.tab)} />
         ))}
       </section>
 
-      <section className="dashboard-insights">
+      <section className="dashboard-command-center">
+        <article className="dashboard-activity-panel">
+          <div className="dashboard-panel-heading">
+            <h2>Actividad general</h2>
+          </div>
+          <div className="activity-bar-chart" aria-label="Comparación de actividad operativa">
+            <div className="activity-chart-scale" aria-hidden="true"><span>{activityMaximum}</span><span>{Math.ceil(activityMaximum / 2)}</span><span>0</span></div>
+            <div className="activity-chart-bars">
+              {activityBars.map((item) => (
+                <div key={item.label} className="activity-chart-bar-group">
+                  <span className={`activity-chart-bar activity-chart-bar-${item.tone}`} style={{ height: `${Math.max((item.value / activityMaximum) * 100, item.value > 0 ? 8 : 0)}%` }} />
+                  <strong>{item.value}</strong>
+                  <small>{item.label}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <article className="dashboard-installation-panel">
+          <div className="dashboard-panel-heading"><h2>Instalaciones</h2></div>
+          <div className="installation-chart-layout">
+            <div className="installation-donut-wrap">
+              <svg className="installation-donut" viewBox="0 0 120 120" aria-label={`${installationSegments[0].value} instalaciones pendientes`} role="img">
+                <circle className="installation-donut-track" cx="60" cy="60" r="44" />
+                {installationChartSegments.map((segment) => (
+                  <circle
+                    key={segment.label}
+                    className={`installation-donut-segment installation-donut-${segment.tone}`}
+                    cx="60"
+                    cy="60"
+                    r="44"
+                    strokeDasharray={`${(segment.value / installationTotal) * 276.46} 276.46`}
+                    strokeDashoffset={`${-(segment.offset / installationTotal) * 276.46}`}
+                  />
+                ))}
+              </svg>
+              <div><strong>{installationSegments[0].value}</strong><span>Pendientes</span></div>
+            </div>
+            <div className="installation-chart-legend">
+              {installationSegments.map((segment) => (
+                <div key={segment.label}><span className={`installation-legend-dot ${segment.tone}`} /><span>{segment.label}</span><strong>{segment.value}</strong></div>
+              ))}
+            </div>
+          </div>
+        </article>
+
+        <aside className="dashboard-key-indicators">
+          <div className="dashboard-panel-heading"><h2>Indicadores clave</h2></div>
+          <div>
+            {keyIndicators.map((indicator) => (
+              <button key={indicator.label} type="button" className={`dashboard-key-indicator dashboard-key-indicator-${indicator.tone}`} onClick={() => onNavigate(indicator.tab)}>
+                <span>{indicator.label}</span><strong>{indicator.value}</strong><small>{indicator.description}</small>
+              </button>
+            ))}
+          </div>
+        </aside>
+      </section>
+
+      <section className="dashboard-support-row">
         <article className="panel stack expiry-panel">
           <div className="expiry-panel-header">
             <div className="section-heading">
@@ -349,6 +437,14 @@ export function DashboardHome({
             <p className="empty-state">No hay tickets cerrados en el periodo actual.</p>
           )}
         </article>
+        <section className="dashboard-actions dashboard-support-actions">
+          <div className="dashboard-panel-heading"><h2>Acciones rápidas</h2></div>
+          <div className="quick-actions">
+            {quickActions.filter((action) => action.visible).map((action) => (
+              <QuickActionCard key={action.label} {...action} onNavigate={onNavigate} />
+            ))}
+          </div>
+        </section>
       </section>
 
       {permissions.viewBilling && (
@@ -388,7 +484,7 @@ export function DashboardHome({
         </section>
       )}
 
-      <section className="dashboard-actions">
+      <section className="dashboard-actions dashboard-actions-legacy">
         <div className="section-heading">
           <h2>Acciones rápidas</h2>
         </div>

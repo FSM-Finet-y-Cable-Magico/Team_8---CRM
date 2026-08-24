@@ -168,7 +168,6 @@ export default function App() {
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [scope, setScope] = useState('consolidado');
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('finet_theme') === 'dark');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -296,7 +295,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   ];
 
   return (
-    <main className={darkMode ? 'crm-shell theme-dark' : 'crm-shell'}>
+    <main className="crm-shell">
       <Sidebar
         activeTab={activeTab}
         mainItems={mainNavItems}
@@ -315,8 +314,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           onScopeChange={setScope}
           onOpenSettings={() => setSettingsOpen(true)}
           onLogout={logout}
-          darkMode={darkMode}
-          onToggleDarkMode={() => setDarkMode((current) => { const next = !current; localStorage.setItem('finet_theme', next ? 'dark' : 'light'); return next; })}
         />
         <Modal title="Configuración" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
           <section className="user-settings-card">

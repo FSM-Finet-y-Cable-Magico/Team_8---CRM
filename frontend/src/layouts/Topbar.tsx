@@ -1,4 +1,4 @@
-import { Building2, ChevronDown, LogOut, Moon, Settings, Sun } from 'lucide-react';
+import { Building2, ChevronDown, LogOut, Settings } from 'lucide-react';
 import type { AuthUser, Company } from '../api';
 
 export function Topbar({
@@ -11,8 +11,6 @@ export function Topbar({
   onScopeChange,
   onOpenSettings,
   onLogout,
-  darkMode,
-  onToggleDarkMode,
 }: {
   isAdmin: boolean;
   scope: string;
@@ -23,8 +21,6 @@ export function Topbar({
   onScopeChange: (scope: string) => void;
   onOpenSettings: () => void;
   onLogout: () => void;
-  darkMode: boolean;
-  onToggleDarkMode: () => void;
 }) {
   return (
     <header className="topbar">
@@ -42,9 +38,6 @@ export function Topbar({
             </select>
           </div>
         )}
-        <button type="button" className={darkMode ? 'theme-toggle active' : 'theme-toggle'} role="switch" aria-checked={darkMode} aria-label="Cambiar modo de color" onClick={onToggleDarkMode}>
-          <Sun size={14} /><span /><Moon size={14} />
-        </button>
         <div className="active-company" aria-label={`Empresa activa: ${currentCompanyName}`}>
           <strong>{currentCompanyName}</strong>
           <span className="company-status-dot" aria-hidden="true" />
