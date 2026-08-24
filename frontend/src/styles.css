@@ -3330,11 +3330,13 @@ button.profile-menu-item.danger:hover {
 .inventory-equipment-summary-heading strong { border-radius: 999px; padding: 7px 10px; color: #256a58; background: #dff2e9; font-size: .76rem; }
 .inventory-equipment-summary .detail-line { margin: 13px 0 0; padding: 0; border: 0; background: transparent; color: #506159; font-size: .8rem; }
 .inventory-management-intro { margin: 0; color: #718078; font-size: .82rem; }
-.inventory-management-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; counter-reset: inventory-action; }
+.inventory-management-categories { display: flex; flex-wrap: wrap; gap: 8px; }
+.inventory-management-categories span { border-radius: 999px; padding: 6px 10px; color: #3f6055; background: #edf5f1; font-size: .72rem; font-weight: 750; }
+.inventory-management-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .inventory-management-flow > label { position: relative; display: grid; gap: 9px; min-width: 0; border: 1px solid #dfe8e4; border-radius: 14px; padding: 16px; color: #304139; background: #fff; font-size: .85rem; font-weight: 750; }
-.inventory-management-flow > label::before { content: counter(inventory-action); counter-increment: inventory-action; display: grid; width: 23px; height: 23px; place-items: center; border-radius: 999px; color: #17715b; background: #e0f3eb; font-size: .7rem; }
+.inventory-management-flow > label::before { content: 'Acción de gestión'; color: #17715b; font-size: .7rem; letter-spacing: .03em; text-transform: uppercase; }
 .inventory-management-flow > label input, .inventory-management-flow > label select { min-height: 40px; }
-.inventory-management-flow > label button { min-height: 40px; margin-top: 2px; font-size: .82rem; }
+.inventory-management-flow > label button { height: 42px; min-height: 42px; margin-top: 2px; font-size: .82rem; }
 .inventory-management-flow > label:nth-child(3), .inventory-management-flow > label:nth-child(7) { border-color: #edd9cf; background: #fffaf7; }
 
 @media (max-width: 680px) {

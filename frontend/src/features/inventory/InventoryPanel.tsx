@@ -200,7 +200,10 @@ export function InventoryPanel({
                 </p>
               )}
               </div>
-              <p className="inventory-management-intro">Sigue el orden sugerido: actualiza el estado, registra la revisión técnica si corresponde y finaliza vinculando o documentando el equipo.</p>
+              <p className="inventory-management-intro">Selecciona la acción que necesitas según el estado actual del equipo.</p>
+              <div className="inventory-management-categories" aria-label="Categorías de gestión">
+                <span>Operación</span><span>Control técnico</span><span>Vinculación y evidencia</span>
+              </div>
               <div className="inventory-management-flow">
                 {permissions.manageInventory && <label>
                   Estado logico
