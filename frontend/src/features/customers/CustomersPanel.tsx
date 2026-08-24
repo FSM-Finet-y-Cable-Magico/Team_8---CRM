@@ -783,7 +783,7 @@ export function CustomersPanel({
     <section className="customers-module">
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
-          <h2>Clientes</h2><span>{visibleCustomers.length}</span>
+          <h2>Clientes</h2>
         </div>
         <div className="customer-search">
           <label>
@@ -794,13 +794,13 @@ export function CustomersPanel({
               placeholder="Buscar por RUT, nombre, teléfono o contrato"
             />
           </label>
-          <label className="customer-status-filter">
-            Estado actual
-            <select value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
-              <option value="">Todos los estados</option>
-              {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
-            </select>
-          </label>
+        </div>
+        <div className="customer-list-filters">
+          <span>{visibleCustomers.length} registros</span>
+          <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
+            <option value="">Todos los estados</option>
+            {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
+          </select>
         </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
         <div className="table-wrap customers-table-wrap">

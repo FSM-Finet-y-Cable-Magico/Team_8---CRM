@@ -3817,12 +3817,14 @@ button.profile-menu-item.danger:hover {
 }
 
 /* Listados operativos: filtros visibles y valores consistentes. */
-.customers-list-panel .customer-search { grid-template-columns: minmax(260px, 1fr) minmax(185px, .45fr); max-width: 900px; }
+.customers-list-panel .customer-search { grid-template-columns: minmax(260px, 1fr); max-width: 720px; margin-bottom: 10px; }
 .customers-list-heading { display: flex; align-items: center; gap: 9px; }
 .customers-list-heading > span,
 .installation-history-count { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; min-height: 24px; border-radius: 999px; padding: 0 8px; color: #1f735e; background: #e3f3ec; font-size: .72rem; font-weight: 750; }
 .installation-history-count { margin-right: auto; color: #60766c; background: #edf3f0; font-weight: 600; }
-.customer-status-filter select { min-height: 40px; }
+.customer-list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.customer-list-filters > span { display: inline-flex; align-items: center; min-height: 24px; border-radius: 999px; padding: 0 8px; color: #60766c; background: #edf3f0; font-size: .72rem; font-weight: 600; }
+.customer-list-filters select { width: auto; min-width: 168px; min-height: 32px; border-color: #d8e5df; border-radius: 999px; padding: 0 30px 0 11px; color: #64736d; background-color: #fff; font-size: .75rem; }
 .customers-table-wrap { width: min(1440px, 100%); margin: 0 auto; }
 .customers-table th,
 .customers-table td { text-align: center; }

@@ -142,8 +142,8 @@ export function InstallationsPanel({
       <section className="installation-history">
         <div className="installation-history-header">
           <h2>Historial de instalaciones</h2>
-          <span className="installation-history-count">{filteredInstallationOrders.length} registros</span>
           <div className="installation-history-filters">
+            <span className="installation-history-count">{filteredInstallationOrders.length} registros</span>
             <button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button>
             <button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button>
             <button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button>
