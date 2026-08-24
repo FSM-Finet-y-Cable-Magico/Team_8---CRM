@@ -1,8 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { emptyProspectForm, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
-import { Modal } from '../../shared/components';
+import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
 
 export function ProspectsPanel({
@@ -23,8 +23,13 @@ export function ProspectsPanel({
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
 
   const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
+  const pageSize = 20;
+  const visibleProspects = prospects.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => { setPage(1); }, [prospects.length]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -141,7 +146,7 @@ export function ProspectsPanel({
               </tr>
             </thead>
             <tbody>
-              {prospects.map((prospect) => (
+              {visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
                   <td>{prospect.rut}</td>
                   <td>{prospect.nombreCompleto}</td>
@@ -158,6 +163,7 @@ export function ProspectsPanel({
             </tbody>
           </table>
         </div>
+        <TablePagination currentPage={page} totalItems={prospects.length} pageSize={pageSize} onPageChange={setPage} />
         <Modal
           title="Gestionar prospecto"
           open={Boolean(selectedProspect)}

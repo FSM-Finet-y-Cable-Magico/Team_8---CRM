@@ -7,3 +7,4 @@ export * from './MonitoringStatusView';
 export * from './QuickActionCard';
 export * from './StatCard';
 export * from './StatusBadge';
+export * from './TablePagination';

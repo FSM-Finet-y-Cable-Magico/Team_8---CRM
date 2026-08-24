@@ -93,6 +93,7 @@ export function DashboardHome({
       description: 'Oportunidades registradas',
       icon: UserRoundPlus,
       tone: 'mint' as const,
+      tab: 'prospects' as Tab,
     },
     {
       label: 'Clientes activos',
@@ -100,6 +101,7 @@ export function DashboardHome({
       description: 'Clientes de la vista actual',
       icon: Users,
       tone: 'teal' as const,
+      tab: 'customers' as Tab,
     },
     {
       label: 'Instalaciones pendientes',
@@ -107,6 +109,7 @@ export function DashboardHome({
       description: 'Por coordinar o finalizar',
       icon: Wrench,
       tone: 'blue' as const,
+      tab: 'installations' as Tab,
     },
     {
       label: 'Tickets abiertos',
@@ -114,6 +117,7 @@ export function DashboardHome({
       description: 'Casos todavía en atención',
       icon: TicketIcon,
       tone: 'orange' as const,
+      tab: 'tickets' as Tab,
     },
     {
       label: 'Clientes morosos',
@@ -121,6 +125,7 @@ export function DashboardHome({
       description: 'Con deuda o suspensión',
       icon: HandCoins,
       tone: 'rose' as const,
+      tab: 'billing' as Tab,
     },
     {
       label: 'Inventario disponible',
@@ -128,6 +133,7 @@ export function DashboardHome({
       description: 'Equipos listos para asignar',
       icon: Boxes,
       tone: 'violet' as const,
+      tab: 'inventory' as Tab,
     },
     {
       label: 'Instalaciones del mes',
@@ -135,6 +141,7 @@ export function DashboardHome({
       description: 'Completadas durante el mes',
       icon: CircleCheckBig,
       tone: 'green' as const,
+      tab: 'installations' as Tab,
     },
     {
       label: 'Churn mensual',
@@ -142,6 +149,7 @@ export function DashboardHome({
       description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`,
       icon: TrendingDown,
       tone: 'amber' as const,
+      tab: 'billing' as Tab,
     },
   ];
   const quickActions = [
@@ -207,7 +215,7 @@ export function DashboardHome({
 
       <section className="stat-grid">
         {stats.map((stat) => (
-          <DashboardStatCard key={stat.label} {...stat} />
+          <DashboardStatCard key={stat.label} {...stat} onClick={() => onNavigate(stat.tab)} />
         ))}
       </section>
 

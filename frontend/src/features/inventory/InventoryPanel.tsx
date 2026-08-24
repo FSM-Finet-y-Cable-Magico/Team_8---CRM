@@ -3,7 +3,7 @@ import { api, apiErrorMessage, type AdvancedInventory, type Customer, type Inven
 import { macPattern } from '../../constants';
 import { formatWorkOrderValue } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { Modal } from '../../shared/components';
+import { Modal, TablePagination } from '../../shared/components';
 import { InventoryAdvancedPanel } from './InventoryAdvancedPanel';
 
 export function InventoryPanel({
@@ -39,8 +39,11 @@ export function InventoryPanel({
   });
   const [status, setStatus] = useState('');
   const [managementOpen, setManagementOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? null;
+  const pageSize = 20;
+  const paginatedInventory = inventory.slice((page - 1) * pageSize, page * pageSize);
   const eligibleCustomers = customers.filter(
     (customer) =>
       customer.idEmpresa === selectedUnit?.idEmpresa ||
@@ -59,6 +62,8 @@ export function InventoryPanel({
       setInstallForm((current) => ({ ...current, modelo: selectedUnit.modelo ?? '' }));
     }
   }, [selectedUnit?.idUnidad]);
+
+  useEffect(() => { setPage(1); }, [inventory.length]);
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -155,7 +160,7 @@ export function InventoryPanel({
               </tr>
             </thead>
             <tbody>
-              {inventory.map((unit) => (
+              {paginatedInventory.map((unit) => (
                 <tr key={unit.idUnidad}>
                   <td>{unit.numeroSerie}</td>
                   <td>{unit.modelo ?? '-'}</td>
@@ -178,6 +183,7 @@ export function InventoryPanel({
             </tbody>
           </table>
         </div>
+        <TablePagination currentPage={page} totalItems={inventory.length} pageSize={pageSize} onPageChange={setPage} />
 
         <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
           {selectedUnit ? (

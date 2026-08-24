@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { type Prospect, type WorkOrder } from '../../api';
 import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
-import { Modal, StatusBadge } from '../../shared/components';
+import { Modal, StatusBadge, TablePagination } from '../../shared/components';
 import { InstallOrderForm } from './InstallOrderForm';
 
 export function InstallationsPanel({
@@ -31,6 +31,7 @@ export function InstallationsPanel({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [historyPage, setHistoryPage] = useState(1);
   const selectedProspect = installationProspects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const prospectByCustomerCompany = useMemo(() => {
     const map = new Map<string, Prospect>();
@@ -56,6 +57,10 @@ export function InstallationsPanel({
     : historyFilter === 'completed'
       ? completedInstallationOrders
       : installationOrders;
+  const historyPageSize = 20;
+  const paginatedInstallationOrders = filteredInstallationOrders.slice((historyPage - 1) * historyPageSize, historyPage * historyPageSize);
+
+  useEffect(() => { setHistoryPage(1); }, [historyFilter, filteredInstallationOrders.length]);
 
   useEffect(() => {
     if (!focusedProspectId) {
@@ -128,7 +133,8 @@ export function InstallationsPanel({
       </div>
       <section className="installation-history">
         <div className="installation-history-header"><h2>Historial de instalaciones</h2><div className="installation-history-filters"><button type="button" className={historyFilter === 'all' ? 'active' : ''} onClick={() => setHistoryFilter('all')}>Todas <span>{installationOrders.length}</span></button><button type="button" className={historyFilter === 'active' ? 'active' : ''} onClick={() => setHistoryFilter('active')}>Activas <span>{pendingInstallationOrders.length}</span></button><button type="button" className={historyFilter === 'completed' ? 'active' : ''} onClick={() => setHistoryFilter('completed')}>Finalizadas <span>{completedInstallationOrders.length}</span></button></div></div>
-        <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{filteredInstallationOrders.map((order) => { const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
+        <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{paginatedInstallationOrders.map((order) => { const relatedProspect = prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
+        <TablePagination currentPage={historyPage} totalItems={filteredInstallationOrders.length} pageSize={historyPageSize} onPageChange={setHistoryPage} />
       </section>
       <Modal title="Agendar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedProspect ? (

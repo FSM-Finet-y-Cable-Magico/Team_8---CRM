@@ -3235,3 +3235,44 @@ button.profile-menu-item.danger:hover {
   .inventory-workspace { grid-template-columns: 1fr; }
   .inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: 1fr; }
 }
+
+.dashboard-stat-card-link {
+  width: 100%;
+  min-height: 0;
+  border: 1px solid #dfe8e4;
+  padding: 18px;
+  color: inherit;
+  text-align: left;
+  background: #fff;
+}
+
+.dashboard-stat-card-link:hover {
+  border-color: #b9d9cd;
+  background: #fbfefd;
+  box-shadow: 0 12px 25px rgba(31, 91, 73, .10);
+  transform: translateY(-2px);
+}
+
+.dashboard-stat-card-link:focus-visible {
+  outline: 3px solid rgba(35, 128, 103, .28);
+  outline-offset: 2px;
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  color: #74817b;
+  font-size: .78rem;
+}
+
+.table-pagination > div { display: flex; align-items: center; gap: 6px; }
+.table-pagination button { min-width: 34px; min-height: 34px; padding: 0 8px; }
+.table-pagination .table-pagination-page { border: 1px solid #dbe6e1; color: #53635c; background: #fff; }
+.table-pagination .table-pagination-page.active { border-color: #bbddcf; color: #176d58; background: #e7f5ee; font-weight: 800; }
+
+@media (max-width: 560px) {
+  .table-pagination { align-items: flex-start; flex-direction: column; }
+}

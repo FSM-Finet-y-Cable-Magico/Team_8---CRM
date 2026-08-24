@@ -29,7 +29,7 @@ import {
   technicalEntries,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
-import { HistoryBox, Modal, MonitoringStatusView, StatusBadge } from '../../shared/components';
+import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
 import { ObservationsModal } from '../observations';
 
 type CustomerHistory = {
@@ -168,8 +168,11 @@ export function CustomersPanel({
   const [installTechnicianId, setInstallTechnicianId] = useState('');
   const [installOrderStatus, setInstallOrderStatus] = useState('');
   const [installOrderError, setInstallOrderError] = useState('');
+  const [page, setPage] = useState(1);
 
   const visibleCustomers = searchResults ?? customers;
+  const pageSize = 20;
+  const paginatedCustomers = visibleCustomers.slice((page - 1) * pageSize, page * pageSize);
   const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
@@ -264,6 +267,8 @@ export function CustomersPanel({
     setSearchTerm('');
     void loadPaymentZones(true);
   }, [scope]);
+
+  useEffect(() => { setPage(1); }, [customers.length, searchResults]);
 
   async function searchCustomers(event: FormEvent) {
     event.preventDefault();
@@ -832,7 +837,7 @@ export function CustomersPanel({
               </tr>
             </thead>
             <tbody>
-              {visibleCustomers.map((customer) => (
+              {paginatedCustomers.map((customer) => (
                 <tr key={customer.idCliente}>
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
@@ -851,6 +856,7 @@ export function CustomersPanel({
             </tbody>
           </table>
         </div>
+        <TablePagination currentPage={page} totalItems={visibleCustomers.length} pageSize={pageSize} onPageChange={setPage} />
         {!visibleCustomers.length && (
           <p className="empty-state">
             {searchResults ? 'No se encontraron clientes con los criterios ingresados.' : 'No hay clientes registrados para mostrar.'}
