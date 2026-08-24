@@ -3658,7 +3658,7 @@ button.profile-menu-item.danger:hover {
 .activity-chart-scale { display: flex; flex-direction: column; justify-content: space-between; padding: 2px 7px 23px 0; color: #8a9993; font-size: .66rem; text-align: right; }
 .activity-chart-bars {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   align-items: end;
   gap: 18px;
   min-height: 0;
@@ -3673,7 +3673,8 @@ button.profile-menu-item.danger:hover {
 .activity-chart-bar-orange { background: linear-gradient(180deg, #eead54, #d98524); }
 .activity-chart-bar-violet { background: linear-gradient(180deg, #9c8ae4, #7967c9); }
 .activity-chart-bar-group strong { color: #243a31; font-size: .82rem; line-height: 1; }
-.activity-chart-bar-group small { color: #708079; font-size: .65rem; white-space: nowrap; }
+.activity-chart-bar-group small { color: #708079; font-size: .65rem; line-height: 1.2; text-align: center; }
+.dashboard-chart-empty { min-height: 220px; display: grid; place-items: center; margin: 13px 0 0; border: 1px dashed #cfddd7; border-radius: 10px; padding: 16px; color: #718179; background: #f9fcfa; font-size: .8rem; text-align: center; }
 
 .dashboard-installation-panel { display: grid; grid-template-rows: auto 1fr; }
 .installation-chart-layout { display: grid; grid-template-columns: minmax(130px, .9fr) minmax(120px, 1fr); align-items: center; gap: 14px; min-height: 0; padding-top: 8px; }

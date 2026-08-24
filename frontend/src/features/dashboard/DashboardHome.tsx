@@ -67,6 +67,10 @@ type Summary = {
     categoria: string;
     total: number;
   }>;
+  origenCaptacion?: Array<{
+    origen: string;
+    total: number;
+  }>;
 };
 export function DashboardHome({
   summary,
@@ -221,12 +225,15 @@ export function DashboardHome({
     ...segment,
     offset: installationSegments.slice(0, index).reduce((total, item) => total + item.value, 0),
   }));
-  const activityBars = [
-    { label: 'Prospectos', value: Number(summary?.metricas.prospectos ?? prospects.length), tone: 'mint' },
-    { label: 'Clientes', value: Number(summary?.metricas.clientes ?? customers.length), tone: 'teal' },
-    { label: 'Tickets', value: Number(summary?.metricas.ticketsAbiertos ?? openTickets), tone: 'orange' },
-    { label: 'Órdenes', value: workOrders.length, tone: 'violet' },
-  ];
+  const activityTones = ['mint', 'teal', 'blue', 'orange', 'violet'];
+  const activityBars = (summary?.origenCaptacion ?? [])
+    .filter((item) => Number(item.total) > 0)
+    .slice(0, 5)
+    .map((item, index) => ({
+      label: item.origen || 'Sin origen',
+      value: Number(item.total),
+      tone: activityTones[index % activityTones.length],
+    }));
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
     { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Completadas durante el mes', tone: 'green', tab: 'installations' as Tab },
@@ -265,20 +272,22 @@ export function DashboardHome({
       <section className="dashboard-command-center">
         <article className="dashboard-activity-panel">
           <div className="dashboard-panel-heading">
-            <h2>Actividad general</h2>
+            <h2>Origen de captación</h2>
           </div>
-          <div className="activity-bar-chart" aria-label="Comparación de actividad operativa">
-            <div className="activity-chart-scale" aria-hidden="true"><span>{activityMaximum}</span><span>{Math.ceil(activityMaximum / 2)}</span><span>0</span></div>
-            <div className="activity-chart-bars">
-              {activityBars.map((item) => (
-                <div key={item.label} className="activity-chart-bar-group">
-                  <span className={`activity-chart-bar activity-chart-bar-${item.tone}`} style={{ height: `${Math.max((item.value / activityMaximum) * 100, item.value > 0 ? 8 : 0)}%` }} />
-                  <strong>{item.value}</strong>
-                  <small>{item.label}</small>
-                </div>
-              ))}
+          {activityBars.length > 0 ? (
+            <div className="activity-bar-chart" aria-label="Prospectos por origen de captación">
+              <div className="activity-chart-scale" aria-hidden="true"><span>{activityMaximum}</span><span>{Math.ceil(activityMaximum / 2)}</span><span>0</span></div>
+              <div className="activity-chart-bars">
+                {activityBars.map((item) => (
+                  <div key={item.label} className="activity-chart-bar-group">
+                    <span className={`activity-chart-bar activity-chart-bar-${item.tone}`} style={{ height: `${Math.max((item.value / activityMaximum) * 100, 8)}%` }} />
+                    <strong>{item.value}</strong>
+                    <small>{item.label}</small>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : <p className="dashboard-chart-empty">Aún no hay prospectos con origen de captación registrado.</p>}
         </article>
 
         <article className="dashboard-installation-panel">
