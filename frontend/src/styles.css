@@ -3754,3 +3754,58 @@ button.profile-menu-item.danger:hover {
   .installation-chart-layout { grid-template-columns: 1fr; }.installation-chart-legend { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }.installation-chart-legend > div { grid-template-columns: auto 1fr; }.installation-chart-legend strong { display: none; }
   .dashboard-support-actions .quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }.dashboard-financial-metrics > div { padding-right: 0; }
 }
+
+/* Cobranza: espacio de gestión compacto, sin paneles blancos repetidos. */
+.billing-module { gap: 18px; padding: 4px 2px; }
+.billing-page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.billing-page-header h1 { margin: 0; color: #172d26; font-size: clamp(1.75rem, 3vw, 2.15rem); letter-spacing: -.04em; }
+.billing-page-header button { min-height: 38px; }
+.billing-summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid #dbe7e2; border-bottom: 1px solid #dbe7e2; }
+.billing-summary-strip .stat-card { min-height: 82px; display: grid; align-content: center; gap: 5px; border: 0; border-left: 1px solid #dbe7e2; border-radius: 0; padding: 12px 20px; background: transparent; box-shadow: none; }
+.billing-summary-strip .stat-card:first-child { border-left: 0; }
+.billing-summary-strip .stat-card span { color: #60746a; font-size: .77rem; }
+.billing-summary-strip .stat-card strong { color: #1d392f; font-size: 1.55rem; line-height: 1; }
+.billing-summary-strip .stat-card small { display: none; }
+.billing-module .inline-status { border: 0; border-left: 3px solid #38a47e; border-radius: 0; padding: 8px 12px; color: #477264; background: #eef8f3; font-size: .8rem; }
+
+.billing-workspace-section { overflow: hidden; border-top: 1px solid #dbe7e2; border-bottom: 1px solid #dbe7e2; background: transparent; }
+.billing-workspace-section > summary { min-height: 60px; display: flex; align-items: center; gap: 11px; padding: 0 4px; color: #22372e; cursor: pointer; list-style: none; }
+.billing-workspace-section > summary::-webkit-details-marker { display: none; }
+.billing-workspace-section > summary > span { font-size: .98rem; font-weight: 750; }
+.billing-workspace-section > summary > strong { display: inline-grid; min-width: 25px; height: 25px; place-items: center; border-radius: 999px; padding: 0 7px; color: #18725e; background: #e4f4ed; font-size: .75rem; }
+.billing-workspace-section > summary::after { width: 8px; height: 8px; margin-left: auto; border-right: 1.5px solid #6e8279; border-bottom: 1.5px solid #6e8279; content: ''; transform: rotate(45deg) translateY(-3px); transition: transform .18s ease; }
+.billing-workspace-section[open] > summary { color: #176d59; background: linear-gradient(90deg, rgba(231, 247, 239, .75), transparent 62%); }
+.billing-workspace-section[open] > summary::after { transform: rotate(225deg) translateY(-1px); }
+.billing-workspace-section .panel { gap: 14px; border: 0; border-radius: 0; padding: 14px 0 18px; background: transparent; box-shadow: none; }
+.billing-workspace-section .section-heading { display: none; }
+.billing-workspace-section .table-wrap { width: min(1220px, 100%); margin: 0 auto; border-top: 1px solid #e1ebe6; }
+.billing-workspace-section .table-wrap table { margin: 0 auto; }
+.billing-workspace-section .table-wrap th { padding-top: 13px; padding-bottom: 11px; color: #64756d; font-size: .69rem; }
+.billing-workspace-section .table-wrap td { padding-top: 10px; padding-bottom: 10px; }
+.billing-workspace-section .table-actions { justify-content: flex-end; }
+.billing-workspace-section .table-actions .secondary { color: #456157; background: #edf2ef; }
+.billing-workspace-section .table-actions .secondary:hover { color: #1e6e59; background: #e1eee8; }
+.billing-workspace-section .empty-state { width: min(1220px, 100%); margin: 0 auto; }
+.billing-workspace-section .table-pagination { margin-top: 12px; }
+.billing-workspace-section .workflow-grid { width: min(1120px, 100%); gap: 34px; margin: 0 auto; }
+.billing-workspace-section .workflow-grid form { gap: 11px; }
+.billing-workspace-section .workflow-grid h3 { margin: 0 0 2px; color: #334b41; font-size: .86rem; }
+.billing-workspace-section .compact-list { width: min(1220px, 100%); gap: 0; margin: 2px auto 0; }
+.billing-workspace-section .compact-list-item { border: 0; border-top: 1px solid #e2ebe7; border-radius: 0; padding: 10px 0; background: transparent; }
+.billing-workspace-section .compact-list-item strong { color: #3f544b; font-size: .82rem; font-weight: 650; }
+.billing-workspace-section .compact-list-item span { color: #788780; font-size: .75rem; }
+
+@media (max-width: 820px) {
+  .billing-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .billing-summary-strip .stat-card:nth-child(3) { border-left: 0; border-top: 1px solid #dbe7e2; }
+  .billing-summary-strip .stat-card:nth-child(4) { border-top: 1px solid #dbe7e2; }
+}
+@media (max-width: 560px) {
+  .billing-page-header { align-items: flex-start; flex-direction: column; }
+  .billing-summary-strip { grid-template-columns: 1fr; }
+  .billing-summary-strip .stat-card,
+  .billing-summary-strip .stat-card:nth-child(3),
+  .billing-summary-strip .stat-card:nth-child(4) { min-height: 68px; border-top: 1px solid #dbe7e2; border-left: 0; padding: 10px 0; }
+  .billing-summary-strip .stat-card:first-child { border-top: 0; }
+  .billing-workspace-section .workflow-grid { grid-template-columns: 1fr; gap: 26px; }
+}

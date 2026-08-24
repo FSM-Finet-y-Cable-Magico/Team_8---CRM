@@ -2,7 +2,7 @@
 import { api, apiErrorMessage, type BillingOverview, type PaymentZone, type Plan, type ZonePriceRule } from '../../api';
 import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { Modal, StatCard, StatusBadge } from '../../shared/components';
+import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
 export function BillingPanel({
   overview,
   plans,
@@ -25,6 +25,8 @@ export function BillingPanel({
   const [zoneRules, setZoneRules] = useState<ZonePriceRule[]>([]);
   const [zoneForm, setZoneForm] = useState({ nombreZona: '', comuna: '', descripcion: '', diaVencimientoSugerido: '5' });
   const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+  const [morososPage, setMorososPage] = useState(1);
+  const [cortesPage, setCortesPage] = useState(1);
 
   useEffect(() => {
     if (paymentTarget) {
@@ -126,32 +128,33 @@ export function BillingPanel({
   const morosos = overview?.morosos ?? [];
   const cortes = overview?.cortesProgramados ?? [];
   const notifications = overview?.notificaciones ?? [];
+  const pageSize = 10;
+  const visibleMorosos = morosos.slice((morososPage - 1) * pageSize, morososPage * pageSize);
+  const visibleCortes = cortes.slice((cortesPage - 1) * pageSize, cortesPage * pageSize);
 
   return (
     <section className="billing-module stack">
-      <div className="page-heading">
+      <header className="billing-page-header">
         <h1>Cobranza</h1>
-        <p>Gestion de morosidad, cortes programados, avisos preventivos y pagos registrados.</p>
-      </div>
-
-      <section className="stat-grid billing-stats">
-        <StatCard label="Clientes morosos" value={overview?.metricas.clientesMorosos ?? 0} hint="Con deuda vencida" />
-        <StatCard label="Facturas vencidas" value={overview?.metricas.facturasVencidas ?? 0} hint="Pendientes de pago" />
-        <StatCard label="Programados para corte" value={overview?.metricas.clientesProgramadosCorte ?? 0} hint={`Regla: ${overview?.reglaCorteDias ?? 5} día(s)`} />
-        <StatCard label="Notificacion" value={overview?.modoNotificacion ?? 'mock'} hint="Modo de envio actual" />
-      </section>
-
-      {permissions.manageBilling && (
-        <div className="button-row">
+        {permissions.manageBilling && (
           <button type="button" onClick={() => void run(() => api.post('/billing/refresh-delinquency'), 'Clientes morosos actualizados')}>
             Actualizar morosidad
           </button>
-        </div>
-      )}
+        )}
+      </header>
+
+      <section className="billing-summary-strip">
+        <StatCard label="Clientes morosos" value={overview?.metricas.clientesMorosos ?? 0} hint="" />
+        <StatCard label="Facturas vencidas" value={overview?.metricas.facturasVencidas ?? 0} hint="" />
+        <StatCard label="Programados para corte" value={overview?.metricas.clientesProgramadosCorte ?? 0} hint="" />
+        <StatCard label="Canal de avisos" value={overview?.modoNotificacion ?? 'mock'} hint="" />
+      </section>
 
       {status && <p className="inline-status">{status}</p>}
 
-      <section className="panel stack">
+      <details className="billing-workspace-section" open>
+        <summary><span>Clientes morosos</span><strong>{morosos.length}</strong></summary>
+        <section className="panel stack">
         <div className="section-heading">
           <h2>Clientes morosos</h2>
           <p>Facturas vencidas calculadas con fecha actual, pagos registrados y contrato asociado.</p>
@@ -171,7 +174,7 @@ export function BillingPanel({
               </tr>
             </thead>
             <tbody>
-              {morosos.map((row) => (
+              {visibleMorosos.map((row) => (
                 <tr key={row.idFactura}>
                   <td>{row.cliente.nombreCompleto}</td>
                   <td>{row.cliente.rut ?? '-'}</td>
@@ -201,10 +204,14 @@ export function BillingPanel({
             </tbody>
           </table>
         </div>
-        {!morosos.length && <p className="empty-state">No hay clientes morosos para el alcance seleccionado.</p>}
-      </section>
+          {!morosos.length && <p className="empty-state">No hay clientes morosos para el alcance seleccionado.</p>}
+          <TablePagination currentPage={morososPage} totalItems={morosos.length} pageSize={pageSize} onPageChange={setMorososPage} />
+        </section>
+      </details>
 
-      <section className="panel stack">
+      <details className="billing-workspace-section">
+        <summary><span>Programados para corte</span><strong>{cortes.length}</strong></summary>
+        <section className="panel stack">
         <div className="section-heading">
           <h2>Clientes programados para corte</h2>
           <p>Clientes cuya deuda supera la regla de días configurada para corte.</p>
@@ -221,7 +228,7 @@ export function BillingPanel({
               </tr>
             </thead>
             <tbody>
-              {cortes.map((row) => (
+              {visibleCortes.map((row) => (
                 <tr key={`cut-${row.idFactura}`}>
                   <td>{row.cliente.nombreCompleto}</td>
                   <td>{row.idContrato}</td>
@@ -252,10 +259,14 @@ export function BillingPanel({
             </tbody>
           </table>
         </div>
-        {!cortes.length && <p className="empty-state">No hay clientes dentro de regla de corte.</p>}
-      </section>
+          {!cortes.length && <p className="empty-state">No hay clientes dentro de regla de corte.</p>}
+          <TablePagination currentPage={cortesPage} totalItems={cortes.length} pageSize={pageSize} onPageChange={setCortesPage} />
+        </section>
+      </details>
 
-      <section className="panel stack">
+      <details className="billing-workspace-section">
+        <summary><span>Notificaciones de cobranza</span><strong>{notifications.length}</strong></summary>
+        <section className="panel stack">
         <div className="section-heading">
           <h2>Notificaciones de cobranza</h2>
           <p>Historial de avisos registrados en modo simulado o desactivado.</p>
@@ -284,10 +295,13 @@ export function BillingPanel({
             </tbody>
           </table>
         </div>
-        {!notifications.length && <p className="empty-state">Aun no hay notificaciones de cobranza registradas.</p>}
-      </section>
+          {!notifications.length && <p className="empty-state">Aun no hay notificaciones de cobranza registradas.</p>}
+        </section>
+      </details>
 
-      <section className="panel stack">
+      <details className="billing-workspace-section">
+        <summary><span>Zonas de pago y reglas</span><strong>{zones.length}</strong></summary>
+        <section className="panel stack">
         <div className="section-heading">
           <h2>Zonas de pago</h2>
           <p>Configura vencimientos sugeridos y precios manuales por zona.</p>
@@ -352,7 +366,8 @@ export function BillingPanel({
             </section>
           ))}
         </div>
-      </section>
+        </section>
+      </details>
 
       <Modal title="Registrar pago" open={Boolean(paymentTarget)} onClose={() => setPaymentTarget(null)}>
         {paymentTarget && (
