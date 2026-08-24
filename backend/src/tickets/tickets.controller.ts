@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { CreateTicketDto } from './dto/create-ticket.dto';
+import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
 import { TechnicalNoteDto } from './dto/technical-note.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
@@ -34,6 +35,16 @@ export class TicketsController {
   @Roles(...ACCESS_ROLES.CREATE_TICKETS)
   create(@Body() dto: CreateTicketDto, @CurrentUser() user: AuthUser) {
     return this.ticketsService.create(dto, user);
+  }
+
+  @Post(':id/work-order')
+  @Roles(...ACCESS_ROLES.MANAGE_TICKETS)
+  createWorkOrder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateTicketWorkOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.ticketsService.createWorkOrder(id, dto, user);
   }
 
   @Patch(':id/category')

@@ -75,6 +75,8 @@ export type Plan = {
   tipoCliente: string;
   velocidadMbps: number | null;
   precioMensual: string;
+  descripcion?: string | null;
+  activo?: boolean | null;
   empresa?: Company | null;
 };
 
@@ -115,6 +117,7 @@ export type CustomerService = {
   idEmpresa: number | null;
   idContrato: number | null;
   idDireccion: number | null;
+  idZonaPago?: number | null;
   tipoServicio: string;
   estadoOperativo: string;
   observaciones: string | null;
@@ -133,9 +136,11 @@ export type CustomerService = {
     comuna: string | null;
     ciudad: string | null;
   } | null;
+  zonaPago?: PaymentZone | null;
   equipos?: InventoryUnit[];
   tickets?: Ticket[];
   ordenes?: WorkOrder[];
+  solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
 };
 
@@ -145,6 +150,9 @@ export type InventoryUnit = {
   idTipoEquipo: number | null;
   idServicio: number | null;
   idCajaNap?: number | null;
+  modalidadAsignacion?: string | null;
+  valorArriendoMensual?: string | null;
+  fechaInicioAsignacion?: string | null;
   numeroSerie: string;
   numeroPoste?: string | null;
   modelo: string | null;
@@ -204,6 +212,77 @@ export type BillingOverview = {
     fechaEnvio: string | null;
     estadoEnvio: string | null;
   }>;
+};
+
+export type PaymentZone = {
+  idZonaPago: number;
+  idEmpresa: number | null;
+  nombreZona: string;
+  comuna: string | null;
+  descripcion: string | null;
+  diaVencimientoSugerido: number | null;
+  activo: boolean | null;
+  empresa?: Company | null;
+};
+
+export type ZonePriceRule = {
+  idPlanZonaPrecio: number;
+  idPlan: number;
+  idZonaPago: number;
+  precioMensual: string;
+  valorInstalacion: string | null;
+  activo: boolean | null;
+  plan?: Plan | null;
+  zonaPago?: PaymentZone | null;
+};
+
+export type CustomerRequest = {
+  idSolicitud: number;
+  idCliente: number | null;
+  idProspecto: number | null;
+  idServicio: number | null;
+  idEmpresa: number | null;
+  tipoSolicitud: string;
+  canalOrigen: string | null;
+  estado: string;
+  factible: boolean | null;
+  motivoNoFactible: string | null;
+  descripcion: string | null;
+  observaciones: string | null;
+  fechaCreacion: string | null;
+  fechaCierre: string | null;
+  cliente?: Customer | null;
+  servicio?: CustomerService | null;
+};
+
+export type OperationalObservation = {
+  idObservacion: number;
+  tipoEntidad: string;
+  idEntidad: number;
+  idCliente: number | null;
+  idEmpresa: number | null;
+  idUsuario: number | null;
+  observacion: string;
+  visibilidad: string | null;
+  fechaCreacion: string | null;
+  usuario?: {
+    idUsuario: number;
+    nombreCompleto: string;
+    email: string | null;
+  } | null;
+};
+
+export type DigitalContract = {
+  idContratoDigital: number;
+  idContrato: number;
+  idCliente: number | null;
+  idEmpresa: number | null;
+  urlDocumento: string;
+  hashDocumento: string;
+  estadoFirma: string;
+  fechaGeneracion: string | null;
+  fechaFirma: string | null;
+  version: number;
 };
 
 export type AdvancedInventory = {
@@ -362,6 +441,8 @@ export type Ticket = {
   descripcion: string | null;
   cliente?: Customer | null;
   categoria?: TicketCategory | null;
+  workOrders?: WorkOrder[];
+  hasOpenWorkOrder?: boolean;
   observacionesTecnicas?: TechnicalNote[];
 };
 
@@ -371,6 +452,7 @@ export type WorkOrder = {
   idCliente: number | null;
   idTecnico: number | null;
   idTicket: number | null;
+  codigoSeguimiento: string | null;
   idServicio: number | null;
   idCajaNap?: number | null;
   tipoOt: string;
@@ -387,12 +469,29 @@ export type WorkOrder = {
     nombreCompleto: string;
     email: string | null;
   } | null;
+  cliente?: {
+    idCliente: number;
+    rut: string | null;
+    nombreCompleto: string;
+  } | null;
   prospecto?: {
     idProspecto: number;
+    rut: string | null;
+    nombreCompleto: string | null;
     fechaCreacion: string | null;
     fechaConversion: string | null;
     tiempoConversionDias: number | null;
     estadoPipeline: string | null;
+  } | null;
+  ticket?: {
+    idTicket: number;
+    idCliente: number | null;
+    idServicio: number | null;
+    idCategoria: number;
+    codigoSeguimiento: string | null;
+    prioridad: string;
+    estado: string;
+    descripcion: string | null;
   } | null;
 };
 

@@ -19,6 +19,7 @@ describe('CompaniesService', () => {
           .mockResolvedValueOnce(17)
           .mockResolvedValueOnce(2)
           .mockResolvedValueOnce(15),
+        groupBy: jest.fn().mockResolvedValue([]),
       },
       prospecto: { count: jest.fn().mockResolvedValue(11) },
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1, nombre: 'FiNet Limitada' }]) },
@@ -33,6 +34,8 @@ describe('CompaniesService', () => {
         count: jest.fn().mockResolvedValue(0),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      solicitudCliente: { count: jest.fn().mockResolvedValue(0) },
+      historialCambioPlan: { findMany: jest.fn().mockResolvedValue([]) },
       categoriaFalla: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new CompaniesService(prisma as never);

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import {
@@ -8,6 +8,7 @@ import {
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
+import { CompleteRepairOrderDto } from './dto/complete-repair-order.dto';
 
 @Injectable()
 export class WorkOrdersService {
@@ -24,7 +25,8 @@ export class WorkOrdersService {
     });
     const customerIds = [...new Set(orders.map((order) => order.idCliente).filter((id): id is number => id !== null))];
     const technicianIds = [...new Set(orders.map((order) => order.idTecnico).filter((id): id is number => id !== null))];
-    const [prospects, technicians] = await Promise.all([
+    const ticketIds = [...new Set(orders.map((order) => order.idTicket).filter((id): id is number => id !== null))];
+    const [prospects, customers, technicians, tickets] = await Promise.all([
       customerIds.length
         ? this.prisma.prospecto.findMany({
           where: { idCliente: { in: customerIds } },
@@ -33,11 +35,23 @@ export class WorkOrdersService {
             idProspecto: true,
             idCliente: true,
             idEmpresa: true,
+            rut: true,
+            nombreCompleto: true,
             fechaCreacion: true,
             fechaConversion: true,
             tiempoConversionDias: true,
             estadoPipeline: true,
           },
+          })
+        : Promise.resolve([]),
+      customerIds.length
+        ? this.prisma.cliente.findMany({
+            where: { idCliente: { in: customerIds } },
+            select: {
+              idCliente: true,
+              rut: true,
+              nombreCompleto: true,
+            },
           })
         : Promise.resolve([]),
       technicianIds.length
@@ -50,9 +64,26 @@ export class WorkOrdersService {
             },
           })
         : Promise.resolve([]),
+      ticketIds.length
+        ? this.prisma.ticket.findMany({
+            where: { idTicket: { in: ticketIds } },
+            select: {
+              idTicket: true,
+              idCliente: true,
+              idServicio: true,
+              idCategoria: true,
+              codigoSeguimiento: true,
+              prioridad: true,
+              estado: true,
+              descripcion: true,
+            },
+          })
+        : Promise.resolve([]),
     ]);
     const prospectByCustomerCompany = new Map<string, (typeof prospects)[number]>();
+    const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
+    const ticketById = new Map(tickets.map((ticket) => [ticket.idTicket, ticket]));
 
     for (const prospect of prospects) {
       const key = `${prospect.idCliente}:${prospect.idEmpresa}`;
@@ -64,15 +95,18 @@ export class WorkOrdersService {
 
     return orders.map((order) => {
       const metadata = parseInstallOrderObservations(order.observaciones);
+      const horaVisita = metadata.horaVisita ?? this.extractVisitTime(order.observaciones);
 
       return {
         ...order,
         tipoConexion: metadata.tipoConexion,
-        horaVisita: metadata.horaVisita,
+        horaVisita,
         observacionesAgenda: metadata.observacionesAgenda,
         observacionesCierre: metadata.observacionesCierre,
         tecnico: order.idTecnico ? technicianById.get(order.idTecnico) ?? null : null,
+        cliente: order.idCliente ? customerById.get(order.idCliente) ?? null : null,
         prospecto: prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`) ?? null,
+        ticket: order.idTicket ? ticketById.get(order.idTicket) ?? null : null,
       };
     });
   }
@@ -97,24 +131,26 @@ export class WorkOrdersService {
       orderBy: { fechaCreacion: 'desc' },
     });
 
-    if (!prospect) {
-      throw new BadRequestException('No existe un prospecto asociado para calcular el tiempo de conversion');
+    if (!prospect && !order.idServicio) {
+      throw new BadRequestException('No existe un prospecto o servicio asociado para completar la instalacion');
     }
 
-    if (!prospect.fechaCreacion) {
+    if (prospect && !prospect.fechaCreacion) {
       throw new BadRequestException('No se puede completar la instalacion: falta la fecha de creacion del prospecto');
     }
 
     const conversionDate = new Date();
 
-    if (prospect.fechaCreacion.getTime() > conversionDate.getTime()) {
+    if (prospect?.fechaCreacion && prospect.fechaCreacion.getTime() > conversionDate.getTime()) {
       throw new BadRequestException('No se puede completar la instalacion: la fecha de creacion del prospecto es futura');
     }
 
-    const conversionDays = Math.max(
-      0,
-      Math.ceil((conversionDate.getTime() - prospect.fechaCreacion.getTime()) / (1000 * 60 * 60 * 24)),
-    );
+    const conversionDays = prospect?.fechaCreacion
+      ? Math.max(
+          0,
+          Math.ceil((conversionDate.getTime() - prospect.fechaCreacion.getTime()) / (1000 * 60 * 60 * 24)),
+        )
+      : null;
     const completionObservations = preserveInstallOrderMetadata(order.observaciones, dto.observaciones);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -155,15 +191,17 @@ export class WorkOrdersService {
         data: { estadoOperativo: 'Activo' },
       });
 
-      const updatedProspect = await tx.prospecto.update({
-        where: { idProspecto: prospect.idProspecto },
-        data: {
-          estadoPipeline: 'Servicio Activo',
-          motivoPerdida: null,
-          fechaConversion: conversionDate,
-          tiempoConversionDias: conversionDays,
-        },
-      });
+      const updatedProspect = prospect
+        ? await tx.prospecto.update({
+            where: { idProspecto: prospect.idProspecto },
+            data: {
+              estadoPipeline: 'Servicio Activo',
+              motivoPerdida: null,
+              fechaConversion: conversionDate,
+              tiempoConversionDias: conversionDays,
+            },
+          })
+        : null;
 
       await tx.historialOt.create({
         data: {
@@ -190,10 +228,95 @@ export class WorkOrdersService {
         idCliente: order.idCliente,
         estadoCliente: 'Activo',
         potenciaOpticaDbm: dto.potenciaOpticaDbm,
-        fechaCreacionProspecto: prospect.fechaCreacion.toISOString(),
-        fechaConversion: conversionDate.toISOString(),
+        fechaCreacionProspecto: prospect?.fechaCreacion?.toISOString() ?? null,
+        fechaConversion: prospect ? conversionDate.toISOString() : null,
         tiempoConversionDias: conversionDays,
         idServicio: order.idServicio,
+      },
+    });
+
+    return result;
+  }
+
+  async completeRepair(idOt: number, dto: CompleteRepairOrderDto, currentUser: AuthUser) {
+    const order = await this.getOrderOrThrow(idOt, currentUser);
+
+    if (order.tipoOt === 'Instalacion') {
+      throw new BadRequestException('La orden de instalacion debe cerrarse desde el flujo de instalacion');
+    }
+
+    if (!order.idTicket) {
+      throw new BadRequestException('La orden no tiene ticket asociado');
+    }
+
+    if (order.estado === 'Completada') {
+      throw new BadRequestException('La orden de trabajo ya se encuentra completada');
+    }
+
+    const ticket = await this.prisma.ticket.findUnique({ where: { idTicket: order.idTicket } });
+
+    if (!ticket) {
+      throw new BadRequestException('El ticket asociado a la orden no existe');
+    }
+
+    const completionNotes = dto.observaciones.trim();
+    const completionObservations = `${order.observaciones ?? ''}\n\nCierre tecnico:\n${completionNotes}`.trim();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.ordenTrabajo.update({
+        where: { idOt },
+        data: {
+          estado: 'Completada',
+          fechaCompletada: new Date(),
+          potenciaOpticaDbm: dto.potenciaOpticaDbm,
+          observaciones: completionObservations,
+        },
+      });
+
+      const updatedTicket = await tx.ticket.update({
+        where: { idTicket: order.idTicket ?? 0 },
+        data: {
+          estado: 'Resuelto',
+          fechaCierre: new Date(),
+          descripcion: `${ticket.descripcion ?? ''}\n\nCierre desde OT #${idOt}:\n${completionNotes}`.trim(),
+        },
+      });
+
+      if (order.idCliente && dto.estadoFinalServicio) {
+        await tx.cliente.update({
+          where: { idCliente: order.idCliente },
+          data: { estado: dto.estadoFinalServicio },
+        });
+      }
+
+      await tx.historialOt.create({
+        data: {
+          idOt,
+          idUsuario: currentUser.idUsuario,
+          estadoAnterior: order.estado,
+          estadoNuevo: 'Completada',
+          observaciones: completionObservations,
+          fechaHora: new Date(),
+        },
+      });
+
+      return { order: updatedOrder, ticket: updatedTicket };
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CERRAR_OT_TICKET',
+      entidadAfectada: 'orden_trabajo',
+      idEntidadAfectada: idOt,
+      valorAnterior: {
+        estadoOrden: order.estado,
+        estadoTicket: ticket.estado,
+      },
+      valorNuevo: {
+        estadoOrden: result.order.estado,
+        estadoTicket: result.ticket.estado,
+        idTicket: order.idTicket,
+        idCliente: order.idCliente,
+        estadoFinalServicio: dto.estadoFinalServicio,
       },
     });
 
@@ -212,6 +335,10 @@ export class WorkOrdersService {
     }
 
     return order;
+  }
+
+  private extractVisitTime(observaciones?: string | null) {
+    return observaciones?.match(/^HoraVisita=(\d{2}:\d{2})$/m)?.[1] ?? null;
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {
