@@ -3350,3 +3350,28 @@ button.profile-menu-item.danger:hover {
   .inventory-equipment-summary-heading { grid-template-columns: 44px minmax(0, 1fr); }
   .inventory-equipment-summary-heading strong { grid-column: 2; justify-self: start; }
 }
+
+.plans-catalog { gap: 22px; }
+.plans-catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.plans-catalog-heading h1 { margin: 0; }
+.plans-catalog-heading button { display: inline-flex; align-items: center; gap: 7px; }
+.plans-catalog-list { min-width: 0; }
+.plans-catalog-list .table-wrap { margin: 0; }
+.plan-row-inactive { opacity: .48; }
+.plan-row-inactive:hover { opacity: .75; }
+.plan-toggle { display: inline-flex; align-items: center; width: 36px; min-width: 36px; height: 21px; min-height: 21px; padding: 2px; border-radius: 999px; background: #cdd7d2; box-shadow: none; }
+.plan-toggle:hover { background: #b6c4bd; box-shadow: none; transform: none; }
+.plan-toggle span { display: block; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform .18s ease; }
+.plan-toggle.active { background: #28856e; }
+.plan-toggle.active span { transform: translateX(15px); }
+.plan-edit-action { display: inline-grid; min-width: 34px; place-items: center; padding: 0; }
+.plan-modal-form { display: grid; gap: 18px; }
+.plan-modal-intro { border: 1px solid #d9e9e2; border-radius: 14px; padding: 14px 16px; background: linear-gradient(135deg, #eff9f5, #fbfdfc); }
+.plan-modal-intro span { color: #19725e; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
+.plan-modal-intro p { margin: 5px 0 0; color: #60716a; font-size: .85rem; }
+.plan-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.plan-form-grid label { display: grid; gap: 7px; color: #405149; font-size: .8rem; font-weight: 750; }
+.plan-description-field { grid-column: 1 / -1; }
+.plan-form-grid textarea { min-height: 88px; resize: vertical; }
+.plan-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+@media (max-width: 620px) { .plans-catalog-heading { align-items: flex-start; flex-direction: column; } .plan-form-grid { grid-template-columns: 1fr; } }
