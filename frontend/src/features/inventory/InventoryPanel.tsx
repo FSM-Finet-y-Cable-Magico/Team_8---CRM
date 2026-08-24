@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { api, apiErrorMessage, type AdvancedInventory, type Customer, type InventoryUnit, type WorkOrder } from '../../api';
 import { macPattern } from '../../constants';
 import { formatWorkOrderValue } from '../../lib';
@@ -200,11 +201,10 @@ export function InventoryPanel({
                 </p>
               )}
               </div>
-              <p className="inventory-management-intro">Selecciona la acción que necesitas según el estado actual del equipo.</p>
-              <div className="inventory-management-categories" aria-label="Categorías de gestión">
-                <span>Operación</span><span>Control técnico</span><span>Vinculación y evidencia</span>
-              </div>
               <div className="inventory-management-flow">
+                <details className="inventory-management-section" open>
+                  <summary><span>Operación del equipo<small>Estado, movimiento y bloqueo</small></span><ChevronDown size={17} /></summary>
+                  <div className="inventory-management-section-content inventory-action-grid">
                 {permissions.manageInventory && <label>
                   Estado logico
                   <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
@@ -297,6 +297,11 @@ export function InventoryPanel({
                   </button>
                 </label>}
 
+                  </div>
+                </details>
+                <details className="inventory-management-section">
+                  <summary><span>Control técnico<small>Diagnóstico, traslado y mantención</small></span><ChevronDown size={17} /></summary>
+                  <div className="inventory-management-section-content inventory-action-grid">
                 {permissions.manageInventory && <label>
                   Diagnosticar equipo devuelto
                   <select
@@ -372,6 +377,11 @@ export function InventoryPanel({
                   </button>
                 </label>}
 
+                  </div>
+                </details>
+                <details className="inventory-management-section">
+                  <summary><span>Vinculación y evidencia<small>Cliente, orden y respaldo</small></span><ChevronDown size={17} /></summary>
+                  <div className="inventory-management-section-content inventory-action-grid">
                 {permissions.installEquipment && <label>
                   Adjuntar evidencia a orden de trabajo
                   <select value={advancedUnitForm.evidenceOt} onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceOt: event.target.value })}>
@@ -458,6 +468,8 @@ export function InventoryPanel({
                     Vincular
                   </button>
                 </label>}
+                  </div>
+                </details>
               </div>
               {status && <p className="inline-status">{status}</p>}
             </div>
