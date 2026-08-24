@@ -530,6 +530,38 @@ model LogNotificacion {
   @@map("log_notificacion")
 }
 
+model EventoGestionComercial {
+  idEvento          BigInt    @id @default(autoincrement()) @map("id_evento")
+  idCliente         Int       @map("id_cliente")
+  idContrato        Int?      @map("id_contrato")
+  idFactura         Int?      @map("id_factura")
+  idPago            Int?      @map("id_pago")
+  idServicio        Int?      @map("id_servicio")
+  idUsuario         Int?      @map("id_usuario")
+  idEmpresa         Int?      @map("id_empresa")
+  tipoEvento        String    @map("tipo_evento") @db.VarChar(40)
+  canal             String    @db.VarChar(30)
+  estado            String    @db.VarChar(20)
+  mensajeGenerado   String?   @map("mensaje_generado")
+  respuestaCliente  String?   @map("respuesta_cliente")
+  observacion       String?
+  montoRelacionado  Decimal?  @map("monto_relacionado") @db.Decimal(10, 2)
+  fechaCompromiso   DateTime? @map("fecha_compromiso") @db.Date
+  fechaEvento       DateTime  @default(now()) @map("fecha_evento")
+  metadataJson      Json?     @map("metadata_json")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([idCliente])
+  @@index([idContrato])
+  @@index([idFactura])
+  @@index([idServicio])
+  @@index([idEmpresa])
+  @@index([tipoEvento])
+  @@index([fechaEvento])
+  @@index([idUsuario])
+  @@map("evento_gestion_comercial")
+}
+
 model StockConsumible {
   idStock             Int     @id @default(autoincrement()) @map("id_stock")
   idTipoEquipo        Int?    @map("id_tipo_equipo")

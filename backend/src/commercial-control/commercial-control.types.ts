@@ -1,0 +1,57 @@
+export const COMMERCIAL_EVENT_TYPES = [
+  'AVISO_PAGO',
+  'AVISO_CORTE',
+  'AVISO_RETIRO',
+  'RESPUESTA_CLIENTE',
+  'PAGO_REGISTRADO',
+  'ABONO_REGISTRADO',
+  'CONVENIO_REGISTRADO',
+  'PRORROGA_REGISTRADA',
+  'CORTE_REGISTRADO',
+  'RETIRO_SOLICITADO',
+  'RETIRO_REGISTRADO',
+  'REACTIVACION_REGISTRADA',
+  'CARGO_REPOSICION',
+  'OBSERVACION_COMERCIAL',
+] as const;
+
+export const COMMERCIAL_EVENT_CHANNELS = [
+  'MANUAL',
+  'WHATSAPP_COPIABLE',
+  'LLAMADA',
+  'CORREO',
+  'PRESENCIAL',
+  'SISTEMA',
+] as const;
+
+export const COMMERCIAL_EVENT_STATUSES = [
+  'REGISTRADO',
+  'PENDIENTE',
+  'ENVIADO',
+  'RESPONDIDO',
+  'FALLIDO',
+  'ANULADO',
+] as const;
+
+export const COMMERCIAL_STATES = [
+  'AL_DIA',
+  'POR_VENCER',
+  'VENCIDO',
+  'MOROSO',
+  'AVISO_PAGO_ENVIADO',
+  'AVISO_CORTE_ENVIADO',
+  'CORTE_PROGRAMADO',
+  'CORTADO',
+  'RETIRO_PROGRAMADO',
+  'RETIRADO',
+  'CONVENIO',
+  'PRORROGA',
+  'REACTIVACION_PENDIENTE',
+  'REGULARIZADO',
+] as const;
+
+export type CommercialEventType = (typeof COMMERCIAL_EVENT_TYPES)[number];
+export type CommercialEventChannel = (typeof COMMERCIAL_EVENT_CHANNELS)[number];
+export type CommercialEventStatus = (typeof COMMERCIAL_EVENT_STATUSES)[number];
+export type CommercialState = (typeof COMMERCIAL_STATES)[number];
+

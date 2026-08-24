@@ -3,6 +3,7 @@ import { api, apiErrorMessage, type BillingOverview, type PaymentZone, type Plan
 import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge } from '../../shared/components';
+import { CommercialControlPanel } from './CommercialControlPanel';
 export function BillingPanel({
   overview,
   plans,
@@ -150,6 +151,13 @@ export function BillingPanel({
       )}
 
       {status && <p className="inline-status">{status}</p>}
+
+      <CommercialControlPanel
+        scope={scope}
+        zones={zones}
+        permissions={permissions}
+        onChanged={onChanged}
+      />
 
       <section className="panel stack">
         <div className="section-heading">

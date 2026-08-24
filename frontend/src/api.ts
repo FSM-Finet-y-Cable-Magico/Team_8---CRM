@@ -236,6 +236,95 @@ export type ZonePriceRule = {
   zonaPago?: PaymentZone | null;
 };
 
+export type CommercialControlRow = {
+  idCliente: number;
+  idContrato: number;
+  idFactura: number;
+  idServicio: number | null;
+  clienteNombre: string;
+  rut: string | null;
+  telefono: string | null;
+  email: string | null;
+  empresa: string | null;
+  plan: string | null;
+  zonaPago: string | null;
+  direccionServicio: string | null;
+  periodo: string;
+  montoFacturado: number;
+  montoPagado: number;
+  saldoPendiente: number;
+  fechaEmision: string | null;
+  fechaVencimiento: string | null;
+  diasAtraso: number;
+  estadoFactura: string;
+  estadoCliente: string;
+  estadoContrato: string;
+  estadoServicio: string | null;
+  estadoComercial: string;
+  ultimoEventoTipo: string | null;
+  ultimoEventoFecha: string | null;
+  ultimoEventoResponsable: string | null;
+  ultimoEventoResponsableId: number | null;
+  fechaAvisoPago: string | null;
+  fechaAvisoCorte: string | null;
+  fechaAvisoRetiro: string | null;
+  puedeEnviarAvisoPago: boolean;
+  puedeEnviarAvisoCorte: boolean;
+  puedeRegistrarRetiro: boolean;
+  puedeRegistrarPago: boolean;
+  accionSugerida: string;
+};
+
+export type CommercialControlFilters = {
+  search?: string;
+  scope?: string;
+  empresaId?: number;
+  zonaPagoId?: number;
+  estadoComercial?: string;
+  periodo?: string;
+  vencidosOnly?: boolean;
+  responsableId?: number;
+};
+
+export type CreateCommercialEventInput = {
+  idCliente: number;
+  idContrato?: number;
+  idFactura?: number;
+  idPago?: number;
+  idServicio?: number;
+  tipoEvento: string;
+  canal: string;
+  estado: string;
+  mensajeGenerado?: string;
+  respuestaCliente?: string;
+  observacion?: string;
+  montoRelacionado?: number;
+  fechaCompromiso?: string;
+  metadataJson?: Record<string, unknown>;
+};
+
+export type CommercialEvent = {
+  idEvento: string;
+  idCliente: number;
+  idContrato: number | null;
+  idFactura: number | null;
+  idPago: number | null;
+  idServicio: number | null;
+  idUsuario: number | null;
+  idEmpresa: number | null;
+  tipoEvento: string;
+  canal: string;
+  estado: string;
+  mensajeGenerado: string | null;
+  respuestaCliente: string | null;
+  observacion: string | null;
+  montoRelacionado: number | null;
+  fechaCompromiso: string | null;
+  fechaEvento: string;
+  metadataJson: Record<string, unknown> | null;
+  createdAt: string;
+};
+
 export type CustomerRequest = {
   idSolicitud: number;
   idCliente: number | null;
@@ -509,6 +598,16 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+export async function getCommercialControl(params: CommercialControlFilters) {
+  const response = await api.get<CommercialControlRow[]>('/commercial-control', { params });
+  return response.data;
+}
+
+export async function createCommercialEvent(input: CreateCommercialEventInput) {
+  const response = await api.post<CommercialEvent>('/commercial-control/events', input);
+  return response.data;
+}
 
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {

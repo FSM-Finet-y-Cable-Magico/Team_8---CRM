@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
+import { CommercialControlModule } from './commercial-control/commercial-control.module';
 import { CompaniesModule } from './companies/companies.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { CustomersModule } from './customers/customers.module';
@@ -33,6 +34,7 @@ import { AppController } from './app.controller';
     AuditModule,
     AuthModule,
     BillingModule,
+    CommercialControlModule,
     PortalModule,
     TvipModule,
     MonitoringModule,
