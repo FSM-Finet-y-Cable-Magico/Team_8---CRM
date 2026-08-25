@@ -150,6 +150,72 @@ describe('ProspectsService', () => {
 
     await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('Factible');
   });
+  it('permite cotizar un plan activo de otra empresa y conserva su idPlan', async () => {
+    const prospect = {
+      idProspecto: 12,
+      idEmpresa: 1,
+      email: 'cliente@example.com',
+      nombreCompleto: 'Prospecto FiNet',
+      estadoPipeline: 'Factible',
+    };
+    const quote = {
+      idCotizacion: 22,
+      idProspecto: 12,
+      idPlan: 9,
+      plan: { idPlan: 9, nombreComercial: 'Cable 200 Hogar' },
+      prospecto: { empresa: { nombre: 'FiNet Limitada' } },
+    };
+    const prisma = {
+      prospecto: {
+        findUnique: jest.fn().mockResolvedValue(prospect),
+        update: jest.fn().mockResolvedValue(prospect),
+      },
+      cotizacion: {
+        findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1, factibilidadVerificada: true }),
+        create: jest.fn().mockResolvedValue(quote),
+        update: jest.fn().mockResolvedValue(quote),
+      },
+      plan: {
+        findUnique: jest.fn().mockResolvedValue({ idPlan: 9, idEmpresa: 2, activo: true }),
+      },
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      { sendQuote: jest.fn().mockResolvedValue({ status: 'skipped' }) } as unknown as MailService,
+    );
+    jest.spyOn(service as any, 'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('pdf'));
+
+    await service.generateQuote(12, { planId: 9 }, admin);
+
+    expect(prisma.cotizacion.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ idProspecto: 12, idPlan: 9 }) }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ idPlan: 9 }) }));
+  });
+
+  it('no permite cotizar un plan inactivo', async () => {
+    const prisma = {
+      prospecto: {
+        findUnique: jest.fn().mockResolvedValue({
+          idProspecto: 13,
+          idEmpresa: 1,
+          email: 'cliente@example.com',
+          estadoPipeline: 'Factible',
+        }),
+      },
+      cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1, factibilidadVerificada: true }) },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 10, activo: false }) },
+    };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+    );
+
+    await expect(service.generateQuote(13, { planId: 10 }, admin)).rejects.toThrow('inactivo');
+  });
   it('confirma contratacion manual y convierte el prospecto en cliente pendiente de firma sin crear servicio ni OT', async () => {
     const prospect = {
       idProspecto: 20,

@@ -98,3 +98,18 @@ La siguiente fase debe continuar desde Cliente pendiente firma contrato hacia fi
 Las pruebas de `ProspectsService` cubren la conversion manual sin campos externos obligatorios, conservacion de la direccion, ausencia de servicio/OT y registro de perdida con motivo y observacion. Las pruebas de `CompaniesService` validan que el resumen use el mismo filtro de prospecto activo que el listado y que la metrica de clientes activos sea exclusiva para estado `Activo`.
 
 Las pruebas manuales de navegador siguen pendientes de ejecutar en un navegador disponible: verificar conteos Dashboard contra Prospectos, convertir un prospecto, validar direccion en Clientes y comprobar el pop-up compacto de perdida.
+## Catalogo de planes para cotizaciones
+
+### Problema y causa
+
+El selector `Plan a cotizar` recibia el mismo arreglo cargado desde `GET /api/plans` que el panel Planes comerciales, pero `ProspectWorkflowPanel` aplicaba un filtro adicional por `idEmpresa` del prospecto. Por eso el catalogo consolidado podia mostrar planes activos de FiNet y Cable Magico Litoral mientras la cotizacion mostraba solo el subconjunto de la empresa del prospecto.
+
+### Regla aplicada
+
+Planes comerciales es la fuente de verdad para los planes disponibles en nuevas cotizaciones. El selector usa el catalogo existente de `GET /api/plans`, filtra solo planes inactivos y muestra cada opcion con su empresa. No usa listas hardcodeadas, nombres como identificador ni un catalogo paralelo: la cotizacion envia el `idPlan` real.
+
+Para esta etapa, un prospecto puede cotizar y confirmar contratacion con cualquier plan activo entregado por el catalogo disponible en el scope actual. La empresa del prospecto no cambia automaticamente. Esta es una regla temporal; la validacion definitiva de compatibilidad empresa-plan queda pendiente de definicion administrativa.
+
+Los planes inactivos se mantienen en historicos, pero no se ofrecen para cotizaciones o contrataciones nuevas. `PlansPanel` dispara la recarga global al crear, editar o cambiar el estado de un plan, por lo que al navegar a Prospectos se utiliza el catalogo actualizado sin reiniciar servicios.
+
+Se revisaron otros selectores: Confirmar contratacion comparte el catalogo activo para preservar el mismo `idPlan` de la cotizacion. Los selectores de Clientes, Portal y otros modulos no se reestructuraron en esta correccion y deben revisarse en una fase posterior si se detecta una fuente distinta.

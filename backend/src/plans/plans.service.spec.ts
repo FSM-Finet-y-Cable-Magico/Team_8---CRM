@@ -10,6 +10,14 @@ const commercial: AuthUser = {
   roles: ['Comercial'],
 };
 
+const administrator: AuthUser = {
+  idUsuario: 1,
+  idEmpresa: 1,
+  email: 'admin@finet.local',
+  nombreCompleto: 'Administrador FiNet',
+  roles: ['Administrador'],
+};
+
 describe('PlansService', () => {
   const audit = { record: jest.fn() };
 
@@ -23,6 +31,21 @@ describe('PlansService', () => {
 
     expect(prisma.plan.findMany).toHaveBeenCalledWith({
       where: { idEmpresa: 1, activo: true },
+      orderBy: { idPlan: 'asc' },
+      include: { empresa: true },
+    });
+  });
+
+  it('lista todos los planes activos del catalogo para un administrador en scope consolidado', async () => {
+    const prisma = {
+      plan: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new PlansService(prisma as never, audit as never);
+
+    await service.list(administrator, 'consolidado');
+
+    expect(prisma.plan.findMany).toHaveBeenCalledWith({
+      where: { activo: true },
       orderBy: { idPlan: 'asc' },
       include: { empresa: true },
     });

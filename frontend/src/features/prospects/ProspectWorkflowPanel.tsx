@@ -55,7 +55,11 @@ export function ProspectWorkflowPanel({
   const isNoFactible = currentStatus === 'No Factible';
   const isQuoted = QUOTED_STATUSES.includes(currentStatus);
   const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
-  const planOptions = plans.filter((plan) => !plan.idEmpresa || !prospect.empresa || plan.idEmpresa === prospect.empresa.idEmpresa);
+  const planOptions = plans.filter((plan) => plan.activo !== false);
+
+  function planOptionLabel(plan: Plan) {
+    return `${plan.nombreComercial} - ${plan.empresa?.nombre ?? 'Sin empresa'}`;
+  }
   const isContractConfirmationReady = Boolean(contractPlanId && isQuoted && !isFinal);
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
@@ -230,7 +234,7 @@ export function ProspectWorkflowPanel({
                 <option value="">Seleccionar plan</option>
                 {planOptions.map((plan) => (
                   <option key={plan.idPlan} value={plan.idPlan}>
-                    {plan.nombreComercial}
+                    {planOptionLabel(plan)}
                   </option>
                 ))}
               </select>
@@ -259,7 +263,7 @@ export function ProspectWorkflowPanel({
                   <option value="">Seleccionar plan</option>
                   {planOptions.map((plan) => (
                     <option key={plan.idPlan} value={plan.idPlan}>
-                      {plan.nombreComercial}
+                      {planOptionLabel(plan)}
                     </option>
                   ))}
                 </select>

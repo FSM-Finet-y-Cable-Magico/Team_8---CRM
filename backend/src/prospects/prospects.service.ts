@@ -239,10 +239,6 @@ export class ProspectsService {
       throw new BadRequestException('Plan inexistente o inactivo');
     }
 
-    if (plan.idEmpresa && prospect.idEmpresa && plan.idEmpresa !== prospect.idEmpresa) {
-      throw new BadRequestException('El plan no pertenece a la empresa del prospecto');
-    }
-
     const quote = await this.prisma.cotizacion.create({
       data: {
         idProspecto,
@@ -354,10 +350,6 @@ export class ProspectsService {
 
     if (prospect.estadoPipeline === LOST_PIPELINE_STATUS) {
       throw new BadRequestException('No se puede confirmar la contratacion de un prospecto perdido');
-    }
-
-    if (plan.idEmpresa && prospect.idEmpresa && plan.idEmpresa !== prospect.idEmpresa) {
-      throw new BadRequestException('El plan no pertenece a la empresa del prospecto');
     }
 
     const quote = await this.prisma.cotizacion.findFirst({
