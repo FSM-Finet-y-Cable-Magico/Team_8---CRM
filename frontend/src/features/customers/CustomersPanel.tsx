@@ -94,6 +94,28 @@ function formatServiceWorkOrderCode(order?: CustomerServiceWorkOrder | null) {
   return order ? `OT-INS-${String(order.idOt).padStart(6, '0')}` : '-';
 }
 
+function serviceAddressLabel(service?: CustomerService | null) {
+  const fullAddress = service?.direccion?.direccionCompleta?.trim();
+
+  if (fullAddress) {
+    return fullAddress;
+  }
+
+  const cityAddress = [service?.direccion?.comuna, service?.direccion?.ciudad]
+    .filter(Boolean)
+    .join(', ');
+
+  return cityAddress || 'Por confirmar';
+}
+
+function serviceContractLabel(service?: CustomerService | null) {
+  if (!service?.idContrato) {
+    return 'Sin contrato asociado';
+  }
+
+  return `Contrato ${service.idContrato}`;
+}
+
 export function CustomersPanel({
   customers,
   plans,
@@ -451,8 +473,13 @@ export function CustomersPanel({
   async function loadServicesForCustomer(idCliente: number, silent = false, preferredServiceId?: number) {
     try {
       const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`);
+      const nextSelectedId =
+        preferredServiceId && data.some((service) => service.idServicio === preferredServiceId)
+          ? preferredServiceId
+          : data[0]?.idServicio ?? null;
+
       setServices(data);
-      setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);
+      setSelectedServiceId(nextSelectedId);
 
       if (!silent) {
         setStatus(data.length ? 'Servicios contratados cargados' : 'El cliente no tiene servicios registrados');
@@ -926,7 +953,7 @@ export function CustomersPanel({
                           <td>{service.tipoServicio}</td>
                           <td><StatusBadge value={service.estadoOperativo} /></td>
                           <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
-                          <td>{service.direccion?.direccionCompleta ?? '-'}</td>
+                          <td>{serviceAddressLabel(service)}</td>
                           <td>
                             <button
                               type="button"
@@ -958,7 +985,8 @@ export function CustomersPanel({
                   </header>
 
                   <div className="history-grid">
-                    <HistoryBox title="Dirección" value={selectedService.direccion?.direccionCompleta ?? 'Sin dirección'} />
+                    <HistoryBox title="Dirección" value={serviceAddressLabel(selectedService)} />
+                    <HistoryBox title="Contrato" value={serviceContractLabel(selectedService)} />
                     <HistoryBox title="Equipos" value={selectedService.equipos?.length ?? 0} />
                     <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
                     <HistoryBox title="Órdenes" value={selectedService.ordenes?.length ?? 0} />
@@ -1100,6 +1128,134 @@ export function CustomersPanel({
                   ) : (
                     <p className="inline-status">No hay acciones de instalación disponibles para el estado actual del servicio.</p>
                   )}
+                  <div className="history-grid">
+                    <section className="history-list">
+                      <h3>Datos técnicos del servicio</h3>
+                      <ul>
+                        {technicalEntries(selectedService.datosTecnicos).map((entry) => (
+                          <li key={entry}>{entry}</li>
+                        ))}
+                        {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos técnicos registrados.</li>}
+                      </ul>
+                      {permissions.manageObservations && (
+                        <button
+                          type="button"
+                          className="secondary compact"
+                          onClick={() => setObservationTarget({
+                            tipoEntidad: 'Servicio',
+                            idEntidad: selectedService.idServicio,
+                            idCliente: selectedService.idCliente,
+                            idEmpresa: selectedService.idEmpresa,
+                            label: `Servicio ${selectedService.idServicio}`,
+                          })}
+                        >
+                          Observaciones del servicio
+                        </button>
+                      )}
+                    </section>
+
+                    <section className="history-list">
+                      <h3>Equipos instalados</h3>
+                      <ul>
+                        {(selectedService.equipos ?? []).map((unit) => (
+                          <li key={unit.idUnidad}>
+                            {unit.numeroSerie} - {unit.estado} - modalidad: {unit.modalidadAsignacion ?? 'Sin clasificar'}
+                            {unit.valorArriendoMensual ? ` - $${Number(unit.valorArriendoMensual).toLocaleString('es-CL')}/mes` : ''}
+                          </li>
+                        ))}
+                        {!selectedService.equipos?.length && <li>Sin equipos asociados al servicio.</li>}
+                      </ul>
+                    </section>
+
+                    {permissions.viewMonitoring && (
+                      <section className="history-list">
+                        <div className="section-heading compact-heading">
+                          <h3>Monitoreo del servicio</h3>
+                          <button type="button" className="secondary compact" onClick={() => void loadServiceMonitoring()}>
+                            Actualizar
+                          </button>
+                        </div>
+                        <MonitoringStatusView status={serviceMonitoringStatus} />
+                      </section>
+                    )}
+
+                    <section className="history-list">
+                      <h3>Solicitudes y visitas asociadas</h3>
+                      <ul>
+                        {(selectedService.solicitudes ?? []).slice(0, 4).map((request) => (
+                          <li key={`request-${request.idSolicitud}`}>
+                            Solicitud {request.idSolicitud} - {request.tipoSolicitud} - {request.estado}
+                          </li>
+                        ))}
+                        {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
+                          <li key={`ticket-${ticket.idTicket}`}>
+                            Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
+                          </li>
+                        ))}
+                        {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
+                          <li key={`order-${order.idOt}`}>
+                            Orden {formatServiceWorkOrderCode(order)} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
+                          </li>
+                        ))}
+                        {!selectedService.solicitudes?.length && !selectedService.tickets?.length && !selectedService.ordenes?.length && (
+                          <li>No hay solicitudes ni visitas asociadas.</li>
+                        )}
+                      </ul>
+                    </section>
+
+                    {selectedService.idContrato && (permissions.changeCustomerPlan || permissions.generateDigitalContract) && (
+                      <section className="history-list">
+                        <h3>Contrato del servicio</h3>
+                        <p>{serviceContractLabel(selectedService)} - {selectedService.contrato?.plan?.nombreComercial ?? 'Sin plan'}</p>
+                        {permissions.generateDigitalContract && (
+                          <div className="button-row">
+                            <button type="button" className="secondary compact" onClick={() => void generateDigitalContract(selectedService.idContrato ?? 0)}>
+                              Generar contrato digital
+                            </button>
+                            <button type="button" className="secondary compact" onClick={() => void downloadDigitalContract(selectedService.idContrato ?? 0)}>
+                              Descargar último contrato
+                            </button>
+                          </div>
+                        )}
+                        {permissions.changeCustomerPlan && (
+                          <form className="stack" onSubmit={changeServicePlan}>
+                            <select
+                              value={changePlanForm.newPlanId}
+                              onChange={(event) => setChangePlanForm({ ...changePlanForm, newPlanId: event.target.value })}
+                              required
+                            >
+                              <option value="">Seleccionar nuevo plan</option>
+                              {plans
+                                .filter((plan) => plan.activo !== false && (!selectedService.idEmpresa || !plan.idEmpresa || plan.idEmpresa === selectedService.idEmpresa))
+                                .map((plan) => (
+                                  <option key={plan.idPlan} value={plan.idPlan}>
+                                    {plan.nombreComercial} - ${Number(plan.precioMensual).toLocaleString('es-CL')}
+                                  </option>
+                                ))}
+                            </select>
+                            <input
+                              type="date"
+                              value={changePlanForm.fechaEfectiva}
+                              onChange={(event) => setChangePlanForm({ ...changePlanForm, fechaEfectiva: event.target.value })}
+                              required
+                            />
+                            <input
+                              placeholder="Motivo del cambio"
+                              value={changePlanForm.motivo}
+                              onChange={(event) => setChangePlanForm({ ...changePlanForm, motivo: event.target.value })}
+                              required
+                            />
+                            <textarea
+                              placeholder="Observaciones del cambio"
+                              value={changePlanForm.observaciones}
+                              onChange={(event) => setChangePlanForm({ ...changePlanForm, observaciones: event.target.value })}
+                            />
+                            <button type="submit">Cambiar plan</button>
+                          </form>
+                        )}
+                      </section>
+                    )}
+                  </div>
                 </article>
               )}
             </section>
@@ -1334,187 +1490,16 @@ export function CustomersPanel({
                   <Router size={19} strokeWidth={1.8} />
                 </span>
                 <span>
-                  <strong>Servicios contratados</strong>
-                  <small>{services.length} servicio(s) registrado(s), perfiles técnicos y equipos.</small>
+                  <strong>Mantenimiento de servicios</strong>
+                  <small>Alta de servicios, perfiles técnicos y equipos del servicio seleccionado.</small>
                 </span>
                 <ChevronDown size={18} strokeWidth={1.8} aria-hidden="true" />
               </summary>
               <div className="customer-modal-section-content customer-services-section">
                 {selectedCustomer ? (
                   <>
-                    <div className="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Servicio</th>
-                            <th>Estado</th>
-                            <th>Plan</th>
-                            <th>Direccion</th>
-                            <th></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {services.map((service) => (
-                            <tr key={service.idServicio}>
-                              <td>{service.tipoServicio}</td>
-                              <td>{service.estadoOperativo}</td>
-                              <td>{service.contrato?.plan?.nombreComercial ?? '-'}</td>
-                              <td>{service.direccion?.direccionCompleta ?? '-'}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="secondary compact"
-                                  onClick={() => setSelectedServiceId(service.idServicio)}
-                                >
-                                  Ver perfil
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
                     {!services.length && (
                       <p className="inline-status">Este cliente aun no tiene servicios contratados registrados.</p>
-                    )}
-
-                    {selectedService && (
-                      <div className="workflow-panel customer-service-profile">
-                        <h3>Servicio #{selectedService.idServicio}</h3>
-                        <p className="detail-line">
-                          {selectedService.tipoServicio} - {selectedService.estadoOperativo}
-                          {selectedService.contrato?.plan ? ` - ${selectedService.contrato.plan.nombreComercial}` : ''}
-                        </p>
-                        <div className="history-grid">
-                          <HistoryBox title="Equipos instalados" value={selectedService.equipos?.length ?? 0} />
-                          <HistoryBox title="Tickets" value={selectedService.tickets?.length ?? 0} />
-                          <HistoryBox title="OTs" value={selectedService.ordenes?.length ?? 0} />
-                          <HistoryBox title="Direccion" value={selectedService.direccion?.comuna ?? 'Sin dato'} />
-                          <section className="history-list">
-                            <h3>Datos tecnicos del servicio</h3>
-                            <ul>
-                              {technicalEntries(selectedService.datosTecnicos).map((entry) => (
-                                <li key={entry}>{entry}</li>
-                              ))}
-                              {!technicalEntries(selectedService.datosTecnicos).length && <li>Sin datos tecnicos registrados.</li>}
-                            </ul>
-                            {permissions.manageObservations && (
-                              <button
-                                type="button"
-                                className="secondary compact"
-                                onClick={() => setObservationTarget({
-                                  tipoEntidad: 'Servicio',
-                                  idEntidad: selectedService.idServicio,
-                                  idCliente: selectedService.idCliente,
-                                  idEmpresa: selectedService.idEmpresa,
-                                  label: `Servicio ${selectedService.idServicio}`,
-                                })}
-                              >
-                                Observaciones del servicio
-                              </button>
-                            )}
-                          </section>
-                          <section className="history-list">
-                            <h3>Equipos instalados</h3>
-                            <ul>
-                              {(selectedService.equipos ?? []).map((unit) => (
-                                <li key={unit.idUnidad}>
-                                  {unit.numeroSerie} - {unit.estado} - modalidad: {unit.modalidadAsignacion ?? 'Sin clasificar'}
-                                  {unit.valorArriendoMensual ? ` - $${Number(unit.valorArriendoMensual).toLocaleString('es-CL')}/mes` : ''}
-                                </li>
-                              ))}
-                              {!selectedService.equipos?.length && <li>Sin equipos asociados al servicio.</li>}
-                            </ul>
-                          </section>
-                          {permissions.viewMonitoring && (
-                            <section className="history-list">
-                              <div className="section-heading compact-heading">
-                                <h3>Monitoreo del servicio</h3>
-                                <button type="button" className="secondary compact" onClick={() => void loadServiceMonitoring()}>
-                                  Actualizar
-                                </button>
-                              </div>
-                              <MonitoringStatusView status={serviceMonitoringStatus} />
-                            </section>
-                          )}
-                          <section className="history-list">
-                            <h3>Solicitudes y visitas asociadas</h3>
-                            <ul>
-                              {(selectedService.solicitudes ?? []).slice(0, 4).map((request) => (
-                                <li key={`request-${request.idSolicitud}`}>
-                                  Solicitud {request.idSolicitud} - {request.tipoSolicitud} - {request.estado}
-                                </li>
-                              ))}
-                              {(selectedService.tickets ?? []).slice(0, 4).map((ticket) => (
-                                <li key={`ticket-${ticket.idTicket}`}>
-                                  Ticket {ticket.codigoSeguimiento ?? ticket.idTicket} - {ticket.estado} - {ticket.prioridad}
-                                </li>
-                              ))}
-                              {(selectedService.ordenes ?? []).slice(0, 4).map((order) => (
-                                <li key={`order-${order.idOt}`}>
-                                  Orden {order.idOt} - {order.tipoOt} - {order.estado} - {formatDateOnly(order.fechaProgramada)}
-                                </li>
-                              ))}
-                              {!selectedService.solicitudes?.length && !selectedService.tickets?.length && !selectedService.ordenes?.length && (
-                                <li>No hay solicitudes ni visitas asociadas.</li>
-                              )}
-                            </ul>
-                          </section>
-                          {selectedService.idContrato && (permissions.changeCustomerPlan || permissions.generateDigitalContract) && (
-                            <section className="history-list">
-                              <h3>Contrato del servicio</h3>
-                              <p>Contrato {selectedService.idContrato} - {selectedService.contrato?.plan?.nombreComercial ?? 'Sin plan'}</p>
-                              {permissions.generateDigitalContract && (
-                                <div className="button-row">
-                                  <button type="button" className="secondary compact" onClick={() => void generateDigitalContract(selectedService.idContrato ?? 0)}>
-                                    Generar contrato digital
-                                  </button>
-                                  <button type="button" className="secondary compact" onClick={() => void downloadDigitalContract(selectedService.idContrato ?? 0)}>
-                                    Descargar último contrato
-                                  </button>
-                                </div>
-                              )}
-                              {permissions.changeCustomerPlan && (
-                                <form className="stack" onSubmit={changeServicePlan}>
-                                  <select
-                                    value={changePlanForm.newPlanId}
-                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, newPlanId: event.target.value })}
-                                    required
-                                  >
-                                    <option value="">Seleccionar nuevo plan</option>
-                                    {plans
-                                      .filter((plan) => plan.activo !== false && (!selectedService.idEmpresa || !plan.idEmpresa || plan.idEmpresa === selectedService.idEmpresa))
-                                      .map((plan) => (
-                                        <option key={plan.idPlan} value={plan.idPlan}>
-                                          {plan.nombreComercial} - ${Number(plan.precioMensual).toLocaleString('es-CL')}
-                                        </option>
-                                      ))}
-                                  </select>
-                                  <input
-                                    type="date"
-                                    value={changePlanForm.fechaEfectiva}
-                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, fechaEfectiva: event.target.value })}
-                                    required
-                                  />
-                                  <input
-                                    placeholder="Motivo del cambio"
-                                    value={changePlanForm.motivo}
-                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, motivo: event.target.value })}
-                                    required
-                                  />
-                                  <textarea
-                                    placeholder="Observaciones del cambio"
-                                    value={changePlanForm.observaciones}
-                                    onChange={(event) => setChangePlanForm({ ...changePlanForm, observaciones: event.target.value })}
-                                  />
-                                  <button type="submit">Cambiar plan</button>
-                                </form>
-                              )}
-                            </section>
-                          )}
-                        </div>
-                      </div>
                     )}
 
                     {permissions.manageServices && (
