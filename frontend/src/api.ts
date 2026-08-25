@@ -45,6 +45,9 @@ export type Prospect = {
   direccion: string | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
+  observacionPerdida?: string | null;
+  fechaPerdida?: string | null;
+  idUsuarioPerdida?: number | null;
   origenContacto: string | null;
   empresa?: Company | null;
 };
@@ -107,6 +110,14 @@ export type Customer = {
   contratos?: Array<{
     idContrato: number;
     idEmpresa: number | null;
+    estado?: string | null;
+    proveedorContrato?: string | null;
+    numeroContratoExterno?: string | null;
+    folioContratoExterno?: string | null;
+    urlContratoPdf?: string | null;
+    fechaGeneracionContrato?: string | null;
+    fechaEnvioCliente?: string | null;
+    observacionContrato?: string | null;
     plan?: Plan | null;
   }>;
 };
@@ -128,6 +139,13 @@ export type CustomerService = {
   contrato?: {
     idContrato: number;
     estado: string | null;
+    proveedorContrato?: string | null;
+    numeroContratoExterno?: string | null;
+    folioContratoExterno?: string | null;
+    urlContratoPdf?: string | null;
+    fechaGeneracionContrato?: string | null;
+    fechaEnvioCliente?: string | null;
+    observacionContrato?: string | null;
     plan?: Plan | null;
   } | null;
   direccion?: {

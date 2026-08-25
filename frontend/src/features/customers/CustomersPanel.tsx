@@ -1180,7 +1180,7 @@ export function CustomersPanel({
                     <label>
                       Estado operativo
                       <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
-                        {['Activo', 'Suspendido', 'En Mantencion', 'Moroso', 'Baja'].map((item) => (
+                        {['Pendiente firma contrato', 'Activo', 'Suspendido', 'En Mantencion', 'Moroso', 'Baja'].map((item) => (
                           <option key={item} value={item}>
                             {item}
                           </option>

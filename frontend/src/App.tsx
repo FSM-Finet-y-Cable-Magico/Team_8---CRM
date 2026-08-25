@@ -363,10 +363,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               plans={plans}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
-              onOpenInstallation={(idProspecto) => {
-                setFocusedInstallationProspectId(idProspecto);
-                setActiveTab('installations');
-              }}
               onCreated={() => void loadData()}
             />
           )}
