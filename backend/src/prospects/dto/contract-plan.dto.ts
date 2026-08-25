@@ -6,10 +6,11 @@ export class ContractPlanDto {
   @Min(1)
   planId!: number;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(28)
-  diaVencimiento!: number;
+  diaVencimiento?: number;
 
   @IsOptional()
   @IsDateString()

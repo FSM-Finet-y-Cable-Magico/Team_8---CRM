@@ -150,7 +150,7 @@ describe('ProspectsService', () => {
 
     await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('Factible');
   });
-  it('registra contrato externo y convierte el prospecto en cliente pendiente de firma sin crear servicio ni OT', async () => {
+  it('confirma contratacion manual y convierte el prospecto en cliente pendiente de firma sin crear servicio ni OT', async () => {
     const prospect = {
       idProspecto: 20,
       idEmpresa: 1,
@@ -182,8 +182,6 @@ describe('ProspectsService', () => {
       idPlan: 8,
       idEmpresa: 1,
       estado: 'Pendiente firma contrato',
-      proveedorContrato: 'FACTURACION_CL',
-      folioContratoExterno: 'FC-100',
     };
     const transaction = {
       cliente: {
@@ -234,9 +232,7 @@ describe('ProspectsService', () => {
       20,
       {
         planId: 8,
-        diaVencimiento: 5,
-        folioContratoExterno: 'FC-100',
-        fechaEnvioCliente: '2026-08-25',
+        fechaInicio: '2026-08-25',
       },
       admin,
     );
@@ -247,8 +243,18 @@ describe('ProspectsService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           estado: 'Pendiente firma contrato',
-          proveedorContrato: 'FACTURACION_CL',
-          folioContratoExterno: 'FC-100',
+          diaVencimiento: 1,
+          proveedorContrato: undefined,
+          folioContratoExterno: undefined,
+        }),
+      }),
+    );
+    expect(transaction.direccionServicio.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          idCliente: 5,
+          direccionCompleta: 'Claudio Gay 2547, Santiago',
+          esPrincipal: true,
         }),
       }),
     );
@@ -263,11 +269,11 @@ describe('ProspectsService', () => {
       }),
     );
     expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ accion: 'REGISTRAR_CONTRATO_EXTERNO_PROSPECTO' }),
+      expect.objectContaining({ accion: 'CONFIRMAR_CONTRATACION_MANUAL' }),
     );
   });
 
-  it('rechaza registrar contrato externo si el prospecto no tiene cotizacion factible del plan', async () => {
+  it('rechaza confirmar contratacion si el prospecto no tiene cotizacion factible del plan', async () => {
     const prospect = {
       idProspecto: 20,
       idEmpresa: 1,
@@ -295,7 +301,7 @@ describe('ProspectsService', () => {
     await expect(
       service.contractPlan(
         20,
-        { planId: 8, diaVencimiento: 5, folioContratoExterno: 'FC-100' },
+        { planId: 8 },
         admin,
       ),
     ).rejects.toThrow('cotizacion factible');
@@ -323,7 +329,7 @@ describe('ProspectsService', () => {
 
     const result = await service.recordLoss(
       10,
-      { motivo: 'Precio', observaciones: 'Cliente eligio otra oferta', detalleMotivoPerdida: 'Competidor local' },
+      { motivo: 'Precio', observaciones: 'Cliente eligio otra oferta' },
       admin,
     );
 
@@ -332,7 +338,7 @@ describe('ProspectsService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           motivoPerdida: 'Precio',
-          observacionPerdida: 'Competidor local',
+          observacionPerdida: 'Cliente eligio otra oferta',
           idUsuarioPerdida: admin.idUsuario,
         }),
       }),

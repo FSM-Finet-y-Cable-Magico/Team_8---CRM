@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -27,7 +28,8 @@ const NOT_FEASIBLE_PIPELINE_STATUS = 'No Factible';
 const QUOTE_SENT_PIPELINE_STATUS = 'Cotizacion Enviada';
 const EXTERNAL_CONTRACT_PIPELINE_STATUS = 'Contrato externo registrado';
 const PENDING_SIGNATURE_STATUS = 'Pendiente firma contrato';
-const LOST_PIPELINE_STATUS = 'Perdido';
+const LOST_PIPELINE_STATUS = LOST_PROSPECT_PIPELINE_STATUS;
+const PENDING_SIGNATURE_DUE_DAY = 1;
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
 const ALTERNATIVE_VISIT_TIMES = ['09:00', '11:00', '14:00', '16:00', '18:00'];
 const PIPELINE_STATUSES = [
@@ -55,13 +57,7 @@ export class ProspectsService {
     const companyScope = this.companyScope(currentUser, scope);
 
     return this.prisma.prospecto.findMany({
-      where: {
-        AND: [
-          companyScope,
-          { idCliente: null },
-          { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: LOST_PIPELINE_STATUS } }] },
-        ],
-      },
+      where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
@@ -353,11 +349,11 @@ export class ProspectsService {
     }
 
     if (prospect.estadoPipeline === NOT_FEASIBLE_PIPELINE_STATUS) {
-      throw new BadRequestException('No se puede registrar contrato externo para un prospecto no factible');
+      throw new BadRequestException('No se puede confirmar la contratacion de un prospecto no factible');
     }
 
     if (prospect.estadoPipeline === LOST_PIPELINE_STATUS) {
-      throw new BadRequestException('No se puede registrar contrato externo para un prospecto perdido');
+      throw new BadRequestException('No se puede confirmar la contratacion de un prospecto perdido');
     }
 
     if (plan.idEmpresa && prospect.idEmpresa && plan.idEmpresa !== prospect.idEmpresa) {
@@ -375,7 +371,7 @@ export class ProspectsService {
     });
 
     if (!quote) {
-      throw new BadRequestException('Debe generar una cotizacion factible para el plan antes de registrar el contrato externo');
+      throw new BadRequestException('Debe generar una cotizacion factible para el plan antes de confirmar la contratacion');
     }
 
     if (dto.idZonaPago) {
@@ -390,17 +386,11 @@ export class ProspectsService {
       }
     }
 
-    const proveedorContrato = dto.proveedorContrato?.trim() || 'FACTURACION_CL';
+    const proveedorContrato = dto.proveedorContrato?.trim() || undefined;
     const numeroContratoExterno = dto.numeroContratoExterno?.trim() || undefined;
     const folioContratoExterno = dto.folioContratoExterno?.trim() || undefined;
     const urlContratoPdf = dto.urlContratoPdf?.trim() || undefined;
     const observacionContrato = dto.observacionContrato?.trim() || undefined;
-
-    if (!numeroContratoExterno && !folioContratoExterno && !urlContratoPdf && !observacionContrato) {
-      throw new BadRequestException(
-        'Debe informar numero, folio, URL u observacion del contrato externo gestionado en Facturacion.cl',
-      );
-    }
 
     const fechaInicio = dto.fechaInicio ? this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date() : new Date();
     const fechaGeneracionContrato = this.parseOptionalDate(dto.fechaGeneracionContrato, 'fechaGeneracionContrato');
@@ -462,7 +452,7 @@ export class ProspectsService {
         idEmpresa: prospect.idEmpresa,
         idZonaPago: dto.idZonaPago,
         fechaInicio,
-        diaVencimiento: dto.diaVencimiento,
+        diaVencimiento: dto.diaVencimiento ?? PENDING_SIGNATURE_DUE_DAY,
         estado: PENDING_SIGNATURE_STATUS,
         proveedorContrato,
         numeroContratoExterno,
@@ -505,7 +495,7 @@ export class ProspectsService {
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_CONTRATO_EXTERNO_PROSPECTO',
+      accion: 'CONFIRMAR_CONTRATACION_MANUAL',
       entidadAfectada: 'contrato',
       idEntidadAfectada: result.contrato.idContrato,
       valorNuevo: {
@@ -513,6 +503,7 @@ export class ProspectsService {
         idCliente: result.cliente.idCliente,
         idPlan: dto.planId,
         estadoContrato: PENDING_SIGNATURE_STATUS,
+        fechaConfirmacion: fechaInicio,
         proveedorContrato,
         numeroContratoExterno,
         folioContratoExterno,

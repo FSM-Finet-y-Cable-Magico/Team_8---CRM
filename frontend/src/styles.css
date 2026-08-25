@@ -466,6 +466,46 @@ th {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
 }
+.modal-card:has(.prospect-loss-dialog) {
+  width: min(460px, 100%);
+}
+
+.prospect-loss-dialog {
+  gap: 14px;
+}
+
+.prospect-loss-dialog textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+
+.prospect-loss-actions {
+  justify-content: flex-end;
+}
+
+.prospect-loss-trigger,
+.prospect-loss-confirm {
+  border: 1px solid #d66559;
+  color: #a23f34;
+  background: #fff0ed;
+}
+
+.prospect-loss-trigger:hover,
+.prospect-loss-confirm:hover {
+  border-color: #b7473c;
+  color: #8e332a;
+  background: #ffe1db;
+}
+
+.prospect-loss-confirm {
+  color: #fff;
+  background: #b7473c;
+}
+
+.prospect-loss-confirm:hover {
+  color: #fff;
+  background: #963a31;
+}
 
 .modal-header {
   position: sticky;

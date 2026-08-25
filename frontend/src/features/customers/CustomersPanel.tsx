@@ -94,6 +94,17 @@ function formatServiceWorkOrderCode(order?: CustomerServiceWorkOrder | null) {
   return order ? `OT-INS-${String(order.idOt).padStart(6, '0')}` : '-';
 }
 
+function customerAddressLabel(customer: Customer) {
+  const technicalAddress = customer.datosTecnicos?.direccion;
+
+  if (typeof technicalAddress === 'string' && technicalAddress.trim()) {
+    return technicalAddress.trim();
+  }
+
+  return customer.direcciones?.find((address) => address.direccionCompleta?.trim())?.direccionCompleta.trim()
+    ?? 'No registrada';
+}
+
 export function CustomersPanel({
   customers,
   plans,
@@ -878,7 +889,7 @@ export function CustomersPanel({
                 </div>
                 <div>
                   <dt>Dirección</dt>
-                  <dd>{String(selectedCustomer.datosTecnicos?.direccion ?? 'No registrada')}</dd>
+                  <dd>{customerAddressLabel(selectedCustomer)}</dd>
                 </div>
                 <div>
                   <dt>Plan principal</dt>

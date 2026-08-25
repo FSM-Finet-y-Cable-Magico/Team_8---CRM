@@ -1,135 +1,100 @@
-# Corrección del flujo Prospecto → Cliente pendiente de firma
+# Correccion de consistencia Prospectos, Clientes y Dashboard
 
-## Problema original
+## Objetivo
 
-La vista `Gestionar prospecto` mezclaba etapas comerciales previas a cliente con acciones operativas propias de clientes y servicios. Desde el modal se podía modificar manualmente el estado del pipeline, registrar contratación, marcar pérdida como una sección principal y avanzar hacia instalación. Esto hacía que el flujo real quedara difuso y podía convertir una oportunidad en servicio/instalación antes de registrar formalmente la referencia del contrato externo.
+Esta correccion alinea la definicion de prospecto activo usada por Dashboard y por el modulo Prospectos, simplifica la confirmacion manual de contratacion y mantiene la conversion hacia Cliente pendiente firma contrato sin crear servicios ni ordenes de trabajo.
 
-## Nueva regla de negocio
+## Definiciones de negocio aplicadas
 
-Prospectos termina cuando la oportunidad queda formalizada como cliente pendiente de firma de contrato. La firma, confirmación final de plan, generación de orden de instalación, servicio pendiente de instalación y cierre técnico pertenecen a la siguiente etapa de Gestión de Clientes.
+### Prospecto activo
 
-Flujo implementado en esta fase:
+Un prospecto activo cumple todas estas condiciones dentro del scope de empresa seleccionado:
 
-1. Prospecto.
-2. Factibilidad técnica.
-3. Cotización.
-4. Registro de contrato externo gestionado en Facturación.cl.
-5. Conversión a cliente en estado `Pendiente firma contrato`.
+- no tiene `idCliente` asociado;
+- su `estadoPipeline` no es `Perdido`;
+- permanece en el flujo comercial previo a la confirmacion de contratacion.
 
-## Qué se eliminó del modal de Prospectos
+Por tanto, los estados Factible, En Factibilidad, Cotizacion Enviada y Cotizacion aceptada siguen contando como prospectos activos. Los prospectos perdidos y los convertidos a cliente no cuentan ni se muestran en el listado activo.
 
-- Selector genérico de cambio manual de estado.
-- Acción visible de agendar/generar instalación.
-- Contratación entendida como servicio activo o instalación programada.
-- Sección grande de pérdida de prospecto.
-- Cualquier noción de firma de contrato dentro de Prospectos.
-- Cualquier generación de contrato PDF propio desde el CRM.
+### Cliente activo
 
-El endpoint histórico de actualización manual de pipeline se mantiene por compatibilidad, pero deja de formar parte del flujo principal visible.
+La tarjeta Dashboard `Clientes activos` cuenta solo clientes con estado `Activo`, dentro del scope de empresa. Los clientes `Pendiente firma contrato` aparecen en Clientes, pero no incrementan esta tarjeta.
 
-## Qué se agregó
+## Correccion de metricas
 
-- Dirección del prospecto en el encabezado del modal.
-- Factibilidad como control de avance a cotización.
-- Bloque de registro de contrato externo con proveedor `FACTURACION_CL`.
-- Campos de referencia externa:
-  - número de contrato externo;
-  - folio externo;
-  - URL de PDF externo;
-  - fecha de generación;
-  - fecha de envío al cliente;
-  - observación del contrato.
-- Acción secundaria `Marcar como perdido` con pop-up interno.
-- Motivo y observación obligatoria para pérdida.
-- Conversión de prospecto a cliente pendiente de firma sin crear servicio ni OT.
+- `GET /api/companies/summary` reutiliza el mismo filtro de prospecto activo que `GET /api/prospects`.
+- El grafico de origen de captacion usa la misma poblacion activa de prospectos.
+- La cuenta de clientes de Dashboard queda limitada a estado `Activo`.
+- Los fallbacks de Dashboard no vuelven a contar arreglos cargados en frontend con una regla distinta; el backend es la fuente de verdad.
 
-## Contrato externo Facturación.cl
+## Confirmacion manual de contratacion
 
-El CRM no emite contratos ni consume API de Facturación.cl en esta fase. Solo registra la referencia del contrato gestionado externamente.
+El bloque visible en Gestionar prospecto se llama `Confirmar contratacion`. Su objetivo es registrar que la cotizacion fue aceptada, no simular una integracion de contratos.
 
-Reglas aplicadas:
+Datos solicitados en esta etapa:
 
-- No se inventa formato de contrato.
-- No se genera PDF de contrato propio.
-- No se simula firma electrónica.
-- No se guardan credenciales de Facturación.cl.
-- Al menos una referencia externa debe informarse: número, folio, URL u observación.
+- plan aceptado, obligatorio;
+- fecha de confirmacion, con la fecha actual por defecto;
+- observacion, opcional.
 
-## Endpoints modificados
+Al confirmar:
 
-- `GET /api/prospects`: ahora lista prospectos activos no convertidos. Excluye registros con `idCliente` y excluye `Perdido` por defecto.
-- `POST /api/prospects/:id/feasibility`: `No Factible` ya no marca automáticamente como perdido; deja el estado en `No Factible`.
-- `POST /api/prospects/:id/quotes`: bloquea cotización si el prospecto está `No Factible` o `Perdido`.
-- `POST /api/prospects/:id/contracts`: registra contrato externo, crea/actualiza cliente pendiente de firma y no crea servicio ni OT.
-- `POST /api/prospects/:id/loss`: exige observación y guarda detalle, fecha y responsable.
+1. se conserva la cotizacion factible asociada al plan;
+2. se crea o reutiliza el cliente;
+3. se crea o actualiza un contrato en estado `Pendiente firma contrato`;
+4. se vincula el prospecto al cliente y deja de aparecer en Prospectos activos;
+5. se conserva la direccion del prospecto como direccion principal del cliente cuando corresponde;
+6. no se crea servicio;
+7. no se crea orden de trabajo;
+8. no se activa cliente, contrato o servicio.
 
-## Estados usados
+Los campos externos de Facturacion.cl (proveedor, numero, folio, URL y fechas externas) se mantienen opcionales en el modelo y DTO para una integracion futura. La ausencia de esos datos no bloquea la confirmacion manual ni se presenta como una integracion activa.
 
-Prospecto:
+La accion queda auditada como `CONFIRMAR_CONTRATACION_MANUAL`.
 
-- `Prospecto Nuevo`
-- `Contactado`
-- `En Factibilidad`
-- `Factible`
-- `No Factible`
-- `Cotizacion Enviada`
-- `Contrato externo registrado`
-- `Perdido`
+## Perdida de prospecto
 
-Cliente:
+La accion `Marcar como perdido` es secundaria y usa semantica visual de peligro. El pop-up contextual solo solicita:
 
-- `Pendiente firma contrato`
-- Estados operativos existentes: `Activo`, `Moroso`, `Suspendido`, `En Mantencion`, `Baja`.
+- Motivo.
+- Observacion.
 
-Contrato:
+La observacion es obligatoria. Al confirmar, se guarda el motivo y la observacion, se actualiza el listado y se cierran tanto el pop-up como el modal de gestion. Al cancelar, solo se cierra el pop-up.
 
-- `Pendiente firma contrato` para contratos externos registrados desde Prospectos.
+## Archivos y endpoints revisados
 
-## Cambios de datos
+- `backend/src/common/customer-lifecycle.ts`
+- `backend/src/companies/companies.service.ts`
+- `backend/src/customers/customers.service.ts`
+- `backend/src/prospects/prospects.service.ts`
+- `backend/src/prospects/dto/contract-plan.dto.ts`
+- `frontend/src/features/dashboard/DashboardHome.tsx`
+- `frontend/src/features/prospects/ProspectWorkflowPanel.tsx`
+- `frontend/src/features/customers/CustomersPanel.tsx`
+- `frontend/src/api.ts`
+- `frontend/src/styles.css`
 
-Se agregaron campos aditivos para trazabilidad:
+Endpoints cubiertos por la correccion:
 
-- `prospecto.observacion_perdida`
-- `prospecto.fecha_perdida`
-- `prospecto.id_usuario_perdida`
-- metadata externa nullable en `contrato` para proveedor, número, folio, URL, fechas y observación.
+- `GET /api/companies/summary`
+- `GET /api/prospects`
+- `POST /api/prospects/:id/contracts`
+- `POST /api/prospects/:id/loss`
+- `GET /api/customers`
 
-También se amplió el largo de `cliente.estado` y `contrato.estado` para soportar `Pendiente firma contrato`.
-
-## Qué queda fuera de esta fase
+## Fuera de alcance
 
 - Firma de contrato desde Clientes.
-- Confirmación/asignación final de plan desde Clientes.
-- Generación de orden de instalación desde Cliente/Servicio.
-- Servicio pendiente de instalación.
-- Cierre técnico y activación de servicio.
-- Integración real con Facturación.cl.
-- WhatsApp API o mensajes comerciales copiables.
-- Reorganización completa de Gestión de Clientes.
+- Creacion de servicios para clientes pendientes de firma.
+- Generacion de OT o instalacion desde Prospectos.
+- Integracion API con Facturacion.cl.
+- Emision de PDF propio de contrato.
+- WhatsApp API y Fase Comercial 2.
 
-## Siguiente fase de Gestión de Clientes
+La siguiente fase debe continuar desde Cliente pendiente firma contrato hacia firma corroborada, creacion de servicio pendiente de instalacion y agendamiento de OT, manteniendo esas acciones fuera del flujo de Prospectos.
 
-La próxima etapa debe reorganizar `CustomersPanel` para continuar el flujo:
+## Pruebas cubiertas
 
-Cliente pendiente de firma → Confirmación de firma de contrato → Confirmación/asignación de plan → Orden de instalación → Servicio pendiente instalación → Servicio activo.
+Las pruebas de `ProspectsService` cubren la conversion manual sin campos externos obligatorios, conservacion de la direccion, ausencia de servicio/OT y registro de perdida con motivo y observacion. Las pruebas de `CompaniesService` validan que el resumen use el mismo filtro de prospecto activo que el listado y que la metrica de clientes activos sea exclusiva para estado `Activo`.
 
-Las acciones deben mostrarse secuencialmente según estado del cliente, contrato y servicio.
-
-## Pruebas previstas
-
-- Prospecto no factible no puede cotizar ni registrar contrato externo.
-- Registrar contrato externo convierte a cliente pendiente de firma.
-- Prospecto convertido deja de aparecer en tabla de prospectos activos.
-- Cliente pendiente de firma aparece en tabla de clientes.
-- Registrar contrato externo guarda metadata externa mínima.
-- Marcar como perdido exige motivo y observación.
-- Prospecto perdido no aparece como cliente.
-- Registrar contrato externo no crea OT.
-- Registrar contrato externo no crea servicio activo.
-- No se genera contrato PDF propio ni se llama API real de Facturación.cl.
-
-## Riesgos pendientes
-
-- El módulo de contratos digitales existente sigue disponible en Clientes para flujos históricos, pero no se usa desde Prospectos.
-- Algunos estados antiguos del pipeline se mantienen en backend por compatibilidad con datos existentes.
-- La experiencia completa de Cliente pendiente de firma depende de la siguiente fase sobre `CustomersPanel`.
+Las pruebas manuales de navegador siguen pendientes de ejecutar en un navegador disponible: verificar conteos Dashboard contra Prospectos, convertir un prospecto, validar direccion en Clientes y comprobar el pop-up compacto de perdida.

@@ -25,17 +25,14 @@ export function ProspectWorkflowPanel({
   const [feasibilityResult, setFeasibilityResult] = useState<'Factible' | 'No Factible'>('Factible');
   const [quotePlanId, setQuotePlanId] = useState('');
   const [contractPlanId, setContractPlanId] = useState('');
-  const [dueDay, setDueDay] = useState(5);
-  const [contractNumber, setContractNumber] = useState('');
-  const [contractFolio, setContractFolio] = useState('');
-  const [contractUrl, setContractUrl] = useState('');
-  const [contractGeneratedAt, setContractGeneratedAt] = useState('');
-  const [contractSentAt, setContractSentAt] = useState('');
+  const [contractConfirmationDate, setContractConfirmationDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+
   const [contractObservation, setContractObservation] = useState('');
   const [lossOpen, setLossOpen] = useState(false);
   const [lossReason, setLossReason] = useState('Precio');
   const [lossObservation, setLossObservation] = useState('');
-  const [lossDetail, setLossDetail] = useState('');
+
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
 
@@ -43,16 +40,12 @@ export function ProspectWorkflowPanel({
     setFeasibilityResult('Factible');
     setQuotePlanId('');
     setContractPlanId('');
-    setContractNumber('');
-    setContractFolio('');
-    setContractUrl('');
-    setContractGeneratedAt('');
-    setContractSentAt('');
+    setContractConfirmationDate(new Date().toISOString().slice(0, 10));
     setContractObservation('');
     setLossOpen(false);
     setLossReason('Precio');
     setLossObservation('');
-    setLossDetail('');
+
     setStatus('');
     setStatusIsError(false);
   }, [prospect.idProspecto]);
@@ -63,9 +56,7 @@ export function ProspectWorkflowPanel({
   const isQuoted = QUOTED_STATUSES.includes(currentStatus);
   const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const planOptions = plans.filter((plan) => !plan.idEmpresa || !prospect.empresa || plan.idEmpresa === prospect.empresa.idEmpresa);
-  const hasContractReference = Boolean(
-    contractNumber.trim() || contractFolio.trim() || contractUrl.trim() || contractObservation.trim(),
-  );
+  const isContractConfirmationReady = Boolean(contractPlanId && isQuoted && !isFinal);
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
     setStatus('');
@@ -109,26 +100,14 @@ export function ProspectWorkflowPanel({
   }
 
   async function registerExternalContract() {
-    if (!hasContractReference) {
-      setStatusIsError(true);
-      setStatus('Informa número, folio, URL u observación del contrato externo.');
-      return;
-    }
-
     await runAction(
       () =>
         api.post(`/prospects/${prospect.idProspecto}/contracts`, {
           planId: Number(contractPlanId),
-          diaVencimiento: dueDay,
-          proveedorContrato: 'FACTURACION_CL',
-          numeroContratoExterno: contractNumber.trim() || undefined,
-          folioContratoExterno: contractFolio.trim() || undefined,
-          urlContratoPdf: contractUrl.trim() || undefined,
-          fechaGeneracionContrato: contractGeneratedAt || undefined,
-          fechaEnvioCliente: contractSentAt || undefined,
+          fechaInicio: contractConfirmationDate || undefined,
           observacionContrato: contractObservation.trim() || undefined,
         }),
-      'Contrato externo registrado. El prospecto queda como cliente pendiente de firma.',
+      'Contratación confirmada. El prospecto queda como cliente pendiente de firma.',
       true,
     );
   }
@@ -140,17 +119,22 @@ export function ProspectWorkflowPanel({
       return;
     }
 
-    await runAction(
-      () =>
-        api.post(`/prospects/${prospect.idProspecto}/loss`, {
-          motivo: lossReason,
-          observaciones: lossObservation.trim(),
-          detalleMotivoPerdida: lossDetail.trim() || undefined,
-        }),
-      'Prospecto marcado como perdido.',
-      true,
-    );
-    setLossOpen(false);
+    setStatus('');
+    setStatusIsError(false);
+
+    try {
+      await api.post('/prospects/' + prospect.idProspecto + '/loss', {
+        motivo: lossReason,
+        observaciones: lossObservation.trim(),
+      });
+      setStatus('Prospecto marcado como perdido.');
+      onChanged();
+      setLossOpen(false);
+      onClose?.();
+    } catch (err) {
+      setStatusIsError(true);
+      setStatus(apiErrorMessage(err));
+    }
   }
 
   return (
@@ -264,8 +248,8 @@ export function ProspectWorkflowPanel({
                 <HandCoins size={19} strokeWidth={1.8} />
               </span>
               <div>
-                <h4>Registrar contrato externo</h4>
-                <p>Guarda la referencia del contrato gestionado en Facturación.cl.</p>
+                <h4>Confirmar contratación</h4>
+                <p>Confirma manualmente el plan aceptado; la firma se gestionará en Clientes.</p>
               </div>
             </header>
             <div className="prospect-contract-fields">
@@ -281,47 +265,29 @@ export function ProspectWorkflowPanel({
                 </select>
               </label>
               <label>
-                Día de vencimiento
+                Fecha de confirmación
                 <input
-                  min="1"
-                  max="28"
-                  type="number"
-                  value={dueDay}
+                  type="date"
+                  value={contractConfirmationDate}
                   disabled={!isQuoted || isFinal}
-                  onChange={(event) => setDueDay(Number(event.target.value))}
+                  onChange={(event) => setContractConfirmationDate(event.target.value)}
                 />
               </label>
               <label>
-                Número contrato externo
-                <input value={contractNumber} disabled={!isQuoted || isFinal} onChange={(event) => setContractNumber(event.target.value)} />
-              </label>
-              <label>
-                Folio externo
-                <input value={contractFolio} disabled={!isQuoted || isFinal} onChange={(event) => setContractFolio(event.target.value)} />
-              </label>
-              <label>
-                URL PDF externo
-                <input value={contractUrl} disabled={!isQuoted || isFinal} onChange={(event) => setContractUrl(event.target.value)} />
-              </label>
-              <label>
-                Fecha generación
-                <input type="date" value={contractGeneratedAt} disabled={!isQuoted || isFinal} onChange={(event) => setContractGeneratedAt(event.target.value)} />
-              </label>
-              <label>
-                Fecha envío cliente
-                <input type="date" value={contractSentAt} disabled={!isQuoted || isFinal} onChange={(event) => setContractSentAt(event.target.value)} />
-              </label>
-              <label>
-                Observación contrato
-                <input value={contractObservation} disabled={!isQuoted || isFinal} onChange={(event) => setContractObservation(event.target.value)} />
+                Observación
+                <textarea
+                  value={contractObservation}
+                  disabled={!isQuoted || isFinal}
+                  onChange={(event) => setContractObservation(event.target.value)}
+                />
               </label>
             </div>
             <button
               type="button"
-              disabled={!contractPlanId || !isQuoted || isFinal || !hasContractReference}
+              disabled={!isContractConfirmationReady}
               onClick={() => void registerExternalContract()}
             >
-              Registrar contrato externo
+              Confirmar contratación
             </button>
           </section>
         )}
@@ -329,7 +295,7 @@ export function ProspectWorkflowPanel({
 
       {permissions.recordProspectLoss && !isFinal && (
         <div className="button-row">
-          <button type="button" className="secondary compact" onClick={() => setLossOpen(true)}>
+          <button type="button" className="prospect-loss-trigger" onClick={() => setLossOpen(true)}>
             Marcar como perdido
           </button>
         </div>
@@ -338,8 +304,7 @@ export function ProspectWorkflowPanel({
       {status && <p className={statusIsError ? 'alert' : 'inline-status'}>{status}</p>}
 
       <Modal title="Marcar prospecto como perdido" open={lossOpen} onClose={() => setLossOpen(false)}>
-        <div className="stack">
-          <p>Esta acción saca al prospecto del flujo activo y no lo convierte en cliente.</p>
+        <div className="stack prospect-loss-dialog">
           <label>
             Motivo
             <select value={lossReason} onChange={(event) => setLossReason(event.target.value)}>
@@ -354,15 +319,11 @@ export function ProspectWorkflowPanel({
             Observación
             <textarea value={lossObservation} onChange={(event) => setLossObservation(event.target.value)} required />
           </label>
-          <label>
-            Detalle adicional
-            <textarea value={lossDetail} onChange={(event) => setLossDetail(event.target.value)} />
-          </label>
-          <div className="button-row">
+          <div className="button-row prospect-loss-actions">
             <button type="button" className="secondary" onClick={() => setLossOpen(false)}>
               Cancelar
             </button>
-            <button type="button" onClick={() => void recordLoss()}>
+            <button type="button" className="prospect-loss-confirm" onClick={() => void recordLoss()}>
               Confirmar pérdida
             </button>
           </div>

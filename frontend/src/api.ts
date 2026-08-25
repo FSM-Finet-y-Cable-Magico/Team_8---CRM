@@ -107,6 +107,13 @@ export type Customer = {
   datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;
   empresas?: string[];
+  direcciones?: Array<{
+    idDireccion: number;
+    direccionCompleta: string;
+    comuna: string | null;
+    ciudad: string | null;
+    esPrincipal?: boolean | null;
+  }>;
   contratos?: Array<{
     idContrato: number;
     idEmpresa: number | null;

@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
 import { CompaniesService } from './companies.service';
 
 const commercial: AuthUser = {
@@ -11,17 +12,15 @@ const commercial: AuthUser = {
 };
 
 describe('CompaniesService', () => {
-  it('limits the summary to the company assigned to a non-admin user', async () => {
+  it('uses the same active prospect and active customer definitions in the summary', async () => {
     const prisma = {
       cliente: {
-        count: jest
-          .fn()
-          .mockResolvedValueOnce(17)
-          .mockResolvedValueOnce(2)
-          .mockResolvedValueOnce(15),
+        count: jest.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(15),
+      },
+      prospecto: {
+        count: jest.fn().mockResolvedValue(1),
         groupBy: jest.fn().mockResolvedValue([]),
       },
-      prospecto: { count: jest.fn().mockResolvedValue(11) },
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1, nombre: 'FiNet Limitada' }]) },
       ordenTrabajo: { count: jest.fn().mockResolvedValue(0) },
       ticket: {
@@ -38,21 +37,45 @@ describe('CompaniesService', () => {
       historialCambioPlan: { findMany: jest.fn().mockResolvedValue([]) },
       categoriaFalla: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const service = new CompaniesService(prisma as never);
+    const service = new CompaniesService(prisma as unknown as PrismaService);
 
     const result = await service.summary(commercial, 'consolidado');
 
     expect(result.scope).toBe('1');
-    expect(result.metricas).toEqual(expect.objectContaining({ clientes: 17, prospectos: 11 }));
-    expect(prisma.cliente.count).toHaveBeenCalledWith({
+    expect(result.metricas).toEqual(expect.objectContaining({ clientes: 15, prospectos: 1 }));
+    expect(prisma.prospecto.count).toHaveBeenCalledWith({
       where: {
-        OR: [
+        AND: [
           { idEmpresa: 1 },
-          { contratos: { some: { idEmpresa: 1 } } },
+          { idCliente: null },
+          { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
         ],
       },
     });
-    expect(prisma.prospecto.count).toHaveBeenCalledWith({ where: { idEmpresa: 1 } });
+    expect(prisma.prospecto.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            { idEmpresa: 1 },
+            { idCliente: null },
+            { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          ],
+        },
+      }),
+    );
+    expect(prisma.cliente.count).toHaveBeenLastCalledWith({
+      where: {
+        AND: [
+          {
+            OR: [
+              { idEmpresa: 1 },
+              { contratos: { some: { idEmpresa: 1 } } },
+            ],
+          },
+          { estado: 'Activo' },
+        ],
+      },
+    });
     expect(prisma.empresa.findMany).toHaveBeenCalledWith({
       where: { idEmpresa: 1 },
       orderBy: { idEmpresa: 'asc' },
@@ -60,7 +83,7 @@ describe('CompaniesService', () => {
   });
 
   it('rejects non-admin users without an assigned company', async () => {
-    const service = new CompaniesService({} as never);
+    const service = new CompaniesService({} as PrismaService);
 
     await expect(service.summary({ ...commercial, idEmpresa: null })).rejects.toBeInstanceOf(BadRequestException);
   });

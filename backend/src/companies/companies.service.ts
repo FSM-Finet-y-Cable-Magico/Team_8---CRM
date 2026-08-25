@@ -1,5 +1,6 @@
 ﻿import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
+import { activeCustomerWhere, activeProspectWhere } from '../common/customer-lifecycle';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,6 +19,8 @@ export class CompaniesService {
     const effectiveScope = this.resolveScope(currentUser, scope);
     const customerFilter = this.buildCustomerCompanyFilter(effectiveScope);
     const companyFilter = this.buildCompanyFilter(effectiveScope);
+    const activeProspectFilter = activeProspectWhere(companyFilter);
+    const activeCustomerFilter = activeCustomerWhere(customerFilter);
     const companiesFilter = 'idEmpresa' in companyFilter ? companyFilter : {};
     const today = todayDateOnly();
     const monthStart = parseDateOnly(`${today.slice(0, 8)}01`);
@@ -28,7 +31,6 @@ export class CompaniesService {
     }
 
     const [
-      clientes,
       prospectos,
       empresas,
       instalacionesPendientes,
@@ -47,8 +49,7 @@ export class CompaniesService {
       cambiosPlanRecientes,
       origenCaptacion,
     ] = await Promise.all([
-      this.prisma.cliente.count({ where: customerFilter }),
-      this.prisma.prospecto.count({ where: companyFilter }),
+      this.prisma.prospecto.count({ where: activeProspectFilter }),
       this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } }),
       this.prisma.ordenTrabajo.count({
         where: {
@@ -93,12 +94,7 @@ export class CompaniesService {
         },
       }),
       this.prisma.cliente.count({
-        where: {
-          AND: [
-            customerFilter,
-            { estado: 'Activo' },
-          ],
-        },
+        where: activeCustomerFilter,
       }),
       this.prisma.ticket.findMany({
         where: {
@@ -149,9 +145,9 @@ export class CompaniesService {
         orderBy: { fechaRegistro: 'desc' },
         take: 8,
       }),
-      this.prisma.cliente.groupBy({
+      this.prisma.prospecto.groupBy({
         by: ['origenContacto'],
-        where: customerFilter,
+        where: activeProspectFilter,
         _count: { _all: true },
         orderBy: { _count: { origenContacto: 'desc' } },
         take: 8,
@@ -206,7 +202,7 @@ export class CompaniesService {
       scope: effectiveScope,
       empresas,
       metricas: {
-        clientes,
+        clientes: clientesActivos,
         prospectos,
         instalacionesPendientes,
         ticketsAbiertos,
