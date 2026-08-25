@@ -12,6 +12,8 @@ import { parseDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
+import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
 const CONTRACT_INCLUDE = {
@@ -37,6 +39,105 @@ export class ContractsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
+
+  async createCustomerContract(dto: CreateCustomerContractDto, currentUser: AuthUser) {
+    const customer = await this.prisma.cliente.findUnique({
+      where: { idCliente: dto.idCliente },
+      include: { contratos: { select: { idEmpresa: true } } },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+
+    const plan = await this.prisma.plan.findUnique({ where: { idPlan: dto.idPlan } });
+
+    if (!plan || plan.activo === false) {
+      throw new BadRequestException('El plan no existe o esta inactivo');
+    }
+
+    const idEmpresa = plan.idEmpresa ?? customer.idEmpresa;
+    this.assertCompanyAccess(idEmpresa, currentUser);
+
+    if (dto.idZonaPago) {
+      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
+
+      if (!zone || zone.activo === false || (zone.idEmpresa && idEmpresa && zone.idEmpresa !== idEmpresa)) {
+        throw new BadRequestException('La zona de pago no corresponde a la empresa del contrato');
+      }
+    }
+
+    const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
+    const contract = await this.prisma.contrato.create({
+      data: {
+        idCliente: customer.idCliente,
+        idPlan: plan.idPlan,
+        idEmpresa,
+        idZonaPago: dto.idZonaPago,
+        fechaInicio,
+        diaVencimiento: 1,
+        estado: 'Pendiente firma contrato',
+        observacionContrato: dto.observacion?.trim() || null,
+      },
+      include: CONTRACT_INCLUDE,
+    });
+
+    await this.reconcileCustomerStatus(customer.idCliente);
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CREAR_CONTRATACION_CLIENTE',
+      entidadAfectada: 'contrato',
+      idEntidadAfectada: contract.idContrato,
+      valorNuevo: {
+        idCliente: customer.idCliente,
+        idPlan: plan.idPlan,
+        estadoContrato: contract.estado,
+      },
+    });
+
+    return contract;
+  }
+
+  async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
+
+    if (this.isSignedContract(contract.estado)) {
+      return contract;
+    }
+
+    if (contract.estado === 'Anulado') {
+      throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
+    }
+
+    const updated = await this.prisma.contrato.update({
+      where: { idContrato },
+      data: {
+        estado: 'Firmado',
+        fechaFirmaManual: new Date(),
+        idUsuarioFirmaManual: currentUser.idUsuario,
+        observacionFirmaManual: dto.observacion?.trim() || null,
+      },
+      include: CONTRACT_INCLUDE,
+    });
+
+    if (updated.idCliente) {
+      await this.reconcileCustomerStatus(updated.idCliente);
+    }
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL',
+      entidadAfectada: 'contrato',
+      idEntidadAfectada: idContrato,
+      valorAnterior: { estado: contract.estado },
+      valorNuevo: {
+        estado: updated.estado,
+        fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
+      },
+    });
+
+    return updated;
+  }
 
   async changePlan(idContrato: number, dto: ChangePlanDto, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
@@ -256,6 +357,43 @@ export class ContractsService {
     this.assertCompanyAccess(contract.idEmpresa, currentUser);
 
     return contract;
+  }
+
+  private isSignedContract(status: string | null | undefined) {
+    return ['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(status ?? '');
+  }
+
+  private async reconcileCustomerStatus(idCliente: number) {
+    const customer = await this.prisma.cliente.findUnique({
+      where: { idCliente },
+      include: {
+        contratos: { select: { estado: true } },
+        servicios: { select: { estadoOperativo: true } },
+      },
+    });
+
+    if (!customer || ['Suspendido', 'Moroso', 'Baja'].includes(customer.estado)) {
+      return;
+    }
+
+    const serviceStates = customer.servicios.map((service) => service.estadoOperativo);
+    const hasActiveService = serviceStates.includes('Activo');
+    const hasPendingInstallation = serviceStates.some((state) =>
+      state === 'Pendiente Instalacion' || state === 'Instalacion Programada',
+    );
+    const hasPendingSignature = customer.contratos.some((item) => item.estado === 'Pendiente firma contrato');
+    const hasSignedContract = customer.contratos.some((item) => this.isSignedContract(item.estado));
+    const nextStatus = hasActiveService
+      ? 'Activo'
+      : hasPendingInstallation || hasSignedContract
+        ? 'Pendiente Instalacion'
+        : hasPendingSignature
+          ? 'Pendiente firma contrato'
+          : customer.estado;
+
+    if (nextStatus !== customer.estado) {
+      await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
+    }
   }
 
   private async resolvePlanPrice(idPlan: number, idZonaPago: number | null) {

@@ -117,7 +117,12 @@ export type Customer = {
   contratos?: Array<{
     idContrato: number;
     idEmpresa: number | null;
+    idZonaPago?: number | null;
     estado?: string | null;
+    fechaInicio?: string | null;
+    fechaFirmaManual?: string | null;
+    idUsuarioFirmaManual?: number | null;
+    observacionFirmaManual?: string | null;
     proveedorContrato?: string | null;
     numeroContratoExterno?: string | null;
     folioContratoExterno?: string | null;
@@ -146,6 +151,9 @@ export type CustomerService = {
   contrato?: {
     idContrato: number;
     estado: string | null;
+    fechaFirmaManual?: string | null;
+    idUsuarioFirmaManual?: number | null;
+    observacionFirmaManual?: string | null;
     proveedorContrato?: string | null;
     numeroContratoExterno?: string | null;
     folioContratoExterno?: string | null;

@@ -8,12 +8,30 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { ContractsService } from './contracts.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
+import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
 @Controller('contracts')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractsController {
   constructor(private readonly contractsService: ContractsService) {}
+
+  @Post()
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  createCustomerContract(@Body() dto: CreateCustomerContractDto, @CurrentUser() user: AuthUser) {
+    return this.contractsService.createCustomerContract(dto, user);
+  }
+
+  @Patch(':id/confirm-signature')
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  confirmSignature(
+    @Param('id', ParseIntPipe) idContrato: number,
+    @Body() dto: ConfirmContractSignatureDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.contractsService.confirmManualSignature(idContrato, dto, user);
+  }
 
   @Post(':id/change-plan')
   @Roles(...ACCESS_ROLES.CHANGE_CUSTOMER_PLAN)

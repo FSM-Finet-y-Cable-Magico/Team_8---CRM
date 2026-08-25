@@ -23,7 +23,7 @@ describe('ServicesService', () => {
       idContrato: 30,
       idDireccion: 7,
       estadoOperativo: 'Pendiente Instalacion',
-      contrato: { idContrato: 30, estado: 'Pendiente', plan: null },
+      contrato: { idContrato: 30, estado: 'Firmado', plan: null },
       cliente: { idCliente: 10 },
       empresa: { idEmpresa: 1 },
       direccion: null,
@@ -120,5 +120,39 @@ describe('ServicesService', () => {
         }),
       }),
     );
+  });
+
+  it('bloquea la creación de un servicio mientras el contrato no está firmado', async () => {
+    const prisma = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue({
+          idCliente: 10,
+          idEmpresa: 1,
+          contratos: [{ idEmpresa: 1 }],
+        }),
+      },
+      contrato: {
+        findUnique: jest.fn().mockResolvedValue({
+          idContrato: 30,
+          idCliente: 10,
+          idEmpresa: 1,
+          estado: 'Pendiente firma contrato',
+        }),
+      },
+      servicioContratado: { create: jest.fn() },
+    };
+    const service = new ServicesService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(service.create({
+      idCliente: 10,
+      idContrato: 30,
+      tipoServicio: 'Internet',
+      estadoOperativo: 'Pendiente Instalacion',
+    }, comercial)).rejects.toThrow('Debes confirmar la firma del contrato antes de crear un servicio');
+
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
   });
 });

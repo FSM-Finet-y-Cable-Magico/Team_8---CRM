@@ -93,16 +93,17 @@ export class ServicesService {
   async create(dto: CreateServiceDto, currentUser: AuthUser) {
     const customer = await this.getCustomerOrThrow(dto.idCliente, currentUser);
     const idEmpresa = await this.resolveCompanyId(dto, customer, currentUser);
-    await this.assertContract(dto.idContrato, dto.idCliente, idEmpresa);
-    await this.assertAddress(dto.idDireccion, dto.idCliente);
+    const contract = await this.assertContract(dto.idContrato, dto.idCliente, idEmpresa);
+    const idDireccion = dto.idDireccion ?? await this.resolvePrimaryAddressId(dto.idCliente);
+    await this.assertAddress(idDireccion, dto.idCliente);
     await this.assertPaymentZone(dto.idZonaPago, idEmpresa);
 
     const created = await this.prisma.servicioContratado.create({
       data: {
         idCliente: dto.idCliente,
         idEmpresa,
-        idContrato: dto.idContrato,
-        idDireccion: dto.idDireccion,
+        idContrato: contract.idContrato,
+        idDireccion,
         idZonaPago: dto.idZonaPago,
         tipoServicio: dto.tipoServicio,
         estadoOperativo: dto.estadoOperativo,
@@ -125,6 +126,8 @@ export class ServicesService {
         estadoOperativo: dto.estadoOperativo,
       },
     });
+
+    await this.reconcileCustomerStatus(created.idCliente);
 
     return created;
   }
@@ -426,15 +429,59 @@ export class ServicesService {
     return customer.idEmpresa;
   }
 
-  private async assertContract(idContrato: number | undefined, idCliente: number, idEmpresa: number | null) {
-    if (!idContrato) {
-      return;
-    }
-
+  private async assertContract(idContrato: number, idCliente: number, idEmpresa: number | null) {
     const contract = await this.prisma.contrato.findUnique({ where: { idContrato } });
 
     if (!contract || contract.idCliente !== idCliente || contract.idEmpresa !== idEmpresa) {
       throw new BadRequestException('El contrato no corresponde al cliente y empresa seleccionados');
+    }
+
+    if (!['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(contract.estado)) {
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de crear un servicio');
+    }
+
+    return contract;
+  }
+
+  private async resolvePrimaryAddressId(idCliente: number) {
+    const address = await this.prisma.direccionServicio.findFirst({
+      where: { idCliente },
+      orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }],
+      select: { idDireccion: true },
+    });
+
+    return address?.idDireccion;
+  }
+
+  private async reconcileCustomerStatus(idCliente: number) {
+    const customer = await this.prisma.cliente.findUnique({
+      where: { idCliente },
+      include: {
+        contratos: { select: { estado: true } },
+        servicios: { select: { estadoOperativo: true } },
+      },
+    });
+
+    if (!customer || ['Suspendido', 'Moroso', 'Baja'].includes(customer.estado)) {
+      return;
+    }
+
+    const serviceStates = customer.servicios.map((service) => service.estadoOperativo);
+    const hasActiveService = serviceStates.includes('Activo');
+    const hasPendingInstallation = serviceStates.some((state) =>
+      state === 'Pendiente Instalacion' || state === 'Instalacion Programada',
+    );
+    const hasPendingSignature = customer.contratos.some((contract) => contract.estado === 'Pendiente firma contrato');
+    const nextStatus = hasActiveService
+      ? 'Activo'
+      : hasPendingInstallation
+        ? 'Pendiente Instalacion'
+        : hasPendingSignature
+          ? 'Pendiente firma contrato'
+          : customer.estado;
+
+    if (nextStatus !== customer.estado) {
+      await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
     }
   }
 
@@ -525,7 +572,7 @@ export class ServicesService {
       throw new BadRequestException('Solo un servicio pendiente de instalacion puede generar una orden de instalacion');
     }
 
-    if (service.contrato && !['Pendiente', 'Activo'].includes(service.contrato.estado)) {
+    if (!service.contrato || !['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(service.contrato.estado)) {
       throw new BadRequestException('El contrato asociado no esta vigente para generar la instalacion');
     }
 

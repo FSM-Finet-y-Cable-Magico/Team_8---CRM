@@ -185,6 +185,9 @@ model Contrato {
   fechaGeneracionContrato DateTime?    @map("fecha_generacion_contrato") @db.Date
   fechaEnvioCliente     DateTime?      @map("fecha_envio_cliente") @db.Date
   observacionContrato   String?        @map("observacion_contrato")
+  fechaFirmaManual      DateTime?      @map("fecha_firma_manual") @db.Date
+  idUsuarioFirmaManual  Int?           @map("id_usuario_firma_manual")
+  observacionFirmaManual String?       @map("observacion_firma_manual")
   cliente         Cliente?             @relation(fields: [idCliente], references: [idCliente])
   plan            Plan?                @relation(fields: [idPlan], references: [idPlan])
   zonaPago        ZonaPago?            @relation(fields: [idZonaPago], references: [idZonaPago])
