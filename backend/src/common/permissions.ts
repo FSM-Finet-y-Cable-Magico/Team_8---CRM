@@ -1,4 +1,4 @@
-import { RoleName } from './roles';
+﻿import { RoleName } from './roles';
 
 export const ACCESS_ROLES = {
   ADMIN_ONLY: ['Administrador'],
@@ -16,4 +16,18 @@ export const ACCESS_ROLES = {
   UPDATE_TICKET_STATUS: ['Administrador', 'Soporte', 'Terreno'],
   VIEW_WORK_ORDERS: ['Administrador', 'Soporte', 'Terreno'],
   COMPLETE_INSTALLATION: ['Administrador', 'Soporte', 'Terreno'],
+  VIEW_BILLING: ['Administrador', 'Comercial', 'Soporte'],
+  MANAGE_BILLING: ['Administrador', 'Comercial'],
+  MANAGE_PAYMENT_ZONES: ['Administrador', 'Comercial'],
+  VIEW_PORTAL_ADMIN: ['Administrador', 'Soporte'],
+  MANAGE_TVIP: ['Administrador', 'Comercial', 'Soporte'],
+  VIEW_MONITORING: ['Administrador', 'Soporte', 'Terreno'],
+  REGISTER_TECHNICAL_NOTES: ['Administrador', 'Soporte', 'Terreno'],
+  MANAGE_PLANS: ['Administrador', 'Comercial'],
+  MANAGE_CONTRACTS: ['Administrador', 'Comercial'],
+  GENERATE_DIGITAL_CONTRACT: ['Administrador', 'Comercial'],
+  CHANGE_CUSTOMER_PLAN: ['Administrador', 'Comercial'],
+  MANAGE_OBSERVATIONS: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
+  MANAGE_CUSTOMER_REQUESTS: ['Administrador', 'Comercial', 'Soporte'],
+  MANAGE_EQUIPMENT_ASSIGNMENT_MODE: ['Administrador', 'Soporte', 'Terreno', 'Inventario'],
 } as const satisfies Record<string, readonly RoleName[]>;

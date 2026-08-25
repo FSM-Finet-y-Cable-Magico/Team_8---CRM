@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
 @Injectable()
@@ -68,22 +69,54 @@ export class CustomersService {
     return updated;
   }
 
+  async updateTechnicalData(idCliente: number, dto: UpdateCustomerTechnicalDataDto, currentUser: AuthUser) {
+    const cliente = await this.getCustomerOrThrow(idCliente, currentUser);
+    const nextTechnicalData = this.mergeTechnicalData(cliente.datosTecnicos, {
+      tecnologiaPrincipal: dto.tecnologiaPrincipal?.trim() || undefined,
+      nodoPrincipal: dto.nodoPrincipal?.trim() || undefined,
+      cajaNapPrincipal: dto.cajaNapPrincipal?.trim() || undefined,
+      numeroPoste: dto.numeroPoste?.trim() || undefined,
+      ipReferencia: dto.ipReferencia?.trim() || undefined,
+      observacionesTecnicas: dto.observacionesTecnicas?.trim() || undefined,
+    });
+
+    const updated = await this.prisma.cliente.update({
+      where: { idCliente },
+      data: { datosTecnicos: nextTechnicalData },
+      include: { empresa: true },
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_DATOS_TECNICOS_CLIENTE',
+      entidadAfectada: 'cliente',
+      idEntidadAfectada: idCliente,
+      valorAnterior: { datosTecnicos: cliente.datosTecnicos },
+      valorNuevo: { datosTecnicos: updated.datosTecnicos },
+    });
+
+    return updated;
+  }
+
   async history(idCliente: number, currentUser: AuthUser) {
     const cliente = await this.getCustomerOrThrow(idCliente, currentUser);
     const companyFilter = isAdministrator(currentUser.roles) || !currentUser.idEmpresa
       ? {}
       : { idEmpresa: currentUser.idEmpresa };
+    const scopedCompanyId = 'idEmpresa' in companyFilter ? companyFilter.idEmpresa : undefined;
 
-    const [contratos, servicios, tickets, ordenes, equipos, auditoria] = await Promise.all([
+    const [contratos, servicios, tickets, ordenes, equipos, solicitudes, observaciones, cambiosPlan, contratosDigitales, auditoria] = await Promise.all([
       this.prisma.contrato.findMany({
         where: { idCliente, ...companyFilter },
         orderBy: { fechaInicio: 'desc' },
         include: {
           plan: true,
+          zonaPago: true,
           facturas: {
             include: { pagos: true },
             orderBy: [{ periodoAnio: 'desc' }, { periodoMes: 'desc' }],
           },
+          contratosDigitales: { orderBy: { version: 'desc' }, take: 5 },
         },
       }),
       this.prisma.servicioContratado.findMany({
@@ -92,7 +125,9 @@ export class CustomersService {
         include: {
           contrato: { include: { plan: true } },
           direccion: true,
+          zonaPago: true,
           equipos: true,
+          solicitudes: { orderBy: { fechaCreacion: 'desc' }, take: 20 },
         },
       }),
       this.prisma.ticket.findMany({
@@ -106,6 +141,33 @@ export class CustomersService {
       this.prisma.unidadEquipo.findMany({
         where: { idClienteInstalado: idCliente, ...companyFilter },
         orderBy: { idUnidad: 'desc' },
+      }),
+      this.prisma.solicitudCliente.findMany({
+        where: { idCliente, ...companyFilter },
+        orderBy: { fechaCreacion: 'desc' },
+        take: 100,
+      }),
+      this.prisma.observacionOperativa.findMany({
+        where: {
+          OR: [
+            { tipoEntidad: 'Cliente', idEntidad: idCliente },
+            { idCliente },
+          ],
+          ...(scopedCompanyId ? { idEmpresa: scopedCompanyId } : {}),
+        },
+        orderBy: { fechaCreacion: 'desc' },
+        take: 100,
+      }),
+      this.prisma.historialCambioPlan.findMany({
+        where: { idCliente, ...companyFilter },
+        include: { planAnterior: true, planNuevo: true },
+        orderBy: { fechaRegistro: 'desc' },
+        take: 50,
+      }),
+      this.prisma.contratoDigital.findMany({
+        where: { idCliente, ...companyFilter },
+        orderBy: [{ idContrato: 'desc' }, { version: 'desc' }],
+        take: 50,
       }),
       this.prisma.logAuditoria.findMany({
         where: {
@@ -126,6 +188,10 @@ export class CustomersService {
       tickets,
       ordenes,
       equipos,
+      solicitudes,
+      observaciones,
+      cambiosPlan,
+      contratosDigitales,
       auditoria: auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() })),
     };
   }
@@ -248,5 +314,15 @@ export class CustomersService {
     return isAdministrator(currentUser.roles) ||
       customer.idEmpresa === currentUser.idEmpresa ||
       customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
+  }
+
+  private mergeTechnicalData(current: Prisma.JsonValue | null, next: Record<string, unknown>) {
+    const currentObject =
+      current && typeof current === 'object' && !Array.isArray(current)
+        ? (current as Record<string, unknown>)
+        : {};
+    const cleanNext = Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined));
+
+    return { ...currentObject, ...cleanNext } as Prisma.InputJsonObject;
   }
 }

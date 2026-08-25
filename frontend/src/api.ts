@@ -75,6 +75,8 @@ export type Plan = {
   tipoCliente: string;
   velocidadMbps: number | null;
   precioMensual: string;
+  descripcion?: string | null;
+  activo?: boolean | null;
   empresa?: Company | null;
 };
 
@@ -115,6 +117,7 @@ export type CustomerService = {
   idEmpresa: number | null;
   idContrato: number | null;
   idDireccion: number | null;
+  idZonaPago?: number | null;
   tipoServicio: string;
   estadoOperativo: string;
   observaciones: string | null;
@@ -133,9 +136,11 @@ export type CustomerService = {
     comuna: string | null;
     ciudad: string | null;
   } | null;
+  zonaPago?: PaymentZone | null;
   equipos?: InventoryUnit[];
   tickets?: Ticket[];
   ordenes?: WorkOrder[];
+  solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
 };
 
@@ -144,7 +149,12 @@ export type InventoryUnit = {
   idEmpresa: number | null;
   idTipoEquipo: number | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
+  modalidadAsignacion?: string | null;
+  valorArriendoMensual?: string | null;
+  fechaInicioAsignacion?: string | null;
   numeroSerie: string;
+  numeroPoste?: string | null;
   modelo: string | null;
   estado: string;
   idClienteInstalado: number | null;
@@ -154,11 +164,265 @@ export type InventoryUnit = {
   macAddress?: string | null;
   puertoOlt?: string | null;
   tipoEquipo?: {
+    idTipoEquipo?: number;
     nombre: string;
     categoria: string | null;
   } | null;
 };
 
+export type BillingOverview = {
+  fechaCorteCalculo: string;
+  reglaCorteDias: number;
+  modoNotificacion: string;
+  metricas: {
+    clientesMorosos: number;
+    facturasVencidas: number;
+    clientesProgramadosCorte: number;
+  };
+  morosos: Array<{
+    idFactura: number;
+    idContrato: number;
+    monto: number;
+    pagado: number;
+    saldo: number;
+    fechaLimitePago: string;
+    diasAtraso: number;
+    estadoFactura: string;
+    cliente: {
+      idCliente: number;
+      rut: string | null;
+      nombreCompleto: string;
+      telefono: string | null;
+      email: string | null;
+      estado: string;
+      empresa: string | null;
+    };
+    contrato: {
+      idContrato: number;
+      estado: string;
+      plan: string | null;
+    };
+  }>;
+  cortesProgramados: BillingOverview['morosos'];
+  notificaciones: Array<{
+    idNotificacion: string;
+    idCliente: number | null;
+    idPlantilla: number | null;
+    canal: string | null;
+    fechaEnvio: string | null;
+    estadoEnvio: string | null;
+  }>;
+};
+
+export type PaymentZone = {
+  idZonaPago: number;
+  idEmpresa: number | null;
+  nombreZona: string;
+  comuna: string | null;
+  descripcion: string | null;
+  diaVencimientoSugerido: number | null;
+  activo: boolean | null;
+  empresa?: Company | null;
+};
+
+export type ZonePriceRule = {
+  idPlanZonaPrecio: number;
+  idPlan: number;
+  idZonaPago: number;
+  precioMensual: string;
+  valorInstalacion: string | null;
+  activo: boolean | null;
+  plan?: Plan | null;
+  zonaPago?: PaymentZone | null;
+};
+
+export type CustomerRequest = {
+  idSolicitud: number;
+  idCliente: number | null;
+  idProspecto: number | null;
+  idServicio: number | null;
+  idEmpresa: number | null;
+  tipoSolicitud: string;
+  canalOrigen: string | null;
+  estado: string;
+  factible: boolean | null;
+  motivoNoFactible: string | null;
+  descripcion: string | null;
+  observaciones: string | null;
+  fechaCreacion: string | null;
+  fechaCierre: string | null;
+  cliente?: Customer | null;
+  servicio?: CustomerService | null;
+};
+
+export type OperationalObservation = {
+  idObservacion: number;
+  tipoEntidad: string;
+  idEntidad: number;
+  idCliente: number | null;
+  idEmpresa: number | null;
+  idUsuario: number | null;
+  observacion: string;
+  visibilidad: string | null;
+  fechaCreacion: string | null;
+  usuario?: {
+    idUsuario: number;
+    nombreCompleto: string;
+    email: string | null;
+  } | null;
+};
+
+export type DigitalContract = {
+  idContratoDigital: number;
+  idContrato: number;
+  idCliente: number | null;
+  idEmpresa: number | null;
+  urlDocumento: string;
+  hashDocumento: string;
+  estadoFirma: string;
+  fechaGeneracion: string | null;
+  fechaFirma: string | null;
+  version: number;
+};
+
+export type AdvancedInventory = {
+  consumibles: Array<{
+    idStock: number;
+    idTipoEquipo: number | null;
+    idBodega: number | null;
+    cantidadDisponible: number;
+    umbralMinimo: number | null;
+    tipoEquipo?: {
+      idTipoEquipo: number;
+      nombre: string;
+      categoria: string | null;
+    } | null;
+    bodega?: {
+      idBodega: number;
+      nombre: string;
+      idEmpresa: number | null;
+    } | null;
+  }>;
+  alertasStock: AdvancedInventory['consumibles'];
+  cajasNap: Array<{
+    idCajaNap: number;
+    idEmpresa: number | null;
+    identificadorUnico: string | null;
+    numeroPoste: string | null;
+    zona: string | null;
+    capacidadPuertos: number | null;
+  }>;
+  transferencias: Array<{
+    idTransferencia: number;
+    idEmpresaOrigen: number | null;
+    idEmpresaDestino: number | null;
+    fechaTransferencia: string | null;
+    observaciones: string | null;
+  }>;
+  usoMateriales: Array<{
+    idUso: number;
+    idOt: number | null;
+    idTipoEquipo: number | null;
+    cantidad: number;
+    tipoEquipo?: {
+      nombre: string;
+      categoria: string | null;
+    } | null;
+  }>;
+  evidencias: Array<{
+    idFoto: number;
+    idOt: number | null;
+    urlCloudinary: string;
+    formato: string | null;
+    tamanoKb: number | null;
+    fechaSubida: string | null;
+  }>;
+  mantenciones: Array<{
+    idHistorial: string;
+    idUnidad: number | null;
+    motivo: string | null;
+    fechaHora: string | null;
+    unidad?: {
+      numeroSerie: string;
+    } | null;
+  }>;
+};
+export type TechnicalNote = {
+  metadata: string;
+  texto: string;
+};
+
+export type TvipCredentialSummary = {
+  idContrato: number;
+  estadoContrato: string;
+  plan: {
+    idPlan: number;
+    nombreComercial: string;
+    tipoPlan: string;
+  } | null;
+  incluyeTv: boolean;
+  credencial: {
+    idCredencial: number;
+    usuarioTvip: string | null;
+    fechaGeneracion: string | null;
+  } | null;
+  puedeGenerar: boolean;
+};
+
+export type TvipGenerationResult = {
+  idCredencial: number;
+  idContrato: number | null;
+  usuarioTvip: string | null;
+  fechaGeneracion: string | null;
+  temporaryPassword: string;
+  aviso: string;
+};
+
+export type MonitoringStatus = {
+  estadoConexion: string;
+  mensaje: string;
+  latenciaMs: number | null;
+  latenciaEstado: string;
+  fuente: string;
+  ventanaDatoRecienteHoras: number;
+  ultimaMedicion: {
+    idMonitoreo: string;
+    idUnidad: number | null;
+    idCliente: number | null;
+    idCajaNap: number | null;
+    potenciaActualDbm: number | null;
+    timestampMedicion: string | null;
+    estadoConexion: string | null;
+  } | null;
+  equipo: {
+    idUnidad: number;
+    numeroSerie: string;
+    modelo: string | null;
+    estado: string;
+  } | null;
+  cajaNap: {
+    idCajaNap: number;
+    identificadorUnico: string | null;
+    zona: string | null;
+    numeroPoste: string | null;
+  } | null;
+  historial: Array<{
+    idHistorialOnt: string;
+    idUnidad: number | null;
+    evento: string | null;
+    timestamp: string | null;
+  }>;
+};
+
+export type PortalCustomer = {
+  idCliente: number;
+  rut: string | null;
+  nombreCompleto: string;
+  email: string | null;
+  telefono: string | null;
+  estado: string;
+  idEmpresa: number | null;
+};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;
@@ -169,6 +433,7 @@ export type Ticket = {
   idTicket: number;
   idCliente: number | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
   idCategoria: number;
   codigoSeguimiento: string | null;
   prioridad: string;
@@ -176,6 +441,9 @@ export type Ticket = {
   descripcion: string | null;
   cliente?: Customer | null;
   categoria?: TicketCategory | null;
+  workOrders?: WorkOrder[];
+  hasOpenWorkOrder?: boolean;
+  observacionesTecnicas?: TechnicalNote[];
 };
 
 export type WorkOrder = {
@@ -184,7 +452,9 @@ export type WorkOrder = {
   idCliente: number | null;
   idTecnico: number | null;
   idTicket: number | null;
+  codigoSeguimiento: string | null;
   idServicio: number | null;
+  idCajaNap?: number | null;
   tipoOt: string;
   prioridad: string;
   estado: string;
@@ -199,12 +469,29 @@ export type WorkOrder = {
     nombreCompleto: string;
     email: string | null;
   } | null;
+  cliente?: {
+    idCliente: number;
+    rut: string | null;
+    nombreCompleto: string;
+  } | null;
   prospecto?: {
     idProspecto: number;
+    rut: string | null;
+    nombreCompleto: string | null;
     fechaCreacion: string | null;
     fechaConversion: string | null;
     tiempoConversionDias: number | null;
     estadoPipeline: string | null;
+  } | null;
+  ticket?: {
+    idTicket: number;
+    idCliente: number | null;
+    idServicio: number | null;
+    idCategoria: number;
+    codigoSeguimiento: string | null;
+    prioridad: string;
+    estado: string;
+    descripcion: string | null;
   } | null;
 };
 
@@ -214,8 +501,9 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('finet_token');
+  const hasAuthorization = Boolean(config.headers?.Authorization ?? config.headers?.authorization);
 
-  if (token) {
+  if (token && !hasAuthorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
