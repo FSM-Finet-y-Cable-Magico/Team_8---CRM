@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { PrismaService } from '../prisma/prisma.service';
 import { CommercialControlService } from './commercial-control.service';
 
@@ -16,8 +17,8 @@ const commercialUser: AuthUser = {
 const config = { get: jest.fn().mockReturnValue(undefined) };
 
 function daysFromNow(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
+  const date = parseDateOnly(todayDateOnly()) ?? new Date();
+  date.setUTCDate(date.getUTCDate() + days);
   return date;
 }
 

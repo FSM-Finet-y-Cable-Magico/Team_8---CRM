@@ -54,7 +54,7 @@ describe('ServicesService', () => {
       servicioContratado: {
         update: jest.fn().mockResolvedValue({
           ...serviceRecord,
-          estadoOperativo: 'Instalacion Programada',
+          estadoOperativo: 'Pendiente Instalacion',
         }),
       },
       historialOt: {
@@ -107,7 +107,7 @@ describe('ServicesService', () => {
     expect(tx.servicioContratado.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { idServicio: 55 },
-        data: { estadoOperativo: 'Instalacion Programada' },
+        data: { estadoOperativo: 'Pendiente Instalacion' },
       }),
     );
     expect(audit.record).toHaveBeenCalledWith(
@@ -118,6 +118,69 @@ describe('ServicesService', () => {
           idServicio: 55,
           codigoSeguimiento: 'OT-INS-000021',
         }),
+      }),
+    );
+  });
+
+  it('devuelve direccion resuelta para servicios sin direccion propia', async () => {
+    const serviceRecord = {
+      idServicio: 56,
+      idCliente: 10,
+      idEmpresa: 1,
+      idContrato: 30,
+      idDireccion: null,
+      estadoOperativo: 'Pendiente Instalacion',
+      contrato: { idContrato: 30, estado: 'Pendiente', plan: { nombreComercial: 'Fibra 600' } },
+      cliente: { idCliente: 10 },
+      empresa: { idEmpresa: 1 },
+      direccion: null,
+      zonaPago: null,
+      equipos: [],
+      tickets: [],
+      ordenes: [],
+      solicitudes: [],
+      tipoServicio: 'Internet',
+      observaciones: null,
+      datosTecnicos: null,
+      fechaCreacion: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const resolvedAddress = {
+      idDireccion: 8,
+      idCliente: 10,
+      direccionCompleta: 'Av. las condes 99',
+      comuna: 'Las Condes',
+      ciudad: 'Santiago',
+      esPrincipal: true,
+    };
+    const prisma = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue({
+          idCliente: 10,
+          idEmpresa: 1,
+          contratos: [{ idEmpresa: 1 }],
+        }),
+      },
+      servicioContratado: {
+        findMany: jest.fn().mockResolvedValue([serviceRecord]),
+      },
+      direccionServicio: {
+        findFirst: jest.fn().mockResolvedValue(resolvedAddress),
+      },
+    };
+    const audit = { record: jest.fn() };
+    const service = new ServicesService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    const result = await service.listByCustomer(10, comercial);
+
+    expect(result[0].direccion).toEqual(expect.objectContaining({
+      direccionCompleta: 'Av. las condes 99',
+    }));
+    expect(prisma.direccionServicio.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idCliente: 10, esPrincipal: true },
       }),
     );
   });

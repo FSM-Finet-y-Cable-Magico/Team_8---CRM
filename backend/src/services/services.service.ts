@@ -38,6 +38,7 @@ const SERVICE_INCLUDE = {
 } satisfies Prisma.ServicioContratadoInclude;
 
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
+const PENDING_INSTALLATION_STATUS = 'Pendiente Instalacion';
 const ALTERNATIVE_VISIT_TIMES = ['09:00', '11:00', '14:00', '16:00', '18:00'];
 
 type ServiceTechnicalDataDto = Pick<
@@ -64,15 +65,18 @@ export class ServicesService {
   async listByCustomer(idCliente: number, currentUser: AuthUser) {
     await this.getCustomerOrThrow(idCliente, currentUser);
 
-    return this.prisma.servicioContratado.findMany({
+    const services = await this.prisma.servicioContratado.findMany({
       where: { idCliente, ...this.serviceCompanyScope(currentUser) },
       orderBy: { fechaCreacion: 'desc' },
       include: SERVICE_INCLUDE,
     });
+
+    return Promise.all(services.map((service) => this.withResolvedAddress(service)));
   }
 
   async detail(idServicio: number, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
+    const serviceWithAddress = await this.withResolvedAddress(service);
     const auditoria = await this.prisma.logAuditoria.findMany({
       where: {
         OR: [
@@ -85,7 +89,7 @@ export class ServicesService {
     });
 
     return {
-      ...service,
+      ...serviceWithAddress,
       auditoria: auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() })),
     };
   }
@@ -126,7 +130,7 @@ export class ServicesService {
       },
     });
 
-    return created;
+    return this.withResolvedAddress(created);
   }
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
@@ -172,7 +176,7 @@ export class ServicesService {
       },
     });
 
-    return updated;
+    return this.withResolvedAddress(updated);
   }
 
   async attachEquipment(idServicio: number, dto: AttachEquipmentDto, currentUser: AuthUser) {
@@ -311,7 +315,7 @@ export class ServicesService {
       });
       const updatedService = await tx.servicioContratado.update({
         where: { idServicio: service.idServicio },
-        data: { estadoOperativo: 'Instalacion Programada' },
+        data: { estadoOperativo: PENDING_INSTALLATION_STATUS },
         include: SERVICE_INCLUDE,
       });
 
@@ -356,7 +360,10 @@ export class ServicesService {
       },
     });
 
-    return result;
+    return {
+      ...result,
+      servicio: await this.withResolvedAddress(result.servicio),
+    };
   }
 
   private async getServiceOrThrow(idServicio: number, currentUser: AuthUser) {
@@ -733,6 +740,16 @@ export class ServicesService {
       where: { idCliente: service.idCliente },
       orderBy: { idDireccion: 'asc' },
     });
+  }
+
+  private async withResolvedAddress<T extends ServiceWithRelations>(service: T): Promise<T> {
+    if (service.direccion) {
+      return service;
+    }
+
+    const direccion = await this.resolveServiceAddress(service);
+
+    return direccion ? { ...service, direccion } as T : service;
   }
 
   private addDaysToDateOnly(value: string, days: number) {
