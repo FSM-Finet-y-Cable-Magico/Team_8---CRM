@@ -208,6 +208,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     const loadCustomers = canManageCustomers || permissions.installEquipment;
     const [
       summaryResult,
+      companiesResult,
       prospectsResult,
       plansResult,
       customersResult,
@@ -219,6 +220,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       workOrdersResult,
     ] = await Promise.allSettled([
       api.get<Summary>('/companies/summary', { params: { scope } }),
+      isAdmin ? api.get<Company[]>('/companies') : Promise.resolve({ data: [] as Company[] }),
       api.get<Prospect[]>('/prospects', { params: { scope } }),
       api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
@@ -230,9 +232,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
     ]);
     const summaryData = settledData(summaryResult, null as Summary | null, errors);
+    const companyOptions = isAdmin
+      ? settledData(companiesResult, [] as Company[], errors)
+      : summaryData?.empresas ?? [];
 
     setSummary(summaryData);
-    setCompanies(summaryData?.empresas ?? []);
+    setCompanies(companyOptions.length > 0 ? companyOptions : summaryData?.empresas ?? []);
     setProspects(settledData(prospectsResult, [] as Prospect[], errors));
     setPlans(settledData(plansResult, [] as Plan[], errors));
     setCustomers(settledData(customersResult, [] as Customer[], errors));
