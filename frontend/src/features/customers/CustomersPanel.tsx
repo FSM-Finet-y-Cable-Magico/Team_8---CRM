@@ -903,7 +903,6 @@ export function CustomersPanel({
               customer={selectedCustomer}
               services={services}
               plans={plans}
-              paymentZones={paymentZones}
               permissions={permissions}
               onRefresh={async (preferredServiceId) => {
                 await loadServicesForCustomer(selectedCustomer.idCliente, true, preferredServiceId);

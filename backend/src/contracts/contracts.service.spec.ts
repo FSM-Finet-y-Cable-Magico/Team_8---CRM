@@ -37,7 +37,12 @@ describe('ContractsService', () => {
       ordenTrabajo: { create: jest.fn() },
     };
     const audit = { record: jest.fn() };
-    const service = new ContractsService(prisma as unknown as PrismaService, audit as unknown as AuditService);
+    const servicesService = { ensureInstallationServiceForContract: jest.fn() };
+    const service = new ContractsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      servicesService as never,
+    );
 
     const result = await service.createCustomerContract({ idCliente: 10, idPlan: 7 }, comercial);
 
@@ -50,14 +55,14 @@ describe('ContractsService', () => {
     expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
   });
 
-  it('confirma la firma manual y deja al cliente listo para crear su primer servicio', async () => {
+  it('confirma la firma manual y prepara el servicio pendiente de instalación', async () => {
     const contract = {
       idContrato: 30,
       idCliente: 10,
       idEmpresa: 1,
       estado: 'Pendiente firma contrato',
-      cliente: { idCliente: 10 },
-      plan: null,
+      cliente: { idCliente: 10, direcciones: [{ idDireccion: 7, direccionCompleta: 'Av. Siempre Viva 405' }] },
+      plan: { idPlan: 7, tipoPlan: 'Internet' },
       zonaPago: null,
       servicios: [],
     };
@@ -78,7 +83,18 @@ describe('ContractsService', () => {
       },
     };
     const audit = { record: jest.fn() };
-    const service = new ContractsService(prisma as unknown as PrismaService, audit as unknown as AuditService);
+    const servicesService = {
+      ensureInstallationServiceForContract: jest.fn().mockResolvedValue({
+        idServicio: 55,
+        idContrato: 30,
+        estadoOperativo: 'Pendiente Instalacion',
+      }),
+    };
+    const service = new ContractsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      servicesService as never,
+    );
 
     await service.confirmManualSignature(30, { observacion: 'Firma corroborada en oficina' }, comercial);
 
@@ -92,6 +108,7 @@ describe('ContractsService', () => {
       where: { idCliente: 10 },
       data: { estado: 'Pendiente Instalacion' },
     });
+    expect(servicesService.ensureInstallationServiceForContract).toHaveBeenCalledWith(30, comercial);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL' }));
   });
 });

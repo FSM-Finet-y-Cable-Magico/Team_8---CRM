@@ -1,9 +1,20 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Pencil, Plus } from 'lucide-react';
 import { api, apiErrorMessage, type Company, type Plan } from '../../api';
+import { serviceTypeOptions } from '../../constants';
 import { Modal, TablePagination } from '../../shared/components';
 
 const initialForm = (companyId: number) => ({ idEmpresa: String(companyId), nombreComercial: '', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: '', precioMensual: '', descripcion: '', activo: true });
+
+function canonicalPlanType(value: string) {
+  const normalized = value.trim().toLocaleLowerCase('es-CL').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const hasInternet = normalized.includes('internet');
+  const hasTelevision = normalized.includes('television') || /(^|\W)tv(\W|$)/.test(normalized);
+
+  if (hasInternet && hasTelevision) return 'Internet + Television';
+  if (hasTelevision) return 'Television';
+  return 'Internet';
+}
 
 export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { plans: Plan[]; companies: Company[]; writeCompanyId: number; onChanged: () => void }) {
   const [status, setStatus] = useState('');
@@ -18,7 +29,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
   function openCreatePlan() { resetForm(); setModalOpen(true); }
   function editPlan(plan: Plan) {
     setEditingPlan(plan); setModalOpen(true);
-    setForm({ idEmpresa: String(plan.idEmpresa ?? writeCompanyId), nombreComercial: plan.nombreComercial, tipoPlan: plan.tipoPlan, tipoCliente: plan.tipoCliente, velocidadMbps: plan.velocidadMbps === null ? '' : String(plan.velocidadMbps), precioMensual: String(plan.precioMensual), descripcion: plan.descripcion ?? '', activo: plan.activo !== false });
+    setForm({ idEmpresa: String(plan.idEmpresa ?? writeCompanyId), nombreComercial: plan.nombreComercial, tipoPlan: canonicalPlanType(plan.tipoPlan), tipoCliente: plan.tipoCliente, velocidadMbps: plan.velocidadMbps === null ? '' : String(plan.velocidadMbps), precioMensual: String(plan.precioMensual), descripcion: plan.descripcion ?? '', activo: plan.activo !== false });
   }
   async function savePlan(event: FormEvent) {
     event.preventDefault();
@@ -34,7 +45,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
       {plans.slice((page - 1) * 20, page * 20).map((plan) => <tr key={plan.idPlan} className={plan.activo === false ? 'plan-row-inactive' : undefined}><td>{plan.nombreComercial}</td><td>{plan.empresa?.nombre ?? plan.idEmpresa ?? '-'}</td><td>{plan.tipoPlan}</td><td>{plan.tipoCliente}</td><td>{plan.velocidadMbps ?? '-'}</td><td>${Number(plan.precioMensual).toLocaleString('es-CL')}</td><td><div className="table-actions"><button type="button" className={plan.activo === false ? 'plan-toggle' : 'plan-toggle active'} role="switch" aria-checked={plan.activo !== false} aria-label={`Cambiar estado de ${plan.nombreComercial}`} onClick={() => void togglePlan(plan)}><span /></button><button type="button" className="secondary compact plan-edit-action" aria-label={`Editar ${plan.nombreComercial}`} onClick={() => editPlan(plan)}><Pencil size={15} /></button></div></td></tr>)}
     </tbody></table></div><TablePagination currentPage={page} totalItems={plans.length} onPageChange={setPage} /></section>
     <Modal title={editingPlan ? 'Editar plan comercial' : 'Crear plan comercial'} open={modalOpen} onClose={closeModal}><form className="plan-modal-form" onSubmit={savePlan}><div className="plan-form-grid">
-      <label>Empresa<select value={form.idEmpresa} onChange={(e) => setForm({ ...form, idEmpresa: e.target.value })}>{companies.map((company) => <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>)}</select></label><label>Nombre comercial<input value={form.nombreComercial} onChange={(e) => setForm({ ...form, nombreComercial: e.target.value })} required /></label><label>Tipo de plan<input value={form.tipoPlan} onChange={(e) => setForm({ ...form, tipoPlan: e.target.value })} required /></label><label>Tipo de cliente<input value={form.tipoCliente} onChange={(e) => setForm({ ...form, tipoCliente: e.target.value })} required /></label><label>Velocidad (Mbps)<input type="number" min="0" value={form.velocidadMbps} onChange={(e) => setForm({ ...form, velocidadMbps: e.target.value })} /></label><label>Precio mensual<input type="number" min="0" value={form.precioMensual} onChange={(e) => setForm({ ...form, precioMensual: e.target.value })} required /></label><label className="plan-description-field">Descripción<textarea value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} /></label>
+      <label>Empresa<select value={form.idEmpresa} onChange={(e) => setForm({ ...form, idEmpresa: e.target.value })}>{companies.map((company) => <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>)}</select></label><label>Nombre comercial<input value={form.nombreComercial} onChange={(e) => setForm({ ...form, nombreComercial: e.target.value })} required /></label><label>Tipo de plan<select value={form.tipoPlan} onChange={(e) => setForm({ ...form, tipoPlan: e.target.value })}>{serviceTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Tipo de cliente<input value={form.tipoCliente} onChange={(e) => setForm({ ...form, tipoCliente: e.target.value })} required /></label><label>Velocidad (Mbps)<input type="number" min="0" value={form.velocidadMbps} onChange={(e) => setForm({ ...form, velocidadMbps: e.target.value })} /></label><label>Precio mensual<input type="number" min="0" value={form.precioMensual} onChange={(e) => setForm({ ...form, precioMensual: e.target.value })} required /></label><label className="plan-description-field">Descripción<textarea value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} /></label>
     </div><div className="plan-modal-actions"><button type="button" className="secondary" onClick={closeModal}>Cancelar</button><button type="submit">{editingPlan ? 'Guardar cambios' : 'Crear plan'}</button></div></form></Modal>
   </section>;
 }

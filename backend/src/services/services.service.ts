@@ -2,17 +2,20 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
   parseInstallOrderObservations,
 } from '../common/install-order-metadata';
 import { isAdministrator } from '../common/roles';
+import { serviceTypeFromPlan } from '../common/service-type';
 import { generateWorkOrderCode } from '../common/work-order-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttachEquipmentDto } from './dto/attach-equipment.dto';
 import { CreateServiceInstallOrderDto } from './dto/create-service-install-order.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 
@@ -64,11 +67,13 @@ export class ServicesService {
   async listByCustomer(idCliente: number, currentUser: AuthUser) {
     await this.getCustomerOrThrow(idCliente, currentUser);
 
-    return this.prisma.servicioContratado.findMany({
+    const services = await this.prisma.servicioContratado.findMany({
       where: { idCliente, ...this.serviceCompanyScope(currentUser) },
       orderBy: { fechaCreacion: 'desc' },
       include: SERVICE_INCLUDE,
     });
+
+    return this.withInstallationContext(services);
   }
 
   async detail(idServicio: number, currentUser: AuthUser) {
@@ -84,8 +89,10 @@ export class ServicesService {
       take: 40,
     });
 
+    const [enrichedService] = await this.withInstallationContext([service]);
+
     return {
-      ...service,
+      ...enrichedService,
       auditoria: auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() })),
     };
   }
@@ -124,6 +131,88 @@ export class ServicesService {
         idEmpresa,
         tipoServicio: dto.tipoServicio,
         estadoOperativo: dto.estadoOperativo,
+      },
+    });
+
+    await this.reconcileCustomerStatus(created.idCliente);
+
+    return created;
+  }
+
+  async ensureInstallationServiceForContract(idContrato: number, currentUser: AuthUser) {
+    const contract = await this.prisma.contrato.findUnique({
+      where: { idContrato },
+      include: {
+        plan: true,
+        cliente: true,
+      },
+    });
+
+    if (!contract || !contract.idCliente || !contract.cliente) {
+      throw new NotFoundException('Contrato o cliente no encontrado');
+    }
+
+    const idEmpresa = contract.idEmpresa ?? contract.cliente.idEmpresa;
+
+    if (!this.canAccessCompany(idEmpresa, currentUser)) {
+      throw new BadRequestException('El contrato no pertenece a tu empresa');
+    }
+
+    if (!['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(contract.estado)) {
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalación');
+    }
+
+    const existing = await this.prisma.servicioContratado.findFirst({
+      where: {
+        idContrato,
+        estadoOperativo: { not: 'Baja' },
+      },
+      orderBy: { fechaCreacion: 'desc' },
+      include: SERVICE_INCLUDE,
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    const tipoServicio = serviceTypeFromPlan(contract.plan?.tipoPlan);
+
+    if (!tipoServicio) {
+      throw new BadRequestException('El tipo del plan no permite determinar el servicio a instalar');
+    }
+
+    const idDireccion = await this.resolvePrimaryAddressId(contract.idCliente);
+
+    if (!idDireccion) {
+      throw new BadRequestException('El cliente no tiene una dirección registrada para preparar la instalación');
+    }
+
+    const created = await this.prisma.servicioContratado.create({
+      data: {
+        idCliente: contract.idCliente,
+        idEmpresa,
+        idContrato,
+        idDireccion,
+        idZonaPago: contract.idZonaPago,
+        tipoServicio,
+        estadoOperativo: 'Pendiente Instalacion',
+      },
+      include: SERVICE_INCLUDE,
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CREAR_SERVICIO_DESDE_CONTRATO_FIRMADO',
+      entidadAfectada: 'servicio_contratado',
+      idEntidadAfectada: created.idServicio,
+      valorNuevo: {
+        idCliente: created.idCliente,
+        idContrato,
+        idEmpresa,
+        idDireccion,
+        idZonaPago: created.idZonaPago,
+        tipoServicio,
+        estadoOperativo: created.estadoOperativo,
       },
     });
 
@@ -178,6 +267,63 @@ export class ServicesService {
     return updated;
   }
 
+  async deactivate(idServicio: number, dto: DeactivateServiceDto, currentUser: AuthUser) {
+    const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    if (service.estadoOperativo === 'Baja') {
+      return service;
+    }
+
+    const observation = dto.observacion?.trim() || null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const deactivatedService = await tx.servicioContratado.update({
+        where: { idServicio },
+        data: {
+          estadoOperativo: 'Baja',
+          observaciones: observation ?? service.observaciones,
+        },
+        include: SERVICE_INCLUDE,
+      });
+
+      if (service.idContrato) {
+        const operationalServices = await tx.servicioContratado.count({
+          where: {
+            idContrato: service.idContrato,
+            estadoOperativo: { not: 'Baja' },
+          },
+        });
+
+        if (operationalServices === 0) {
+          await tx.contrato.update({
+            where: { idContrato: service.idContrato },
+            data: { estado: 'Baja' },
+          });
+        }
+      }
+
+      return deactivatedService;
+    });
+
+    await this.reconcileCustomerStatus(updated.idCliente);
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'DAR_BAJA_SERVICIO',
+      entidadAfectada: 'servicio_contratado',
+      idEntidadAfectada: idServicio,
+      valorAnterior: {
+        estadoOperativo: service.estadoOperativo,
+        observaciones: service.observaciones,
+      },
+      valorNuevo: {
+        estadoOperativo: updated.estadoOperativo,
+        observacion: observation,
+        idContrato: updated.idContrato,
+      },
+    });
+
+    return updated;
+  }
+
   async attachEquipment(idServicio: number, dto: AttachEquipmentDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
 
@@ -220,7 +366,9 @@ export class ServicesService {
         estado: 'Instalado',
         diagnosticoTecnico: technicalNotes || unit.diagnosticoTecnico,
         modalidadAsignacion: dto.modalidadAsignacion ?? unit.modalidadAsignacion ?? 'Propiedad empresa',
-        valorArriendoMensual: dto.valorArriendoMensual,
+        valorArriendoMensual: dto.modalidadAsignacion && dto.modalidadAsignacion !== 'Arriendo'
+          ? null
+          : dto.valorArriendoMensual,
         fechaInicioAsignacion: dto.fechaInicioAsignacion ? new Date(dto.fechaInicioAsignacion) : unit.fechaInicioAsignacion,
       },
     });
@@ -462,23 +610,15 @@ export class ServicesService {
       },
     });
 
-    if (!customer || ['Suspendido', 'Moroso', 'Baja'].includes(customer.estado)) {
+    if (!customer) {
       return;
     }
 
-    const serviceStates = customer.servicios.map((service) => service.estadoOperativo);
-    const hasActiveService = serviceStates.includes('Activo');
-    const hasPendingInstallation = serviceStates.some((state) =>
-      state === 'Pendiente Instalacion' || state === 'Instalacion Programada',
-    );
-    const hasPendingSignature = customer.contratos.some((contract) => contract.estado === 'Pendiente firma contrato');
-    const nextStatus = hasActiveService
-      ? 'Activo'
-      : hasPendingInstallation
-        ? 'Pendiente Instalacion'
-        : hasPendingSignature
-          ? 'Pendiente firma contrato'
-          : customer.estado;
+    const nextStatus = resolveCustomerLifecycleStatus({
+      currentStatus: customer.estado,
+      contractStates: customer.contratos.map((contract) => contract.estado),
+      serviceStates: customer.servicios.map((service) => service.estadoOperativo),
+    });
 
     if (nextStatus !== customer.estado) {
       await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
@@ -511,6 +651,57 @@ export class ServicesService {
 
   private canAccessCompany(idEmpresa: number | null, currentUser: AuthUser) {
     return isAdministrator(currentUser.roles) || idEmpresa === currentUser.idEmpresa;
+  }
+
+  private async withInstallationContext(services: ServiceWithRelations[]) {
+    const completedInstallationByService = new Map<number, ServiceWithRelations['ordenes'][number]>();
+
+    for (const service of services) {
+      const installation = service.ordenes
+        .filter((order) =>
+          this.normalizeStatus(order.tipoOt) === 'instalacion' &&
+          this.normalizeStatus(order.estado) === 'completada',
+        )
+        .sort((left, right) => {
+          const leftDate = left.fechaCompletada?.getTime() ?? left.fechaCreacion?.getTime() ?? 0;
+          const rightDate = right.fechaCompletada?.getTime() ?? right.fechaCreacion?.getTime() ?? 0;
+          return rightDate - leftDate;
+        })[0];
+
+      if (installation) {
+        completedInstallationByService.set(service.idServicio, installation);
+      }
+    }
+
+    const technicianIds = [...new Set(
+      [...completedInstallationByService.values()]
+        .map((order) => order.idTecnico)
+        .filter((id): id is number => id !== null),
+    )];
+    const technicians = technicianIds.length
+      ? await this.prisma.usuario.findMany({
+        where: { idUsuario: { in: technicianIds } },
+        select: { idUsuario: true, nombreCompleto: true },
+      })
+      : [];
+    const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
+
+    return services.map((service) => {
+      const installation = completedInstallationByService.get(service.idServicio);
+
+      return {
+        ...service,
+        instalacion: installation
+          ? {
+            idOt: installation.idOt,
+            codigoSeguimiento: installation.codigoSeguimiento,
+            fechaCompletada: installation.fechaCompletada,
+            idTecnico: installation.idTecnico,
+            tecnico: installation.idTecnico ? technicianById.get(installation.idTecnico) ?? null : null,
+          }
+          : null,
+      };
+    });
   }
 
   private technicalData(dto: ServiceTechnicalDataDto) {

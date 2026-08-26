@@ -33,6 +33,15 @@ export class ContractsController {
     return this.contractsService.confirmManualSignature(idContrato, dto, user);
   }
 
+  @Post(':id/prepare-installation')
+  @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
+  prepareInstallation(
+    @Param('id', ParseIntPipe) idContrato: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.contractsService.prepareInstallation(idContrato, user);
+  }
+
   @Post(':id/change-plan')
   @Roles(...ACCESS_ROLES.CHANGE_CUSTOMER_PLAN)
   changePlan(

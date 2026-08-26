@@ -8,9 +8,12 @@ import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { parseDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
+import { serviceTypeFromPlan } from '../common/service-type';
 import { PrismaService } from '../prisma/prisma.service';
+import { ServicesService } from '../services/services.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
@@ -38,6 +41,7 @@ export class ContractsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly servicesService: ServicesService,
   ) {}
 
   async createCustomerContract(dto: CreateCustomerContractDto, currentUser: AuthUser) {
@@ -109,6 +113,16 @@ export class ContractsService {
       throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
     }
 
+    const hasOperationalService = contract.servicios.some((service) => service.estadoOperativo !== 'Baja');
+
+    if (!hasOperationalService && !serviceTypeFromPlan(contract.plan?.tipoPlan)) {
+      throw new BadRequestException('El plan del contrato no permite determinar el servicio a instalar');
+    }
+
+    if (!hasOperationalService && !contract.cliente?.direcciones.some((address) => address.direccionCompleta?.trim())) {
+      throw new BadRequestException('El cliente necesita una dirección registrada antes de confirmar la firma');
+    }
+
     const updated = await this.prisma.contrato.update({
       where: { idContrato },
       data: {
@@ -119,6 +133,8 @@ export class ContractsService {
       },
       include: CONTRACT_INCLUDE,
     });
+
+    const installationService = await this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
 
     if (updated.idCliente) {
       await this.reconcileCustomerStatus(updated.idCliente);
@@ -133,10 +149,21 @@ export class ContractsService {
       valorNuevo: {
         estado: updated.estado,
         fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
+        idServicio: installationService.idServicio,
       },
     });
 
-    return updated;
+    return this.getContractOrThrow(idContrato, currentUser);
+  }
+
+  async prepareInstallation(idContrato: number, currentUser: AuthUser) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
+
+    if (!this.isSignedContract(contract.estado)) {
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalación');
+    }
+
+    return this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
   }
 
   async changePlan(idContrato: number, dto: ChangePlanDto, currentUser: AuthUser) {
@@ -145,6 +172,12 @@ export class ContractsService {
 
     if (!nextPlan || nextPlan.activo === false) {
       throw new BadRequestException('El nuevo plan no existe o esta inactivo');
+    }
+
+    const nextServiceType = serviceTypeFromPlan(nextPlan.tipoPlan);
+
+    if (!nextServiceType) {
+      throw new BadRequestException('El tipo del plan nuevo no permite determinar el servicio contratado');
     }
 
     if (contract.idEmpresa && nextPlan.idEmpresa && contract.idEmpresa !== nextPlan.idEmpresa) {
@@ -169,7 +202,7 @@ export class ContractsService {
           idPlanAnterior: contract.idPlan,
           idPlanNuevo: nextPlan.idPlan,
           fechaEfectiva: effectiveDate,
-          motivo: dto.motivo.trim(),
+          motivo: dto.motivo?.trim() || 'Cambio de plan',
           observaciones: dto.observaciones?.trim() || null,
           precioAnterior: previousPrice,
           precioNuevo: nextPrice,
@@ -188,6 +221,7 @@ export class ContractsService {
         await tx.servicioContratado.update({
           where: { idServicio: service.idServicio },
           data: {
+            tipoServicio: nextServiceType,
             datosTecnicos: this.mergeServicePlanData(service.datosTecnicos, nextPlan, nextPrice),
           },
         });
@@ -210,6 +244,7 @@ export class ContractsService {
         precioMensual: nextPrice ? Number(nextPrice) : null,
         idCambioPlan: result.history.idCambioPlan,
         fechaEfectiva: dto.fechaEfectiva,
+        tipoServicio: nextServiceType,
       },
     });
 
@@ -372,24 +407,15 @@ export class ContractsService {
       },
     });
 
-    if (!customer || ['Suspendido', 'Moroso', 'Baja'].includes(customer.estado)) {
+    if (!customer) {
       return;
     }
 
-    const serviceStates = customer.servicios.map((service) => service.estadoOperativo);
-    const hasActiveService = serviceStates.includes('Activo');
-    const hasPendingInstallation = serviceStates.some((state) =>
-      state === 'Pendiente Instalacion' || state === 'Instalacion Programada',
-    );
-    const hasPendingSignature = customer.contratos.some((item) => item.estado === 'Pendiente firma contrato');
-    const hasSignedContract = customer.contratos.some((item) => this.isSignedContract(item.estado));
-    const nextStatus = hasActiveService
-      ? 'Activo'
-      : hasPendingInstallation || hasSignedContract
-        ? 'Pendiente Instalacion'
-        : hasPendingSignature
-          ? 'Pendiente firma contrato'
-          : customer.estado;
+    const nextStatus = resolveCustomerLifecycleStatus({
+      currentStatus: customer.estado,
+      contractStates: customer.contratos.map((item) => item.estado),
+      serviceStates: customer.servicios.map((service) => service.estadoOperativo),
+    });
 
     if (nextStatus !== customer.estado) {
       await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });

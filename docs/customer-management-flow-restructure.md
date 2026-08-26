@@ -1,56 +1,100 @@
-# Reorganización de Gestión de Clientes
+# Reestructuracion de gestion de clientes, contratacion e instalacion
 
-## Problema anterior
+## Objetivo
 
-El modal `Gestionar cliente` mostraba al mismo tiempo dos representaciones de servicios, contratos, formularios técnicos, asociación de equipos, monitoreo, TV IP e historial. Esto duplicaba información y permitía intentar acciones sin el contexto de una contratación o servicio concreto.
+Separar el ciclo comercial y operativo para que una contratacion no solicite datos tecnicos antes de que exista una instalacion real. El flujo queda organizado como:
 
-## Estructura actual
+`Cliente -> contrato y plan -> firma confirmada -> instalacion programada -> cierre tecnico de OT -> servicio activo`.
 
-El modal principal conserva el resumen del cliente y una única lista `Contratos y servicios`. Cada fila representa una contratación y muestra plan, empresa, estado de contrato, estado de servicio, dirección y la acción `Gestionar`.
+La gestion posterior de un servicio activo se realiza en un modal distinto y no dentro del wizard de contratacion.
 
-La acción abre un modal secundario con tres etapas:
+## Arquitectura revisada
 
-1. **Contrato y plan**: muestra datos reales del plan y permite confirmar manualmente la firma o abrir el cambio de plan contextual.
-2. **Servicio e instalación**: se habilita solo para contratos firmados. Permite crear un servicio pendiente de instalación y luego generar su OT.
-3. **Operación técnica**: se habilita solo cuando existe servicio y organiza resumen, datos técnicos, equipos, tickets/OT e historial en tabs.
+- `Plan` define el producto comercial, empresa, velocidad, precio y tipo de plan.
+- `Contrato` representa la relacion comercial entre cliente y plan.
+- `ServicioContratado` representa la instancia que se instalara o ya opera para ese cliente.
+- `OrdenTrabajo` representa la visita de instalacion y queda asociada a cliente, contrato, servicio y plan.
+- `UnidadEquipo` representa el equipo fisico que se instala al cerrar una OT.
+- `AuditService` conserva trazabilidad de las transiciones relevantes.
 
-## Reglas de negocio
+Se mantienen los filtros de empresa, permisos existentes y relaciones historicas. No se creo una migracion ni se duplicaron entidades: se reutilizaron los modelos actuales.
 
-- Un contrato puede existir sin servicio.
-- `Confirmar firma de contrato` es una corroboración manual. No emite ni descarga contratos y no consume Facturación.cl.
-- Un servicio requiere contrato firmado. Su estado inicial desde este flujo es `Pendiente Instalacion`.
-- Una OT de instalación mantiene el servicio pendiente/programado y el cierre técnico continúa en Órdenes de Trabajo.
-- `Añadir plan` crea un nuevo contrato `Pendiente firma contrato`; no crea servicio ni OT.
-- Si un cliente ya tiene un servicio activo, añadir una contratación pendiente no cambia su estado global `Activo`.
-- Si solo hay contrato firmado sin servicio, el cliente queda `Pendiente Instalacion`; si solo hay contratación pendiente, queda `Pendiente firma contrato`.
-- La dirección se toma primero del servicio y, si no existe, de la dirección principal o técnica del cliente.
+## Flujo implementado
 
-## Endpoints reutilizados y extendidos
+### 1. Contrato y plan
 
-- `GET /api/customers`
-- `GET /api/services/customer/:idCliente`
-- `POST /api/services`
-- `PATCH /api/services/:id`
-- `POST /api/services/:id/equipment`
-- `POST /api/services/:id/install-order`
-- `POST /api/contracts` (nueva contratación de cliente)
-- `PATCH /api/contracts/:id/confirm-signature` (firma manual)
-- `POST /api/contracts/:id/change-plan`
+El wizard de contratacion solo tiene dos etapas: `Contrato y plan` e `Instalacion`. La primera presenta plan, empresa, velocidad, precio, fecha, direccion y estado como informacion de solo lectura estructurada.
 
-## Cambios de datos
+La firma manual se confirma desde esta etapa. La confirmacion crea o reutiliza un `ServicioContratado` en estado `Pendiente Instalacion`, derivando automaticamente `tipoServicio` desde `Plan.tipoPlan`. No se solicita al usuario volver a escoger Internet, Television o Internet + Television.
 
-`Contrato` incorpora de forma aditiva `fechaFirmaManual`, `idUsuarioFirmaManual` y `observacionFirmaManual`. El script incremental es `db/init/11_customer_contract_workflow.sql`.
+### 2. Instalacion
 
-## UI oculta temporalmente
+La segunda etapa se limita a programar la OT de instalacion. Cliente, contrato, plan, tipo de servicio, direccion y zona se resuelven desde las relaciones existentes. La OT mantiene el servicio en `Pendiente Instalacion` hasta que se complete tecnicamente.
 
-Se retiran del modal principal el acordeón `Conectividad y TV IP`, el monitoreo y el acordeón general de estado/historial. No se elimina backend, tablas ni endpoints preparados para Smart OLT o TV IP.
+Al crear la OT se refrescan los datos, se muestra una confirmacion temporal y se cierra el modal de contratacion. Si existe una OT de instalacion abierta, se muestra su codigo, estado, visita y tecnico, evitando crear una duplicada.
 
-**Smart OLT:** el monitoreo se oculta hasta disponer de una integración real; no se reemplaza con datos demo.
+### 3. Cierre tecnico de la OT
 
-**Facturación.cl:** la firma y el contrato se corroboran manualmente hasta que exista integración real. Esta fase no genera contratos PDF propios ni llama a una API externa.
+El tecnico registra al cerrar la OT, cuando corresponde:
 
-## Cobertura y pendientes
+- numero de serie;
+- modelo;
+- MAC;
+- puerto OLT;
+- modalidad de asignacion;
+- valor de arriendo solo para modalidad `Arriendo`;
+- observaciones tecnicas.
 
-Las pruebas de contratos cubren creación sin servicio/OT, firma manual y preservación del estado activo ante una contratación adicional. Las pruebas de servicios cubren el bloqueo de creación antes de la firma y conservan la generación de OT desde servicios pendientes.
+El cierre activa el servicio asociado, actualiza el contrato relacionado, asocia la unidad de inventario al cliente y servicio, conserva su historial y registra auditoria. La informacion tecnica se conserva como historica y no se edita desde el flujo comercial.
 
-Pendientes de una fase posterior: integración real de Facturación.cl, firma electrónica, Smart OLT, TV IP contextual por servicio y reglas comerciales adicionales para cambios de plan entre empresas.
+### 4. Gestionar servicio activo
+
+Cuando el servicio esta activo, suspendido o dado de baja, `Gestionar` abre `Gestionar servicio` en vez del wizard de contratacion. El modal muestra un resumen comercial y la informacion de instalacion de solo lectura. Sus acciones editables son:
+
+- modificar plan, con una unica observacion opcional;
+- dar de baja logica el servicio, con una unica observacion opcional;
+- abrir observaciones existentes.
+
+El cambio de plan conserva la trazabilidad del contrato y actualiza el tipo del servicio desde el nuevo plan. La baja no elimina historial y reconcilia el estado del cliente y contrato segun los servicios restantes.
+
+## Estados usados
+
+- Cliente: `Pendiente firma contrato`, `Pendiente Instalacion`, `Activo`, `Suspendido`, `Moroso` y `Baja` segun reglas existentes.
+- Contrato: se conserva el estado de firma existente; despues de firma queda listo para instalacion.
+- Servicio: `Pendiente Instalacion`, `Activo` y `Baja`.
+- Orden de trabajo: los estados de instalacion existentes, incluida `Completada` al cerrar tecnicamente.
+
+La conciliacion del estado del cliente se centraliza en `resolveCustomerLifecycleStatus`, para evitar combinaciones contradictorias entre cliente, contrato y servicio.
+
+## Endpoints y contratos ajustados
+
+- `POST /api/contracts/:id/confirm-manual-signature`: confirma firma y prepara el servicio pendiente de instalacion.
+- `POST /api/contracts/:id/prepare-installation`: prepara de forma segura un servicio pendiente para contratos firmados historicos.
+- `POST /api/contracts/:id/change-plan`: permite cambio de plan sin exigir un segundo textarea de motivo; mantiene observacion opcional.
+- `PATCH /api/services/:id/deactivate`: realiza baja logica del servicio y conserva auditoria.
+- `PATCH /api/work-orders/:id/complete-installation`: acepta datos opcionales de equipo y los asocia al servicio al completar la instalacion.
+
+No se modificaron endpoints de portal, cobros, tickets ni Facturacion.cl.
+
+## Cambios de UX
+
+- Informacion de solo lectura presentada como listas estructuradas, no como inputs deshabilitados ni tarjetas individuales.
+- Mensajes de exito del flujo usan `useTransientMessage` y desaparecen aproximadamente a los tres segundos.
+- Se eliminaron explicaciones permanentes de procesos internos y el tercer paso de operacion tecnica.
+- `Ver disponibilidad` es una accion secundaria compacta junto a la fecha de agenda.
+- Valor de arriendo no aparece ni se persiste para modalidades distintas de `Arriendo`.
+
+## Auditoria y compatibilidad
+
+Se registran acciones de confirmacion de firma, preparacion de servicio, cambio de plan, baja de servicio, cierre de instalacion y asociacion de equipo mediante el mecanismo de auditoria existente. Las validaciones mantienen empresa, permisos, pertenencia entre entidades e integridad del inventario.
+
+No se introdujo una integracion externa ni se eliminaron datos historicos. Las integraciones de Facturacion.cl, WhatsApp, cambios de equipo, traslados y upgrades quedan fuera de esta fase y deben ejecutarse mediante flujos posteriores u ordenes de trabajo nuevas.
+
+## Validacion prevista
+
+- Cliente sin firma: no puede programar instalacion.
+- Contrato firmado: prepara un servicio pendiente y permite agendar una sola OT abierta.
+- Cierre de OT: activa el servicio y asocia el equipo real cuando se informa.
+- Servicio activo: abre el modal de gestion posterior, no el wizard de contratacion.
+- Cambio de plan y baja: mantienen auditoria e historial.
+- Equipo sin arriendo: no requiere ni muestra valor de arriendo.

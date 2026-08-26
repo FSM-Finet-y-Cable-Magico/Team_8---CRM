@@ -175,6 +175,16 @@ export type CustomerService = {
   ordenes?: WorkOrder[];
   solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
+  instalacion?: {
+    idOt: number;
+    codigoSeguimiento: string | null;
+    fechaCompletada: string | null;
+    idTecnico: number | null;
+    tecnico?: {
+      idUsuario: number;
+      nombreCompleto: string;
+    } | null;
+  } | null;
 };
 
 export type InventoryUnit = {

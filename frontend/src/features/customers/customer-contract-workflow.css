@@ -70,9 +70,165 @@
   flex: 1;
 }
 
+.customer-readonly-details {
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 16px 0;
+}
+
+.customer-readonly-details > div {
+  border-bottom: 1px solid #e5eee9;
+  display: grid;
+  gap: 3px;
+  padding: 0 0 10px;
+}
+
+.customer-readonly-details dt {
+  color: #77877f;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.customer-readonly-details dd {
+  color: #263a31;
+  font-size: .92rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.customer-contract-stage > button {
+  margin-top: 6px;
+}
+
+.customer-inline-form {
+  margin-top: 16px;
+}
+
+.customer-inline-form-wide,
+.customer-inline-summary {
+  grid-column: 1 / -1;
+}
+
+.customer-inline-summary {
+  color: #52675d;
+  font-size: .86rem;
+  margin: 0;
+}
+
+.customer-install-schedule {
+  align-items: end;
+  margin-top: 16px;
+}
+
+.availability-button {
+  align-self: end;
+  background: #237b65;
+  border: 1px solid #237b65;
+  border-radius: 7px;
+  color: #fff;
+  font-size: .82rem;
+  min-height: 36px;
+  padding: 7px 11px;
+  width: auto;
+}
+
+.availability-button:hover {
+  background: #176d58;
+  border-color: #176d58;
+}
+
+.customer-transient-status {
+  margin: 0 0 12px;
+}
+
+.customer-service-management {
+  display: grid;
+  gap: 20px;
+}
+
+.customer-service-summary,
+.customer-service-history {
+  border-bottom: 1px solid #dce8e1;
+  padding-bottom: 18px;
+}
+
+.customer-service-summary-header,
+.customer-service-history > header,
+.customer-service-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.customer-service-summary-header > div,
+.customer-service-history > header {
+  min-width: 0;
+}
+
+.customer-service-summary-header p {
+  color: #718178;
+  font-size: .78rem;
+  margin: 0 0 3px;
+}
+
+.customer-service-summary-header h3,
+.customer-service-history h3 {
+  color: #253a30;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.customer-service-summary-header span {
+  color: #5e7066;
+  font-size: .84rem;
+}
+
+.customer-service-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.customer-service-management .danger {
+  background: #c94742;
+  border-color: #c94742;
+  color: #fff;
+}
+
+.customer-service-management .danger:hover {
+  background: #aa3733;
+  border-color: #aa3733;
+}
+
+.customer-service-history > header {
+  justify-content: flex-start;
+}
+
+.customer-service-history > header svg {
+  color: #257b65;
+}
+
+.customer-equipment-list {
+  display: grid;
+  gap: 14px;
+}
+
 @media (max-width: 720px) {
   .customer-workflow-steps,
-  .customer-operation-columns {
+  .customer-operation-columns,
+  .customer-readonly-details {
+    flex-direction: column;
+  }
+
+  .customer-readonly-details {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-service-summary-header {
+    align-items: flex-start;
     flex-direction: column;
   }
 }

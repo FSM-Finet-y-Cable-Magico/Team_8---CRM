@@ -8,6 +8,7 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { AttachEquipmentDto } from './dto/attach-equipment.dto';
 import { CreateServiceInstallOrderDto } from './dto/create-service-install-order.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ServicesService } from './services.service';
@@ -66,6 +67,16 @@ export class ServicesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.servicesService.update(id, dto, user);
+  }
+
+  @Patch(':id/deactivate')
+  @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
+  deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeactivateServiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.servicesService.deactivate(id, dto, user);
   }
 
   @Post(':id/equipment')

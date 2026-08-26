@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { CircleCheckBig, ClipboardList, Wrench } from 'lucide-react';
 import { api, apiErrorMessage, type WorkOrder } from '../../api';
+import { equipmentModeOptions } from '../../constants';
 import {
   formatConnectionType,
   formatDateOnly,
@@ -13,7 +14,17 @@ import { HistoryBox, Modal, StatusBadge } from '../../shared/components';
 export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState({ potenciaOpticaDbm: '', observaciones: '', estadoFinalServicio: 'Activo' });
+  const [form, setForm] = useState({
+    potenciaOpticaDbm: '',
+    observaciones: '',
+    estadoFinalServicio: 'Activo',
+    numeroSerie: '',
+    modelo: '',
+    macAddress: '',
+    puertoOlt: '',
+    modalidadAsignacion: 'Propiedad empresa',
+    valorArriendoMensual: '',
+  });
   const [status, setStatus] = useState('');
 
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
@@ -25,7 +36,17 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
     selectedOrderIsInstallation && !selectedOrderIsCompleted && selectedOrderHasInstallContext;
 
   useEffect(() => {
-    setForm({ potenciaOpticaDbm: '', observaciones: '', estadoFinalServicio: 'Activo' });
+    setForm({
+      potenciaOpticaDbm: '',
+      observaciones: '',
+      estadoFinalServicio: 'Activo',
+      numeroSerie: '',
+      modelo: '',
+      macAddress: '',
+      puertoOlt: '',
+      modalidadAsignacion: 'Propiedad empresa',
+      valorArriendoMensual: '',
+    });
     setStatus('');
   }, [selectedId]);
 
@@ -85,6 +106,14 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
       const { data } = await api.patch(`/work-orders/${selectedOrder.idOt}/complete-installation`, {
         potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
         observaciones: form.observaciones,
+        numeroSerie: form.numeroSerie.trim() || undefined,
+        modelo: form.modelo.trim() || undefined,
+        macAddress: form.macAddress.trim() || undefined,
+        puertoOlt: form.puertoOlt.trim() || undefined,
+        modalidadAsignacion: form.numeroSerie.trim() ? form.modalidadAsignacion : undefined,
+        valorArriendoMensual: form.modalidadAsignacion === 'Arriendo' && form.valorArriendoMensual
+          ? Number(form.valorArriendoMensual)
+          : undefined,
       });
       if (data.prospect) {
         setStatus(
@@ -269,7 +298,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 {!selectedOrderHasInstallContext && (
                   <p className="alert">No se puede completar la instalación: falta prospecto o servicio asociado.</p>
                 )}
-                <div className="workflow-grid work-order-technical-grid">
+                {!selectedOrderIsCompleted && <div className="workflow-grid work-order-technical-grid">
                   <label className="work-order-technical-field">
                     <span className="work-order-field-label">Potencia óptica</span>
                     <span className="work-order-measurement">
@@ -292,7 +321,49 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
                     />
                   </label>
-                </div>
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Número de serie del equipo</span>
+                    <input
+                      placeholder="Serie registrada en inventario"
+                      value={form.numeroSerie}
+                      onChange={(event) => setForm({ ...form, numeroSerie: event.target.value })}
+                    />
+                  </label>
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Modelo</span>
+                    <input value={form.modelo} onChange={(event) => setForm({ ...form, modelo: event.target.value })} />
+                  </label>
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">MAC</span>
+                    <input value={form.macAddress} onChange={(event) => setForm({ ...form, macAddress: event.target.value })} />
+                  </label>
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Puerto OLT</span>
+                    <input value={form.puertoOlt} onChange={(event) => setForm({ ...form, puertoOlt: event.target.value })} />
+                  </label>
+                  <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Modalidad</span>
+                    <select
+                      value={form.modalidadAsignacion}
+                      onChange={(event) => setForm({
+                        ...form,
+                        modalidadAsignacion: event.target.value,
+                        valorArriendoMensual: event.target.value === 'Arriendo' ? form.valorArriendoMensual : '',
+                      })}
+                    >
+                      {equipmentModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                    </select>
+                  </label>
+                  {form.modalidadAsignacion === 'Arriendo' && <label className="work-order-technical-field">
+                    <span className="work-order-field-label">Valor de arriendo mensual</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.valorArriendoMensual}
+                      onChange={(event) => setForm({ ...form, valorArriendoMensual: event.target.value })}
+                    />
+                  </label>}
+                </div>}
                 <button
                   type="button"
                   className="work-order-complete-button"

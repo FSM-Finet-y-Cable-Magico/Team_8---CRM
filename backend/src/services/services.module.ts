@@ -7,5 +7,6 @@ import { ServicesService } from './services.service';
   imports: [AuditModule],
   controllers: [ServicesController],
   providers: [ServicesService],
+  exports: [ServicesService],
 })
 export class ServicesModule {}
