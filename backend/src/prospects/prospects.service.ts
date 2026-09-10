@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -22,14 +23,23 @@ import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
-const LOST_PIPELINE_STATUS = 'Perdido';
+const FEASIBLE_PIPELINE_STATUS = 'Factible';
+const NOT_FEASIBLE_PIPELINE_STATUS = 'No Factible';
+const QUOTE_SENT_PIPELINE_STATUS = 'Cotizacion Enviada';
+const EXTERNAL_CONTRACT_PIPELINE_STATUS = 'Contrato externo registrado';
+const PENDING_SIGNATURE_STATUS = 'Pendiente firma contrato';
+const LOST_PIPELINE_STATUS = LOST_PROSPECT_PIPELINE_STATUS;
+const PENDING_SIGNATURE_DUE_DAY = 1;
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
 const ALTERNATIVE_VISIT_TIMES = ['09:00', '11:00', '14:00', '16:00', '18:00'];
 const PIPELINE_STATUSES = [
   INITIAL_PIPELINE_STATUS,
   'Contactado',
   'En Factibilidad',
-  'Cotizacion Enviada',
+  FEASIBLE_PIPELINE_STATUS,
+  NOT_FEASIBLE_PIPELINE_STATUS,
+  QUOTE_SENT_PIPELINE_STATUS,
+  EXTERNAL_CONTRACT_PIPELINE_STATUS,
   'Aceptado',
   'Instalacion Programada',
   'Servicio Activo',
@@ -44,10 +54,10 @@ export class ProspectsService {
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
-    const where = this.companyScope(currentUser, scope);
+    const companyScope = this.companyScope(currentUser, scope);
 
     return this.prisma.prospecto.findMany({
-      where,
+      where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
@@ -162,13 +172,8 @@ export class ProspectsService {
     }
 
     const currentStatus = prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
-    const nextStatus =
-      dto.resultado === 'Factible' && this.statusIndex(currentStatus) < this.statusIndex('En Factibilidad')
-        ? 'En Factibilidad'
-        : dto.resultado === 'No Factible'
-          ? LOST_PIPELINE_STATUS
-          : currentStatus;
-    const lossReason = dto.resultado === 'No Factible' ? 'Sin cobertura' : prospect.motivoPerdida;
+    const nextStatus = dto.resultado === 'Factible' ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS;
+    const lossReason = prospect.motivoPerdida;
 
     const updated = await this.prisma.prospecto.update({
       where: { idProspecto },
@@ -218,7 +223,11 @@ export class ProspectsService {
       },
     });
 
-    if (!hasFeasibility && this.statusIndex(prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS) < this.statusIndex('En Factibilidad')) {
+    if ([NOT_FEASIBLE_PIPELINE_STATUS, LOST_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')) {
+      throw new BadRequestException('La factibilidad debe estar marcada como Factible');
+    }
+
+    if (!hasFeasibility && this.statusIndex(prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS) < this.statusIndex(FEASIBLE_PIPELINE_STATUS)) {
       throw new BadRequestException('La factibilidad debe estar marcada como Factible');
     }
 
@@ -228,10 +237,6 @@ export class ProspectsService {
 
     if (!plan || plan.activo === false) {
       throw new BadRequestException('Plan inexistente o inactivo');
-    }
-
-    if (plan.idEmpresa && prospect.idEmpresa && plan.idEmpresa !== prospect.idEmpresa) {
-      throw new BadRequestException('El plan no pertenece a la empresa del prospecto');
     }
 
     const quote = await this.prisma.cotizacion.create({
@@ -268,10 +273,10 @@ export class ProspectsService {
 
     const currentStatus = prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
 
-    if (this.statusIndex(currentStatus) < this.statusIndex('Cotizacion Enviada')) {
+    if (this.statusIndex(currentStatus) < this.statusIndex(QUOTE_SENT_PIPELINE_STATUS)) {
       await this.prisma.prospecto.update({
         where: { idProspecto },
-        data: { estadoPipeline: 'Cotizacion Enviada' },
+        data: { estadoPipeline: QUOTE_SENT_PIPELINE_STATUS },
       });
     }
 
@@ -303,6 +308,9 @@ export class ProspectsService {
       data: {
         estadoPipeline: LOST_PIPELINE_STATUS,
         motivoPerdida: dto.motivo,
+        observacionPerdida: dto.detalleMotivoPerdida?.trim() || dto.observaciones.trim(),
+        fechaPerdida: new Date(),
+        idUsuarioPerdida: currentUser.idUsuario,
       },
       include: { empresa: true },
     });
@@ -313,7 +321,12 @@ export class ProspectsService {
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
       valorAnterior: { estadoPipeline: prospect.estadoPipeline, motivoPerdida: prospect.motivoPerdida },
-      valorNuevo: { estadoPipeline: LOST_PIPELINE_STATUS, motivo: dto.motivo, observaciones: dto.observaciones },
+      valorNuevo: {
+        estadoPipeline: LOST_PIPELINE_STATUS,
+        motivo: dto.motivo,
+        observaciones: dto.observaciones,
+        detalleMotivoPerdida: dto.detalleMotivoPerdida,
+      },
     });
 
     return updated;
@@ -331,8 +344,26 @@ export class ProspectsService {
       throw new BadRequestException('El prospecto no tiene datos suficientes para crear cliente');
     }
 
-    if (plan.idEmpresa && prospect.idEmpresa && plan.idEmpresa !== prospect.idEmpresa) {
-      throw new BadRequestException('El plan no pertenece a la empresa del prospecto');
+    if (prospect.estadoPipeline === NOT_FEASIBLE_PIPELINE_STATUS) {
+      throw new BadRequestException('No se puede confirmar la contratacion de un prospecto no factible');
+    }
+
+    if (prospect.estadoPipeline === LOST_PIPELINE_STATUS) {
+      throw new BadRequestException('No se puede confirmar la contratacion de un prospecto perdido');
+    }
+
+    const quote = await this.prisma.cotizacion.findFirst({
+      where: {
+        idProspecto,
+        idPlan: dto.planId,
+        factibilidadVerificada: true,
+        fechaEnvio: { not: null },
+      },
+      orderBy: { idCotizacion: 'desc' },
+    });
+
+    if (!quote) {
+      throw new BadRequestException('Debe generar una cotizacion factible para el plan antes de confirmar la contratacion');
     }
 
     if (dto.idZonaPago) {
@@ -347,7 +378,16 @@ export class ProspectsService {
       }
     }
 
-    const fechaInicio = dto.fechaInicio ? new Date(dto.fechaInicio) : new Date();
+    const proveedorContrato = dto.proveedorContrato?.trim() || undefined;
+    const numeroContratoExterno = dto.numeroContratoExterno?.trim() || undefined;
+    const folioContratoExterno = dto.folioContratoExterno?.trim() || undefined;
+    const urlContratoPdf = dto.urlContratoPdf?.trim() || undefined;
+    const observacionContrato = dto.observacionContrato?.trim() || undefined;
+
+    const fechaInicio = dto.fechaInicio ? this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date() : new Date();
+    const fechaGeneracionContrato = this.parseOptionalDate(dto.fechaGeneracionContrato, 'fechaGeneracionContrato');
+    const fechaEnvioCliente = this.parseOptionalDate(dto.fechaEnvioCliente, 'fechaEnvioCliente');
+
     const result = await this.prisma.$transaction(async (tx) => {
       let cliente = prospect.idCliente
         ? await tx.cliente.findUnique({ where: { idCliente: prospect.idCliente } })
@@ -361,9 +401,20 @@ export class ProspectsService {
             nombreCompleto: prospect.nombreCompleto ?? '',
             email: prospect.email,
             telefono: prospect.telefono,
-            estado: 'Pendiente',
+            estado: PENDING_SIGNATURE_STATUS,
             origenContacto: prospect.origenContacto,
             importadoMasivo: false,
+          },
+        });
+      } else {
+        cliente = await tx.cliente.update({
+          where: { idCliente: cliente.idCliente },
+          data: {
+            idEmpresa: cliente.idEmpresa ?? prospect.idEmpresa,
+            email: cliente.email ?? prospect.email,
+            telefono: cliente.telefono ?? prospect.telefono,
+            origenContacto: cliente.origenContacto ?? prospect.origenContacto,
+            estado: PENDING_SIGNATURE_STATUS,
           },
         });
       }
@@ -387,84 +438,75 @@ export class ProspectsService {
         });
       }
 
+      const contractData = {
+        idCliente: cliente.idCliente,
+        idPlan: dto.planId,
+        idEmpresa: prospect.idEmpresa,
+        idZonaPago: dto.idZonaPago,
+        fechaInicio,
+        diaVencimiento: dto.diaVencimiento ?? PENDING_SIGNATURE_DUE_DAY,
+        estado: PENDING_SIGNATURE_STATUS,
+        proveedorContrato,
+        numeroContratoExterno,
+        folioContratoExterno,
+        urlContratoPdf,
+        fechaGeneracionContrato,
+        fechaEnvioCliente,
+        observacionContrato,
+      };
+
       const existingContract = await tx.contrato.findFirst({
         where: {
           idCliente: cliente.idCliente,
           idPlan: dto.planId,
           idEmpresa: prospect.idEmpresa,
-          estado: { in: ['Pendiente', 'Activo'] },
+          estado: { in: [PENDING_SIGNATURE_STATUS, 'Pendiente'] },
         },
         orderBy: { idContrato: 'desc' },
       });
 
-      const contrato = existingContract ?? await tx.contrato.create({
-        data: {
-          idCliente: cliente.idCliente,
-          idPlan: dto.planId,
-          idEmpresa: prospect.idEmpresa,
-          idZonaPago: dto.idZonaPago,
-          fechaInicio,
-          diaVencimiento: dto.diaVencimiento,
-          estado: 'Pendiente',
-        },
-      });
-
-      const existingService = await tx.servicioContratado.findFirst({
-        where: {
-          idCliente: cliente.idCliente,
-          idContrato: contrato.idContrato,
-          idEmpresa: prospect.idEmpresa,
-        },
-      });
-
-      const servicio = existingService ?? await tx.servicioContratado.create({
-        data: {
-          idCliente: cliente.idCliente,
-          idEmpresa: prospect.idEmpresa,
-          idContrato: contrato.idContrato,
-          idDireccion: direccion?.idDireccion,
-          idZonaPago: dto.idZonaPago,
-          tipoServicio: this.serviceTypeFromPlan(plan.tipoPlan),
-          estadoOperativo: 'Pendiente Instalacion',
-          observaciones: `Servicio creado desde prospecto ${idProspecto}`,
-          datosTecnicos: {
-            plan: plan.nombreComercial,
-            velocidadMbps: plan.velocidadMbps,
-            comuna: dto.comuna?.trim() || undefined,
-            ciudad: dto.ciudad?.trim() || undefined,
-          },
-        },
-      });
+      const contrato = existingContract
+        ? await tx.contrato.update({
+            where: { idContrato: existingContract.idContrato },
+            data: contractData,
+          })
+        : await tx.contrato.create({ data: contractData });
 
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
           idCliente: cliente.idCliente,
-          estadoPipeline: 'Aceptado',
+          estadoPipeline: EXTERNAL_CONTRACT_PIPELINE_STATUS,
+          ...this.conversionData(EXTERNAL_CONTRACT_PIPELINE_STATUS, prospect.fechaCreacion),
         },
         include: { empresa: true },
       });
 
-      return { cliente, contrato, prospecto: updatedProspect, servicio };
+      return { cliente, contrato, prospecto: updatedProspect, direccion };
     });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_PLAN_CONTRATADO',
+      accion: 'CONFIRMAR_CONTRATACION_MANUAL',
       entidadAfectada: 'contrato',
       idEntidadAfectada: result.contrato.idContrato,
       valorNuevo: {
         idProspecto,
         idCliente: result.cliente.idCliente,
         idPlan: dto.planId,
-        idServicio: result.servicio.idServicio,
-        diaVencimiento: dto.diaVencimiento,
+        estadoContrato: PENDING_SIGNATURE_STATUS,
+        fechaConfirmacion: fechaInicio,
+        proveedorContrato,
+        numeroContratoExterno,
+        folioContratoExterno,
+        urlContratoPdf,
+        fechaGeneracionContrato,
+        fechaEnvioCliente,
       },
     });
 
     return result;
   }
-
   async installAvailability(idProspecto: number, dto: InstallAvailabilityDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     await this.validateInstallOrderPreconditions(prospect);
@@ -994,7 +1036,7 @@ export class ProspectsService {
   }
 
   private conversionData(nextStatus: string, fechaCreacion: Date | null) {
-    if (nextStatus !== 'Servicio Activo' || !fechaCreacion) {
+    if (![EXTERNAL_CONTRACT_PIPELINE_STATUS, 'Servicio Activo'].includes(nextStatus) || !fechaCreacion) {
       return {};
     }
 
@@ -1007,6 +1049,19 @@ export class ProspectsService {
     };
   }
 
+  private parseOptionalDate(value: string | undefined, fieldName: string) {
+    if (!value?.trim()) {
+      return undefined;
+    }
+
+    const parsed = parseDateOnly(value);
+
+    if (!parsed) {
+      throw new BadRequestException(`${fieldName} no es una fecha calendario valida`);
+    }
+
+    return parsed;
+  }
   private companyScope(currentUser: AuthUser, scope: string) {
     if (!isAdministrator(currentUser.roles)) {
       if (!currentUser.idEmpresa) {

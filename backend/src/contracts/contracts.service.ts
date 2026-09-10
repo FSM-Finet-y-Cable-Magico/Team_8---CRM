@@ -8,10 +8,15 @@ import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { parseDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
+import { serviceTypeFromPlan } from '../common/service-type';
 import { PrismaService } from '../prisma/prisma.service';
+import { ServicesService } from '../services/services.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
+import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
 const CONTRACT_INCLUDE = {
@@ -36,7 +41,130 @@ export class ContractsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly servicesService: ServicesService,
   ) {}
+
+  async createCustomerContract(dto: CreateCustomerContractDto, currentUser: AuthUser) {
+    const customer = await this.prisma.cliente.findUnique({
+      where: { idCliente: dto.idCliente },
+      include: { contratos: { select: { idEmpresa: true } } },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+
+    const plan = await this.prisma.plan.findUnique({ where: { idPlan: dto.idPlan } });
+
+    if (!plan || plan.activo === false) {
+      throw new BadRequestException('El plan no existe o esta inactivo');
+    }
+
+    const idEmpresa = plan.idEmpresa ?? customer.idEmpresa;
+    this.assertCompanyAccess(idEmpresa, currentUser);
+
+    if (dto.idZonaPago) {
+      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
+
+      if (!zone || zone.activo === false || (zone.idEmpresa && idEmpresa && zone.idEmpresa !== idEmpresa)) {
+        throw new BadRequestException('La zona de pago no corresponde a la empresa del contrato');
+      }
+    }
+
+    const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
+    const contract = await this.prisma.contrato.create({
+      data: {
+        idCliente: customer.idCliente,
+        idPlan: plan.idPlan,
+        idEmpresa,
+        idZonaPago: dto.idZonaPago,
+        fechaInicio,
+        diaVencimiento: 1,
+        estado: 'Pendiente firma contrato',
+        observacionContrato: dto.observacion?.trim() || null,
+      },
+      include: CONTRACT_INCLUDE,
+    });
+
+    await this.reconcileCustomerStatus(customer.idCliente);
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CREAR_CONTRATACION_CLIENTE',
+      entidadAfectada: 'contrato',
+      idEntidadAfectada: contract.idContrato,
+      valorNuevo: {
+        idCliente: customer.idCliente,
+        idPlan: plan.idPlan,
+        estadoContrato: contract.estado,
+      },
+    });
+
+    return contract;
+  }
+
+  async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
+
+    if (this.isSignedContract(contract.estado)) {
+      return contract;
+    }
+
+    if (contract.estado === 'Anulado') {
+      throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
+    }
+
+    const hasOperationalService = contract.servicios.some((service) => service.estadoOperativo !== 'Baja');
+
+    if (!hasOperationalService && !serviceTypeFromPlan(contract.plan?.tipoPlan)) {
+      throw new BadRequestException('El plan del contrato no permite determinar el servicio a instalar');
+    }
+
+    if (!hasOperationalService && !contract.cliente?.direcciones.some((address) => address.direccionCompleta?.trim())) {
+      throw new BadRequestException('El cliente necesita una dirección registrada antes de confirmar la firma');
+    }
+
+    const updated = await this.prisma.contrato.update({
+      where: { idContrato },
+      data: {
+        estado: 'Firmado',
+        fechaFirmaManual: new Date(),
+        idUsuarioFirmaManual: currentUser.idUsuario,
+        observacionFirmaManual: dto.observacion?.trim() || null,
+      },
+      include: CONTRACT_INCLUDE,
+    });
+
+    const installationService = await this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
+
+    if (updated.idCliente) {
+      await this.reconcileCustomerStatus(updated.idCliente);
+    }
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL',
+      entidadAfectada: 'contrato',
+      idEntidadAfectada: idContrato,
+      valorAnterior: { estado: contract.estado },
+      valorNuevo: {
+        estado: updated.estado,
+        fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
+        idServicio: installationService.idServicio,
+      },
+    });
+
+    return this.getContractOrThrow(idContrato, currentUser);
+  }
+
+  async prepareInstallation(idContrato: number, currentUser: AuthUser) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
+
+    if (!this.isSignedContract(contract.estado)) {
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalación');
+    }
+
+    return this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
+  }
 
   async changePlan(idContrato: number, dto: ChangePlanDto, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
@@ -44,6 +172,12 @@ export class ContractsService {
 
     if (!nextPlan || nextPlan.activo === false) {
       throw new BadRequestException('El nuevo plan no existe o esta inactivo');
+    }
+
+    const nextServiceType = serviceTypeFromPlan(nextPlan.tipoPlan);
+
+    if (!nextServiceType) {
+      throw new BadRequestException('El tipo del plan nuevo no permite determinar el servicio contratado');
     }
 
     if (contract.idEmpresa && nextPlan.idEmpresa && contract.idEmpresa !== nextPlan.idEmpresa) {
@@ -68,7 +202,7 @@ export class ContractsService {
           idPlanAnterior: contract.idPlan,
           idPlanNuevo: nextPlan.idPlan,
           fechaEfectiva: effectiveDate,
-          motivo: dto.motivo.trim(),
+          motivo: dto.motivo?.trim() || 'Cambio de plan',
           observaciones: dto.observaciones?.trim() || null,
           precioAnterior: previousPrice,
           precioNuevo: nextPrice,
@@ -87,6 +221,7 @@ export class ContractsService {
         await tx.servicioContratado.update({
           where: { idServicio: service.idServicio },
           data: {
+            tipoServicio: nextServiceType,
             datosTecnicos: this.mergeServicePlanData(service.datosTecnicos, nextPlan, nextPrice),
           },
         });
@@ -109,6 +244,7 @@ export class ContractsService {
         precioMensual: nextPrice ? Number(nextPrice) : null,
         idCambioPlan: result.history.idCambioPlan,
         fechaEfectiva: dto.fechaEfectiva,
+        tipoServicio: nextServiceType,
       },
     });
 
@@ -256,6 +392,34 @@ export class ContractsService {
     this.assertCompanyAccess(contract.idEmpresa, currentUser);
 
     return contract;
+  }
+
+  private isSignedContract(status: string | null | undefined) {
+    return ['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(status ?? '');
+  }
+
+  private async reconcileCustomerStatus(idCliente: number) {
+    const customer = await this.prisma.cliente.findUnique({
+      where: { idCliente },
+      include: {
+        contratos: { select: { estado: true } },
+        servicios: { select: { estadoOperativo: true } },
+      },
+    });
+
+    if (!customer) {
+      return;
+    }
+
+    const nextStatus = resolveCustomerLifecycleStatus({
+      currentStatus: customer.estado,
+      contractStates: customer.contratos.map((item) => item.estado),
+      serviceStates: customer.servicios.map((service) => service.estadoOperativo),
+    });
+
+    if (nextStatus !== customer.estado) {
+      await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
+    }
   }
 
   private async resolvePlanPrice(idPlan: number, idZonaPago: number | null) {

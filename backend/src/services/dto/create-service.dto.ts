@@ -13,11 +13,10 @@ export class CreateServiceDto {
   @Min(1)
   idEmpresa?: number;
 
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  idContrato?: number;
+  idContrato!: number;
 
   @IsOptional()
   @Type(() => Number)

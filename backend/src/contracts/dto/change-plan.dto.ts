@@ -10,9 +10,10 @@ export class ChangePlanDto {
   @IsDateString()
   fechaEfectiva!: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(300)
-  motivo!: string;
+  motivo?: string;
 
   @IsOptional()
   @IsString()

@@ -1,4 +1,5 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import {
@@ -126,6 +127,32 @@ export class WorkOrdersService {
       throw new BadRequestException('La orden de instalacion ya se encuentra completada');
     }
 
+    const installationService = order.idServicio
+      ? await this.prisma.servicioContratado.findUnique({
+        where: { idServicio: order.idServicio },
+        select: {
+          idServicio: true,
+          idCliente: true,
+          idEmpresa: true,
+          idContrato: true,
+          datosTecnicos: true,
+        },
+      })
+      : null;
+
+    if (order.idServicio && !installationService) {
+      throw new BadRequestException('El servicio asociado a la orden de instalacion no existe');
+    }
+
+    if (
+      installationService &&
+      (installationService.idCliente !== order.idCliente || installationService.idEmpresa !== order.idEmpresa)
+    ) {
+      throw new BadRequestException('El servicio asociado no corresponde al cliente y empresa de la orden');
+    }
+
+    const equipment = await this.resolveInstallationEquipment(dto, order, installationService);
+
     const prospect = await this.prisma.prospecto.findFirst({
       where: { idCliente: order.idCliente, idEmpresa: order.idEmpresa },
       orderBy: { fechaCreacion: 'desc' },
@@ -169,27 +196,73 @@ export class WorkOrdersService {
         data: { estado: 'Activo' },
       });
 
-      await tx.contrato.updateMany({
-        where: {
-          idCliente: cliente.idCliente,
-          idEmpresa: order.idEmpresa,
-          estado: { not: 'Activo' },
-        },
-        data: { estado: 'Activo' },
-      });
+      if (installationService?.idContrato) {
+        await tx.contrato.update({
+          where: { idContrato: installationService.idContrato },
+          data: { estado: 'Activo' },
+        });
+      } else {
+        await tx.contrato.updateMany({
+          where: {
+            idCliente: cliente.idCliente,
+            idEmpresa: order.idEmpresa,
+            estado: { not: 'Activo' },
+          },
+          data: { estado: 'Activo' },
+        });
+      }
 
-      const serviceWhere = order.idServicio
-        ? { idServicio: order.idServicio }
-        : {
+      let updatedService = null;
+
+      if (installationService) {
+        updatedService = await tx.servicioContratado.update({
+          where: { idServicio: installationService.idServicio },
+          data: {
+            estadoOperativo: 'Activo',
+            datosTecnicos: this.mergeInstallationTechnicalData(installationService.datosTecnicos, dto),
+          },
+        });
+      } else {
+        await tx.servicioContratado.updateMany({
+          where: {
             idCliente: cliente.idCliente,
             idEmpresa: order.idEmpresa,
             estadoOperativo: { not: 'Baja' },
-          };
+          },
+          data: { estadoOperativo: 'Activo' },
+        });
+      }
 
-      await tx.servicioContratado.updateMany({
-        where: serviceWhere,
-        data: { estadoOperativo: 'Activo' },
-      });
+      const updatedEquipment = equipment && installationService
+        ? await tx.unidadEquipo.update({
+          where: { idUnidad: equipment.idUnidad },
+          data: {
+            idServicio: installationService.idServicio,
+            idClienteInstalado: cliente.idCliente,
+            estado: 'Instalado',
+            modelo: dto.modelo?.trim() || equipment.modelo,
+            modalidadAsignacion: dto.modalidadAsignacion ?? equipment.modalidadAsignacion ?? 'Propiedad empresa',
+            valorArriendoMensual: dto.modalidadAsignacion && dto.modalidadAsignacion !== 'Arriendo'
+              ? null
+              : dto.valorArriendoMensual ?? equipment.valorArriendoMensual,
+            fechaInicioAsignacion: new Date(),
+            diagnosticoTecnico: this.appendInstallationEquipmentNotes(equipment.diagnosticoTecnico, dto),
+          },
+        })
+        : null;
+
+      if (updatedEquipment) {
+        await tx.historialEstadoEquipo.create({
+          data: {
+            idUnidad: updatedEquipment.idUnidad,
+            idUsuario: currentUser.idUsuario,
+            estadoAnterior: equipment?.estado,
+            estadoNuevo: 'Instalado',
+            motivo: 'Instalacion OT ' + (updatedOrder.codigoSeguimiento ?? updatedOrder.idOt),
+            fechaHora: new Date(),
+          },
+        });
+      }
 
       const updatedProspect = prospect
         ? await tx.prospecto.update({
@@ -214,7 +287,13 @@ export class WorkOrdersService {
         },
       });
 
-      return { order: updatedOrder, cliente, prospect: updatedProspect };
+      return {
+        order: updatedOrder,
+        cliente,
+        prospect: updatedProspect,
+        servicio: updatedService,
+        equipo: updatedEquipment,
+      };
     });
 
     await this.auditService.record({
@@ -232,6 +311,9 @@ export class WorkOrdersService {
         fechaConversion: prospect ? conversionDate.toISOString() : null,
         tiempoConversionDias: conversionDays,
         idServicio: order.idServicio,
+        idContrato: installationService?.idContrato ?? null,
+        idEquipo: result.equipo?.idUnidad ?? null,
+        tecnicoCierre: currentUser.idUsuario,
       },
     });
 
@@ -335,6 +417,71 @@ export class WorkOrdersService {
     }
 
     return order;
+  }
+
+  private async resolveInstallationEquipment(
+    dto: CompleteInstallOrderDto,
+    order: { idEmpresa: number | null; idServicio: number | null },
+    installationService: { idServicio: number; idCliente: number; idEmpresa: number | null } | null,
+  ) {
+    const serial = dto.numeroSerie?.trim();
+
+    if (!dto.idUnidad && !serial) {
+      return null;
+    }
+
+    if (!installationService) {
+      throw new BadRequestException('La instalación debe tener un servicio asociado para registrar equipo');
+    }
+
+    const equipment = dto.idUnidad
+      ? await this.prisma.unidadEquipo.findUnique({ where: { idUnidad: dto.idUnidad } })
+      : await this.prisma.unidadEquipo.findUnique({ where: { numeroSerie: serial ?? '' } });
+
+    if (!equipment) {
+      throw new NotFoundException('El equipo indicado no existe en inventario');
+    }
+
+    if (dto.idUnidad && serial && equipment.numeroSerie !== serial) {
+      throw new BadRequestException('El número de serie no corresponde al equipo seleccionado');
+    }
+
+    if (equipment.idEmpresa && order.idEmpresa && equipment.idEmpresa !== order.idEmpresa) {
+      throw new BadRequestException('El equipo no pertenece a la empresa de la orden');
+    }
+
+    if (['Bloqueado', 'Baja Definitiva'].includes(equipment.estado)) {
+      throw new BadRequestException('Un equipo bloqueado o dado de baja no puede instalarse');
+    }
+
+    if (equipment.idServicio && equipment.idServicio !== installationService.idServicio && equipment.estado === 'Instalado') {
+      throw new BadRequestException('El equipo ya se encuentra instalado en otro servicio');
+    }
+
+    return equipment;
+  }
+
+  private mergeInstallationTechnicalData(current: Prisma.JsonValue | null, dto: CompleteInstallOrderDto) {
+    const currentObject = current && typeof current === 'object' && !Array.isArray(current)
+      ? current as Record<string, unknown>
+      : {};
+    const values = {
+      potenciaOpticaDbm: dto.potenciaOpticaDbm ?? undefined,
+      macAddress: dto.macAddress?.trim().toUpperCase() || undefined,
+      puertoOlt: dto.puertoOlt?.trim() || undefined,
+    };
+    const next = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+
+    return { ...currentObject, ...next } as Prisma.InputJsonObject;
+  }
+
+  private appendInstallationEquipmentNotes(current: string | null, dto: CompleteInstallOrderDto) {
+    const details = [
+      dto.macAddress?.trim() ? 'MAC: ' + dto.macAddress.trim().toUpperCase() : null,
+      dto.puertoOlt?.trim() ? 'Puerto OLT: ' + dto.puertoOlt.trim() : null,
+    ].filter(Boolean).join('; ');
+
+    return details ? [current, 'Instalacion OT - ' + details].filter(Boolean).join('\n') : current;
   }
 
   private extractVisitTime(observaciones?: string | null) {

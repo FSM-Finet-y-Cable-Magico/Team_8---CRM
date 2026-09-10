@@ -102,7 +102,7 @@ export function DashboardHome({
   const stats = [
     {
       label: 'Prospectos activos',
-      value: summary?.metricas.prospectos ?? prospects.length,
+      value: summary?.metricas.prospectos ?? 0,
       description: 'Oportunidades registradas',
       icon: UserRoundPlus,
       tone: 'mint' as const,
@@ -110,7 +110,7 @@ export function DashboardHome({
     },
     {
       label: 'Clientes activos',
-      value: summary?.metricas.clientes ?? customers.length,
+      value: summary?.metricas.clientes ?? 0,
       description: 'Clientes de la vista actual',
       icon: Users,
       tone: 'teal' as const,

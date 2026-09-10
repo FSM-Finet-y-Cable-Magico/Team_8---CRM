@@ -10,14 +10,12 @@ export function ProspectsPanel({
   plans,
   writeCompanyId,
   permissions,
-  onOpenInstallation,
   onCreated,
 }: {
   prospects: Prospect[];
   plans: Plan[];
   writeCompanyId: number;
   permissions: DashboardPermissions;
-  onOpenInstallation: (idProspecto: number) => void;
   onCreated: () => void;
 }) {
   const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
@@ -174,11 +172,8 @@ export function ProspectsPanel({
               prospect={selectedProspect}
               plans={plans}
               permissions={permissions}
-              onOpenInstallation={() => {
-                setSelectedId(null);
-                onOpenInstallation(selectedProspect.idProspecto);
-              }}
               onChanged={onCreated}
+              onClose={() => setSelectedId(null)}
             />
           )}
         </Modal>

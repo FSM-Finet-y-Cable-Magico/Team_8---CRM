@@ -45,6 +45,9 @@ export type Prospect = {
   direccion: string | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
+  observacionPerdida?: string | null;
+  fechaPerdida?: string | null;
+  idUsuarioPerdida?: number | null;
   origenContacto: string | null;
   empresa?: Company | null;
 };
@@ -104,9 +107,29 @@ export type Customer = {
   datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;
   empresas?: string[];
+  direcciones?: Array<{
+    idDireccion: number;
+    direccionCompleta: string;
+    comuna: string | null;
+    ciudad: string | null;
+    esPrincipal?: boolean | null;
+  }>;
   contratos?: Array<{
     idContrato: number;
     idEmpresa: number | null;
+    idZonaPago?: number | null;
+    estado?: string | null;
+    fechaInicio?: string | null;
+    fechaFirmaManual?: string | null;
+    idUsuarioFirmaManual?: number | null;
+    observacionFirmaManual?: string | null;
+    proveedorContrato?: string | null;
+    numeroContratoExterno?: string | null;
+    folioContratoExterno?: string | null;
+    urlContratoPdf?: string | null;
+    fechaGeneracionContrato?: string | null;
+    fechaEnvioCliente?: string | null;
+    observacionContrato?: string | null;
     plan?: Plan | null;
   }>;
 };
@@ -128,6 +151,16 @@ export type CustomerService = {
   contrato?: {
     idContrato: number;
     estado: string | null;
+    fechaFirmaManual?: string | null;
+    idUsuarioFirmaManual?: number | null;
+    observacionFirmaManual?: string | null;
+    proveedorContrato?: string | null;
+    numeroContratoExterno?: string | null;
+    folioContratoExterno?: string | null;
+    urlContratoPdf?: string | null;
+    fechaGeneracionContrato?: string | null;
+    fechaEnvioCliente?: string | null;
+    observacionContrato?: string | null;
     plan?: Plan | null;
   } | null;
   direccion?: {
@@ -142,6 +175,16 @@ export type CustomerService = {
   ordenes?: WorkOrder[];
   solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
+  instalacion?: {
+    idOt: number;
+    codigoSeguimiento: string | null;
+    fechaCompletada: string | null;
+    idTecnico: number | null;
+    tecnico?: {
+      idUsuario: number;
+      nombreCompleto: string;
+    } | null;
+  } | null;
 };
 
 export type InventoryUnit = {

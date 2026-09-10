@@ -89,7 +89,7 @@ model Cliente {
   email              String?              @db.VarChar(120)
   telefono           String?              @db.VarChar(20)
   passwordPortalHash String?              @map("password_portal_hash") @db.VarChar(72)
-  estado             String               @db.VarChar(20)
+  estado             String               @db.VarChar(40)
   esConflictivo      Boolean?             @default(false) @map("es_conflictivo")
   importadoMasivo    Boolean?             @default(false) @map("importado_masivo")
   obsConflictivo     String?              @map("obs_conflictivo")
@@ -120,6 +120,9 @@ model Prospecto {
   direccion            String?      @db.VarChar(200)
   estadoPipeline       String?      @map("estado_pipeline") @db.VarChar(30)
   motivoPerdida        String?      @map("motivo_perdida") @db.VarChar(30)
+  observacionPerdida   String?      @map("observacion_perdida")
+  fechaPerdida         DateTime?    @map("fecha_perdida")
+  idUsuarioPerdida     Int?         @map("id_usuario_perdida")
   origenContacto       String?      @map("origen_contacto") @db.VarChar(40)
   tiempoConversionDias Int?         @map("tiempo_conversion_dias")
   fechaCreacion        DateTime?    @map("fecha_creacion")
@@ -173,8 +176,18 @@ model Contrato {
   idZonaPago      Int?                 @map("id_zona_pago")
   fechaInicio     DateTime             @map("fecha_inicio") @db.Date
   diaVencimiento  Int                  @map("dia_vencimiento") @db.SmallInt
-  estado          String               @db.VarChar(20)
+  estado          String               @db.VarChar(40)
   fechaSuspension DateTime?            @map("fecha_suspension") @db.Date
+  proveedorContrato     String?        @map("proveedor_contrato") @db.VarChar(40)
+  numeroContratoExterno String?        @map("numero_contrato_externo") @db.VarChar(80)
+  folioContratoExterno  String?        @map("folio_contrato_externo") @db.VarChar(80)
+  urlContratoPdf        String?        @map("url_contrato_pdf")
+  fechaGeneracionContrato DateTime?    @map("fecha_generacion_contrato") @db.Date
+  fechaEnvioCliente     DateTime?      @map("fecha_envio_cliente") @db.Date
+  observacionContrato   String?        @map("observacion_contrato")
+  fechaFirmaManual      DateTime?      @map("fecha_firma_manual") @db.Date
+  idUsuarioFirmaManual  Int?           @map("id_usuario_firma_manual")
+  observacionFirmaManual String?       @map("observacion_firma_manual")
   cliente         Cliente?             @relation(fields: [idCliente], references: [idCliente])
   plan            Plan?                @relation(fields: [idPlan], references: [idPlan])
   zonaPago        ZonaPago?            @relation(fields: [idZonaPago], references: [idZonaPago])

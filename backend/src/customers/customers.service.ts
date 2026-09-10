@@ -36,6 +36,10 @@ export class CustomersService {
           },
           orderBy: { fechaInicio: 'desc' },
         },
+        direcciones: {
+          orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }],
+          take: 1,
+        },
       },
     });
 
