@@ -5,6 +5,8 @@ import { dateInputValue, formatDateOnly, formatWorkOrderValue } from '../../lib'
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
+import { ContractDocuments } from './ContractDocuments';
+import { PlanChangeHistory } from './PlanChangeHistory';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
 
@@ -64,6 +66,8 @@ export function CustomerServiceManagementModal({
 }) {
   const { message, showMessage, clearMessage } = useTransientMessage();
   const [changePlanOpen, setChangePlanOpen] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planRevision, setPlanRevision] = useState(0);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
   const [newPlanId, setNewPlanId] = useState('');
   const [fechaEfectiva, setFechaEfectiva] = useState(dateInputValue(new Date()));
@@ -73,9 +77,10 @@ export function CustomerServiceManagementModal({
   const activePlans = useMemo(
     () => plans.filter((plan) =>
       plan.activo !== false &&
+      plan.idPlan !== contract.plan?.idPlan &&
       (!contract.idEmpresa || !plan.idEmpresa || plan.idEmpresa === contract.idEmpresa),
     ),
-    [plans, contract.idEmpresa],
+    [plans, contract.idEmpresa, contract.plan?.idPlan],
   );
   const nextPlan = activePlans.find((plan) => plan.idPlan === Number(newPlanId)) ?? null;
 
@@ -92,14 +97,16 @@ export function CustomerServiceManagementModal({
 
   async function savePlanChange(event: FormEvent) {
     event.preventDefault();
+    if (savingPlan) return;
 
     if (!newPlanId) {
       showMessage('Selecciona el nuevo plan.');
       return;
     }
 
+    setSavingPlan(true);
     try {
-      await api.post('/contracts/' + contract.idContrato + '/change-plan', {
+      const { data } = await api.post('/contracts/' + contract.idContrato + '/change-plan', {
         newPlanId: Number(newPlanId),
         fechaEfectiva,
         observaciones: planObservation.trim() || undefined,
@@ -108,9 +115,12 @@ export function CustomerServiceManagementModal({
       setNewPlanId('');
       setPlanObservation('');
       await onRefresh(service.idServicio);
-      showMessage('Cambio de plan registrado.');
+      setPlanRevision(x => x + 1);
+      showMessage(data.cambioPlan?.estadoCambio === 'Pendiente' ? 'Cambio programado. El plan vigente se conserva hasta la fecha efectiva.' : 'Cambio de plan aplicado.');
     } catch (error) {
       showMessage(apiErrorMessage(error));
+    } finally {
+      setSavingPlan(false);
     }
   }
 
@@ -158,7 +168,7 @@ export function CustomerServiceManagementModal({
         </section>
 
         <div className="customer-service-actions">
-          {permissions.changeCustomerPlan && (
+          {permissions.changeCustomerPlan && service.estadoOperativo !== 'Baja' && (
             <button type="button" className="secondary compact" onClick={() => setChangePlanOpen((current) => !current)}>
               <Pencil size={15} /> Modificar plan
             </button>
@@ -200,7 +210,7 @@ export function CustomerServiceManagementModal({
             </label>
             <label>
               Fecha efectiva
-              <input type="date" required value={fechaEfectiva} onChange={(event) => setFechaEfectiva(event.target.value)} />
+              <input type="date" required min={dateInputValue(new Date())} value={fechaEfectiva} onChange={(event) => setFechaEfectiva(event.target.value)} />
             </label>
             {nextPlan && (
               <p className="customer-inline-summary">
@@ -213,7 +223,7 @@ export function CustomerServiceManagementModal({
             </label>
             <div className="button-row">
               <button type="button" className="secondary" onClick={() => setChangePlanOpen(false)}>Cancelar</button>
-              <button type="submit">Guardar cambio</button>
+              <button type="submit" disabled={savingPlan}>{savingPlan ? 'Guardando…' : 'Guardar cambio'}</button>
             </div>
           </form>
         )}
@@ -231,6 +241,8 @@ export function CustomerServiceManagementModal({
           </form>
         )}
 
+        {permissions.changeCustomerPlan && <PlanChangeHistory idContrato={contract.idContrato} revision={planRevision} />}
+        {permissions.manageContracts && <ContractDocuments idContrato={contract.idContrato} canGenerate={permissions.generateDigitalContract} />}
         <section className="customer-service-history">
           <header>
             <Wrench size={18} />

@@ -32,6 +32,7 @@ import { DashboardPermissions } from '../../permissions';
 import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
 import { ObservationsModal } from '../observations';
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
+import { CustomerRequestsPanel } from './CustomerRequestsPanel';
 
 type CustomerHistory = {
   contratos: Array<{ idContrato: number; estado: string | null; plan?: Plan | null }>;
@@ -900,6 +901,7 @@ export function CustomersPanel({
             </section>
 
             <CustomerContractWorkflow
+              key={selectedCustomer.idCliente}
               customer={selectedCustomer}
               services={services}
               plans={plans}
@@ -910,6 +912,8 @@ export function CustomersPanel({
               }}
               onOpenObservations={setObservationTarget}
             />
+            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} onChanged={onChanged} />}
+            {permissions.manageObservations && <button type="button" className="secondary compact" onClick={() => setObservationTarget({ tipoEntidad: 'Cliente', idEntidad: selectedCustomer.idCliente, label: selectedCustomer.nombreCompleto })}>Observaciones del cliente</button>}
           </div>
         ) : (
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>

@@ -421,7 +421,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
           )}
           {activeTab === 'users' && permissions.viewUsers && (
-            <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
+            <UsersPanel users={users} roles={roles} companies={companies} onUpdated={() => void loadData()} />
           )}
           {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
         </section>

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -16,6 +16,18 @@ import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-st
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractsController {
   constructor(private readonly contractsService: ContractsService) {}
+
+  @Get(':id/plan-changes')
+  @Roles(...ACCESS_ROLES.CHANGE_CUSTOMER_PLAN)
+  planChanges(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.contractsService.planChanges(id, user);
+  }
+
+  @Patch(':id/plan-changes/:changeId/cancel')
+  @Roles(...ACCESS_ROLES.CHANGE_CUSTOMER_PLAN)
+  cancelChange(@Param('id', ParseIntPipe) id: number, @Param('changeId', ParseIntPipe) changeId: number, @CurrentUser() user: AuthUser) {
+    return this.contractsService.cancelPlanChange(id, changeId, user);
+  }
 
   @Post()
   @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
@@ -70,8 +82,9 @@ export class ContractsController {
     @Param('id', ParseIntPipe) idContrato: number,
     @CurrentUser() user: AuthUser,
     @Res({ passthrough: true }) response: Response,
+    @Query('version') version?: string,
   ) {
-    return this.contractsService.downloadDigitalContract(idContrato, user, response);
+    return this.contractsService.downloadDigitalContract(idContrato, user, response, version === undefined ? undefined : Number(version));
   }
 
   @Patch(':id/digital-contract/sign-status')

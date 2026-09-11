@@ -2,8 +2,6 @@ import { FormEvent, useState } from 'react';
 import { api, apiErrorMessage, type AuthUser } from '../../api';
 import { normalizeAuthUser } from '../../lib';
 
-const portalUrl = import.meta.env.VITE_PORTAL_URL?.trim() || 'http://localhost:5174';
-
 export function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,10 +24,6 @@ export function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) 
     } finally {
       setLoading(false);
     }
-  }
-
-  function openCustomerPortal() {
-    window.location.href = portalUrl;
   }
 
   return (
@@ -66,9 +60,6 @@ export function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) 
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </form>
-          <button type="button" className="secondary portal-entry-button" onClick={openCustomerPortal}>
-            Ingresar al portal cliente
-          </button>
         </section>
       </section>
     </main>

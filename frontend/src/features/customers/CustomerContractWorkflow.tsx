@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, CircleCheckBig, Plus } from 'lucide-react';
-import { api, apiErrorMessage, Customer, CustomerService, InstallAvailability, Plan } from '../../api';
+import { api, apiErrorMessage, Customer, CustomerService, InstallAvailability, PaymentZone, Plan } from '../../api';
 import { addYearsToInputDate, dateInputValue, formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { CustomerServiceManagementModal } from './CustomerServiceManagementModal';
+import { ContractDocuments } from './ContractDocuments';
 import './customer-contract-workflow.css';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
@@ -94,6 +95,9 @@ export function CustomerContractWorkflow({
   const [contracts, setContracts] = useState<CustomerContract[]>(customer.contratos ?? []);
   const [addPlanOpen, setAddPlanOpen] = useState(false);
   const [newPlanId, setNewPlanId] = useState('');
+  const [zones, setZones] = useState<PaymentZone[]>([]);
+  const [newZoneId, setNewZoneId] = useState('');
+  const [creatingContract, setCreatingContract] = useState(false);
   const [newContractObservation, setNewContractObservation] = useState('');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
@@ -108,6 +112,12 @@ export function CustomerContractWorkflow({
   const { message, showMessage, clearMessage } = useTransientMessage();
 
   useEffect(() => setContracts(customer.contratos ?? []), [customer.contratos]);
+  useEffect(() => {
+    if (!addPlanOpen) return;
+    let active = true;
+    api.get<PaymentZone[]>('/billing/zones').then(({ data }) => { if (active) setZones(data); }).catch(e => { if (active) showMessage(apiErrorMessage(e)); });
+    return () => { active = false; };
+  }, [addPlanOpen, showMessage]);
 
   const selectedContract = contracts.find((contract) => contract.idContrato === selectedContractId) ?? null;
   const contractServices = selectedContract ? services.filter((service) => service.idContrato === selectedContract.idContrato) : [];
@@ -173,25 +183,31 @@ export function CustomerContractWorkflow({
 
   async function addPlan(event: FormEvent) {
     event.preventDefault();
+    if (creatingContract) return;
     if (!newPlanId) {
       showMessage('Selecciona el plan para la nueva contratación.');
       return;
     }
+    setCreatingContract(true);
     try {
       const { data } = await api.post<CustomerContract>('/contracts', {
         idCliente: customer.idCliente,
         idPlan: Number(newPlanId),
+        idZonaPago: newZoneId ? Number(newZoneId) : undefined,
         observacion: newContractObservation.trim() || undefined,
       });
       setContracts((current) => [data, ...current]);
       setAddPlanOpen(false);
       setNewPlanId('');
+      setNewZoneId('');
       setNewContractObservation('');
       await onRefresh();
       openContract(data);
       showMessage('Contratación creada.');
     } catch (error) {
       showMessage(apiErrorMessage(error));
+    } finally {
+      setCreatingContract(false);
     }
   }
 
@@ -308,9 +324,12 @@ export function CustomerContractWorkflow({
 
       <Modal title="Añadir plan" open={addPlanOpen} onClose={() => setAddPlanOpen(false)}>
         <form className="workflow-panel" onSubmit={addPlan}>
-          <label>Nuevo plan<select required value={newPlanId} onChange={(event) => setNewPlanId(event.target.value)}><option value="">Seleccionar plan</option>{activePlans.map((plan) => <option key={plan.idPlan} value={plan.idPlan}>{plan.nombreComercial} - {plan.empresa?.nombre ?? 'Sin empresa'}</option>)}</select></label>
+          <label>Nuevo plan<select required value={newPlanId} onChange={(event) => { setNewPlanId(event.target.value); setNewZoneId(''); }}><option value="">Seleccionar plan</option>{activePlans.map((plan) => <option key={plan.idPlan} value={plan.idPlan}>{plan.nombreComercial} - {plan.empresa?.nombre ?? 'Sin empresa'}</option>)}</select></label>
+          <label>Zona de pago<select value={newZoneId} disabled={!newPlanId} onChange={e => setNewZoneId(e.target.value)}><option value="">Sin zona (precio base, vence el día 1)</option>{zones.filter(z => z.activo !== false && (!z.idEmpresa || z.idEmpresa === activePlans.find(p => p.idPlan === Number(newPlanId))?.idEmpresa)).map(z => <option key={z.idZonaPago} value={z.idZonaPago}>{z.nombreZona} · vence el día {z.diaVencimientoSugerido ?? 1}</option>)}</select></label>
+          <p>Se utilizará el precio configurado para el plan y la zona. Si no existe una regla activa, se utiliza el precio base del plan.</p>
+          {message && <p role="status" className="inline-status">{message}</p>}
           <label>Observaciones<textarea value={newContractObservation} onChange={(event) => setNewContractObservation(event.target.value)} /></label>
-          <div className="button-row"><button type="button" className="secondary" onClick={() => setAddPlanOpen(false)}>Cancelar</button><button type="submit">Crear contratación</button></div>
+          <div className="button-row"><button type="button" className="secondary" disabled={creatingContract} onClick={() => setAddPlanOpen(false)}>Cancelar</button><button type="submit" disabled={creatingContract}>{creatingContract ? 'Guardando…' : 'Crear contratación'}</button></div>
         </form>
       </Modal>
 
@@ -338,6 +357,7 @@ export function CustomerContractWorkflow({
               <label className="customer-inline-form-wide">Observaciones<textarea value={signatureObservation} onChange={(event) => setSignatureObservation(event.target.value)} /></label>
               <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit">Confirmar firma de contrato</button></div>
             </form> : <button type="button" onClick={() => setSignatureOpen(true)}>Confirmar firma de contrato</button>)}
+            {permissions.manageContracts && <ContractDocuments idContrato={selectedContract.idContrato} canGenerate={permissions.generateDigitalContract} />}
           </section>}
 
           {stage === 2 && <section className="workflow-panel customer-contract-stage">

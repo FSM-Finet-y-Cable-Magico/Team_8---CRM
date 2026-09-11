@@ -58,11 +58,10 @@ Servicios esperados:
 | Servicio | URL / puerto |
 | --- | --- |
 | CRM interno | `http://localhost:5173` |
-| Portal Cliente | `http://localhost:5174` |
 | Backend API | `http://localhost:3000/api` |
 | PostgreSQL | `localhost:5432` o el valor definido en `POSTGRES_PORT` |
 
-El CRM interno es para empleados de FiNet/Cable Magico. El Portal Cliente es una app separada para clientes finales y se abre desde el login del CRM mediante `VITE_PORTAL_URL`.
+El CRM interno es para empleados de FiNet/Cable Magico. El portal de clientes pertenece al Grupo 2 y no se ejecuta desde este repositorio. Los datos históricos de sus antiguas tablas se conservan para una eventual migración, sin rutas ni autenticación de portal en el CRM.
 
 El contenedor de PostgreSQL carga automaticamente los scripts iniciales:
 

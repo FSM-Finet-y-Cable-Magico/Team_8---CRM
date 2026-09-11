@@ -1,5 +1,5 @@
--- Datos locales para probar Portal Cliente, TV IP y monitoreo tecnico basico.
--- Acceso demo portal: RUT 18765432-7 / clave portal123.
+-- Datos históricos de demostración para TV IP y monitoreo técnico.
+-- Los nombres originales se conservan por idempotencia; no se crean credenciales de portal.
 
 DO $$
 DECLARE
@@ -41,20 +41,18 @@ BEGIN
     RETURNING id_plan INTO v_plan;
   END IF;
 
-  INSERT INTO cliente (id_empresa, rut, nombre_completo, email, telefono, password_portal_hash, estado, origen_contacto, datos_tecnicos)
+  INSERT INTO cliente (id_empresa, rut, nombre_completo, email, telefono, estado, origen_contacto, datos_tecnicos)
   VALUES (
     v_empresa,
     '18765432-7',
     'Cliente Portal Demo',
     'portal.demo@finet.local',
     '+56987654321',
-    '$2a$10$T5w8RMOF8Nwc7rXBuurmbexzZ3zdV9xXvTG36VG51DBFcNjICKdx6',
     'Activo',
     'Portal demo',
     '{"direccion":"Av. Portal Demo 123"}'::jsonb
   )
   ON CONFLICT (rut) DO UPDATE SET
-    password_portal_hash = EXCLUDED.password_portal_hash,
     estado = 'Activo'
   RETURNING id_cliente INTO v_cliente;
 

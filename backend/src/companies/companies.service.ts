@@ -223,6 +223,8 @@ export class CompaniesService {
         planAnterior: change.planAnterior?.nombreComercial ?? null,
         planNuevo: change.planNuevo.nombreComercial,
         fechaRegistro: change.fechaRegistro,
+        fechaEfectiva: change.fechaEfectiva,
+        estadoCambio: change.estadoCambio,
       })),
       origenCaptacion: origenCaptacion.map((row) => ({
         origen: row.origenContacto ?? 'Sin origen',

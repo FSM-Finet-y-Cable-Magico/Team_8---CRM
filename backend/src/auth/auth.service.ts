@@ -52,6 +52,7 @@ export class AuthService {
     }
 
     const payload: AuthUser = {
+      versionSesion: user.versionSesion,
       idUsuario: user.idUsuario,
       idEmpresa: user.idEmpresa ?? null,
       email: user.email ?? null,

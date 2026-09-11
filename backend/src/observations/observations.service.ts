@@ -29,8 +29,11 @@ export class ObservationsService {
 
   async create(dto: CreateObservationDto, currentUser: AuthUser) {
     const context = await this.resolveEntityContext(dto.tipoEntidad, dto.idEntidad, currentUser);
-    const idEmpresa = dto.idEmpresa ?? context.idEmpresa ?? currentUser.idEmpresa ?? null;
-    const idCliente = dto.idCliente ?? context.idCliente ?? null;
+    if (!dto.observacion.trim()) throw new BadRequestException('Escribe una observación');
+    if (dto.idCliente !== undefined && dto.idCliente !== context.idCliente) throw new BadRequestException('La observación no corresponde al cliente');
+    if (dto.idEmpresa !== undefined && dto.idEmpresa !== context.idEmpresa) throw new BadRequestException('La observación no corresponde a la empresa');
+    const idEmpresa = context.idEmpresa;
+    const idCliente = context.idCliente;
 
     this.assertCompanyAccess(idEmpresa, currentUser);
 
@@ -84,7 +87,7 @@ export class ObservationsService {
           throw new BadRequestException('El cliente no pertenece a tu empresa');
         }
 
-        return { idCliente: cliente.idCliente, idEmpresa: cliente.idEmpresa ?? cliente.contratos[0]?.idEmpresa ?? null };
+        return { idCliente: cliente.idCliente, idEmpresa: isAdministrator(currentUser.roles) ? cliente.idEmpresa ?? cliente.contratos[0]?.idEmpresa ?? null : currentUser.idEmpresa };
       }
       case 'Servicio': {
         const servicio = await this.prisma.servicioContratado.findUnique({ where: { idServicio: idEntidad } });

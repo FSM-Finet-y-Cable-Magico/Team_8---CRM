@@ -27,6 +27,7 @@ export type Role = {
 };
 
 export type UserRow = {
+  idEmpresa: number | null;
   idUsuario: number;
   nombreCompleto: string;
   email: string | null;
@@ -457,15 +458,6 @@ export type MonitoringStatus = {
   }>;
 };
 
-export type PortalCustomer = {
-  idCliente: number;
-  rut: string | null;
-  nombreCompleto: string;
-  email: string | null;
-  telefono: string | null;
-  estado: string;
-  idEmpresa: number | null;
-};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;

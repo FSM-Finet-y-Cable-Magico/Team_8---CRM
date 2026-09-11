@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { SaveUserDto, ResetPasswordDto } from './dto/save-user.dto';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -18,6 +19,15 @@ export class UsersController {
   list() {
     return this.usersService.list();
   }
+
+  @Post()
+  create(@Body() dto: SaveUserDto, @CurrentUser() user: AuthUser) { return this.usersService.save(null, dto, user); }
+
+  @Patch(':id')
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveUserDto, @CurrentUser() user: AuthUser) { return this.usersService.save(id, dto, user); }
+
+  @Patch(':id/password')
+  password(@Param('id', ParseIntPipe) id: number, @Body() dto: ResetPasswordDto, @CurrentUser() user: AuthUser) { return this.usersService.resetPassword(id, dto.password, user); }
 
   @Get('roles')
   roles() {

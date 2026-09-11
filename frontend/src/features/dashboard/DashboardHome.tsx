@@ -53,6 +53,8 @@ type Summary = {
   metricas: {
     clientes: number;
     prospectos: number;
+    solicitudesAbiertas?: number;
+    solicitudesNoFactibles?: number;
     instalacionesPendientes?: number;
     ticketsAbiertos?: number;
     clientesMorosos?: number;
@@ -270,6 +272,7 @@ export function DashboardHome({
       </section>
 
       <section className="dashboard-command-center">
+        {permissions.manageCustomerRequests && <article className="dashboard-activity-panel"><div className="dashboard-panel-heading"><h2>Seguimiento de solicitudes</h2></div><p><strong>{summary?.metricas.solicitudesAbiertas ?? 0}</strong> abiertas o en gestión</p><p><strong>{summary?.metricas.solicitudesNoFactibles ?? 0}</strong> cerradas como no factibles</p><p>Totales de la empresa seleccionada. Las solicitudes se gestionan desde la ficha del cliente.</p><button className="secondary compact" onClick={() => onNavigate('customers')}>Ver clientes</button></article>}
         <article className="dashboard-activity-panel">
           <div className="dashboard-panel-heading">
             <h2>Origen de captación</h2>

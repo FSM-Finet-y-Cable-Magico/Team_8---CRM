@@ -112,18 +112,6 @@ export class TicketsService {
     });
   }
 
-  async createForPortal(
-    idCliente: number,
-    dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
-  ) {
-    return this.createForCustomer(idCliente, dto, {
-      idUsuario: null,
-      idUsuarioAsignado: null,
-      accion: 'CREAR_TICKET_PORTAL',
-      origen: 'Portal',
-    });
-  }
-
   async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
 

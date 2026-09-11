@@ -30,6 +30,7 @@ model Usuario {
   nombreUsuario      String?        @unique @map("nombre_usuario") @db.VarChar(50)
   email              String?        @unique @db.VarChar(120)
   passwordHash       String         @map("password_hash") @db.VarChar(72)
+  versionSesion      Int            @default(0) @map("version_sesion")
   activo             Boolean?       @default(true)
   fechaCreacion      DateTime?      @default(now()) @map("fecha_creacion")
   esPasswordTemporal Boolean?       @default(true) @map("es_password_temporal")
@@ -88,7 +89,6 @@ model Cliente {
   nombreCompleto     String               @map("nombre_completo") @db.VarChar(120)
   email              String?              @db.VarChar(120)
   telefono           String?              @db.VarChar(20)
-  passwordPortalHash String?              @map("password_portal_hash") @db.VarChar(72)
   estado             String               @db.VarChar(40)
   esConflictivo      Boolean?             @default(false) @map("es_conflictivo")
   importadoMasivo    Boolean?             @default(false) @map("importado_masivo")
@@ -493,6 +493,8 @@ model HistorialCambioPlan {
   precioNuevo        Decimal?  @map("precio_nuevo") @db.Decimal(10, 2)
   idUsuarioRegistro  Int?      @map("id_usuario_registro")
   fechaRegistro      DateTime? @default(now()) @map("fecha_registro")
+  estadoCambio       String   @default("Aplicado") @map("estado_cambio") @db.VarChar(20)
+  fechaAplicacion    DateTime? @map("fecha_aplicacion")
 
   contrato      Contrato @relation(fields: [idContrato], references: [idContrato])
   cliente       Cliente? @relation(fields: [idCliente], references: [idCliente])
@@ -621,16 +623,6 @@ model UsoMaterialOt {
   cantidad     Decimal @db.Decimal(10, 2)
 
   @@map("uso_material_ot")
-}
-model SesionPortal {
-  idSesion        BigInt    @id @default(autoincrement()) @map("id_sesion")
-  idCliente       Int?      @map("id_cliente")
-  token           String    @db.VarChar(255)
-  fechaInicio     DateTime? @map("fecha_inicio")
-  fechaExpiracion DateTime? @map("fecha_expiracion")
-  ipOrigen        String?   @map("ip_origen") @db.Inet
-
-  @@map("sesion_portal")
 }
 
 model IntentoFallido {

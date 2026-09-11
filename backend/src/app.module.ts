@@ -11,7 +11,6 @@ import { InventoryModule } from './inventory/inventory.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { ObservationsModule } from './observations/observations.module';
 import { PlansModule } from './plans/plans.module';
-import { PortalModule } from './portal/portal.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProspectsModule } from './prospects/prospects.module';
 import { ReportsModule } from './reports/reports.module';
@@ -33,7 +32,6 @@ import { AppController } from './app.controller';
     AuditModule,
     AuthModule,
     BillingModule,
-    PortalModule,
     TvipModule,
     MonitoringModule,
     UsersModule,
