@@ -131,6 +131,7 @@ model Prospecto {
   usuarioComercial     Usuario?     @relation(fields: [idUsuarioComercial], references: [idUsuario])
   cliente              Cliente?     @relation(fields: [idCliente], references: [idCliente])
   cotizaciones         Cotizacion[]
+  contratos            Contrato[]
 
   @@map("prospecto")
 }
@@ -171,6 +172,7 @@ model Cotizacion {
 model Contrato {
   idContrato      Int                  @id @default(autoincrement()) @map("id_contrato")
   idCliente       Int?                 @map("id_cliente")
+  idProspecto     Int?                 @map("id_prospecto")
   idPlan          Int?                 @map("id_plan")
   idEmpresa       Int?                 @map("id_empresa")
   idZonaPago      Int?                 @map("id_zona_pago")
@@ -188,8 +190,14 @@ model Contrato {
   fechaFirmaManual      DateTime?      @map("fecha_firma_manual") @db.Date
   idUsuarioFirmaManual  Int?           @map("id_usuario_firma_manual")
   observacionFirmaManual String?       @map("observacion_firma_manual")
-  cliente         Cliente?             @relation(fields: [idCliente], references: [idCliente])
+  direccionInstalacion   String?       @map("direccion_instalacion") @db.VarChar(200)
+  comunaInstalacion      String?       @map("comuna_instalacion") @db.VarChar(80)
+  ciudadInstalacion      String?       @map("ciudad_instalacion") @db.VarChar(80)
   plan            Plan?                @relation(fields: [idPlan], references: [idPlan])
+  cliente         Cliente?             @relation(fields: [idCliente], references: [idCliente])
+  prospecto       Prospecto?           @relation(fields: [idProspecto], references: [idProspecto])
+
+
   zonaPago        ZonaPago?            @relation(fields: [idZonaPago], references: [idZonaPago])
   facturas        Factura[]
   servicios       ServicioContratado[]

@@ -112,6 +112,7 @@ type Summary = {
   metricas: {
     clientes: number;
     prospectos: number;
+    pendientesActivacion?: number;
     instalacionesPendientes?: number;
     ticketsAbiertos?: number;
     clientesMorosos?: number;

@@ -12,6 +12,7 @@ import {
   OperationalObservation,
   PaymentZone,
   Plan,
+  Prospect,
   TvipCredentialSummary,
   TvipGenerationResult,
 } from '../../api';
@@ -107,6 +108,19 @@ function customerAddressLabel(customer: Customer) {
     ?? 'No registrada';
 }
 
+function pendingActivationContract(prospect: Prospect) {
+  return prospect.contratos?.[0] ?? null;
+}
+
+function pendingActivationAddress(prospect: Prospect) {
+  const contract = pendingActivationContract(prospect);
+  const address = [contract?.direccionInstalacion, contract?.comunaInstalacion, contract?.ciudadInstalacion]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(', ');
+
+  return address || prospect.direccion || 'No registrada';
+}
+
 export function CustomersPanel({
   customers,
   plans,
@@ -182,6 +196,10 @@ export function CustomersPanel({
   const [installOrderError, setInstallOrderError] = useState('');
   const [page, setPage] = useState(1);
   const [customerStatusFilter, setCustomerStatusFilter] = useState('');
+  const [pendingActivations, setPendingActivations] = useState<Prospect[]>([]);
+  const [pendingActivationsError, setPendingActivationsError] = useState('');
+  const [pendingActivationsLoading, setPendingActivationsLoading] = useState(true);
+  const [selectedPendingActivation, setSelectedPendingActivation] = useState<Prospect | null>(null);
 
   const normalizedSearchTerm = normalizeWorkOrderValue(searchTerm);
   const customerList = customers.filter((customer) => {
@@ -296,6 +314,33 @@ export function CustomersPanel({
     setSearchTerm('');
     void loadPaymentZones(true);
   }, [scope]);
+  useEffect(() => {
+    let active = true;
+    setPendingActivationsLoading(true);
+    setPendingActivationsError('');
+
+    api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
+      .then(({ data }) => {
+        if (active) {
+          setPendingActivations(data);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setPendingActivations([]);
+          setPendingActivationsError(apiErrorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setPendingActivationsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [scope, customers]);
 
   useEffect(() => { setPage(1); }, [customers.length, searchTerm, customerStatusFilter]);
 
@@ -796,7 +841,63 @@ export function CustomersPanel({
     <section className="customers-module">
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
-          <h2>Clientes</h2>
+          <h2>Pendientes de activación</h2>
+        </div>
+        <div className="customer-list-filters">
+          <span>Pendientes de activación: {pendingActivations.length}</span>
+        </div>
+        {pendingActivationsError && <p className="inline-status">No fue posible cargar pendientes de activación: {pendingActivationsError}</p>}
+        {pendingActivationsLoading ? (
+          <p className="inline-status">Cargando pendientes de activación...</p>
+        ) : pendingActivations.length ? (
+          <div className="table-wrap customers-table-wrap">
+            <table className="customers-table">
+              <thead>
+                <tr>
+                  <th>RUT</th>
+                  <th>Nombre</th>
+                  <th>Empresa</th>
+                  <th>Plan</th>
+                  <th>Contrato</th>
+                  <th>Fecha de firma</th>
+                  <th>Dirección prevista</th>
+                  <th>Comuna</th>
+                  <th>Ciudad</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingActivations.map((prospect) => {
+                  const contract = pendingActivationContract(prospect);
+
+                  return (
+                    <tr key={prospect.idProspecto}>
+                      <td>{prospect.rut ?? '-'}</td>
+                      <td>{prospect.nombreCompleto ?? '-'}</td>
+                      <td>{prospect.empresa?.nombre ?? '-'}</td>
+                      <td>{contract?.plan?.nombreComercial ?? '-'}</td>
+                      <td>#{contract?.idContrato ?? '-'}</td>
+                      <td>{formatDateOnly(contract?.fechaFirmaManual)}</td>
+                      <td>{pendingActivationAddress(prospect)}</td>
+                      <td>{contract?.comunaInstalacion ?? '-'}</td>
+                      <td>{contract?.ciudadInstalacion ?? '-'}</td>
+                      <td><StatusBadge value="Pendiente de activación" /></td>
+                      <td><button className="secondary compact" onClick={() => setSelectedPendingActivation(prospect)}>Ver detalle</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty-state">No hay contrataciones pendientes de activación.</p>
+        )}
+      </section>
+
+      <section className="customers-list-panel">
+        <div className="section-heading customers-list-heading">
+          <h2>Clientes activos</h2>
         </div>
         <div className="customer-search">
           <label>
@@ -809,7 +910,7 @@ export function CustomersPanel({
           </label>
         </div>
         <div className="customer-list-filters">
-          <span>{visibleCustomers.length} registros</span>
+          <span>Clientes activos: {visibleCustomers.length}</span>
           <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
             {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
@@ -918,6 +1019,39 @@ export function CustomersPanel({
         ) : (
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
         )}
+      </Modal>
+      <Modal title="Pendiente de activación" open={Boolean(selectedPendingActivation)} onClose={() => setSelectedPendingActivation(null)}>
+        {selectedPendingActivation && (() => {
+          const contract = pendingActivationContract(selectedPendingActivation);
+
+          return (
+            <section className="customer-profile-overview">
+              <header className="customer-profile-header">
+                <span className="customer-profile-avatar" aria-hidden="true">
+                  <Users size={22} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <h3>{selectedPendingActivation.nombreCompleto ?? 'Sin nombre registrado'}</h3>
+                  <p>{selectedPendingActivation.rut ?? 'RUT no registrado'}</p>
+                </div>
+                <StatusBadge value="Pendiente de activación" />
+              </header>
+              <dl className="customer-profile-data">
+                <div><dt>Empresa</dt><dd>{selectedPendingActivation.empresa?.nombre ?? 'No registrada'}</dd></div>
+                <div><dt>Contacto</dt><dd>{selectedPendingActivation.telefono ?? selectedPendingActivation.email ?? 'No registrado'}</dd></div>
+                <div><dt>Plan contratado</dt><dd>{contract?.plan?.nombreComercial ?? 'No registrado'}</dd></div>
+                <div><dt>Contrato</dt><dd>#{contract?.idContrato ?? '-'}</dd></div>
+                <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
+                <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
+                <div><dt>Dirección de instalación</dt><dd>{pendingActivationAddress(selectedPendingActivation)}</dd></div>
+                <div><dt>Comuna</dt><dd>{contract?.comunaInstalacion ?? 'No registrada'}</dd></div>
+                <div><dt>Ciudad</dt><dd>{contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
+                <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
+              </dl>
+              <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>
+            </section>
+          );
+        })()}
       </Modal>
       <ObservationsModal
         target={observationTarget}

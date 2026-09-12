@@ -21,6 +21,7 @@ import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-st
 
 const CONTRACT_INCLUDE = {
   cliente: { include: { empresa: true, direcciones: true } },
+  prospecto: { include: { empresa: true } },
   plan: true,
   zonaPago: true,
   servicios: {
@@ -115,28 +116,35 @@ export class ContractsService {
       throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
     }
 
-    const hasOperationalService = contract.servicios.some((service) => service.estadoOperativo !== 'Baja');
+    const installationAddress = contract.direccionInstalacion?.trim()
+      || contract.prospecto?.direccion?.trim()
+      || contract.cliente?.direcciones.find((address) => address.direccionCompleta?.trim())?.direccionCompleta;
 
-    if (!hasOperationalService && !serviceTypeFromPlan(contract.plan?.tipoPlan)) {
-      throw new BadRequestException('El plan del contrato no permite determinar el servicio a instalar');
+    if (!installationAddress) {
+      throw new BadRequestException('El contrato necesita una direccion de instalacion registrada antes de confirmar la firma');
     }
 
-    if (!hasOperationalService && !contract.cliente?.direcciones.some((address) => address.direccionCompleta?.trim())) {
-      throw new BadRequestException('El cliente necesita una dirección registrada antes de confirmar la firma');
-    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const signedContract = await tx.contrato.update({
+        where: { idContrato },
+        data: {
+          estado: 'Firmado',
+          fechaFirmaManual: new Date(),
+          idUsuarioFirmaManual: currentUser.idUsuario,
+          observacionFirmaManual: dto.observacion?.trim() || null,
+        },
+        include: CONTRACT_INCLUDE,
+      });
 
-    const updated = await this.prisma.contrato.update({
-      where: { idContrato },
-      data: {
-        estado: 'Firmado',
-        fechaFirmaManual: new Date(),
-        idUsuarioFirmaManual: currentUser.idUsuario,
-        observacionFirmaManual: dto.observacion?.trim() || null,
-      },
-      include: CONTRACT_INCLUDE,
+      if (signedContract.idProspecto && !signedContract.idCliente) {
+        await tx.prospecto.update({
+          where: { idProspecto: signedContract.idProspecto },
+          data: { estadoPipeline: 'Pendiente activacion' },
+        });
+      }
+
+      return signedContract;
     });
-
-    const installationService = await this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
 
     if (updated.idCliente) {
       await this.reconcileCustomerStatus(updated.idCliente);
@@ -151,18 +159,22 @@ export class ContractsService {
       valorNuevo: {
         estado: updated.estado,
         fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
-        idServicio: installationService.idServicio,
+        idProspecto: updated.idProspecto,
+        estadoActivacion: updated.idCliente ? null : 'Pendiente Instalacion',
       },
     });
 
     return this.getContractOrThrow(idContrato, currentUser);
   }
-
   async prepareInstallation(idContrato: number, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
 
     if (!this.isSignedContract(contract.estado)) {
-      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalación');
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalacion');
+    }
+
+    if (!contract.idCliente) {
+      throw new BadRequestException('La instalacion de este contrato se solicitara mediante la futura integracion G3');
     }
 
     return this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
@@ -476,7 +488,7 @@ export class ContractsService {
       include: CONTRACT_INCLUDE,
     });
 
-    if (!contract || !contract.cliente) {
+    if (!contract || (!contract.cliente && !contract.prospecto)) {
       throw new NotFoundException('Contrato no encontrado');
     }
 

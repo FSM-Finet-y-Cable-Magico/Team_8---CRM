@@ -53,6 +53,7 @@ type Summary = {
   metricas: {
     clientes: number;
     prospectos: number;
+    pendientesActivacion?: number;
     solicitudesAbiertas?: number;
     solicitudesNoFactibles?: number;
     instalacionesPendientes?: number;
@@ -109,6 +110,14 @@ export function DashboardHome({
       icon: UserRoundPlus,
       tone: 'mint' as const,
       tab: 'prospects' as Tab,
+    },
+    {
+      label: 'Pendientes de activacion',
+      value: summary?.metricas.pendientesActivacion ?? 0,
+      description: 'Contratos firmados sin servicio activo',
+      icon: CalendarPlus,
+      tone: 'blue' as const,
+      tab: 'customers' as Tab,
     },
     {
       label: 'Clientes activos',

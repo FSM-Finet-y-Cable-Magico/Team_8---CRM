@@ -1,6 +1,6 @@
-﻿import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
-import { activeCustomerWhere, activeProspectWhere } from '../common/customer-lifecycle';
+import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +20,7 @@ export class CompaniesService {
     const customerFilter = this.buildCustomerCompanyFilter(effectiveScope);
     const companyFilter = this.buildCompanyFilter(effectiveScope);
     const activeProspectFilter = activeProspectWhere(companyFilter);
+    const pendingActivationFilter = pendingActivationWhere(companyFilter);
     const activeCustomerFilter = activeCustomerWhere(customerFilter);
     const companiesFilter = 'idEmpresa' in companyFilter ? companyFilter : {};
     const today = todayDateOnly();
@@ -32,6 +33,7 @@ export class CompaniesService {
 
     const [
       prospectos,
+      pendientesActivacion,
       empresas,
       instalacionesPendientes,
       ticketsAbiertos,
@@ -50,6 +52,7 @@ export class CompaniesService {
       origenCaptacion,
     ] = await Promise.all([
       this.prisma.prospecto.count({ where: activeProspectFilter }),
+      this.prisma.prospecto.count({ where: pendingActivationFilter }),
       this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } }),
       this.prisma.ordenTrabajo.count({
         where: {
@@ -204,6 +207,7 @@ export class CompaniesService {
       metricas: {
         clientes: clientesActivos,
         prospectos,
+        pendientesActivacion,
         instalacionesPendientes,
         ticketsAbiertos,
         clientesMorosos,

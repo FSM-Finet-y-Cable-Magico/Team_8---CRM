@@ -27,6 +27,12 @@ export class ProspectsController {
     return this.prospectsService.list(user, scope ?? 'consolidado');
   }
 
+  @Get('pending-activation')
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
+  listPendingActivation(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
+    return this.prospectsService.listPendingActivation(user, scope ?? 'consolidado');
+  }
+
   @Post()
   @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   create(@Body() dto: CreateProspectDto, @CurrentUser() user: AuthUser) {
