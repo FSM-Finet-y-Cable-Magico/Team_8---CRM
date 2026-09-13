@@ -19,7 +19,6 @@ export const ACCESS_ROLES = {
   VIEW_BILLING: ['Administrador', 'Comercial', 'Soporte'],
   MANAGE_BILLING: ['Administrador', 'Comercial'],
   MANAGE_PAYMENT_ZONES: ['Administrador', 'Comercial'],
-  VIEW_PORTAL_ADMIN: ['Administrador', 'Soporte'],
   MANAGE_TVIP: ['Administrador', 'Comercial', 'Soporte'],
   VIEW_MONITORING: ['Administrador', 'Soporte', 'Terreno'],
   REGISTER_TECHNICAL_NOTES: ['Administrador', 'Soporte', 'Terreno'],

@@ -46,6 +46,13 @@ export class RequestsService {
 
   async create(dto: CreateCustomerRequestDto, currentUser: AuthUser) {
     const resolved = await this.resolveContext(dto, currentUser);
+    if (!dto.tipoSolicitud.trim() || !dto.descripcion?.trim()) {
+      throw new BadRequestException('Indica el tipo y la descripción de la solicitud');
+    }
+    const estado = dto.factible === false ? 'No Factible' : dto.estado ?? 'Abierta';
+    if (estado === 'No Factible' && !dto.motivoNoFactible?.trim()) {
+      throw new BadRequestException('Indica el motivo de no factibilidad');
+    }
     const created = await this.prisma.solicitudCliente.create({
       data: {
         idCliente: resolved.idCliente,
@@ -54,14 +61,14 @@ export class RequestsService {
         idEmpresa: resolved.idEmpresa,
         tipoSolicitud: dto.tipoSolicitud.trim(),
         canalOrigen: dto.canalOrigen?.trim() || 'CRM',
-        estado: dto.estado ?? (dto.factible === false ? 'No Factible' : 'Abierta'),
-        factible: dto.factible,
+        estado,
+        factible: estado === 'No Factible' ? false : dto.factible,
         motivoNoFactible: dto.motivoNoFactible?.trim() || null,
         descripcion: dto.descripcion?.trim() || null,
         observaciones: dto.observaciones?.trim() || null,
         idUsuarioRegistro: currentUser.idUsuario,
         fechaCreacion: new Date(),
-        fechaCierre: dto.estado && CLOSED_REQUEST_STATES.includes(dto.estado) ? new Date() : null,
+        fechaCierre: CLOSED_REQUEST_STATES.includes(estado) ? new Date() : null,
       },
       include: REQUEST_INCLUDE,
     });
@@ -86,8 +93,15 @@ export class RequestsService {
 
   async updateStatus(idSolicitud: number, dto: UpdateRequestStatusDto, currentUser: AuthUser) {
     const request = await this.getRequestOrThrow(idSolicitud, currentUser);
+    if (request.estado === dto.estado && (dto.observaciones === undefined || (dto.observaciones.trim() || null) === request.observaciones)) return request;
+    if (CLOSED_REQUEST_STATES.includes(request.estado)) {
+      throw new BadRequestException('La solicitud está cerrada; registra una nueva solicitud para continuar');
+    }
+    if (dto.estado === 'No Factible' && !request.motivoNoFactible?.trim()) {
+      throw new BadRequestException('Registra primero el motivo de no factibilidad');
+    }
     const updated = await this.prisma.solicitudCliente.update({
-      where: { idSolicitud },
+      where: { idSolicitud, estado: request.estado },
       data: {
         estado: dto.estado,
         observaciones: dto.observaciones === undefined ? request.observaciones : dto.observaciones.trim() || null,
@@ -110,9 +124,11 @@ export class RequestsService {
 
   async updateFeasibility(idSolicitud: number, dto: UpdateRequestFeasibilityDto, currentUser: AuthUser) {
     const request = await this.getRequestOrThrow(idSolicitud, currentUser);
+    if (CLOSED_REQUEST_STATES.includes(request.estado)) throw new BadRequestException('La solicitud está cerrada');
+    if (!dto.factible && !dto.motivoNoFactible?.trim()) throw new BadRequestException('Indica el motivo de no factibilidad');
     const nextState = dto.factible ? request.estado : 'No Factible';
     const updated = await this.prisma.solicitudCliente.update({
-      where: { idSolicitud },
+      where: { idSolicitud, estado: request.estado },
       data: {
         factible: dto.factible,
         motivoNoFactible: dto.factible ? null : dto.motivoNoFactible?.trim() || 'No especificado',
@@ -147,6 +163,9 @@ export class RequestsService {
     let idEmpresa = isAdministrator(currentUser.roles) ? dto.idEmpresa : currentUser.idEmpresa ?? undefined;
     let idCliente = dto.idCliente;
     let idServicio = dto.idServicio;
+    if (!dto.idCliente && !dto.idServicio && !dto.idProspecto) {
+      throw new BadRequestException('Vincula la solicitud a un cliente, servicio o prospecto');
+    }
 
     if (dto.idServicio) {
       const service = await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } });
@@ -156,13 +175,18 @@ export class RequestsService {
       }
 
       this.assertCompanyAccess(service.idEmpresa, currentUser);
-      idEmpresa = idEmpresa ?? service.idEmpresa ?? undefined;
+      if (dto.idCliente && dto.idCliente !== service.idCliente) throw new BadRequestException('El servicio no pertenece al cliente');
+      if (dto.idEmpresa && dto.idEmpresa !== service.idEmpresa) throw new BadRequestException('El servicio pertenece a otra empresa');
+      idEmpresa = service.idEmpresa ?? undefined;
       idCliente = idCliente ?? service.idCliente;
       idServicio = service.idServicio;
     }
 
     if (dto.idCliente) {
       const customer = await this.getCustomerOrThrow(dto.idCliente, currentUser);
+      if (idEmpresa && customer.idEmpresa !== idEmpresa && !customer.contratos.some(c => c.idEmpresa === idEmpresa)) {
+        throw new BadRequestException('El cliente no pertenece a la empresa de la solicitud');
+      }
       idEmpresa = idEmpresa ?? customer.idEmpresa ?? undefined;
     }
 
@@ -174,6 +198,8 @@ export class RequestsService {
       }
 
       this.assertCompanyAccess(prospect.idEmpresa, currentUser);
+      if (idEmpresa && idEmpresa !== prospect.idEmpresa) throw new BadRequestException('El prospecto pertenece a otra empresa');
+      if (idCliente && idCliente !== prospect.idCliente) throw new BadRequestException('El prospecto no corresponde al cliente');
       idEmpresa = idEmpresa ?? prospect.idEmpresa ?? undefined;
       idCliente = idCliente ?? prospect.idCliente ?? undefined;
     }

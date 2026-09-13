@@ -84,16 +84,6 @@ export class TvipService {
       });
   }
 
-  async regenerateForPortal(idCliente: number, idContrato: number) {
-    const contract = await this.getEligibleContract(idContrato);
-
-    if (contract.idCliente !== idCliente) {
-      throw new BadRequestException('El contrato no pertenece al cliente autenticado');
-    }
-
-    return this.upsertCredential(contract, null, 'REGENERAR_CREDENCIALES_TVIP_PORTAL');
-  }
-
   private async getEligibleContract(idContrato: number) {
     const contract = await this.prisma.contrato.findUnique({
       where: { idContrato },

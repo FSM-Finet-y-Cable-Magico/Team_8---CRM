@@ -4,9 +4,9 @@ import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
 
-const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
-const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
-const FINAL_PROSPECT_STATUSES = ['Perdido', 'Contrato externo registrado'];
+const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
+const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
+const FINAL_PROSPECT_STATUSES = ['Perdido'];
 const LOSS_REASONS = ['Precio', 'Sin cobertura', 'Competencia', 'Falta de respuesta', 'Otro'];
 
 export function ProspectWorkflowPanel({
@@ -55,6 +55,8 @@ export function ProspectWorkflowPanel({
   const isNoFactible = currentStatus === 'No Factible';
   const isQuoted = QUOTED_STATUSES.includes(currentStatus);
   const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
+  const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
+  const isWorkflowLocked = isFinal || Boolean(pendingContract);
   const planOptions = plans.filter((plan) => plan.activo !== false);
 
   function planOptionLabel(plan: Plan) {
@@ -194,7 +196,7 @@ export function ProspectWorkflowPanel({
               Resultado
               <select
                 value={feasibilityResult}
-                disabled={isFinal}
+                disabled={isWorkflowLocked}
                 onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}
               >
                 <option value="Factible">Factible</option>
@@ -203,7 +205,7 @@ export function ProspectWorkflowPanel({
             </label>
             <button
               type="button"
-              disabled={isFinal}
+              disabled={isWorkflowLocked}
               onClick={() =>
                 void runAction(
                   () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
@@ -230,7 +232,7 @@ export function ProspectWorkflowPanel({
             </header>
             <label>
               Plan a cotizar
-              <select value={quotePlanId} disabled={!isFactible || isFinal} onChange={(event) => setQuotePlanId(event.target.value)}>
+              <select value={quotePlanId} disabled={!isFactible || isWorkflowLocked} onChange={(event) => setQuotePlanId(event.target.value)}>
                 <option value="">Seleccionar plan</option>
                 {planOptions.map((plan) => (
                   <option key={plan.idPlan} value={plan.idPlan}>
@@ -239,7 +241,7 @@ export function ProspectWorkflowPanel({
                 ))}
               </select>
             </label>
-            <button type="button" disabled={!quotePlanId || !isFactible || isFinal} onClick={() => void generateQuote()}>
+            <button type="button" disabled={!quotePlanId || !isFactible || isWorkflowLocked} onClick={() => void generateQuote()}>
               Generar cotización
             </button>
           </section>
@@ -259,7 +261,7 @@ export function ProspectWorkflowPanel({
             <div className="prospect-contract-fields">
               <label>
                 Plan aceptado
-                <select value={contractPlanId} disabled={!isQuoted || isFinal} onChange={(event) => setContractPlanId(event.target.value)}>
+                <select value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>
                   <option value="">Seleccionar plan</option>
                   {planOptions.map((plan) => (
                     <option key={plan.idPlan} value={plan.idPlan}>
@@ -273,7 +275,7 @@ export function ProspectWorkflowPanel({
                 <input
                   type="date"
                   value={contractConfirmationDate}
-                  disabled={!isQuoted || isFinal}
+                  disabled={!isQuoted || isWorkflowLocked}
                   onChange={(event) => setContractConfirmationDate(event.target.value)}
                 />
               </label>
@@ -281,7 +283,7 @@ export function ProspectWorkflowPanel({
                 Observación
                 <textarea
                   value={contractObservation}
-                  disabled={!isQuoted || isFinal}
+                  disabled={!isQuoted || isWorkflowLocked}
                   onChange={(event) => setContractObservation(event.target.value)}
                 />
               </label>
@@ -297,6 +299,12 @@ export function ProspectWorkflowPanel({
         )}
       </div>
 
+        {pendingContract && permissions.manageContracts && (
+          <section className="prospect-action-card prospect-action-card-contract">
+            <header className="prospect-action-header"><div><h4>Confirmar firma de contrato</h4><p>Al confirmar, la persona pasa a Pendiente de activacion. No se crea cliente ni servicio todavia.</p></div></header>
+            <button type="button" onClick={() => void runAction(() => api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}), 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Confirmar firma</button>
+          </section>
+        )}
       {permissions.recordProspectLoss && !isFinal && (
         <div className="button-row">
           <button type="button" className="prospect-loss-trigger" onClick={() => setLossOpen(true)}>

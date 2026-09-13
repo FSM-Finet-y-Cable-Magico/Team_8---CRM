@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
-import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS } from '../common/customer-lifecycle';
+import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, pendingActivationWhere } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -28,6 +28,7 @@ const NOT_FEASIBLE_PIPELINE_STATUS = 'No Factible';
 const QUOTE_SENT_PIPELINE_STATUS = 'Cotizacion Enviada';
 const EXTERNAL_CONTRACT_PIPELINE_STATUS = 'Contrato externo registrado';
 const PENDING_SIGNATURE_STATUS = 'Pendiente firma contrato';
+const PENDING_SIGNATURE_PIPELINE_STATUS = 'Pendiente firma';
 const LOST_PIPELINE_STATUS = LOST_PROSPECT_PIPELINE_STATUS;
 const PENDING_SIGNATURE_DUE_DAY = 1;
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
@@ -40,6 +41,7 @@ const PIPELINE_STATUSES = [
   NOT_FEASIBLE_PIPELINE_STATUS,
   QUOTE_SENT_PIPELINE_STATUS,
   EXTERNAL_CONTRACT_PIPELINE_STATUS,
+  PENDING_SIGNATURE_PIPELINE_STATUS,
   'Aceptado',
   'Instalacion Programada',
   'Servicio Activo',
@@ -68,10 +70,37 @@ export class ProspectsService {
             email: true,
           },
         },
+        contratos: {
+          select: {
+            idContrato: true,
+            estado: true,
+            fechaFirmaManual: true,
+            idPlan: true,
+          },
+          orderBy: { idContrato: 'desc' },
+        },
       },
     });
   }
 
+  async listPendingActivation(currentUser: AuthUser, scope = 'consolidado') {
+    const companyScope = this.companyScope(currentUser, scope);
+
+    return this.prisma.prospecto.findMany({
+      where: pendingActivationWhere(companyScope),
+      orderBy: { fechaCreacion: 'desc' },
+      take: 100,
+      include: {
+        empresa: true,
+        contratos: {
+          where: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } },
+          include: { plan: true },
+          orderBy: { fechaFirmaManual: 'desc' },
+          take: 1,
+        },
+      },
+    });
+  }
   async create(dto: CreateProspectDto, currentUser: AuthUser) {
     const rutResult = validateRut(dto.rut);
 
@@ -341,7 +370,11 @@ export class ProspectsService {
     }
 
     if (!prospect.rut || !prospect.nombreCompleto || !prospect.telefono) {
-      throw new BadRequestException('El prospecto no tiene datos suficientes para crear cliente');
+      throw new BadRequestException('El prospecto no tiene datos suficientes para registrar el contrato');
+    }
+
+    if (prospect.idCliente) {
+      throw new BadRequestException('El prospecto ya pertenece al flujo historico de clientes');
     }
 
     if (prospect.estadoPipeline === NOT_FEASIBLE_PIPELINE_STATUS) {
@@ -378,88 +411,36 @@ export class ProspectsService {
       }
     }
 
-    const proveedorContrato = dto.proveedorContrato?.trim() || undefined;
-    const numeroContratoExterno = dto.numeroContratoExterno?.trim() || undefined;
-    const folioContratoExterno = dto.folioContratoExterno?.trim() || undefined;
-    const urlContratoPdf = dto.urlContratoPdf?.trim() || undefined;
-    const observacionContrato = dto.observacionContrato?.trim() || undefined;
-
     const fechaInicio = dto.fechaInicio ? this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date() : new Date();
     const fechaGeneracionContrato = this.parseOptionalDate(dto.fechaGeneracionContrato, 'fechaGeneracionContrato');
     const fechaEnvioCliente = this.parseOptionalDate(dto.fechaEnvioCliente, 'fechaEnvioCliente');
+    const direccionInstalacion = prospect.direccion?.trim() || undefined;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      let cliente = prospect.idCliente
-        ? await tx.cliente.findUnique({ where: { idCliente: prospect.idCliente } })
-        : await tx.cliente.findUnique({ where: { rut: prospect.rut ?? undefined } });
-
-      if (!cliente) {
-        cliente = await tx.cliente.create({
-          data: {
-            idEmpresa: prospect.idEmpresa,
-            rut: prospect.rut,
-            nombreCompleto: prospect.nombreCompleto ?? '',
-            email: prospect.email,
-            telefono: prospect.telefono,
-            estado: PENDING_SIGNATURE_STATUS,
-            origenContacto: prospect.origenContacto,
-            importadoMasivo: false,
-          },
-        });
-      } else {
-        cliente = await tx.cliente.update({
-          where: { idCliente: cliente.idCliente },
-          data: {
-            idEmpresa: cliente.idEmpresa ?? prospect.idEmpresa,
-            email: cliente.email ?? prospect.email,
-            telefono: cliente.telefono ?? prospect.telefono,
-            origenContacto: cliente.origenContacto ?? prospect.origenContacto,
-            estado: PENDING_SIGNATURE_STATUS,
-          },
-        });
-      }
-
-      let direccion = await tx.direccionServicio.findFirst({
-        where: {
-          idCliente: cliente.idCliente,
-          direccionCompleta: prospect.direccion ?? '',
-        },
-      });
-
-      if (!direccion && prospect.direccion?.trim()) {
-        direccion = await tx.direccionServicio.create({
-          data: {
-            idCliente: cliente.idCliente,
-            direccionCompleta: prospect.direccion,
-            comuna: dto.comuna?.trim() || 'Por confirmar',
-            ciudad: dto.ciudad?.trim() || 'Por confirmar',
-            esPrincipal: true,
-          },
-        });
-      }
-
       const contractData = {
-        idCliente: cliente.idCliente,
+        idCliente: null,
+        idProspecto,
         idPlan: dto.planId,
         idEmpresa: prospect.idEmpresa,
         idZonaPago: dto.idZonaPago,
         fechaInicio,
         diaVencimiento: dto.diaVencimiento ?? PENDING_SIGNATURE_DUE_DAY,
         estado: PENDING_SIGNATURE_STATUS,
-        proveedorContrato,
-        numeroContratoExterno,
-        folioContratoExterno,
-        urlContratoPdf,
+        proveedorContrato: dto.proveedorContrato?.trim() || undefined,
+        numeroContratoExterno: dto.numeroContratoExterno?.trim() || undefined,
+        folioContratoExterno: dto.folioContratoExterno?.trim() || undefined,
+        urlContratoPdf: dto.urlContratoPdf?.trim() || undefined,
         fechaGeneracionContrato,
         fechaEnvioCliente,
-        observacionContrato,
+        observacionContrato: dto.observacionContrato?.trim() || undefined,
+        direccionInstalacion,
+        comunaInstalacion: dto.comuna?.trim() || undefined,
+        ciudadInstalacion: dto.ciudad?.trim() || undefined,
       };
 
       const existingContract = await tx.contrato.findFirst({
         where: {
-          idCliente: cliente.idCliente,
-          idPlan: dto.planId,
-          idEmpresa: prospect.idEmpresa,
+          idProspecto,
           estado: { in: [PENDING_SIGNATURE_STATUS, 'Pendiente'] },
         },
         orderBy: { idContrato: 'desc' },
@@ -475,33 +456,26 @@ export class ProspectsService {
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
-          idCliente: cliente.idCliente,
-          estadoPipeline: EXTERNAL_CONTRACT_PIPELINE_STATUS,
-          ...this.conversionData(EXTERNAL_CONTRACT_PIPELINE_STATUS, prospect.fechaCreacion),
+          estadoPipeline: PENDING_SIGNATURE_PIPELINE_STATUS,
         },
         include: { empresa: true },
       });
 
-      return { cliente, contrato, prospecto: updatedProspect, direccion };
+      return { contrato, prospecto: updatedProspect, direccionInstalacion };
     });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'CONFIRMAR_CONTRATACION_MANUAL',
+      accion: 'GENERAR_CONTRATO_PROSPECTO',
       entidadAfectada: 'contrato',
       idEntidadAfectada: result.contrato.idContrato,
       valorNuevo: {
         idProspecto,
-        idCliente: result.cliente.idCliente,
         idPlan: dto.planId,
         estadoContrato: PENDING_SIGNATURE_STATUS,
+        estadoProspecto: PENDING_SIGNATURE_PIPELINE_STATUS,
         fechaConfirmacion: fechaInicio,
-        proveedorContrato,
-        numeroContratoExterno,
-        folioContratoExterno,
-        urlContratoPdf,
-        fechaGeneracionContrato,
-        fechaEnvioCliente,
+        direccionInstalacion,
       },
     });
 

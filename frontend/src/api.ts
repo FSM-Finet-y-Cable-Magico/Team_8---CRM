@@ -27,6 +27,7 @@ export type Role = {
 };
 
 export type UserRow = {
+  idEmpresa: number | null;
   idUsuario: number;
   nombreCompleto: string;
   email: string | null;
@@ -50,6 +51,16 @@ export type Prospect = {
   idUsuarioPerdida?: number | null;
   origenContacto: string | null;
   empresa?: Company | null;
+  contratos?: Array<{
+    idContrato: number;
+    estado: string | null;
+    fechaFirmaManual?: string | null;
+    idPlan?: number | null;
+    plan?: Plan | null;
+    direccionInstalacion?: string | null;
+    comunaInstalacion?: string | null;
+    ciudadInstalacion?: string | null;
+  }>;
 };
 
 export type InstallTechnician = {
@@ -457,15 +468,6 @@ export type MonitoringStatus = {
   }>;
 };
 
-export type PortalCustomer = {
-  idCliente: number;
-  rut: string | null;
-  nombreCompleto: string;
-  email: string | null;
-  telefono: string | null;
-  estado: string;
-  idEmpresa: number | null;
-};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;

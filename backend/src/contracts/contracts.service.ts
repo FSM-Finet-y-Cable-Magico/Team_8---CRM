@@ -9,7 +9,7 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
-import { parseDateOnly } from '../common/date-rules';
+import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { serviceTypeFromPlan } from '../common/service-type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,7 @@ import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-st
 
 const CONTRACT_INCLUDE = {
   cliente: { include: { empresa: true, direcciones: true } },
+  prospecto: { include: { empresa: true } },
   plan: true,
   zonaPago: true,
   servicios: {
@@ -63,12 +64,14 @@ export class ContractsService {
     const idEmpresa = plan.idEmpresa ?? customer.idEmpresa;
     this.assertCompanyAccess(idEmpresa, currentUser);
 
+    let diaVencimiento = 1;
     if (dto.idZonaPago) {
       const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
 
       if (!zone || zone.activo === false || (zone.idEmpresa && idEmpresa && zone.idEmpresa !== idEmpresa)) {
         throw new BadRequestException('La zona de pago no corresponde a la empresa del contrato');
       }
+      diaVencimiento = zone.diaVencimientoSugerido ?? 1;
     }
 
     const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
@@ -79,7 +82,7 @@ export class ContractsService {
         idEmpresa,
         idZonaPago: dto.idZonaPago,
         fechaInicio,
-        diaVencimiento: 1,
+        diaVencimiento,
         estado: 'Pendiente firma contrato',
         observacionContrato: dto.observacion?.trim() || null,
       },
@@ -109,32 +112,39 @@ export class ContractsService {
       return contract;
     }
 
-    if (contract.estado === 'Anulado') {
+    if (['Anulado', 'Baja'].includes(contract.estado)) {
       throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
     }
 
-    const hasOperationalService = contract.servicios.some((service) => service.estadoOperativo !== 'Baja');
+    const installationAddress = contract.direccionInstalacion?.trim()
+      || contract.prospecto?.direccion?.trim()
+      || contract.cliente?.direcciones.find((address) => address.direccionCompleta?.trim())?.direccionCompleta;
 
-    if (!hasOperationalService && !serviceTypeFromPlan(contract.plan?.tipoPlan)) {
-      throw new BadRequestException('El plan del contrato no permite determinar el servicio a instalar');
+    if (!installationAddress) {
+      throw new BadRequestException('El contrato necesita una direccion de instalacion registrada antes de confirmar la firma');
     }
 
-    if (!hasOperationalService && !contract.cliente?.direcciones.some((address) => address.direccionCompleta?.trim())) {
-      throw new BadRequestException('El cliente necesita una dirección registrada antes de confirmar la firma');
-    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const signedContract = await tx.contrato.update({
+        where: { idContrato },
+        data: {
+          estado: 'Firmado',
+          fechaFirmaManual: new Date(),
+          idUsuarioFirmaManual: currentUser.idUsuario,
+          observacionFirmaManual: dto.observacion?.trim() || null,
+        },
+        include: CONTRACT_INCLUDE,
+      });
 
-    const updated = await this.prisma.contrato.update({
-      where: { idContrato },
-      data: {
-        estado: 'Firmado',
-        fechaFirmaManual: new Date(),
-        idUsuarioFirmaManual: currentUser.idUsuario,
-        observacionFirmaManual: dto.observacion?.trim() || null,
-      },
-      include: CONTRACT_INCLUDE,
+      if (signedContract.idProspecto && !signedContract.idCliente) {
+        await tx.prospecto.update({
+          where: { idProspecto: signedContract.idProspecto },
+          data: { estadoPipeline: 'Pendiente activacion' },
+        });
+      }
+
+      return signedContract;
     });
-
-    const installationService = await this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
 
     if (updated.idCliente) {
       await this.reconcileCustomerStatus(updated.idCliente);
@@ -149,18 +159,22 @@ export class ContractsService {
       valorNuevo: {
         estado: updated.estado,
         fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
-        idServicio: installationService.idServicio,
+        idProspecto: updated.idProspecto,
+        estadoActivacion: updated.idCliente ? null : 'Pendiente Instalacion',
       },
     });
 
     return this.getContractOrThrow(idContrato, currentUser);
   }
-
   async prepareInstallation(idContrato: number, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
 
     if (!this.isSignedContract(contract.estado)) {
-      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalación');
+      throw new BadRequestException('Debes confirmar la firma del contrato antes de preparar la instalacion');
+    }
+
+    if (!contract.idCliente) {
+      throw new BadRequestException('La instalacion de este contrato se solicitara mediante la futura integracion G3');
     }
 
     return this.servicesService.ensureInstallationServiceForContract(idContrato, currentUser);
@@ -169,6 +183,13 @@ export class ContractsService {
   async changePlan(idContrato: number, dto: ChangePlanDto, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
     const nextPlan = await this.prisma.plan.findUnique({ where: { idPlan: dto.newPlanId } });
+
+    if (!this.isSignedContract(contract.estado)) {
+      throw new BadRequestException('Solo puedes cambiar el plan de un contrato firmado y vigente');
+    }
+    if (contract.idPlan === dto.newPlanId) {
+      throw new BadRequestException('Selecciona un plan diferente al actual');
+    }
 
     if (!nextPlan || nextPlan.activo === false) {
       throw new BadRequestException('El nuevo plan no existe o esta inactivo');
@@ -186,14 +207,22 @@ export class ContractsService {
 
     const effectiveDate = parseDateOnly(dto.fechaEfectiva);
 
-    if (!effectiveDate) {
-      throw new BadRequestException('La fecha efectiva no es valida');
+    if (!effectiveDate || dto.fechaEfectiva < todayDateOnly()) {
+      throw new BadRequestException('La fecha efectiva debe ser hoy o una fecha futura');
     }
 
-    const previousPrice = contract.plan?.precioMensual ?? null;
+    const scheduled = dto.fechaEfectiva > todayDateOnly();
+    const previousPrice = await this.resolvePlanPrice(contract.idPlan ?? 0, contract.idZonaPago);
     const nextPrice = await this.resolvePlanPrice(nextPlan.idPlan, contract.idZonaPago);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      const current = await tx.contrato.findUnique({ where: { idContrato } });
+      if (!current || current.idPlan !== contract.idPlan || !this.isSignedContract(current.estado)) {
+        throw new BadRequestException('El contrato cambió; actualiza la pantalla antes de continuar');
+      }
+      const pending = await tx.historialCambioPlan.findFirst({ where: { idContrato, estadoCambio: 'Pendiente' } });
+      if (pending) throw new BadRequestException('Ya existe un cambio pendiente; cancélalo antes de programar otro');
       const history = await tx.historialCambioPlan.create({
         data: {
           idContrato,
@@ -208,8 +237,15 @@ export class ContractsService {
           precioNuevo: nextPrice,
           idUsuarioRegistro: currentUser.idUsuario,
           fechaRegistro: new Date(),
+          estadoCambio: scheduled ? 'Pendiente' : 'Aplicado',
+          fechaAplicacion: scheduled ? null : new Date(),
         },
       });
+
+      if (scheduled) {
+        await this.auditPlanChange(tx, history.idCambioPlan, idContrato, 'PROGRAMAR_CAMBIO_PLAN', currentUser.idUsuario);
+        return { history, updatedContract: contract };
+      }
 
       const updatedContract = await tx.contrato.update({
         where: { idContrato },
@@ -218,6 +254,7 @@ export class ContractsService {
       });
 
       for (const service of contract.servicios) {
+        if (service.estadoOperativo === 'Baja') continue;
         await tx.servicioContratado.update({
           where: { idServicio: service.idServicio },
           data: {
@@ -227,12 +264,13 @@ export class ContractsService {
         });
       }
 
+      await this.auditPlanChange(tx, history.idCambioPlan, idContrato, 'CAMBIAR_PLAN_CONTRATADO', currentUser.idUsuario);
       return { history, updatedContract };
     });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'CAMBIAR_PLAN_CONTRATADO',
+      accion: scheduled ? 'DETALLE_PROGRAMACION_PLAN' : 'DETALLE_CAMBIO_PLAN',
       entidadAfectada: 'contrato',
       idEntidadAfectada: idContrato,
       valorAnterior: {
@@ -248,7 +286,68 @@ export class ContractsService {
       },
     });
 
-    return result.updatedContract;
+    return { ...result.updatedContract, cambioPlan: result.history };
+  }
+
+  async planChanges(idContrato: number, user: AuthUser) {
+    await this.getContractOrThrow(idContrato, user);
+    return this.prisma.historialCambioPlan.findMany({
+      where: { idContrato }, include: { planAnterior: true, planNuevo: true },
+      orderBy: { idCambioPlan: 'desc' },
+    });
+  }
+
+  async cancelPlanChange(idContrato: number, idCambioPlan: number, user: AuthUser) {
+    await this.getContractOrThrow(idContrato, user);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      const result = await tx.historialCambioPlan.updateMany({
+        where: { idCambioPlan, idContrato, estadoCambio: 'Pendiente' }, data: { estadoCambio: 'Cancelado' },
+      });
+      if (!result.count) throw new BadRequestException('El cambio ya no está pendiente');
+      await this.auditPlanChange(tx, idCambioPlan, idContrato, 'CANCELAR_CAMBIO_PLAN', user.idUsuario);
+      return { estadoCambio: 'Cancelado' };
+    });
+  }
+
+  async applyDuePlanChanges(reference = new Date()) {
+    const today = parseDateOnly(todayDateOnly(reference))!;
+    const pending = await this.prisma.historialCambioPlan.findMany({
+      where: { estadoCambio: 'Pendiente', fechaEfectiva: { lte: today } },
+      orderBy: [{ fechaEfectiva: 'asc' }, { idCambioPlan: 'asc' }], take: 100,
+    });
+    for (const item of pending) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${item.idContrato} FOR UPDATE`;
+        const change = await tx.historialCambioPlan.findUnique({ where: { idCambioPlan: item.idCambioPlan } });
+        if (!change || change.estadoCambio !== 'Pendiente') return;
+        const contract = await tx.contrato.findUnique({ where: { idContrato: item.idContrato }, include: { servicios: true } });
+        const plan = await tx.plan.findUnique({ where: { idPlan: change.idPlanNuevo } });
+        const type = plan && serviceTypeFromPlan(plan.tipoPlan);
+        const invalid = !contract || !this.isSignedContract(contract.estado) || contract.idPlan !== change.idPlanAnterior
+          || !plan || plan.activo === false || !type
+          || (contract.idEmpresa && plan.idEmpresa && contract.idEmpresa !== plan.idEmpresa);
+        if (invalid || !contract || !plan || !type) {
+          await tx.historialCambioPlan.update({ where: { idCambioPlan: item.idCambioPlan }, data: { estadoCambio: 'Cancelado' } });
+          await this.auditPlanChange(tx, item.idCambioPlan, item.idContrato, 'CANCELAR_CAMBIO_PLAN_NO_VIGENTE', null);
+          return;
+        }
+        await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { idPlan: plan.idPlan } });
+        for (const service of contract.servicios.filter(s => s.estadoOperativo !== 'Baja')) {
+          await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: {
+            tipoServicio: type, datosTecnicos: this.mergeServicePlanData(service.datosTecnicos, plan, change.precioNuevo),
+          } });
+        }
+        await tx.historialCambioPlan.update({ where: { idCambioPlan: item.idCambioPlan }, data: { estadoCambio: 'Aplicado', fechaAplicacion: reference } });
+        await this.auditPlanChange(tx, item.idCambioPlan, item.idContrato, 'APLICAR_CAMBIO_PLAN_PROGRAMADO', null);
+      });
+    }
+  }
+
+  private auditPlanChange(tx: Prisma.TransactionClient, id: number, idContrato: number, accion: string, idUsuario: number | null) {
+    return tx.logAuditoria.create({ data: { idUsuario, accion, entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
+      valorNuevo: { idCambioPlan: id, idContrato },
+    } });
   }
 
   async getDigitalContracts(idContrato: number, currentUser: AuthUser) {
@@ -266,7 +365,9 @@ export class ContractsService {
 
   async generateDigitalContract(idContrato: number, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
-    const latest = await this.prisma.contratoDigital.findFirst({
+    return this.prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+    const latest = await tx.contratoDigital.findFirst({
       where: { idContrato },
       orderBy: { version: 'desc' },
     });
@@ -279,7 +380,7 @@ export class ContractsService {
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, buffer);
 
-    const created = await this.prisma.contratoDigital.create({
+    const created = await tx.contratoDigital.create({
       data: {
         idContrato,
         idCliente: contract.idCliente,
@@ -308,12 +409,14 @@ export class ContractsService {
     });
 
     return created;
+    }, { timeout: 20000 });
   }
 
-  async downloadDigitalContract(idContrato: number, currentUser: AuthUser, response: Response) {
+  async downloadDigitalContract(idContrato: number, currentUser: AuthUser, response: Response, version?: number) {
+    if (version !== undefined && (!Number.isInteger(version) || version < 1)) throw new BadRequestException('Versión inválida');
     await this.getContractOrThrow(idContrato, currentUser);
     const latest = await this.prisma.contratoDigital.findFirst({
-      where: { idContrato },
+      where: { idContrato, ...(version === undefined ? {} : { version }) },
       orderBy: { version: 'desc' },
     });
 
@@ -385,7 +488,7 @@ export class ContractsService {
       include: CONTRACT_INCLUDE,
     });
 
-    if (!contract || !contract.cliente) {
+    if (!contract || (!contract.cliente && !contract.prospecto)) {
       throw new NotFoundException('Contrato no encontrado');
     }
 

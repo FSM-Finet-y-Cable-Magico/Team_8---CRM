@@ -3203,26 +3203,6 @@ button.profile-menu-item.danger:hover {
   }
 }
 
-.portal-entry-button {
-  width: 100%;
-  margin-top: 0.75rem;
-}
-
-.portal-shell {
-  min-height: 100vh;
-  padding: 2rem;
-  background: var(--app-bg, #f4f8f6);
-}
-
-.portal-topbar {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-  margin-bottom: 1rem;
-}
-
-.portal-grid,
 .customer-extra-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -3247,16 +3227,6 @@ button.profile-menu-item.danger:hover {
 
 .monitoring-status-card p {
   margin: 0;
-}
-
-@media (max-width: 760px) {
-  .portal-shell {
-    padding: 1rem;
-  }
-
-  .portal-topbar {
-    flex-direction: column;
-  }
 }
 
 /* Prioridad de las adaptaciones visuales del CRM modular. */
