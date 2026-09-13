@@ -10,12 +10,22 @@ const commercial: AuthUser = {
   roles: ['Comercial'],
 };
 
+const administrator: AuthUser = {
+  idUsuario: 1,
+  idEmpresa: 1,
+  email: 'admin@finet.local',
+  nombreCompleto: 'Administrador FiNet',
+  roles: ['Administrador'],
+};
+
 describe('PlansService', () => {
+  const audit = { record: jest.fn() };
+
   it('limita los planes a la empresa de un usuario no administrador', async () => {
     const prisma = {
       plan: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const service = new PlansService(prisma as never);
+    const service = new PlansService(prisma as never, audit as never);
 
     await service.list(commercial, 'consolidado');
 
@@ -26,8 +36,23 @@ describe('PlansService', () => {
     });
   });
 
+  it('lista todos los planes activos del catalogo para un administrador en scope consolidado', async () => {
+    const prisma = {
+      plan: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new PlansService(prisma as never, audit as never);
+
+    await service.list(administrator, 'consolidado');
+
+    expect(prisma.plan.findMany).toHaveBeenCalledWith({
+      where: { activo: true },
+      orderBy: { idPlan: 'asc' },
+      include: { empresa: true },
+    });
+  });
+
   it('rechaza usuarios no administradores sin empresa asignada', () => {
-    const service = new PlansService({} as never);
+    const service = new PlansService({} as never, audit as never);
 
     expect(() => service.list({ ...commercial, idEmpresa: null })).toThrow(BadRequestException);
   });

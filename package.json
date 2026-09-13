@@ -4,13 +4,16 @@
   "private": true,
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "portal"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
     "dev:backend": "npm run start:dev -w backend",
     "dev:frontend": "npm run dev -w frontend",
+    "dev:portal": "npm run dev -w portal",
     "build": "npm run build --workspaces --if-present",
+    "build:portal": "npm run build -w portal",
     "lint": "npm run lint --workspaces --if-present",
     "prisma:generate": "npm run prisma:generate -w backend",
     "docker:local": "docker compose up --build -d",

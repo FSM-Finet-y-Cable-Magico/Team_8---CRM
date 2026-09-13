@@ -13,17 +13,22 @@ export class CreateServiceDto {
   @Min(1)
   idEmpresa?: number;
 
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  idContrato?: number;
+  idContrato!: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   idDireccion?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idZonaPago?: number;
 
   @IsIn(['Internet', 'Television', 'Internet + Television'])
   tipoServicio!: string;
@@ -65,4 +70,19 @@ export class CreateServiceDto {
   @IsString()
   @MaxLength(300)
   observacionesTecnicas?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  cajaNap?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  numeroPoste?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  caracteristicasComerciales?: string;
 }

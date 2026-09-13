@@ -208,6 +208,7 @@ CREATE TABLE orden_trabajo (
     id_direccion                   INTEGER       ,
     id_servicio                    INTEGER       ,
     id_ticket                      INTEGER        UNIQUE,
+    codigo_seguimiento             VARCHAR(32)    UNIQUE,
     tipo_ot                        VARCHAR(20)    NOT NULL,
     prioridad                      VARCHAR(10)    NOT NULL,
     estado                         VARCHAR(25)    NOT NULL,

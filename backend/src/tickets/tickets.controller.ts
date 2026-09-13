@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+﻿import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -6,7 +6,9 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { CreateTicketDto } from './dto/create-ticket.dto';
+import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
+import { TechnicalNoteDto } from './dto/technical-note.dto';
 import { UpdateTicketCategoryDto } from './dto/update-ticket-category.dto';
 import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -33,6 +35,16 @@ export class TicketsController {
   @Roles(...ACCESS_ROLES.CREATE_TICKETS)
   create(@Body() dto: CreateTicketDto, @CurrentUser() user: AuthUser) {
     return this.ticketsService.create(dto, user);
+  }
+
+  @Post(':id/work-order')
+  @Roles(...ACCESS_ROLES.MANAGE_TICKETS)
+  createWorkOrder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateTicketWorkOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.ticketsService.createWorkOrder(id, dto, user);
   }
 
   @Patch(':id/category')
@@ -73,5 +85,21 @@ export class TicketsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.ticketsService.registerDiagnosis(id, dto, user);
+  }
+
+  @Get(':id/technical-notes')
+  @Roles(...ACCESS_ROLES.REGISTER_TECHNICAL_NOTES)
+  technicalNotes(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.ticketsService.technicalNotes(id, user);
+  }
+
+  @Post(':id/technical-notes')
+  @Roles(...ACCESS_ROLES.REGISTER_TECHNICAL_NOTES)
+  addTechnicalNote(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: TechnicalNoteDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.ticketsService.addTechnicalNote(id, dto, user);
   }
 }

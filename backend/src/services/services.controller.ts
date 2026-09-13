@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -6,7 +6,10 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { AttachEquipmentDto } from './dto/attach-equipment.dto';
+import { CreateServiceInstallOrderDto } from './dto/create-service-install-order.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { DeactivateServiceDto } from './dto/deactivate-service.dto';
+import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ServicesService } from './services.service';
 
@@ -30,6 +33,26 @@ export class ServicesController {
     return this.servicesService.detail(id, user);
   }
 
+  @Get(':id/install-availability')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  installAvailability(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() dto: ServiceInstallAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.servicesService.installAvailability(id, dto, user);
+  }
+
+  @Post(':id/install-order')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  createInstallOrder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateServiceInstallOrderDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.servicesService.createInstallOrder(id, dto, user);
+  }
+
   @Post()
   @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
   create(@Body() dto: CreateServiceDto, @CurrentUser() user: AuthUser) {
@@ -44,6 +67,16 @@ export class ServicesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.servicesService.update(id, dto, user);
+  }
+
+  @Patch(':id/deactivate')
+  @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
+  deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeactivateServiceDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.servicesService.deactivate(id, dto, user);
   }
 
   @Post(':id/equipment')

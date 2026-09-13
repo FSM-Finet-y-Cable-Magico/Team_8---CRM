@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class AttachEquipmentDto {
   @IsOptional()
@@ -32,4 +32,18 @@ export class AttachEquipmentDto {
   @IsString()
   @MaxLength(300)
   observaciones?: string;
+
+  @IsOptional()
+  @IsIn(['Arriendo', 'Prestamo', 'Compra', 'Propio cliente', 'Propiedad empresa'])
+  modalidadAsignacion?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  valorArriendoMensual?: number;
+
+  @IsOptional()
+  @IsDateString()
+  fechaInicioAsignacion?: string;
 }

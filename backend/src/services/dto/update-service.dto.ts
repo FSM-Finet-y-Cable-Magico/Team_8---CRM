@@ -1,4 +1,5 @@
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class UpdateServiceDto {
   @IsOptional()
@@ -13,6 +14,12 @@ export class UpdateServiceDto {
   @IsString()
   @MaxLength(300)
   observaciones?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idZonaPago?: number;
 
   @IsOptional()
   @IsString()
@@ -43,4 +50,19 @@ export class UpdateServiceDto {
   @IsString()
   @MaxLength(300)
   observacionesTecnicas?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  cajaNap?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  numeroPoste?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  caracteristicasComerciales?: string;
 }

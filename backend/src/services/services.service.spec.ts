@@ -1,0 +1,185 @@
+import { AuditService } from '../audit/audit.service';
+import { AuthUser } from '../common/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { ServicesService } from './services.service';
+
+const comercial: AuthUser = {
+  idUsuario: 2,
+  idEmpresa: 1,
+  email: 'comercial@finet.local',
+  nombreCompleto: 'Comercial FiNet',
+  roles: ['Comercial'],
+};
+
+describe('ServicesService', () => {
+  it('genera una orden de instalacion desde un servicio pendiente', async () => {
+    const scheduledDate = new Date();
+    scheduledDate.setDate(scheduledDate.getDate() + 7);
+    const fechaProgramada = scheduledDate.toISOString().slice(0, 10);
+    const serviceRecord = {
+      idServicio: 55,
+      idCliente: 10,
+      idEmpresa: 1,
+      idContrato: 30,
+      idDireccion: 7,
+      estadoOperativo: 'Pendiente Instalacion',
+      contrato: { idContrato: 30, estado: 'Firmado', plan: null },
+      cliente: { idCliente: 10 },
+      empresa: { idEmpresa: 1 },
+      direccion: null,
+      zonaPago: null,
+      equipos: [],
+      tickets: [],
+      ordenes: [],
+      solicitudes: [],
+      tipoServicio: 'Internet',
+      observaciones: null,
+      datosTecnicos: null,
+      fechaCreacion: new Date('2026-07-01T00:00:00.000Z'),
+    };
+    const tx = {
+      ordenTrabajo: {
+        create: jest.fn().mockResolvedValue({ idOt: 21, tipoOt: 'Instalacion' }),
+        update: jest.fn().mockResolvedValue({
+          idOt: 21,
+          idEmpresa: 1,
+          idCliente: 10,
+          idServicio: 55,
+          idTecnico: 4,
+          tipoOt: 'Instalacion',
+          estado: 'Pendiente',
+          codigoSeguimiento: 'OT-INS-000021',
+        }),
+      },
+      servicioContratado: {
+        update: jest.fn().mockResolvedValue({
+          ...serviceRecord,
+          estadoOperativo: 'Instalacion Programada',
+        }),
+      },
+      historialOt: {
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const prisma = {
+      servicioContratado: {
+        findUnique: jest.fn().mockResolvedValue(serviceRecord),
+      },
+      ordenTrabajo: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      direccionServicio: {
+        findUnique: jest.fn().mockResolvedValue({ idDireccion: 7, idCliente: 10 }),
+      },
+      usuario: {
+        findMany: jest.fn().mockResolvedValue([
+          { idUsuario: 4, nombreCompleto: 'Terreno FiNet', email: 'terreno@finet.local' },
+        ]),
+      },
+      $transaction: jest.fn(async (callback: (txClient: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    const audit = { record: jest.fn() };
+    const service = new ServicesService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    const result = await service.createInstallOrder(
+      55,
+      {
+        fechaProgramada,
+        tipoConexion: 'Fibra Optica',
+        horaVisita: '11:00',
+        idTecnico: 4,
+        prioridad: 'Media',
+      },
+      comercial,
+    );
+
+    expect(result.orden).toEqual(
+      expect.objectContaining({
+        codigoSeguimiento: 'OT-INS-000021',
+        idServicio: 55,
+        tecnico: expect.objectContaining({ nombreCompleto: 'Terreno FiNet' }),
+      }),
+    );
+    expect(tx.servicioContratado.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idServicio: 55 },
+        data: { estadoOperativo: 'Instalacion Programada' },
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'GENERAR_ORDEN_INSTALACION_SERVICIO',
+        valorNuevo: expect.objectContaining({
+          idCliente: 10,
+          idServicio: 55,
+          codigoSeguimiento: 'OT-INS-000021',
+        }),
+      }),
+    );
+  });
+
+  it('bloquea la creación de un servicio mientras el contrato no está firmado', async () => {
+    const prisma = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue({
+          idCliente: 10,
+          idEmpresa: 1,
+          contratos: [{ idEmpresa: 1 }],
+        }),
+      },
+      contrato: {
+        findUnique: jest.fn().mockResolvedValue({
+          idContrato: 30,
+          idCliente: 10,
+          idEmpresa: 1,
+          estado: 'Pendiente firma contrato',
+        }),
+      },
+      servicioContratado: { create: jest.fn() },
+    };
+    const service = new ServicesService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(service.create({
+      idCliente: 10,
+      idContrato: 30,
+      tipoServicio: 'Internet',
+      estadoOperativo: 'Pendiente Instalacion',
+    }, comercial)).rejects.toThrow('Debes confirmar la firma del contrato antes de crear un servicio');
+
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
+  });
+
+  it('deriva el servicio pendiente desde el tipo de plan al confirmar un contrato firmado', async () => {
+    const created = {
+      idServicio: 56, idCliente: 10, idEmpresa: 1, idContrato: 30, idDireccion: 7, idZonaPago: null,
+      tipoServicio: 'Internet + Television', estadoOperativo: 'Pendiente Instalacion',
+      cliente: { idCliente: 10 }, empresa: { idEmpresa: 1 },
+      contrato: { idContrato: 30, estado: 'Firmado', plan: { idPlan: 7 } },
+      direccion: { idDireccion: 7, direccionCompleta: 'Av. Siempre Viva 405' }, zonaPago: null,
+      equipos: [], tickets: [], ordenes: [], solicitudes: [], observaciones: null, datosTecnicos: null, fechaCreacion: new Date(),
+    };
+    const prisma = {
+      contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 30, idCliente: 10, idEmpresa: 1, idZonaPago: null, estado: 'Firmado', plan: { idPlan: 7, tipoPlan: 'Internet+TV' }, cliente: { idCliente: 10, idEmpresa: 1 } }) },
+      servicioContratado: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue(created) },
+      direccionServicio: { findFirst: jest.fn().mockResolvedValue({ idDireccion: 7 }) },
+      cliente: { findUnique: jest.fn().mockResolvedValue({ idCliente: 10, estado: 'Pendiente firma contrato', contratos: [{ estado: 'Firmado' }], servicios: [{ estadoOperativo: 'Pendiente Instalacion' }] }), update: jest.fn() },
+    };
+    const audit = { record: jest.fn() };
+    const service = new ServicesService(prisma as unknown as PrismaService, audit as unknown as AuditService);
+
+    const result = await service.ensureInstallationServiceForContract(30, comercial);
+
+    expect(result).toBe(created);
+    expect(prisma.servicioContratado.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idContrato: 30, tipoServicio: 'Internet + Television', estadoOperativo: 'Pendiente Instalacion' }),
+    }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_SERVICIO_DESDE_CONTRATO_FIRMADO' }));
+  });
+});

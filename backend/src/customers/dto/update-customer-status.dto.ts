@@ -1,6 +1,6 @@
 import { IsIn } from 'class-validator';
 
 export class UpdateCustomerStatusDto {
-  @IsIn(['Activo', 'En Mantencion', 'Moroso', 'Suspendido', 'Baja'])
-  estado!: 'Activo' | 'En Mantencion' | 'Moroso' | 'Suspendido' | 'Baja';
+  @IsIn(['Pendiente firma contrato', 'Activo', 'En Mantencion', 'Moroso', 'Suspendido', 'Baja'])
+  estado!: 'Pendiente firma contrato' | 'Activo' | 'En Mantencion' | 'Moroso' | 'Suspendido' | 'Baja';
 }
