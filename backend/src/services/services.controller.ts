@@ -10,6 +10,7 @@ import { CreateServiceInstallOrderDto } from './dto/create-service-install-order
 import { CreateServiceDto } from './dto/create-service.dto';
 import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
+import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ServicesService } from './services.service';
 
@@ -41,6 +42,16 @@ export class ServicesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.servicesService.installAvailability(id, dto, user);
+  }
+
+  @Get(':id/install-day-availability')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  installDayAvailability(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() dto: ServiceInstallDayAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.servicesService.installDayAvailability(id, dto, user);
   }
 
   @Post(':id/install-order')

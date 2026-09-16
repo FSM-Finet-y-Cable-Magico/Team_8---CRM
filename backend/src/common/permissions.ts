@@ -14,7 +14,7 @@ export const ACCESS_ROLES = {
   CREATE_TICKETS: ['Administrador', 'Comercial', 'Soporte'],
   MANAGE_TICKETS: ['Administrador', 'Soporte'],
   UPDATE_TICKET_STATUS: ['Administrador', 'Soporte', 'Terreno'],
-  VIEW_WORK_ORDERS: ['Administrador', 'Soporte', 'Terreno'],
+  VIEW_WORK_ORDERS: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
   COMPLETE_INSTALLATION: ['Administrador', 'Soporte', 'Terreno'],
   VIEW_BILLING: ['Administrador', 'Comercial', 'Soporte'],
   MANAGE_BILLING: ['Administrador', 'Comercial'],

@@ -47,8 +47,9 @@ describe('CompaniesService', () => {
       where: {
         AND: [
           { idEmpresa: 1 },
-          { idCliente: null },
           { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          { idCliente: null },
+          { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
         ],
       },
     });
@@ -57,8 +58,9 @@ describe('CompaniesService', () => {
         where: {
           AND: [
             { idEmpresa: 1 },
-            { idCliente: null },
             { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+            { idCliente: null },
+            { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
           ],
         },
       }),
@@ -72,7 +74,7 @@ describe('CompaniesService', () => {
               { contratos: { some: { idEmpresa: 1 } } },
             ],
           },
-          { estado: 'Activo' },
+          { servicios: { some: { estadoOperativo: 'Activo' } } },
         ],
       },
     });

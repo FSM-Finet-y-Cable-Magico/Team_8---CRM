@@ -25,6 +25,10 @@
 .install-order-form .install-form-grid input, .install-order-form .install-form-grid select, .install-order-form .install-form-grid textarea { border-color: #d6e1dc; background: #fff; }
 .install-order-form > button { min-height: 44px; font-weight: 750; }
 .install-order-form > button.secondary { border: 1px solid #c8ddd4; color: #1e725d; background: #edf6f2; }
+.install-order-basic-fields, .install-order-details-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.install-order-basic-fields > label { max-width: 420px; }
+.install-order-details-grid { border-top: 1px solid #dce8e1; padding-top: 16px; }
+.install-order-basic-fields label, .install-order-details-grid label { color: #43524b; font-size: .82rem; font-weight: 700; }
 
 .installations-workspace { display: grid; gap: 34px; padding: 4px 2px; }
 .installations-overview { display: grid; gap: 14px; }
@@ -270,6 +274,30 @@ th {
   gap: 8px;
 }
 
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #17231f;
+}
+
+.login-brand-icon {
+  flex: 0 0 auto;
+  color: #168b78;
+}
+
+.login-brand h1 {
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.login-brand h1 span {
+  color: #168b78;
+}
+
 .login-panel .stack {
   gap: 16px;
 }
@@ -277,6 +305,42 @@ th {
 .login-panel input {
   min-height: 46px;
   background: #fbfdfc;
+}
+
+.password-field {
+  position: relative;
+  display: block;
+}
+
+.password-field input {
+  padding-right: 48px;
+}
+
+.password-toggle,
+.password-toggle:hover {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  width: 38px;
+  min-height: 38px;
+  place-items: center;
+  border-radius: 7px;
+  padding: 0;
+  color: #5e6a65;
+  background: transparent;
+  box-shadow: none;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  color: #168b78;
+  background: rgba(22, 139, 120, 0.09);
+}
+
+.password-toggle:focus-visible {
+  outline: 3px solid rgba(36, 124, 104, 0.2);
+  outline-offset: 1px;
 }
 
 .login-button {
@@ -516,7 +580,7 @@ th {
   justify-content: space-between;
   gap: 12px;
   margin: 0 0 16px;
-  border-bottom: 1px solid #e2e8e4;
+  border-bottom: 0;
   padding: 16px 18px;
   background: #fff;
 }
@@ -970,8 +1034,16 @@ th {
   padding: 4px 2px;
 }
 
-.users-panel > h2 {
-  margin: 0;
+/* Los modales usan espacio y jerarquía tipográfica, sin separadores horizontales decorativos. */
+.modal-card .workflow-panel,
+.modal-card .customer-workflow-steps,
+.modal-card .customer-operation-tabs,
+.modal-card .install-order-details-grid,
+.modal-card .customer-install-details,
+.modal-card .customer-service-summary,
+.modal-card .customer-service-history {
+  border-top: 0;
+  border-bottom: 0;
 }
 
 .audit-panel {
@@ -3381,12 +3453,16 @@ button.profile-menu-item.danger:hover {
 .plans-catalog-list .table-wrap { margin: 0; }
 .plan-row-inactive { opacity: .48; }
 .plan-row-inactive:hover { opacity: .75; }
+.plans-actions-heading { text-align: right; }
+.plan-table-actions { align-items: center; justify-content: flex-end; flex-wrap: nowrap; }
 .plan-toggle { display: inline-flex; align-items: center; width: 36px; min-width: 36px; height: 21px; min-height: 21px; padding: 2px; border-radius: 999px; background: #cdd7d2; box-shadow: none; }
 .plan-toggle:hover { background: #b6c4bd; box-shadow: none; transform: none; }
 .plan-toggle span { display: block; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform .18s ease; }
 .plan-toggle.active { background: #28856e; }
 .plan-toggle.active span { transform: translateX(15px); }
 .plan-edit-action { display: inline-grid; min-width: 34px; place-items: center; padding: 0; }
+.plan-delete-action { display: inline-grid; min-width: 34px; place-items: center; padding: 0; color: #a34a3d; background: #f4efed; }
+.plan-delete-action:hover { color: #8e392f; background: #f8e5e1; }
 .plan-modal-form { display: grid; gap: 18px; }
 .plan-modal-intro { border: 1px solid #d9e9e2; border-radius: 14px; padding: 14px 16px; background: linear-gradient(135deg, #eff9f5, #fbfdfc); }
 .plan-modal-intro span { color: #19725e; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
@@ -3397,7 +3473,61 @@ button.profile-menu-item.danger:hover {
 .plan-description-field { grid-column: 1 / -1; }
 .plan-form-grid textarea { min-height: 88px; resize: vertical; }
 .plan-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.plan-modal-actions button { width: auto; }
+.modal-card:has(.plan-delete-dialog) { width: min(480px, 100%); }
+.plan-delete-dialog p { margin: 0; color: #506159; line-height: 1.55; }
+.plan-delete-confirm { background: #b7473c; }
+.plan-delete-confirm:hover { background: #963a31; }
 @media (max-width: 620px) { .plans-catalog-heading { align-items: flex-start; flex-direction: column; } .plan-form-grid { grid-template-columns: 1fr; } }
+
+.users-catalog { gap: 22px; }
+.users-catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.users-catalog-heading h1 { margin: 0; }
+.users-catalog-heading button { display: inline-flex; width: auto; align-items: center; gap: 7px; }
+.users-catalog-list { min-width: 0; }
+.users-catalog-list .table-wrap { margin: 0; }
+.user-row-inactive { opacity: .48; }
+.user-row-inactive:hover { opacity: .75; }
+.users-actions-heading { text-align: right; }
+.user-table-actions { align-items: center; justify-content: flex-end; flex-wrap: nowrap; }
+.user-toggle { display: inline-flex; align-items: center; width: 36px; min-width: 36px; height: 21px; min-height: 21px; padding: 2px; border-radius: 999px; background: #cdd7d2; box-shadow: none; }
+.user-toggle:hover { background: #b6c4bd; box-shadow: none; transform: none; }
+.user-toggle span { display: block; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform .18s ease; }
+.user-toggle.active { background: #28856e; }
+.user-toggle.active span { transform: translateX(15px); }
+.user-toggle:disabled { cursor: not-allowed; opacity: .52; }
+.user-edit-action,
+.user-delete-action { display: inline-grid; min-width: 34px; place-items: center; padding: 0; }
+.user-delete-action { color: #a34a3d; background: #f4efed; }
+.user-delete-action:hover { color: #8e392f; background: #f8e5e1; }
+.user-delete-action:disabled { cursor: not-allowed; opacity: .4; }
+.modal-card:has(.user-modal-form) { width: min(720px, 100%); }
+.modal-card:has(.user-delete-dialog) { width: min(480px, 100%); }
+.user-modal-form { display: grid; gap: 18px; }
+.user-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.user-form-grid label,
+.user-reset-fields label { display: grid; gap: 7px; color: #405149; font-size: .8rem; font-weight: 500; }
+.user-form-grid input,
+.user-form-grid select,
+.user-reset-fields input { font-weight: 400; }
+.user-form-grid input:read-only { border-color: #d9dfdc; color: #7b8782; background: #eef1ef; cursor: not-allowed; }
+.user-password-field { grid-column: 1 / -1; }
+.user-access-section { display: grid; gap: 12px; }
+.user-reset-trigger { display: inline-flex; width: fit-content; align-items: center; gap: 7px; }
+.user-reset-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; border: 1px solid #dce7e2; border-radius: 10px; padding: 14px; background: #f8fbf9; }
+.user-reset-fields button { white-space: nowrap; }
+.user-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.user-modal-actions button { width: auto; }
+.user-delete-dialog p { margin: 0; color: #506159; line-height: 1.55; }
+.user-delete-confirm { background: #b7473c; }
+.user-delete-confirm:hover { background: #963a31; }
+
+@media (max-width: 620px) {
+  .users-catalog-heading { align-items: flex-start; flex-direction: column; }
+  .user-form-grid,
+  .user-reset-fields { grid-template-columns: 1fr; }
+  .user-reset-fields button { width: 100%; }
+}
 
 /* Dashboard ejecutivo: superficies agrupadas, legibles y con menor sensación de tarjetas repetidas. */
 .theme-toggle {

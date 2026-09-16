@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, apiErrorMessage, type InstallAvailability, type Prospect } from '../../api';
+import { api, apiErrorMessage, type InstallDayAvailability, type InstallTimeSlot, type Prospect } from '../../api';
 import { addYearsToInputDate, dateInputValue } from '../../lib';
+import { InstallSchedulePicker } from './InstallSchedulePicker';
 
 export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; onChanged: () => void }) {
   const [form, setForm] = useState({
@@ -10,14 +11,19 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
     prioridad: 'Media',
     observaciones: '',
   });
-  const [availability, setAvailability] = useState<InstallAvailability | null>(null);
+  const [dayAvailability, setDayAvailability] = useState<InstallDayAvailability | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const today = dateInputValue(new Date());
   const latestInstallDate = addYearsToInputDate(today, 1);
   const hasContractedPlan = Boolean(prospect.idCliente);
-  const canCreate = prospect.estadoPipeline === 'Aceptado' && hasContractedPlan;
+  const hasSignedContract = Boolean(
+    prospect.contratos?.some((contract) => ['Firmado', 'Activo'].includes(contract.estado ?? '')),
+  );
+  const canCreate = (prospect.estadoPipeline === 'Aceptado' && hasContractedPlan)
+    || (!prospect.idCliente && hasSignedContract);
 
   useEffect(() => {
     setForm({
@@ -27,18 +33,44 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
       prioridad: 'Media',
       observaciones: '',
     });
-    setAvailability(null);
+    setDayAvailability(null);
     setTechnicianId('');
     setStatus('');
     setError('');
   }, [prospect.idProspecto]);
 
-  function updateSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
-    setForm((current) => ({ ...current, [field]: value }));
-    setAvailability(null);
+  async function selectInstallDate(value: string) {
+    setForm((current) => ({ ...current, fechaProgramada: value, horaVisita: '' }));
+    setDayAvailability(null);
     setTechnicianId('');
     setStatus('');
     setError('');
+    if (!value || !canCreate) return;
+    setAvailabilityLoading(true);
+
+    try {
+      const { data } = await api.get<InstallDayAvailability>(
+        `/prospects/${prospect.idProspecto}/install-day-availability`,
+        { params: { fechaProgramada: value } },
+      );
+      setDayAvailability(data);
+    } catch (err) {
+      setDayAvailability(null);
+      setTechnicianId('');
+      setError(apiErrorMessage(err));
+    } finally {
+      setAvailabilityLoading(false);
+    }
+  }
+
+  function selectInstallTime(slot: InstallTimeSlot) {
+    if (!slot.disponible) return;
+    setForm((current) => ({ ...current, horaVisita: slot.horaVisita }));
+    setTechnicianId(
+      slot.tecnicosDisponibles[0] ? String(slot.tecnicosDisponibles[0].idTecnico) : '',
+    );
+    setError('');
+    setStatus('');
   }
 
   function validateRequiredFields() {
@@ -46,70 +78,9 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
       return 'Completa tipo de conexión, fecha y hora de la visita.';
     }
 
-    if (form.fechaProgramada < today) {
-      return 'La fecha de instalación no puede ser anterior a hoy.';
-    }
-
-    if (form.fechaProgramada > latestInstallDate) {
-      return 'La fecha de instalación no puede superar un año desde hoy.';
-    }
-
+    if (form.fechaProgramada < today) return 'La fecha de instalación no puede ser anterior a hoy.';
+    if (form.fechaProgramada > latestInstallDate) return 'La fecha de instalación no puede superar un año desde hoy.';
     return '';
-  }
-
-  async function checkAvailability() {
-    setStatus('');
-    setError('');
-    const validationError = validateRequiredFields();
-
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    try {
-      const { data } = await api.get<InstallAvailability>(
-        `/prospects/${prospect.idProspecto}/install-availability`,
-        {
-          params: {
-            fechaProgramada: form.fechaProgramada,
-            horaVisita: form.horaVisita,
-          },
-        },
-      );
-      setAvailability(data);
-      setTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
-
-      if (data.tecnicosDisponibles.length) {
-        setStatus(data.mensaje);
-      } else {
-        setError(data.mensaje);
-      }
-    } catch (err) {
-      setAvailability(null);
-      setTechnicianId('');
-      setError(apiErrorMessage(err));
-    }
-  }
-
-  function selectAlternative(alternative: InstallAvailability['alternativas'][number]) {
-    setForm((current) => ({
-      ...current,
-      fechaProgramada: alternative.fechaProgramada,
-      horaVisita: alternative.horaVisita,
-    }));
-    setAvailability({
-      fechaProgramada: alternative.fechaProgramada,
-      horaVisita: alternative.horaVisita,
-      tecnicosDisponibles: alternative.tecnicosDisponibles,
-      alternativas: [],
-      mensaje: 'Horario alternativo seleccionado. Confirma el técnico asignado.',
-    });
-    setTechnicianId(
-      alternative.tecnicosDisponibles[0] ? String(alternative.tecnicosDisponibles[0].idTecnico) : '',
-    );
-    setError('');
-    setStatus('Horario alternativo seleccionado. Confirma el técnico asignado.');
   }
 
   async function createInstallOrder() {
@@ -136,7 +107,7 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
         `Orden de Instalación ${data.orden.idOt} creada y asignada a ${data.orden.tecnico.nombreCompleto}. ` +
         `El prospecto avanzó a Instalación Programada.`,
       );
-      setAvailability(null);
+      setDayAvailability(null);
       setTechnicianId('');
       onChanged();
     } catch (err) {
@@ -150,13 +121,10 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
       <p className="detail-line">
         Prospecto: {prospect.nombreCompleto} - Estado: {prospect.estadoPipeline}
       </p>
-      {prospect.estadoPipeline === 'Aceptado' && !hasContractedPlan && (
-        <p className="alert">Primero registra correctamente el plan contratado del prospecto.</p>
+      {!canCreate && (
+        <p className="alert">Primero confirma la firma del contrato y el plan del prospecto.</p>
       )}
-      {prospect.estadoPipeline !== 'Aceptado' && (
-        <p className="inline-status">La orden de instalación ya fue generada para este prospecto.</p>
-      )}
-      <div className="install-form-grid">
+      <div className="install-order-basic-fields">
         <label>
           Tipo de conexión
           <select
@@ -172,26 +140,19 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
             <option value="Television">Televisión</option>
           </select>
         </label>
-        <label>
-          Fecha de la visita
-          <input
-            type="date"
-            min={today}
-            max={latestInstallDate}
-            disabled={!canCreate}
-            value={form.fechaProgramada}
-            onChange={(event) => updateSchedule('fechaProgramada', event.target.value)}
-          />
-        </label>
-        <label>
-          Hora de la visita
-          <input
-            type="time"
-            disabled={!canCreate}
-            value={form.horaVisita}
-            onChange={(event) => updateSchedule('horaVisita', event.target.value)}
-          />
-        </label>
+      </div>
+      <InstallSchedulePicker
+        date={form.fechaProgramada}
+        time={form.horaVisita}
+        min={today}
+        max={latestInstallDate}
+        slots={dayAvailability?.horarios}
+        loading={availabilityLoading}
+        disabled={!canCreate}
+        onDateChange={(value) => void selectInstallDate(value)}
+        onTimeChange={selectInstallTime}
+      />
+      <div className="install-order-details-grid">
         <label>
           Prioridad
           <select
@@ -204,6 +165,14 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
             <option value="Baja">Baja</option>
           </select>
         </label>
+        {form.horaVisita && <label>
+          Técnico asignado
+          <select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>
+            {dayAvailability?.horarios.find((slot) => slot.horaVisita === form.horaVisita)?.tecnicosDisponibles.map((technician) => (
+              <option key={technician.idTecnico} value={technician.idTecnico}>{technician.nombreCompleto}</option>
+            ))}
+          </select>
+        </label>}
         <label className="full-width-field">
           Observaciones de agenda
           <textarea
@@ -214,43 +183,9 @@ export function InstallOrderForm({ prospect, onChanged }: { prospect: Prospect; 
           />
         </label>
       </div>
-      <button type="button" className="secondary" disabled={!canCreate} onClick={() => void checkAvailability()}>
-        Verificar disponibilidad técnica
-      </button>
-
-      {availability?.tecnicosDisponibles.length ? (
-        <label>
-          Técnico asignado
-          <select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>
-            {availability.tecnicosDisponibles.map((technician) => (
-              <option key={technician.idTecnico} value={technician.idTecnico}>
-                {technician.nombreCompleto}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      {availability && !availability.tecnicosDisponibles.length && availability.alternativas.length > 0 && (
-        <div className="alternative-slots">
-          <strong>Horarios alternativos sugeridos</strong>
-          <div className="button-row">
-            {availability.alternativas.map((alternative) => (
-              <button
-                key={`${alternative.fechaProgramada}-${alternative.horaVisita}`}
-                type="button"
-                className="secondary compact"
-                onClick={() => selectAlternative(alternative)}
-              >
-                {alternative.fechaProgramada} {alternative.horaVisita} ({alternative.tecnicosDisponibles.length} técnico(s))
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <button type="button" disabled={!canCreate || !technicianId} onClick={() => void createInstallOrder()}>
-        Generar Orden de Instalación
+        Generar orden de trabajo
       </button>
       {error && <p className="alert">{error}</p>}
       {status && <p className="inline-status">{status}</p>}

@@ -43,7 +43,7 @@ export function BillingPanel({
       return undefined;
     }
 
-    const timer = window.setTimeout(() => setStatus(''), 5000);
+    const timer = window.setTimeout(() => setStatus(''), 3000);
     return () => window.clearTimeout(timer);
   }, [status]);
 

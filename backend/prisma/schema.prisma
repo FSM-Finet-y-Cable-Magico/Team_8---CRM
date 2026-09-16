@@ -132,6 +132,7 @@ model Prospecto {
   cliente              Cliente?     @relation(fields: [idCliente], references: [idCliente])
   cotizaciones         Cotizacion[]
   contratos            Contrato[]
+  ordenesTrabajo       OrdenTrabajo[]
 
   @@map("prospecto")
 }
@@ -140,7 +141,7 @@ model Plan {
   idPlan          Int          @id @default(autoincrement()) @map("id_plan")
   idEmpresa       Int?         @map("id_empresa")
   nombreComercial String       @map("nombre_comercial") @db.VarChar(100)
-  tipoPlan        String       @map("tipo_plan") @db.VarChar(20)
+  tipoPlan        String       @map("tipo_plan") @db.VarChar(40)
   tipoCliente     String       @map("tipo_cliente") @db.VarChar(20)
   velocidadMbps   Int?         @map("velocidad_mbps")
   precioMensual   Decimal      @map("precio_mensual") @db.Decimal(10, 2)
@@ -258,6 +259,7 @@ model OrdenTrabajo {
   idTecnicoExterno    Int?                @map("id_tecnico_externo")
   idDireccion         Int?                @map("id_direccion")
   idServicio          Int?                @map("id_servicio")
+  idProspecto         Int?                @map("id_prospecto")
   idTicket            Int?                @unique @map("id_ticket")
   codigoSeguimiento   String?             @unique @map("codigo_seguimiento") @db.VarChar(32)
   tipoOt              String              @map("tipo_ot") @db.VarChar(20)
@@ -270,6 +272,7 @@ model OrdenTrabajo {
   observaciones       String?
   resueltoRemotamente Boolean?            @default(false) @map("resuelto_remotamente")
   servicio            ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  prospecto           Prospecto?          @relation(fields: [idProspecto], references: [idProspecto])
 
   @@map("orden_trabajo")
 }

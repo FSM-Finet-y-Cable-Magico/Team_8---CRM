@@ -69,6 +69,18 @@ export type InstallTechnician = {
   email: string | null;
 };
 
+export type InstallTimeSlot = {
+  horaVisita: string;
+  disponible: boolean;
+  motivo: string;
+  tecnicosDisponibles: InstallTechnician[];
+};
+
+export type InstallDayAvailability = {
+  fechaProgramada: string;
+  horarios: InstallTimeSlot[];
+};
+
 export type InstallAvailability = {
   fechaProgramada: string;
   horaVisita: string;
@@ -78,6 +90,7 @@ export type InstallAvailability = {
     horaVisita: string;
     tecnicosDisponibles: InstallTechnician[];
   }>;
+  horarios?: InstallTimeSlot[];
   mensaje: string;
 };
 
@@ -493,6 +506,7 @@ export type Ticket = {
 
 export type WorkOrder = {
   idOt: number;
+  idProspecto?: number | null;
   idEmpresa: number | null;
   idCliente: number | null;
   idTecnico: number | null;
@@ -554,6 +568,23 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error)) {
+      const authorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
+
+      if (error.response?.status === 401 && authorization) {
+        localStorage.removeItem('finet_token');
+        localStorage.removeItem('finet_user');
+        window.dispatchEvent(new Event('finet:auth-expired'));
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
 
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {

@@ -6,9 +6,9 @@ La contratacion desde Prospectos creaba de inmediato un Cliente, una DireccionSe
 
 ## Modelo aplicado
 
-Prospecto -> contrato pendiente de firma -> contrato firmado / Pendiente de activacion -> INSTALLATION_COMPLETED futuro -> Cliente activo.
+Prospecto -> contrato pendiente de firma -> contrato firmado / Pendiente de activacion -> OT de instalacion -> instalacion completada -> Cliente activo.
 
-Contrato conserva idCliente opcional para historicos. Los nuevos contratos creados desde Prospectos usan idProspecto y guardan una fotografia de direccion, comuna y ciudad. No crean Cliente, DireccionServicio, ServicioContratado ni OT.
+Contrato conserva idCliente opcional para historicos. Los nuevos contratos creados desde Prospectos usan idProspecto y guardan una fotografia de direccion, comuna y ciudad. La firma habilita la agenda, pero Cliente, DireccionServicio y ServicioContratado se crean unicamente al completar la OT.
 
 ## Estados
 
@@ -28,15 +28,15 @@ El modal de Prospectos mantiene la persona visible hasta la firma. Dashboard sep
 
 ## Gestion de clientes
 
-CustomersPanel diferencia Pendientes de activación y Clientes activos. Pendiente de activación es la proyección de un Prospecto con Contrato firmado y sin Cliente asociado; no posee OT externa ni ServicioContratado. La sección de solo lectura consume GET /api/prospects/pending-activation y muestra persona, contrato, plan y fotografía de dirección prevista. El listado y modal operativo de Clientes se mantienen sin cambios. INSTALLATION_COMPLETED sigue pendiente para la futura integración G3.
+CustomersPanel diferencia Pendientes de activación y Clientes activos. Pendiente de activación es la proyección de un Prospecto con Contrato firmado y sin Cliente asociado. Puede tener una OT local de instalación asociada directamente por idProspecto. La sección consume GET /api/prospects/pending-activation y muestra persona, contrato, plan y fotografía de dirección prevista.
 
-## Compatibilidad y pendiente G3
+## Compatibilidad y cierre local
 
-No se migran ni desvinculan Clientes, contratos, servicios u OTs existentes. prepare-installation se conserva para contratos historicos con Cliente. INSTALLATION_COMPLETED aun no existe; ese evento futuro sera el unico que cree Cliente y Servicio para una contratacion nueva.
+No se migran ni desvinculan Clientes, contratos, servicios u OTs existentes. prepare-installation se conserva para contratos historicos con Cliente. Al completar una OT asociada al prospecto se crean atomicamente Cliente, DireccionServicio y ServicioContratado, se activan contrato y servicio, y se registra la conversion del prospecto.
 
 ## Migracion
 
-Se creo backend/prisma/migrations/20260912150000_crm_activation_flow/migration.sql.
+Se crearon backend/prisma/migrations/20260912150000_crm_activation_flow/migration.sql y backend/prisma/migrations/20260916120000_installation_prospect_flow/migration.sql.
 
 Aplicar posteriormente solo en un entorno aprobado:
 

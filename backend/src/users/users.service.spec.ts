@@ -4,8 +4,8 @@ const admin = { idUsuario: 1, idEmpresa: null, email: 'admin@test.local', nombre
 const dto = { nombreCompleto: 'Usuario', email: 'USER@test.local', roleId: 2, idEmpresa: 1, activo: true };
 function setup() {
   const target = { idUsuario: 2, activo: true, usuarioRoles: [{ rol: { nombreRol: 'Administrador' } }] };
-  const db = { $queryRaw: jest.fn(), $transaction: jest.fn(), rol: { findUnique: jest.fn().mockResolvedValue({ idRol: 2, nombreRol: 'Comercial' }) }, empresa: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1 }) },
-    usuario: { findUnique: jest.fn().mockResolvedValue(target), findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({ idUsuario: 3 }), update: jest.fn().mockResolvedValue({ idUsuario: 2 }) }, usuarioRol: { create: jest.fn(), deleteMany: jest.fn() }, logAuditoria: { create: jest.fn() } };
+  const db = { $queryRaw: jest.fn(), $executeRaw: jest.fn(), $transaction: jest.fn(), rol: { findUnique: jest.fn().mockResolvedValue({ idRol: 2, nombreRol: 'Comercial' }) }, empresa: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1 }) },
+    usuario: { findUnique: jest.fn().mockResolvedValue(target), findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({ idUsuario: 3 }), update: jest.fn().mockResolvedValue({ idUsuario: 2 }), delete: jest.fn().mockResolvedValue({ idUsuario: 2 }) }, usuarioRol: { create: jest.fn(), deleteMany: jest.fn() }, logAuditoria: { create: jest.fn() } };
   db.$transaction.mockImplementation(fn => fn(db));
   return { db, target, service: new UsersService(db as never, { record: jest.fn() } as never) };
 }
@@ -17,4 +17,6 @@ describe('Usuarios internos', () => {
     const saved = db.usuario.create.mock.calls[0][0].data; expect(await bcrypt.compare(password, saved.passwordHash)).toBe(true); expect(saved.email).toBe('user@test.local'); expect(result).not.toHaveProperty('passwordHash'); expect(JSON.stringify(db.logAuditoria.create.mock.calls)).not.toContain(password); });
   it('restablece el acceso y revoca las sesiones', async () => { const { service, db } = setup(); await service.resetPassword(2, 'Prueba-local-12345', admin); expect(db.usuario.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ versionSesion: { increment: 1 } }) })); });
   it('rechaza claves que bcrypt truncaría por longitud en bytes', async () => { const { service } = setup(); await expect(service.resetPassword(2, 'á'.repeat(40), admin)).rejects.toThrow('72 bytes'); });
+  it('impide eliminar la propia cuenta', async () => { const { service } = setup(); await expect(service.remove(1, admin)).rejects.toThrow('propia'); });
+  it('elimina un usuario y conserva una auditoría', async () => { const { service, db, target } = setup(); target.usuarioRoles = [{ rol: { nombreRol: 'Comercial' } }]; await service.remove(2, admin); expect(db.usuarioRol.deleteMany).toHaveBeenCalledWith({ where: { idUsuario: 2 } }); expect(db.usuario.delete).toHaveBeenCalledWith({ where: { idUsuario: 2 } }); expect(db.logAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accion: 'ELIMINAR_USUARIO', idEntidadAfectada: 2 }) })); });
 });

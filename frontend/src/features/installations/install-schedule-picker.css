@@ -1,0 +1,33 @@
+.install-schedule-picker { align-items: start; display: grid; gap: 22px; grid-template-columns: minmax(250px, .85fr) minmax(320px, 1.6fr); }
+.install-calendar-field { display: flex; flex-direction: column; gap: 9px; }
+.install-calendar-field > span, .install-time-slots legend { color: #43574d; font-size: .83rem; font-weight: 750; }
+.install-inline-calendar { width: min(100%, 310px); }
+.install-calendar-header { align-items: center; display: flex; justify-content: space-between; margin-bottom: 10px; }
+.install-calendar-header strong { color: #293d34; font-size: .92rem; }
+.install-calendar-header > div { display: flex; gap: 3px; }
+.install-calendar-header button, .install-calendar-today { align-items: center; background: transparent; border: 0; color: #24765f; display: inline-flex; justify-content: center; min-height: 32px; padding: 4px 7px; }
+.install-calendar-header button:hover:not(:disabled), .install-calendar-today:hover:not(:disabled) { background: #e7f3ee; }
+.install-calendar-grid { display: grid; gap: 3px; grid-template-columns: repeat(7, 1fr); }
+.install-calendar-weekdays { margin-bottom: 4px; }
+.install-calendar-weekdays span { color: #65766e; font-size: .7rem; font-weight: 750; padding: 5px 0; text-align: center; }
+.install-calendar-grid button { aspect-ratio: 1; background: transparent; border: 0; border-radius: 7px; color: #30443a; min-height: 34px; padding: 0; }
+.install-calendar-grid button:hover:not(:disabled) { background: #e7f3ee; color: #176d58; }
+.install-calendar-grid button.outside { color: #a9b4af; }
+.install-calendar-grid button.today { box-shadow: inset 0 0 0 1px #65ad97; }
+.install-calendar-grid button.selected, .install-calendar-grid button.selected:hover { background: #237b65; color: #fff; }
+.install-calendar-grid button:disabled { color: #c4ccc8; cursor: not-allowed; opacity: .55; }
+.install-calendar-today { font-size: .76rem; margin-top: 7px; }
+.install-time-slots { border: 0; display: grid; gap: 9px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; min-width: 0; padding: 0; }
+.install-time-slots legend { grid-column: 1 / -1; margin-bottom: 4px; }
+.install-time-slots > p { align-items: center; color: #667970; display: flex; grid-column: 1 / -1; justify-content: center; margin: 0; min-height: 84px; padding: 12px; text-align: center; }
+.install-time-slots button { align-items: flex-start; background: #fff; border: 1px solid #abd5c6; color: #176d58; display: flex; flex-direction: column; gap: 3px; min-height: 62px; padding: 10px 12px; text-align: left; }
+.install-time-slots button strong { font-size: .95rem; }
+.install-time-slots button span { color: #61766c; font-size: .7rem; font-weight: 500; }
+.install-time-slots button:hover:not(:disabled), .install-time-slots button.selected { background: #dff2ea; border-color: #27866d; box-shadow: 0 0 0 2px rgb(39 134 109 / 13%); }
+.install-time-slots button:disabled { background: #edf1ef; border-color: #e0e6e3; color: #9ca9a3; cursor: not-allowed; opacity: .58; }
+.install-time-slots button:disabled span { color: #9ca9a3; }
+
+@media (max-width: 720px) {
+  .install-schedule-picker { grid-template-columns: 1fr; }
+  .install-time-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

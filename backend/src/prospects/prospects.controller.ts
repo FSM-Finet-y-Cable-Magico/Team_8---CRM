@@ -11,6 +11,7 @@ import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
 import { GenerateQuoteDto } from './dto/generate-quote.dto';
 import { InstallAvailabilityDto } from './dto/install-availability.dto';
+import { InstallDayAvailabilityDto } from './dto/install-day-availability.dto';
 import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
@@ -122,5 +123,15 @@ export class ProspectsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.prospectsService.installAvailability(id, dto, user);
+  }
+
+  @Get(':id/install-day-availability')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  installDayAvailability(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() dto: InstallDayAvailabilityDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prospectsService.installDayAvailability(id, dto, user);
   }
 }

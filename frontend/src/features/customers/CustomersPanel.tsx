@@ -126,12 +126,14 @@ export function CustomersPanel({
   plans,
   scope,
   permissions,
+  onManageInstallation,
   onChanged,
 }: {
   customers: Customer[];
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
+  onManageInstallation: (idProspecto: number) => void;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1049,6 +1051,14 @@ export function CustomersPanel({
                 <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
               </dl>
               <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>
+              {permissions.createInstallOrders && (
+                <button
+                  type="button"
+                  onClick={() => onManageInstallation(selectedPendingActivation.idProspecto)}
+                >
+                  Gestionar instalación
+                </button>
+              )}
             </section>
           );
         })()}

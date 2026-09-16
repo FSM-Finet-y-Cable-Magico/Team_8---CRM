@@ -17,6 +17,7 @@ import { CreateServiceInstallOrderDto } from './dto/create-service-install-order
 import { CreateServiceDto } from './dto/create-service.dto';
 import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
+import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 
 const SERVICE_INCLUDE = {
@@ -408,6 +409,28 @@ export class ServicesService {
     return this.buildInstallAvailability(service.idEmpresa, dto.fechaProgramada, dto.horaVisita);
   }
 
+  async installDayAvailability(
+    idServicio: number,
+    dto: ServiceInstallDayAvailabilityDto,
+    currentUser: AuthUser,
+  ) {
+    const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    await this.validateServiceInstallOrderPreconditions(service);
+    this.validateInstallDate(dto.fechaProgramada);
+
+    const availability = await this.buildInstallAvailability(
+      service.idEmpresa,
+      dto.fechaProgramada,
+      ALTERNATIVE_VISIT_TIMES[0],
+    );
+
+    return {
+      fechaProgramada: dto.fechaProgramada,
+      horarios: availability.horarios,
+    };
+  }
+
   async createInstallOrder(
     idServicio: number,
     dto: CreateServiceInstallOrderDto,
@@ -780,17 +803,13 @@ export class ServicesService {
     }
   }
 
-  private validateInstallSchedule(dateValue: string, timeValue: string) {
+  private validateInstallDate(dateValue: string) {
     const scheduledDate = parseDateOnly(dateValue);
     const today = todayDateOnly();
     const latestScheduledDate = addYearsToDateOnly(today, 1);
 
     if (!scheduledDate) {
       throw new BadRequestException('La fecha programada no es una fecha calendario valida');
-    }
-
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
-      throw new BadRequestException('La hora de visita no tiene un formato valido');
     }
 
     if (dateValue < today) {
@@ -801,7 +820,17 @@ export class ServicesService {
       throw new BadRequestException('La fecha programada no puede superar un ano desde hoy');
     }
 
-    if (dateValue === today && timeValue <= this.currentChileTime()) {
+    return scheduledDate;
+  }
+
+  private validateInstallSchedule(dateValue: string, timeValue: string) {
+    const scheduledDate = this.validateInstallDate(dateValue);
+
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
+      throw new BadRequestException('La hora de visita no tiene un formato valido');
+    }
+
+    if (dateValue === todayDateOnly() && timeValue <= this.currentChileTime()) {
       throw new BadRequestException('La fecha y hora de visita deben ser posteriores a la hora actual');
     }
 
@@ -844,6 +873,12 @@ export class ServicesService {
         horaVisita: requestedTime,
         tecnicosDisponibles: [],
         alternativas: [],
+        horarios: ALTERNATIVE_VISIT_TIMES.map((horaVisita) => ({
+          horaVisita,
+          disponible: false,
+          motivo: 'No hay técnicos activos para esta empresa',
+          tecnicosDisponibles: [],
+        })),
         mensaje: 'No existen tecnicos en terreno activos para la empresa seleccionada',
       };
     }
@@ -894,6 +929,21 @@ export class ServicesService {
         email: technician.email,
       }));
     const availableTechnicians = availableAt(requestedDate, requestedTime);
+    const horarios = ALTERNATIVE_VISIT_TIMES.map((horaVisita) => {
+      const pasado = requestedDate === todayDateOnly() && horaVisita <= this.currentChileTime();
+      const tecnicosDisponibles = pasado ? [] : availableAt(requestedDate, horaVisita);
+
+      return {
+        horaVisita,
+        disponible: tecnicosDisponibles.length > 0,
+        motivo: pasado
+          ? 'Horario ya pasado'
+          : tecnicosDisponibles.length
+            ? `${tecnicosDisponibles.length} técnico(s) disponible(s)`
+            : 'Horario ocupado',
+        tecnicosDisponibles,
+      };
+    });
     const alternatives: Array<{
       fechaProgramada: string;
       horaVisita: string;
@@ -941,6 +991,7 @@ export class ServicesService {
       horaVisita: requestedTime,
       tecnicosDisponibles: availableTechnicians,
       alternativas: alternatives,
+      horarios,
       mensaje: availableTechnicians.length
         ? `${availableTechnicians.length} tecnico(s) disponible(s) para la visita`
         : 'No existen tecnicos disponibles en el horario solicitado. Selecciona una alternativa',

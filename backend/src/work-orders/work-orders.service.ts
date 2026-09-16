@@ -7,6 +7,7 @@ import {
   preserveInstallOrderMetadata,
 } from '../common/install-order-metadata';
 import { isAdministrator } from '../common/roles';
+import { serviceTypeFromPlan } from '../common/service-type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
 import { CompleteRepairOrderDto } from './dto/complete-repair-order.dto';
@@ -25,12 +26,18 @@ export class WorkOrdersService {
       take: 150,
     });
     const customerIds = [...new Set(orders.map((order) => order.idCliente).filter((id): id is number => id !== null))];
+    const prospectIds = [...new Set(orders.map((order) => order.idProspecto).filter((id): id is number => id !== null))];
     const technicianIds = [...new Set(orders.map((order) => order.idTecnico).filter((id): id is number => id !== null))];
     const ticketIds = [...new Set(orders.map((order) => order.idTicket).filter((id): id is number => id !== null))];
     const [prospects, customers, technicians, tickets] = await Promise.all([
-      customerIds.length
+      customerIds.length || prospectIds.length
         ? this.prisma.prospecto.findMany({
-          where: { idCliente: { in: customerIds } },
+          where: {
+            OR: [
+              ...(prospectIds.length ? [{ idProspecto: { in: prospectIds } }] : []),
+              ...(customerIds.length ? [{ idCliente: { in: customerIds } }] : []),
+            ],
+          },
           orderBy: { fechaCreacion: 'desc' },
           select: {
             idProspecto: true,
@@ -82,6 +89,7 @@ export class WorkOrdersService {
         : Promise.resolve([]),
     ]);
     const prospectByCustomerCompany = new Map<string, (typeof prospects)[number]>();
+    const prospectById = new Map(prospects.map((prospect) => [prospect.idProspecto, prospect]));
     const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
     const ticketById = new Map(tickets.map((ticket) => [ticket.idTicket, ticket]));
@@ -106,7 +114,9 @@ export class WorkOrdersService {
         observacionesCierre: metadata.observacionesCierre,
         tecnico: order.idTecnico ? technicianById.get(order.idTecnico) ?? null : null,
         cliente: order.idCliente ? customerById.get(order.idCliente) ?? null : null,
-        prospecto: prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`) ?? null,
+        prospecto: (order.idProspecto ? prospectById.get(order.idProspecto) : null)
+          ?? prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`)
+          ?? null,
         ticket: order.idTicket ? ticketById.get(order.idTicket) ?? null : null,
       };
     });
@@ -119,12 +129,12 @@ export class WorkOrdersService {
       throw new BadRequestException('La orden no corresponde a instalacion');
     }
 
-    if (!order.idCliente) {
-      throw new BadRequestException('La orden no tiene cliente asociado');
-    }
-
     if (order.estado === 'Completada') {
       throw new BadRequestException('La orden de instalacion ya se encuentra completada');
+    }
+
+    if (!order.idCliente && !order.idProspecto) {
+      throw new BadRequestException('La orden no tiene prospecto ni cliente asociado');
     }
 
     const installationService = order.idServicio
@@ -151,12 +161,12 @@ export class WorkOrdersService {
       throw new BadRequestException('El servicio asociado no corresponde al cliente y empresa de la orden');
     }
 
-    const equipment = await this.resolveInstallationEquipment(dto, order, installationService);
-
-    const prospect = await this.prisma.prospecto.findFirst({
-      where: { idCliente: order.idCliente, idEmpresa: order.idEmpresa },
-      orderBy: { fechaCreacion: 'desc' },
-    });
+    const prospect = order.idProspecto
+      ? await this.prisma.prospecto.findUnique({ where: { idProspecto: order.idProspecto } })
+      : await this.prisma.prospecto.findFirst({
+        where: { idCliente: order.idCliente, idEmpresa: order.idEmpresa },
+        orderBy: { fechaCreacion: 'desc' },
+      });
 
     if (!prospect && !order.idServicio) {
       throw new BadRequestException('No existe un prospecto o servicio asociado para completar la instalacion');
@@ -172,6 +182,45 @@ export class WorkOrdersService {
       throw new BadRequestException('No se puede completar la instalacion: la fecha de creacion del prospecto es futura');
     }
 
+    const activationContract = !order.idCliente && prospect
+      ? await this.prisma.contrato.findFirst({
+        where: {
+          idProspecto: prospect.idProspecto,
+          idEmpresa: order.idEmpresa,
+          estado: { in: ['Firmado', 'Activo'] },
+        },
+        include: { plan: true },
+        orderBy: { idContrato: 'desc' },
+      })
+      : null;
+
+    if (!order.idCliente && !activationContract) {
+      throw new BadRequestException('El prospecto no tiene un contrato firmado para activar la instalacion');
+    }
+
+    const activationServiceType = activationContract
+      ? serviceTypeFromPlan(activationContract.plan?.tipoPlan)
+      : null;
+
+    if (activationContract && !activationServiceType) {
+      throw new BadRequestException('El plan contratado no permite determinar el tipo de servicio');
+    }
+
+    const activationAddress = activationContract
+      ? activationContract.direccionInstalacion?.trim() || prospect?.direccion?.trim()
+      : null;
+
+    if (activationContract && !activationAddress) {
+      throw new BadRequestException('El contrato no tiene una direccion de instalacion registrada');
+    }
+
+    const equipment = await this.resolveInstallationEquipment(
+      dto,
+      order,
+      installationService,
+      Boolean(activationContract),
+    );
+
     const conversionDays = prospect?.fechaCreacion
       ? Math.max(
           0,
@@ -181,9 +230,96 @@ export class WorkOrdersService {
     const completionObservations = preserveInstallOrderMetadata(order.observaciones, dto.observaciones);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      let cliente;
+      let updatedService = null;
+      let idDireccion = order.idDireccion;
+
+      if (!order.idCliente && prospect && activationContract && activationServiceType && activationAddress) {
+        cliente = await tx.cliente.create({
+          data: {
+            idEmpresa: order.idEmpresa,
+            rut: prospect.rut,
+            nombreCompleto: prospect.nombreCompleto?.trim() || `Cliente prospecto ${prospect.idProspecto}`,
+            email: prospect.email,
+            telefono: prospect.telefono,
+            estado: 'Activo',
+            origenContacto: prospect.origenContacto,
+          },
+        });
+        const direccion = await tx.direccionServicio.create({
+          data: {
+            idCliente: cliente.idCliente,
+            direccionCompleta: activationAddress,
+            comuna: activationContract.comunaInstalacion?.trim() || 'Por confirmar',
+            ciudad: activationContract.ciudadInstalacion?.trim() || 'Por confirmar',
+            esPrincipal: true,
+          },
+        });
+        idDireccion = direccion.idDireccion;
+        updatedService = await tx.servicioContratado.create({
+          data: {
+            idCliente: cliente.idCliente,
+            idEmpresa: order.idEmpresa,
+            idContrato: activationContract.idContrato,
+            idDireccion,
+            idZonaPago: activationContract.idZonaPago,
+            tipoServicio: activationServiceType,
+            estadoOperativo: 'Activo',
+            datosTecnicos: this.mergeInstallationTechnicalData(null, dto),
+          },
+        });
+        await tx.contrato.update({
+          where: { idContrato: activationContract.idContrato },
+          data: { idCliente: cliente.idCliente, estado: 'Activo' },
+        });
+      } else {
+        cliente = await tx.cliente.update({
+          where: { idCliente: order.idCliente ?? 0 },
+          data: { estado: 'Activo' },
+        });
+
+        if (installationService?.idContrato) {
+          await tx.contrato.update({
+            where: { idContrato: installationService.idContrato },
+            data: { estado: 'Activo' },
+          });
+        } else {
+          await tx.contrato.updateMany({
+            where: {
+              idCliente: cliente.idCliente,
+              idEmpresa: order.idEmpresa,
+              estado: { not: 'Activo' },
+            },
+            data: { estado: 'Activo' },
+          });
+        }
+
+        if (installationService) {
+          updatedService = await tx.servicioContratado.update({
+            where: { idServicio: installationService.idServicio },
+            data: {
+              estadoOperativo: 'Activo',
+              datosTecnicos: this.mergeInstallationTechnicalData(installationService.datosTecnicos, dto),
+            },
+          });
+        } else {
+          await tx.servicioContratado.updateMany({
+            where: {
+              idCliente: cliente.idCliente,
+              idEmpresa: order.idEmpresa,
+              estadoOperativo: { not: 'Baja' },
+            },
+            data: { estadoOperativo: 'Activo' },
+          });
+        }
+      }
+
       const updatedOrder = await tx.ordenTrabajo.update({
         where: { idOt },
         data: {
+          idCliente: cliente.idCliente,
+          idDireccion,
+          idServicio: updatedService?.idServicio ?? order.idServicio,
           estado: 'Completada',
           fechaCompletada: new Date(),
           potenciaOpticaDbm: dto.potenciaOpticaDbm,
@@ -191,53 +327,11 @@ export class WorkOrdersService {
         },
       });
 
-      const cliente = await tx.cliente.update({
-        where: { idCliente: order.idCliente ?? 0 },
-        data: { estado: 'Activo' },
-      });
-
-      if (installationService?.idContrato) {
-        await tx.contrato.update({
-          where: { idContrato: installationService.idContrato },
-          data: { estado: 'Activo' },
-        });
-      } else {
-        await tx.contrato.updateMany({
-          where: {
-            idCliente: cliente.idCliente,
-            idEmpresa: order.idEmpresa,
-            estado: { not: 'Activo' },
-          },
-          data: { estado: 'Activo' },
-        });
-      }
-
-      let updatedService = null;
-
-      if (installationService) {
-        updatedService = await tx.servicioContratado.update({
-          where: { idServicio: installationService.idServicio },
-          data: {
-            estadoOperativo: 'Activo',
-            datosTecnicos: this.mergeInstallationTechnicalData(installationService.datosTecnicos, dto),
-          },
-        });
-      } else {
-        await tx.servicioContratado.updateMany({
-          where: {
-            idCliente: cliente.idCliente,
-            idEmpresa: order.idEmpresa,
-            estadoOperativo: { not: 'Baja' },
-          },
-          data: { estadoOperativo: 'Activo' },
-        });
-      }
-
-      const updatedEquipment = equipment && installationService
+      const updatedEquipment = equipment && updatedService
         ? await tx.unidadEquipo.update({
           where: { idUnidad: equipment.idUnidad },
           data: {
-            idServicio: installationService.idServicio,
+            idServicio: updatedService.idServicio,
             idClienteInstalado: cliente.idCliente,
             estado: 'Instalado',
             modelo: dto.modelo?.trim() || equipment.modelo,
@@ -268,6 +362,7 @@ export class WorkOrdersService {
         ? await tx.prospecto.update({
             where: { idProspecto: prospect.idProspecto },
             data: {
+              idCliente: cliente.idCliente,
               estadoPipeline: 'Servicio Activo',
               motivoPerdida: null,
               fechaConversion: conversionDate,
@@ -304,17 +399,67 @@ export class WorkOrdersService {
       valorAnterior: { estado: order.estado },
       valorNuevo: {
         estadoOrden: 'Completada',
-        idCliente: order.idCliente,
+        idCliente: result.cliente.idCliente,
         estadoCliente: 'Activo',
         potenciaOpticaDbm: dto.potenciaOpticaDbm,
         fechaCreacionProspecto: prospect?.fechaCreacion?.toISOString() ?? null,
         fechaConversion: prospect ? conversionDate.toISOString() : null,
         tiempoConversionDias: conversionDays,
-        idServicio: order.idServicio,
-        idContrato: installationService?.idContrato ?? null,
+        idServicio: result.servicio?.idServicio ?? order.idServicio,
+        idContrato: installationService?.idContrato ?? activationContract?.idContrato ?? null,
         idEquipo: result.equipo?.idUnidad ?? null,
         tecnicoCierre: currentUser.idUsuario,
       },
+    });
+
+    return result;
+  }
+
+  async cancelInstallation(idOt: number, currentUser: AuthUser) {
+    const order = await this.getOrderOrThrow(idOt, currentUser);
+
+    if (order.tipoOt !== 'Instalacion') {
+      throw new BadRequestException('La orden no corresponde a una instalación');
+    }
+
+    if (['Completada', 'Cancelada'].includes(order.estado)) {
+      throw new BadRequestException('La agenda ya se encuentra cerrada');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.ordenTrabajo.update({
+        where: { idOt },
+        data: { estado: 'Cancelada' },
+      });
+
+      if (order.idServicio) {
+        await tx.servicioContratado.update({
+          where: { idServicio: order.idServicio },
+          data: { estadoOperativo: 'Pendiente Instalacion' },
+        });
+      }
+
+      await tx.historialOt.create({
+        data: {
+          idOt,
+          idUsuario: currentUser.idUsuario,
+          estadoAnterior: order.estado,
+          estadoNuevo: 'Cancelada',
+          observaciones: 'Agenda de instalación cancelada',
+          fechaHora: new Date(),
+        },
+      });
+
+      return updatedOrder;
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'CANCELAR_AGENDA_INSTALACION',
+      entidadAfectada: 'orden_trabajo',
+      idEntidadAfectada: idOt,
+      valorAnterior: { estado: order.estado },
+      valorNuevo: { estado: result.estado },
     });
 
     return result;
@@ -423,6 +568,7 @@ export class WorkOrdersService {
     dto: CompleteInstallOrderDto,
     order: { idEmpresa: number | null; idServicio: number | null },
     installationService: { idServicio: number; idCliente: number; idEmpresa: number | null } | null,
+    allowPendingService = false,
   ) {
     const serial = dto.numeroSerie?.trim();
 
@@ -430,7 +576,7 @@ export class WorkOrdersService {
       return null;
     }
 
-    if (!installationService) {
+    if (!installationService && !allowPendingService) {
       throw new BadRequestException('La instalación debe tener un servicio asociado para registrar equipo');
     }
 
@@ -454,7 +600,11 @@ export class WorkOrdersService {
       throw new BadRequestException('Un equipo bloqueado o dado de baja no puede instalarse');
     }
 
-    if (equipment.idServicio && equipment.idServicio !== installationService.idServicio && equipment.estado === 'Instalado') {
+    if (
+      equipment.idServicio
+      && equipment.idServicio !== installationService?.idServicio
+      && equipment.estado === 'Instalado'
+    ) {
       throw new BadRequestException('El equipo ya se encuentra instalado en otro servicio');
     }
 

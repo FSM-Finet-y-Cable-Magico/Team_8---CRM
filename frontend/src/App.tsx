@@ -160,6 +160,13 @@ export default function App() {
     return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
 
+  useEffect(() => {
+    const handleExpiredSession = () => setUser(null);
+    window.addEventListener('finet:auth-expired', handleExpiredSession);
+
+    return () => window.removeEventListener('finet:auth-expired', handleExpiredSession);
+  }, []);
+
   if (!user) {
     return <LoginScreen onLogin={setUser} />;
   }
@@ -174,6 +181,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [pendingActivationProspects, setPendingActivationProspects] = useState<Prospect[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryUnit[]>([]);
@@ -195,6 +203,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const canViewInstallations = permissions.viewInstallations;
   const canViewWorkOrders = permissions.viewWorkOrders;
 
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = window.setTimeout(() => setMessage(''), 3000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
       return Number(scope);
@@ -211,6 +225,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       summaryResult,
       companiesResult,
       prospectsResult,
+      pendingActivationProspectsResult,
       plansResult,
       customersResult,
       inventoryResult,
@@ -223,6 +238,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       api.get<Summary>('/companies/summary', { params: { scope } }),
       isAdmin ? api.get<Company[]>('/companies') : Promise.resolve({ data: [] as Company[] }),
       api.get<Prospect[]>('/prospects', { params: { scope } }),
+      canViewInstallations
+        ? api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
+        : Promise.resolve({ data: [] as Prospect[] }),
       api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
       canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
@@ -230,7 +248,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       canViewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
       canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
       canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
-      canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+      canViewWorkOrders || canViewInstallations
+        ? api.get<WorkOrder[]>('/work-orders', { params: { scope } })
+        : Promise.resolve({ data: [] as WorkOrder[] }),
     ]);
     const summaryData = settledData(summaryResult, null as Summary | null, errors);
     const companyOptions = isAdmin
@@ -240,6 +260,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     setSummary(summaryData);
     setCompanies(companyOptions.length > 0 ? companyOptions : summaryData?.empresas ?? []);
     setProspects(settledData(prospectsResult, [] as Prospect[], errors));
+    setPendingActivationProspects(settledData(pendingActivationProspectsResult, [] as Prospect[], errors));
     setPlans(settledData(plansResult, [] as Plan[], errors));
     setCustomers(settledData(customersResult, [] as Customer[], errors));
     setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
@@ -375,14 +396,27 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel
               prospects={prospects}
+              pendingActivationProspects={pendingActivationProspects}
               workOrders={workOrders}
+              inventory={inventory}
+              canComplete={permissions.installEquipment}
               focusedProspectId={focusedInstallationProspectId}
               onFocusConsumed={() => setFocusedInstallationProspectId(null)}
               onChanged={() => void loadData()}
             />
           )}
           {activeTab === 'customers' && canManageCustomers && (
-            <CustomersPanel customers={customers} plans={plans} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
+            <CustomersPanel
+              customers={customers}
+              plans={plans}
+              scope={scope}
+              permissions={permissions}
+              onManageInstallation={(idProspecto) => {
+                setFocusedInstallationProspectId(idProspecto);
+                setActiveTab('installations');
+              }}
+              onChanged={() => void loadData()}
+            />
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
@@ -422,7 +456,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
           )}
           {activeTab === 'users' && permissions.viewUsers && (
-            <UsersPanel users={users} roles={roles} companies={companies} onUpdated={() => void loadData()} />
+            <UsersPanel users={users} roles={roles} companies={companies} currentUserId={user.idUsuario} onUpdated={() => void loadData()} />
           )}
           {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
         </section>

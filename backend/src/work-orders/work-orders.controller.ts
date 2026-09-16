@@ -30,6 +30,15 @@ export class WorkOrdersController {
     return this.workOrdersService.completeInstallation(id, dto, user);
   }
 
+  @Patch(':id/cancel-installation')
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  cancelInstallation(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.workOrdersService.cancelInstallation(id, user);
+  }
+
   @Patch(':id/complete-repair')
   @Roles(...ACCESS_ROLES.UPDATE_TICKET_STATUS)
   completeRepair(

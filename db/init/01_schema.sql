@@ -70,7 +70,7 @@ CREATE TABLE plan (
     id_plan                        SERIAL         PRIMARY KEY,
     id_empresa                     INTEGER       ,
     nombre_comercial               VARCHAR(100)   NOT NULL,
-    tipo_plan                      VARCHAR(20)    NOT NULL,
+    tipo_plan                      VARCHAR(40)    NOT NULL,
     tipo_cliente                   VARCHAR(20)    NOT NULL,
     velocidad_mbps                 INTEGER       ,
     precio_mensual                 NUMERIC(10,2)  NOT NULL,
