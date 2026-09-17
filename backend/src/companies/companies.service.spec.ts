@@ -12,13 +12,13 @@ const commercial: AuthUser = {
 };
 
 describe('CompaniesService', () => {
-  it('uses the same active prospect and active customer definitions in the summary', async () => {
+  it('uses the active prospect, pending activation, and active customer definitions in the summary', async () => {
     const prisma = {
       cliente: {
         count: jest.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(15),
       },
       prospecto: {
-        count: jest.fn().mockResolvedValue(1),
+        count: jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(3),
         groupBy: jest.fn().mockResolvedValue([]),
       },
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1, nombre: 'FiNet Limitada' }]) },
@@ -38,17 +38,32 @@ describe('CompaniesService', () => {
       categoriaFalla: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new CompaniesService(prisma as unknown as PrismaService);
+    const signedContractStates = ['Firmado', 'Activo', 'Suspendido', 'Moroso'];
 
     const result = await service.summary(commercial, 'consolidado');
 
     expect(result.scope).toBe('1');
-    expect(result.metricas).toEqual(expect.objectContaining({ clientes: 15, prospectos: 1 }));
-    expect(prisma.prospecto.count).toHaveBeenCalledWith({
+    expect(result.metricas).toEqual(expect.objectContaining({
+      clientes: 15,
+      prospectos: 1,
+      pendientesActivacion: 3,
+    }));
+    expect(prisma.prospecto.count).toHaveBeenNthCalledWith(1, {
+      where: {
+        AND: [
+          { idEmpresa: 1 },
+          { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          { idCliente: null },
+          { contratos: { none: { estado: { in: signedContractStates } } } },
+        ],
+      },
+    });
+    expect(prisma.prospecto.count).toHaveBeenNthCalledWith(2, {
       where: {
         AND: [
           { idEmpresa: 1 },
           { idCliente: null },
-          { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          { contratos: { some: { estado: { in: signedContractStates } } } },
         ],
       },
     });
@@ -57,8 +72,9 @@ describe('CompaniesService', () => {
         where: {
           AND: [
             { idEmpresa: 1 },
-            { idCliente: null },
             { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+            { idCliente: null },
+            { contratos: { none: { estado: { in: signedContractStates } } } },
           ],
         },
       }),
@@ -72,7 +88,7 @@ describe('CompaniesService', () => {
               { contratos: { some: { idEmpresa: 1 } } },
             ],
           },
-          { estado: 'Activo' },
+          { servicios: { some: { estadoOperativo: 'Activo' } } },
         ],
       },
     });

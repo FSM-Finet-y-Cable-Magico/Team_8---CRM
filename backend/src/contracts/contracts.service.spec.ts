@@ -55,60 +55,111 @@ describe('ContractsService', () => {
     expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
   });
 
-  it('confirma la firma manual y prepara el servicio pendiente de instalación', async () => {
+  it('confirma la firma manual y deja la contratación pendiente de activación sin crear cliente ni servicio', async () => {
     const contract = {
       idContrato: 30,
-      idCliente: 10,
+      idCliente: null,
+      idProspecto: 22,
       idEmpresa: 1,
       estado: 'Pendiente firma contrato',
-      cliente: { idCliente: 10, direcciones: [{ idDireccion: 7, direccionCompleta: 'Av. Siempre Viva 405' }] },
+      direccionInstalacion: 'Av. Siempre Viva 405',
+      cliente: null,
+      prospecto: { idProspecto: 22, direccion: 'Av. Siempre Viva 405' },
       plan: { idPlan: 7, tipoPlan: 'Internet' },
       zonaPago: null,
       servicios: [],
     };
-    const updatedContract = { ...contract, estado: 'Firmado', fechaFirmaManual: new Date('2026-08-25') };
+    const signedContract = { ...contract, estado: 'Firmado', fechaFirmaManual: new Date('2026-08-25') };
+    const transaction = {
+      contrato: {
+        update: jest.fn().mockResolvedValue(signedContract),
+      },
+      prospecto: {
+        update: jest.fn().mockResolvedValue({ idProspecto: 22, estadoPipeline: 'Pendiente activacion' }),
+      },
+    };
     const prisma = {
       contrato: {
-        findUnique: jest.fn().mockResolvedValue(contract),
-        update: jest.fn().mockResolvedValue(updatedContract),
+        findUnique: jest.fn().mockResolvedValueOnce(contract).mockResolvedValueOnce(signedContract),
       },
-      cliente: {
-        findUnique: jest.fn().mockResolvedValue({
-          idCliente: 10,
-          estado: 'Pendiente firma contrato',
-          contratos: [{ estado: 'Firmado' }],
-          servicios: [],
-        }),
-        update: jest.fn().mockResolvedValue({ idCliente: 10, estado: 'Pendiente Instalacion' }),
-      },
+      $transaction: jest.fn().mockImplementation(
+        async (callback: (tx: typeof transaction) => unknown) => callback(transaction),
+      ),
+      cliente: { create: jest.fn(), update: jest.fn() },
+      servicioContratado: { create: jest.fn() },
+      ordenTrabajo: { create: jest.fn() },
+      direccionServicio: { create: jest.fn() },
     };
-    const audit = { record: jest.fn() };
-    const servicesService = {
-      ensureInstallationServiceForContract: jest.fn().mockResolvedValue({
-        idServicio: 55,
-        idContrato: 30,
-        estadoOperativo: 'Pendiente Instalacion',
-      }),
-    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const servicesService = { ensureInstallationServiceForContract: jest.fn() };
     const service = new ContractsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       servicesService as never,
     );
 
-    await service.confirmManualSignature(30, { observacion: 'Firma corroborada en oficina' }, comercial);
+    const result = await service.confirmManualSignature(30, { observacion: 'Firma corroborada en oficina' }, comercial);
 
-    expect(prisma.contrato.update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result).toBe(signedContract);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.contrato.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { idContrato: 30 },
       data: expect.objectContaining({
         estado: 'Firmado',
         idUsuarioFirmaManual: comercial.idUsuario,
+        fechaFirmaManual: expect.any(Date),
       }),
     }));
-    expect(prisma.cliente.update).toHaveBeenCalledWith({
-      where: { idCliente: 10 },
-      data: { estado: 'Pendiente Instalacion' },
+    expect(transaction.prospecto.update).toHaveBeenCalledWith({
+      where: { idProspecto: 22 },
+      data: { estadoPipeline: 'Pendiente activacion' },
     });
-    expect(servicesService.ensureInstallationServiceForContract).toHaveBeenCalledWith(30, comercial);
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL' }));
+    expect(prisma.cliente.create).not.toHaveBeenCalled();
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
+    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(prisma.direccionServicio.create).not.toHaveBeenCalled();
+    expect(servicesService.ensureInstallationServiceForContract).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL',
+      valorNuevo: expect.objectContaining({
+        idProspecto: 22,
+        estadoActivacion: 'Pendiente Instalacion',
+      }),
+    }));
+  });
+
+  it('mantiene la firma idempotente cuando el contrato ya está firmado', async () => {
+    const signedContract = {
+      idContrato: 30,
+      idCliente: null,
+      idProspecto: 22,
+      idEmpresa: 1,
+      estado: 'Firmado',
+      direccionInstalacion: 'Av. Siempre Viva 405',
+      cliente: null,
+      prospecto: { idProspecto: 22, direccion: 'Av. Siempre Viva 405' },
+      plan: { idPlan: 7, tipoPlan: 'Internet' },
+      zonaPago: null,
+      servicios: [],
+    };
+    const prisma = {
+      contrato: { findUnique: jest.fn().mockResolvedValue(signedContract) },
+      $transaction: jest.fn(),
+    };
+    const audit = { record: jest.fn() };
+    const servicesService = { ensureInstallationServiceForContract: jest.fn() };
+    const service = new ContractsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      servicesService as never,
+    );
+
+    const result = await service.confirmManualSignature(30, {}, comercial);
+
+    expect(result).toBe(signedContract);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(servicesService.ensureInstallationServiceForContract).not.toHaveBeenCalled();
   });
 });

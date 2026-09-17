@@ -104,7 +104,7 @@ describe('ProspectsService', () => {
     expect(prisma.prospecto.create).toHaveBeenCalled();
   });
 
-  it('lista solo prospectos activos no convertidos', async () => {
+  it('lista prospectos activos hasta que exista un contrato firmado', async () => {
     const prisma = {
       prospecto: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -124,6 +124,7 @@ describe('ProspectsService', () => {
           AND: expect.arrayContaining([
             { idCliente: null },
             { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+            { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
           ]),
         }),
       }),
@@ -216,7 +217,7 @@ describe('ProspectsService', () => {
 
     await expect(service.generateQuote(13, { planId: 10 }, admin)).rejects.toThrow('inactivo');
   });
-  it('confirma contratacion manual y convierte el prospecto en cliente pendiente de firma sin crear servicio ni OT', async () => {
+  it('registra contrato pendiente de firma sin crear cliente, servicio ni OT', async () => {
     const prospect = {
       idProspecto: 20,
       idEmpresa: 1,
@@ -231,42 +232,27 @@ describe('ProspectsService', () => {
       fechaCreacion: new Date('2026-06-01T00:00:00.000Z'),
       origenContacto: 'Formulario web',
     };
-    const createdCustomer = {
-      idCliente: 5,
-      idEmpresa: 1,
-      rut: '21600781-6',
-      nombreCompleto: 'Xiao Zhong',
-      email: 'xiao@example.com',
-      telefono: '+56940618332',
-      estado: 'Pendiente firma contrato',
-      origenContacto: 'Formulario web',
-      importadoMasivo: false,
-    };
     const createdContract = {
       idContrato: 30,
-      idCliente: 5,
+      idCliente: null,
+      idProspecto: 20,
       idPlan: 8,
       idEmpresa: 1,
       estado: 'Pendiente firma contrato',
+      direccionInstalacion: 'Claudio Gay 2547, Santiago',
     };
     const transaction = {
-      cliente: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue(createdCustomer),
-        update: jest.fn(),
-      },
       contrato: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(createdContract),
-        update: jest.fn(),
-      },
-      direccionServicio: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ idDireccion: 12 }),
       },
       prospecto: {
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
       },
+      cliente: { create: jest.fn() },
+      servicioContratado: { create: jest.fn() },
+      ordenTrabajo: { create: jest.fn() },
+      direccionServicio: { create: jest.fn() },
     };
     const prisma = {
       prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
@@ -284,7 +270,7 @@ describe('ProspectsService', () => {
         findFirst: jest.fn().mockResolvedValue({ idCotizacion: 99, idPlan: 8, factibilidadVerificada: true }),
       },
       $transaction: jest.fn().mockImplementation(
-        (callback: (tx: typeof transaction) => unknown) => callback(transaction),
+        async (callback: (tx: typeof transaction) => unknown) => callback(transaction),
       ),
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -303,40 +289,43 @@ describe('ProspectsService', () => {
       admin,
     );
 
-    expect(result.cliente.estado).toBe('Pendiente firma contrato');
-    expect(result.contrato).toBe(createdContract);
+    expect(result).toEqual(expect.objectContaining({
+      contrato: createdContract,
+      prospecto: expect.objectContaining({
+        idProspecto: 20,
+        idCliente: null,
+        estadoPipeline: 'Pendiente firma',
+      }),
+      direccionInstalacion: 'Claudio Gay 2547, Santiago',
+    }));
     expect(transaction.contrato.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          idCliente: null,
+          idProspecto: 20,
+          idPlan: 8,
           estado: 'Pendiente firma contrato',
-          diaVencimiento: 1,
-          proveedorContrato: undefined,
-          folioContratoExterno: undefined,
+          direccionInstalacion: 'Claudio Gay 2547, Santiago',
         }),
       }),
     );
-    expect(transaction.direccionServicio.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          idCliente: 5,
-          direccionCompleta: 'Claudio Gay 2547, Santiago',
-          esPrincipal: true,
-        }),
+    expect(transaction.prospecto.update).toHaveBeenCalledWith({
+      where: { idProspecto: 20 },
+      data: { estadoPipeline: 'Pendiente firma' },
+      include: { empresa: true },
+    });
+    expect(transaction.cliente.create).not.toHaveBeenCalled();
+    expect(transaction.servicioContratado.create).not.toHaveBeenCalled();
+    expect(transaction.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(transaction.direccionServicio.create).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'GENERAR_CONTRATO_PROSPECTO',
+      valorNuevo: expect.objectContaining({
+        idProspecto: 20,
+        estadoContrato: 'Pendiente firma contrato',
+        direccionInstalacion: 'Claudio Gay 2547, Santiago',
       }),
-    );
-    expect(transaction).not.toHaveProperty('servicioContratado');
-    expect(transaction.prospecto.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { idProspecto: 20 },
-        data: expect.objectContaining({
-          idCliente: 5,
-          estadoPipeline: 'Contrato externo registrado',
-        }),
-      }),
-    );
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ accion: 'CONFIRMAR_CONTRATACION_MANUAL' }),
-    );
+    }));
   });
 
   it('rechaza confirmar contratacion si el prospecto no tiene cotizacion factible del plan', async () => {
