@@ -592,20 +592,12 @@ export class WorkOrdersService {
       throw new BadRequestException('El número de serie no corresponde al equipo seleccionado');
     }
 
-    if (equipment.idEmpresa && order.idEmpresa && equipment.idEmpresa !== order.idEmpresa) {
+    if (!equipment.idEmpresa || !order.idEmpresa || equipment.idEmpresa !== order.idEmpresa) {
       throw new BadRequestException('El equipo no pertenece a la empresa de la orden');
     }
 
-    if (['Bloqueado', 'Baja Definitiva'].includes(equipment.estado)) {
-      throw new BadRequestException('Un equipo bloqueado o dado de baja no puede instalarse');
-    }
-
-    if (
-      equipment.idServicio
-      && equipment.idServicio !== installationService?.idServicio
-      && equipment.estado === 'Instalado'
-    ) {
-      throw new BadRequestException('El equipo ya se encuentra instalado en otro servicio');
+    if (equipment.estado !== 'Disponible' || equipment.idServicio || equipment.idClienteInstalado) {
+      throw new BadRequestException('El equipo seleccionado no está disponible para instalar');
     }
 
     return equipment;

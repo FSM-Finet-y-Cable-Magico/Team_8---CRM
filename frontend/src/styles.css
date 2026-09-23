@@ -2036,11 +2036,7 @@ input[readonly] {
 }
 
 .company-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #29a67c;
-  box-shadow: 0 0 0 3px rgba(41, 166, 124, 0.1);
+  display: none;
 }
 
 .profile-menu {

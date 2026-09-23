@@ -299,6 +299,24 @@ describe('WorkOrdersService', () => {
     expect(tx.historialEstadoEquipo.create).toHaveBeenCalled();
   });
 
+  it('rechaza un equipo ocupado aunque se envíe manualmente al completar la instalación', async () => {
+    const prisma = {
+      ordenTrabajo: { findUnique: jest.fn().mockResolvedValue({ idOt: 20, idEmpresa: 1, idCliente: 10, idServicio: 55, tipoOt: 'Instalacion', estado: 'Pendiente', observaciones: null }) },
+      prospecto: { findFirst: jest.fn().mockResolvedValue(null) },
+      servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 55, idCliente: 10, idEmpresa: 1, idContrato: 30, datosTecnicos: null }) },
+      unidadEquipo: { findUnique: jest.fn().mockResolvedValue({ idUnidad: 9, idEmpresa: 1, idServicio: 88, idClienteInstalado: 20, estado: 'Instalado', numeroSerie: 'ONT-OCUPADA' }) },
+    };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(service.completeInstallation(20, { idUnidad: 9 }, terreno)).rejects.toThrow(
+      'no está disponible para instalar',
+    );
+    expect((prisma as { $transaction?: jest.Mock }).$transaction).toBeUndefined();
+  });
+
   it('convierte el prospecto firmado en cliente y servicio al completar la instalación', async () => {
     const prospect = {
       idProspecto: 42,

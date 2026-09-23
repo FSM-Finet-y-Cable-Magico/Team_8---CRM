@@ -51,7 +51,10 @@ export function InstallationCompletionForm({
   }, [order.idOt]);
 
   const availableEquipment = inventory.filter((unit) =>
-    ['disponible', 'en bodega'].includes(normalizedEquipmentState(unit.estado)),
+    normalizedEquipmentState(unit.estado) === 'disponible'
+    && unit.idEmpresa === order.idEmpresa
+    && unit.idServicio === null
+    && unit.idClienteInstalado === null,
   );
 
   function selectEquipment(value: string) {
