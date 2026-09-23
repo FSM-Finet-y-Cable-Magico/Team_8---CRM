@@ -5,6 +5,7 @@ import { buildInstallOrderObservations } from '../common/install-order-metadata'
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { ProspectsService } from './prospects.service';
+import { CoverageService } from '../coverage/coverage.service';
 
 describe('ProspectsService', () => {
   const admin: AuthUser = {
@@ -40,6 +41,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.updatePipeline(10, { estadoPipeline: 'Servicio Activo' }, admin);
@@ -83,6 +85,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.create(
@@ -114,6 +117,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await service.list(admin, 'consolidado');
@@ -146,6 +150,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('Factible');
@@ -184,6 +189,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn().mockResolvedValue({ status: 'skipped' }) } as unknown as MailService,
+      {} as CoverageService,
     );
     jest.spyOn(service as any, 'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('pdf'));
 
@@ -212,6 +218,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await expect(service.generateQuote(13, { planId: 10 }, admin)).rejects.toThrow('inactivo');
@@ -282,6 +289,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.contractPlan(
@@ -343,6 +351,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await expect(
@@ -372,6 +381,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.recordLoss(
@@ -406,6 +416,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await expect(
@@ -458,6 +469,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.installAvailability(
@@ -547,6 +559,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     const result = await service.createInstallOrder(
@@ -634,6 +647,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageService,
     );
 
     await service.createInstallOrder(22, {

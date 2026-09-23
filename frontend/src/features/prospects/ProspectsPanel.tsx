@@ -4,6 +4,7 @@ import { emptyProspectForm, normalizeRutInput, validateProspectForm, type Prospe
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
+import { CoveragePicker, CoverageLocation } from '../coverage';
 
 export function ProspectsPanel({
   prospects,
@@ -22,6 +23,9 @@ export function ProspectsPanel({
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const [location, setLocation] = useState<CoverageLocation | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { setLocation(null); }, [writeCompanyId, form.direccion]);
 
   const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const pageSize = 20;
@@ -31,6 +35,7 @@ export function ProspectsPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitting) return;
     setStatus('');
     const validationMessage = validateProspectForm(form);
 
@@ -39,8 +44,9 @@ export function ProspectsPanel({
       return;
     }
 
+    setSubmitting(true);
     try {
-      await api.post('/prospects', {
+      const { data } = await api.post('/prospects', {
         rut: normalizeRutInput(form.rut),
         nombreCompleto: form.nombreCompleto.trim(),
         email: form.email.trim().toLowerCase() || undefined,
@@ -48,12 +54,16 @@ export function ProspectsPanel({
         direccion: form.direccion.trim(),
         origenContacto: form.origenContacto.trim(),
         idEmpresa: writeCompanyId,
+        ubicacion: location ?? undefined,
       });
       setForm(emptyProspectForm);
-      setStatus('Prospecto creado');
+      setLocation(null);
+      setStatus(data.cobertura ? `Prospecto creado. Cobertura: ${data.cobertura.estado}. ${data.cobertura.motivo}` : 'Prospecto creado. Factibilidad pendiente de revisión.');
       onCreated();
     } catch (err) {
       setStatus(apiErrorMessage(err));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -125,7 +135,10 @@ export function ProspectsPanel({
             />
           </label>
           {status && <p className="inline-status">{status}</p>}
-          <button>Registrar prospecto</button>
+          <details><summary>Confirmar ubicación y consultar cobertura</summary>
+            <CoveragePicker idEmpresa={writeCompanyId} direccion={form.direccion} value={location} onChange={setLocation} disabled={submitting} />
+          </details>
+          <button disabled={submitting}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>
       )}
 

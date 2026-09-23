@@ -3,6 +3,7 @@ import { api, apiErrorMessage, type BillingOverview, type PaymentZone, type Plan
 import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
+import { CoveragePicker, CoverageLocation } from '../coverage';
 export function BillingPanel({
   overview,
   plans,
@@ -19,6 +20,9 @@ export function BillingPanel({
   onChanged: () => void;
 }) {
   const [status, setStatus] = useState('');
+  const [coverageAddress, setCoverageAddress] = useState('');
+  const [coverageLocation, setCoverageLocation] = useState<CoverageLocation | null>(null);
+  useEffect(() => { setCoverageLocation(null); }, [writeCompanyId, coverageAddress]);
   const [paymentTarget, setPaymentTarget] = useState<BillingOverview['morosos'][number] | null>(null);
   const [paymentForm, setPaymentForm] = useState({ monto: '', pasarela: 'Transferencia', codigoTransaccion: '' });
   const [zones, setZones] = useState<PaymentZone[]>([]);
@@ -317,6 +321,11 @@ export function BillingPanel({
           <h2>Zonas de pago</h2>
           <p>Configura vencimientos sugeridos y precios manuales por zona.</p>
         </div>
+        {scope !== 'consolidado' && <details><summary>Consultar cobertura de una dirección</summary>
+          <label>Dirección a consultar<input value={coverageAddress} onChange={event => setCoverageAddress(event.target.value)} placeholder="Calle, número y comuna" maxLength={200} /></label>
+          <CoveragePicker key={writeCompanyId} idEmpresa={writeCompanyId} direccion={coverageAddress} value={coverageLocation} onChange={setCoverageLocation} />
+          <p>La cobertura técnica no asigna una zona de pago ni modifica sus precios.</p>
+        </details>}
         {permissions.managePaymentZones && (
           <div className="workflow-grid">
             <form className="stack" onSubmit={createZone}>

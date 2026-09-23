@@ -1,5 +1,14 @@
 # Integraciones pendientes
 
+## TomoDAT — primera integración de cobertura
+
+Consulta de factibilidad por coordenadas y mapa en prospectos y zonas de pago,
+implementados según la API pública de la instancia chilena. Pendiente configurar
+el token de FiNet y validar respuestas reales. La geocodificación de direcciones y
+el mapeo de zonas/colores con planes y perfiles siguen pendientes.
+
+Ver [alcance, configuración y análisis del CRM](tomodat-zonas-incremento-3.md).
+
 ## WhatsApp Business
 
 WhatsApp Business queda fuera de esta etapa hasta que FiNet/Cable Magico defina la cuenta oficial y el proveedor tecnico.

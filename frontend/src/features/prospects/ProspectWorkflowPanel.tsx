@@ -3,6 +3,7 @@ import { FileClock, HandCoins, TrendingDown, UserRoundPlus, Wrench } from 'lucid
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
+import { CoveragePicker, CoverageLocation } from '../coverage';
 
 const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
 const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
@@ -35,9 +36,12 @@ export function ProspectWorkflowPanel({
 
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
+  const [location, setLocation] = useState<CoverageLocation | null>(null);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   useEffect(() => {
     setFeasibilityResult('Factible');
+    setLocation(null);
     setQuotePlanId('');
     setContractPlanId('');
     setContractConfirmationDate(new Date().toISOString().slice(0, 10));
@@ -181,6 +185,23 @@ export function ProspectWorkflowPanel({
       </section>
 
       <div className="workflow-grid prospect-action-grid">
+        {(permissions.verifyFeasibility || permissions.createProspects) && prospect.empresa && (
+          <section className="prospect-action-card coverage-workspace">
+            <CoveragePicker key={prospect.idProspecto} idEmpresa={prospect.empresa.idEmpresa} direccion={prospect.direccion ?? ''} value={location} onChange={setLocation} disabled={isWorkflowLocked || isQuoted || checkingCoverage} />
+            <button type="button" disabled={!location || isWorkflowLocked || isQuoted || checkingCoverage} onClick={async () => {
+              if (!location || checkingCoverage) return;
+              setCheckingCoverage(true);
+              setStatus('');
+              try {
+                const { data } = await api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location);
+                setStatus(`${data.cobertura.estado}: ${data.cobertura.motivo}`);
+                setStatusIsError(data.cobertura.estado === 'Pendiente');
+                onChanged();
+              } catch (err) { setStatus(apiErrorMessage(err)); setStatusIsError(true); }
+              finally { setCheckingCoverage(false); }
+            }}>{checkingCoverage ? 'Verificando…' : 'Verificar y guardar con TomoDAT'}</button>
+          </section>
+        )}
         {permissions.verifyFeasibility && (
           <section className="prospect-action-card prospect-action-card-blue">
             <header className="prospect-action-header">
@@ -188,7 +209,7 @@ export function ProspectWorkflowPanel({
                 <Wrench size={19} strokeWidth={1.8} />
               </span>
               <div>
-                <h4>Factibilidad técnica</h4>
+                <h4>Revisión técnica manual</h4>
                 <p>Define si el prospecto puede avanzar a cotización.</p>
               </div>
             </header>
@@ -196,7 +217,7 @@ export function ProspectWorkflowPanel({
               Resultado
               <select
                 value={feasibilityResult}
-                disabled={isWorkflowLocked}
+                disabled={isWorkflowLocked || isQuoted || checkingCoverage}
                 onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}
               >
                 <option value="Factible">Factible</option>
@@ -205,7 +226,7 @@ export function ProspectWorkflowPanel({
             </label>
             <button
               type="button"
-              disabled={isWorkflowLocked}
+              disabled={isWorkflowLocked || isQuoted || checkingCoverage}
               onClick={() =>
                 void runAction(
                   () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),

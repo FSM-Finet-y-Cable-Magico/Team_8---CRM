@@ -29,6 +29,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change_me_in_local_env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       PORT: 3000
+      TOMODAT_API_URL: ${TOMODAT_API_URL:-https://cl2.tomodat.com/tomodat/api/}
+      TOMODAT_COMPANY_ID: ${TOMODAT_COMPANY_ID:-}
+      TOMODAT_API_TOKEN: ${TOMODAT_API_TOKEN:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}

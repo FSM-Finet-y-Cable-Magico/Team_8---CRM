@@ -263,6 +263,7 @@ datos locales:
 Documentacion relacionada:
 
 - Guia operativa: `docs/desarrollo-paso-a-paso.md`
+- Integración de cobertura TomoDAT (incremento 3): [configuración y alcance](docs/tomodat-zonas-incremento-3.md)
 - Estado del incremento: `docs/estado-primer-incremento.md`
 - Cobertura de casos de uso: `docs/casos-uso-primer-incremento.md`
 

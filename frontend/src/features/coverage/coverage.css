@@ -1,0 +1,15 @@
+.coverage-picker { display: grid; gap: 12px; padding: 16px; border: 1px solid #dce4ef; border-radius: 14px; background: #f8faff; min-width: 0; }
+.coverage-picker p { margin: 0; font-size: 13px; line-height: 1.5; }
+.coverage-heading, .coverage-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.coverage-heading a, .coverage-note { font-size: 12px; color: #53647e; }
+.coverage-map { height: 290px; width: 100%; border-radius: 10px; z-index: 0; }
+.coverage-map .leaflet-control-zoom a { color: #334155; text-decoration: none; }
+.coverage-map .leaflet-control-attribution { font-size: 10px; }
+.coverage-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.coverage-coordinates input { width: 100%; min-width: 0; }
+.coverage-result { border-left: 3px solid #5477ac; padding: 4px 12px; }
+.coverage-result ul { margin: 8px 0; padding-left: 18px; font-size: 13px; }
+.coverage-result small { color: #64748b; }
+.coverage-picker summary { cursor: pointer; font-size: 13px; }
+.coverage-workspace { grid-column: 1 / -1; }
+@media (max-width: 520px) { .coverage-coordinates { grid-template-columns: 1fr; } }

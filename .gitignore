@@ -6,7 +6,9 @@ build/
 .env.*
 !.env.example
 !.env.railway.example
-coverage/
+/coverage/
+/backend/coverage/
+/frontend/coverage/
 *.log
 uploads/
 .DS_Store

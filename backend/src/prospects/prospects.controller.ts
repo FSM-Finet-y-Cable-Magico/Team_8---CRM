@@ -16,6 +16,7 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { ProspectsService } from './prospects.service';
+import { CoverageLocationDto } from '../coverage/coverage.dto';
 
 @Controller('prospects')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -123,6 +124,16 @@ export class ProspectsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.prospectsService.installAvailability(id, dto, user);
+  }
+
+  @Post(':id/feasibility/tomodat')
+  @Roles('Administrador', 'Comercial', 'Soporte')
+  verifyTomodat(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CoverageLocationDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.prospectsService.verifyTomodat(id, dto, user);
   }
 
   @Get(':id/install-day-availability')

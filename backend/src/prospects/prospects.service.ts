@@ -22,6 +22,8 @@ import { InstallDayAvailabilityDto } from './dto/install-day-availability.dto';
 import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
+import { CoverageResult, CoverageService } from '../coverage/coverage.service';
+import { CoverageLocationDto } from '../coverage/coverage.dto';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
 const FEASIBLE_PIPELINE_STATUS = 'Factible';
@@ -54,6 +56,7 @@ export class ProspectsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
+    private readonly coverageService: CoverageService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -129,6 +132,9 @@ export class ProspectsService {
       throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
+    const cobertura = dto.ubicacion
+      ? await this.coverageService.check(idEmpresa, dto.ubicacion, currentUser)
+      : null;
     const prospect = await this.prisma.prospecto.create({
       data: {
         idEmpresa,
@@ -139,7 +145,8 @@ export class ProspectsService {
         telefono: dto.telefono.trim(),
         direccion: dto.direccion.trim(),
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
-        estadoPipeline: INITIAL_PIPELINE_STATUS,
+        estadoPipeline: cobertura && cobertura.estado !== 'Pendiente' ? cobertura.estado : INITIAL_PIPELINE_STATUS,
+        ...(cobertura?.estado === 'Factible' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         fechaCreacion: new Date(),
       },
       include: {
@@ -157,10 +164,11 @@ export class ProspectsService {
         estadoPipeline: prospect.estadoPipeline,
         idEmpresa: prospect.idEmpresa,
         origenContacto: prospect.origenContacto,
+        ...(cobertura ? { direccion: dto.direccion.trim(), cobertura } : {}),
       },
     });
 
-    return prospect;
+    return { ...prospect, cobertura };
   }
 
   async updatePipeline(idProspecto: number, dto: UpdatePipelineDto, currentUser: AuthUser) {
@@ -195,7 +203,34 @@ export class ProspectsService {
   }
 
   async verifyFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser) {
+    return this.saveFeasibility(idProspecto, dto, currentUser);
+  }
+
+  async verifyTomodat(idProspecto: number, location: CoverageLocationDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
+    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, location, currentUser);
+    if (cobertura.estado === 'Pendiente') {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'CONSULTAR_COBERTURA_PENDIENTE',
+        entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
+        valorNuevo: { direccion: prospect.direccion, cobertura },
+      });
+      return { ...prospect, cobertura };
+    }
+    const updated = await this.saveFeasibility(idProspecto, { resultado: cobertura.estado }, currentUser, cobertura);
+    return { ...updated, cobertura };
+  }
+
+  private assertFeasibilityStage(status: string | null) {
+    if (!['Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible'].includes(status ?? INITIAL_PIPELINE_STATUS)) {
+      throw new BadRequestException('La factibilidad solo puede cambiarse antes de cotizar o contratar');
+    }
+  }
+
+  private async saveFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser, cobertura?: CoverageResult) {
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
 
     if (!prospect.direccion?.trim()) {
       throw new BadRequestException('La direccion del prospecto debe estar completa');
@@ -205,23 +240,19 @@ export class ProspectsService {
     const nextStatus = dto.resultado === 'Factible' ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS;
     const lossReason = prospect.motivoPerdida;
 
-    const updated = await this.prisma.prospecto.update({
-      where: { idProspecto },
-      data: {
-        estadoPipeline: nextStatus,
-        motivoPerdida: lossReason,
-      },
-      include: { empresa: true },
-    });
-
-    if (dto.resultado === 'Factible') {
-      await this.prisma.cotizacion.create({
+    const updated = await this.prisma.$transaction(async tx => {
+      // A negative recheck invalidates previous positive checks used by installation scheduling.
+      await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      return tx.prospecto.update({
+        where: { idProspecto, estadoPipeline: prospect.estadoPipeline },
         data: {
-          idProspecto,
-          factibilidadVerificada: true,
+          estadoPipeline: nextStatus,
+          motivoPerdida: lossReason,
+          ...(dto.resultado === 'Factible' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         },
+        include: { empresa: true },
       });
-    }
+    });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -233,6 +264,8 @@ export class ProspectsService {
         resultado: dto.resultado,
         observaciones: dto.observaciones,
         estadoPipeline: nextStatus,
+        origen: cobertura ? 'TomoDAT' : 'Manual',
+        ...(cobertura ? { direccion: prospect.direccion, cobertura } : {}),
       },
     });
 
