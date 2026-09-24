@@ -220,4 +220,46 @@ describe('ServicesService', () => {
       expect.objectContaining({ horaVisita: '11:00', disponible: false, motivo: 'Horario ocupado' }),
     ]));
   });
+
+  it('rechaza crear manualmente un servicio Activo sin instalacion completada', async () => {
+    const prisma = {
+      cliente: {
+        findUnique: jest.fn().mockResolvedValue({
+          idCliente: 10,
+          idEmpresa: 1,
+          contratos: [{ idEmpresa: 1 }],
+        }),
+      },
+      contrato: {
+        findUnique: jest.fn().mockResolvedValue({
+          idContrato: 30,
+          idCliente: 10,
+          idEmpresa: 1,
+          estado: 'Firmado',
+        }),
+      },
+      direccionServicio: {
+        findFirst: jest.fn().mockResolvedValue({ idDireccion: 7 }),
+        findUnique: jest.fn().mockResolvedValue({ idDireccion: 7, idCliente: 10 }),
+      },
+      servicioContratado: { create: jest.fn() },
+    };
+    const audit = { record: jest.fn() };
+    const service = new ServicesService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(service.create({
+      idCliente: 10,
+      idContrato: 30,
+      tipoServicio: 'Internet',
+      estadoOperativo: 'Activo',
+    }, comercial)).rejects.toThrow('no puede quedar Activo sin una instalacion completada');
+
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+    }));
+  });
 });

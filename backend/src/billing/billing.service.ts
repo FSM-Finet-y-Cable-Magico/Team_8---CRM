@@ -6,6 +6,7 @@ import { AuthUser } from '../common/auth.types';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { canActivateService } from '../services/service-activation.policy';
 import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
 import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -13,6 +14,7 @@ import { SendBillingNotificationDto } from './dto/send-billing-notification.dto'
 import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 
 const CLOSED_INVOICE_STATES = ['Pagada', 'Anulada'];
+const CRM_ACTIVATION_FLOW_START = new Date('2026-09-12T15:00:00.000Z');
 
 @Injectable()
 export class BillingService {
@@ -186,7 +188,7 @@ export class BillingService {
       });
 
       await tx.servicioContratado.updateMany({
-        where: { idContrato },
+        where: { idContrato, estadoOperativo: 'Activo' },
         data: { estadoOperativo: 'Suspendido' },
       });
 
@@ -217,6 +219,19 @@ export class BillingService {
         contrato: {
           include: {
             cliente: true,
+            servicios: {
+              select: {
+                idServicio: true,
+                estadoOperativo: true,
+                datosTecnicos: true,
+                fechaCreacion: true,
+                ordenes: {
+                  where: { tipoOt: 'Instalacion', estado: 'Completada' },
+                  select: { idOt: true },
+                  take: 1,
+                },
+              },
+            },
           },
         },
       },
@@ -231,6 +246,19 @@ export class BillingService {
     if (CLOSED_INVOICE_STATES.includes(invoice.estado)) {
       throw new BadRequestException('La factura ya se encuentra cerrada y no acepta pagos adicionales');
     }
+
+    const reactivatableServiceIds = invoice.contrato.servicios
+      .filter((service) => canActivateService({
+        intent: 'COMMERCIAL_PAYMENT_REACTIVATION',
+        targetStatus: 'Activo',
+        currentStatus: service.estadoOperativo,
+        contractStatus: invoice.contrato?.estado,
+        installationCompleted: service.ordenes.length > 0,
+        historicalImport: invoice.contrato?.cliente?.importadoMasivo === true
+          || this.isHistoricalService(service.datosTecnicos, service.fechaCreacion),
+        serviceExists: true,
+      }))
+      .map((service) => service.idServicio);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.pago.create({
@@ -247,6 +275,7 @@ export class BillingService {
       const totalPaid = this.paidAmount(invoice.pagos) + dto.monto;
       const invoiceAmount = Number(invoice.monto ?? 0);
       const paidInFull = invoiceAmount > 0 && totalPaid >= invoiceAmount;
+      let reactivatedServiceIds: number[] = [];
 
       if (paidInFull) {
         await tx.factura.update({
@@ -263,7 +292,7 @@ export class BillingService {
           },
         });
 
-        if (!pendingOverdue) {
+        if (!pendingOverdue && reactivatableServiceIds.length > 0) {
           await tx.contrato.update({
             where: { idContrato: invoice.contrato?.idContrato ?? 0 },
             data: { estado: 'Activo', fechaSuspension: null },
@@ -273,18 +302,26 @@ export class BillingService {
             data: { estado: 'Activo' },
           });
           await tx.servicioContratado.updateMany({
-            where: { idContrato: invoice.contrato?.idContrato },
+            where: {
+              idServicio: { in: reactivatableServiceIds },
+              estadoOperativo: 'Suspendido',
+            },
             data: { estadoOperativo: 'Activo' },
           });
+          reactivatedServiceIds = [...reactivatableServiceIds];
         }
       }
 
-      return { payment, paidInFull };
+      return {
+        payment,
+        paidInFull,
+        reactivatedServiceIds,
+      };
     });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_PAGO_SOLO_LECTURA',
+      accion: 'REGISTRAR_PAGO',
       entidadAfectada: 'pago',
       idEntidadAfectada: result.payment.idPago,
       valorNuevo: {
@@ -292,10 +329,41 @@ export class BillingService {
         idCliente: invoice.contrato.cliente.idCliente,
         monto: dto.monto,
         pagadaCompleta: result.paidInFull,
+        serviciosReactivados: result.reactivatedServiceIds,
       },
     });
 
+    if (result.reactivatedServiceIds.length > 0) {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'REACTIVAR_SERVICIO_POR_PAGO',
+        entidadAfectada: 'contrato',
+        idEntidadAfectada: invoice.contrato.idContrato,
+        valorAnterior: {
+          estadoContrato: invoice.contrato.estado,
+          estadoServicios: 'Suspendido',
+        },
+        valorNuevo: {
+          estadoContrato: 'Activo',
+          estadoServicios: 'Activo',
+          serviciosReactivados: result.reactivatedServiceIds,
+        },
+      });
+    }
+
     return result;
+  }
+
+  private isHistoricalService(value: Prisma.JsonValue | null, createdAt: Date) {
+    const origin = value && typeof value === 'object' && !Array.isArray(value)
+      ? String((value as Record<string, unknown>).origen ?? '')
+      .trim()
+      .toLocaleLowerCase('es-CL')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      : '';
+
+    return origin.includes('histor') || createdAt < CRM_ACTIVATION_FLOW_START;
   }
 
   zones(currentUser: AuthUser, scope = 'consolidado') {

@@ -19,6 +19,7 @@ import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
 import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { canActivateService } from './service-activation.policy';
 
 const SERVICE_INCLUDE = {
   cliente: true,
@@ -105,6 +106,22 @@ export class ServicesService {
     const idDireccion = dto.idDireccion ?? await this.resolvePrimaryAddressId(dto.idCliente);
     await this.assertAddress(idDireccion, dto.idCliente);
     await this.assertPaymentZone(dto.idZonaPago, idEmpresa);
+
+    if (!canActivateService({
+      intent: 'MANUAL_SERVICE_CHANGE',
+      targetStatus: dto.estadoOperativo,
+      installationCompleted: false,
+    })) {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+        entidadAfectada: 'servicio_contratado',
+        valorNuevo: { idCliente: dto.idCliente, idContrato: dto.idContrato, estadoSolicitado: dto.estadoOperativo },
+      });
+      throw new BadRequestException(
+        'Un servicio nuevo no puede quedar Activo sin una instalacion completada',
+      );
+    }
 
     const created = await this.prisma.servicioContratado.create({
       data: {
@@ -224,6 +241,36 @@ export class ServicesService {
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    if (dto.estadoOperativo === 'Activo' && service.estadoOperativo !== 'Activo') {
+      const completedInstallation = await this.prisma.ordenTrabajo.findFirst({
+        where: {
+          idServicio,
+          tipoOt: 'Instalacion',
+          estado: 'Completada',
+        },
+        select: { idOt: true },
+      });
+
+      if (!canActivateService({
+        intent: 'MANUAL_SERVICE_CHANGE',
+        targetStatus: dto.estadoOperativo,
+        currentStatus: service.estadoOperativo,
+        installationCompleted: Boolean(completedInstallation),
+      })) {
+        await this.auditService.record({
+          idUsuario: currentUser.idUsuario,
+          accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+          entidadAfectada: 'servicio_contratado',
+          idEntidadAfectada: idServicio,
+          valorAnterior: { estadoOperativo: service.estadoOperativo },
+          valorNuevo: { estadoSolicitado: dto.estadoOperativo },
+        });
+        throw new BadRequestException(
+          'El servicio no puede activarse sin una instalacion completada asociada',
+        );
+      }
+    }
     const data: Prisma.ServicioContratadoUncheckedUpdateInput = {
       tipoServicio: dto.tipoServicio,
       estadoOperativo: dto.estadoOperativo,

@@ -1,5 +1,6 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ConflictException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import {
@@ -9,8 +10,10 @@ import {
 import { isAdministrator } from '../common/roles';
 import { serviceTypeFromPlan } from '../common/service-type';
 import { PrismaService } from '../prisma/prisma.service';
+import { canActivateService } from '../services/service-activation.policy';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
 import { CompleteRepairOrderDto } from './dto/complete-repair-order.dto';
+import { workOrderCompletionDecision } from './work-order-transition.policy';
 
 @Injectable()
 export class WorkOrdersService {
@@ -129,15 +132,21 @@ export class WorkOrdersService {
       throw new BadRequestException('La orden no corresponde a instalacion');
     }
 
-    if (order.estado === 'Completada') {
-      throw new BadRequestException('La orden de instalacion ya se encuentra completada');
+    await this.assertCanCompleteOrder(order, currentUser, 'complete-installation');
+
+    if (!canActivateService({
+      intent: 'INSTALLATION_COMPLETION',
+      targetStatus: 'Activo',
+      installationCompleted: true,
+    })) {
+      throw new BadRequestException('La instalacion no cumple la politica de activacion');
     }
 
     if (!order.idCliente && !order.idProspecto) {
       throw new BadRequestException('La orden no tiene prospecto ni cliente asociado');
     }
 
-    const installationService = order.idServicio
+    let installationService = order.idServicio
       ? await this.prisma.servicioContratado.findUnique({
         where: { idServicio: order.idServicio },
         select: {
@@ -168,10 +177,6 @@ export class WorkOrdersService {
         orderBy: { fechaCreacion: 'desc' },
       });
 
-    if (!prospect && !order.idServicio) {
-      throw new BadRequestException('No existe un prospecto o servicio asociado para completar la instalacion');
-    }
-
     if (prospect && !prospect.fechaCreacion) {
       throw new BadRequestException('No se puede completar la instalacion: falta la fecha de creacion del prospecto');
     }
@@ -180,6 +185,37 @@ export class WorkOrdersService {
 
     if (prospect?.fechaCreacion && prospect.fechaCreacion.getTime() > conversionDate.getTime()) {
       throw new BadRequestException('No se puede completar la instalacion: la fecha de creacion del prospecto es futura');
+    }
+
+    if (!installationService && order.idCliente) {
+      const legacyCandidates = await this.prisma.servicioContratado.findMany({
+        where: {
+          idCliente: order.idCliente,
+          idEmpresa: order.idEmpresa,
+          estadoOperativo: { in: ['Pendiente', 'Pendiente Instalacion', 'Instalacion Programada'] },
+        },
+        select: {
+          idServicio: true,
+          idCliente: true,
+          idEmpresa: true,
+          idContrato: true,
+          datosTecnicos: true,
+        },
+        orderBy: { idServicio: 'desc' },
+        take: 2,
+      });
+
+      if (legacyCandidates.length !== 1) {
+        throw new BadRequestException(
+          'La orden legacy debe corresponder a un unico servicio pendiente de instalacion',
+        );
+      }
+
+      [installationService] = legacyCandidates;
+    }
+
+    if (!prospect && !installationService) {
+      throw new BadRequestException('No existe un prospecto o servicio asociado para completar la instalacion');
     }
 
     const activationContract = !order.idCliente && prospect
@@ -230,6 +266,15 @@ export class WorkOrdersService {
     const completionObservations = preserveInstallOrderMetadata(order.observaciones, dto.observaciones);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.ordenTrabajo.updateMany({
+        where: { idOt, estado: order.estado },
+        data: { estado: order.estado },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException('La orden cambio de estado durante el cierre');
+      }
+
       let cliente;
       let updatedService = null;
       let idDireccion = order.idDireccion;
@@ -301,15 +346,6 @@ export class WorkOrdersService {
               estadoOperativo: 'Activo',
               datosTecnicos: this.mergeInstallationTechnicalData(installationService.datosTecnicos, dto),
             },
-          });
-        } else {
-          await tx.servicioContratado.updateMany({
-            where: {
-              idCliente: cliente.idCliente,
-              idEmpresa: order.idEmpresa,
-              estadoOperativo: { not: 'Baja' },
-            },
-            data: { estadoOperativo: 'Activo' },
           });
         }
       }
@@ -472,12 +508,18 @@ export class WorkOrdersService {
       throw new BadRequestException('La orden de instalacion debe cerrarse desde el flujo de instalacion');
     }
 
+    await this.assertCanCompleteOrder(order, currentUser, 'complete-repair');
+
     if (!order.idTicket) {
       throw new BadRequestException('La orden no tiene ticket asociado');
     }
 
-    if (order.estado === 'Completada') {
-      throw new BadRequestException('La orden de trabajo ya se encuentra completada');
+    if (dto.estadoFinalServicio === 'Activo' && !canActivateService({
+      intent: 'REPAIR_COMPLETION',
+      targetStatus: dto.estadoFinalServicio,
+      serviceExists: Boolean(order.idServicio),
+    })) {
+      throw new BadRequestException('La reparacion no tiene un servicio existente que pueda reactivar');
     }
 
     const ticket = await this.prisma.ticket.findUnique({ where: { idTicket: order.idTicket } });
@@ -489,6 +531,15 @@ export class WorkOrdersService {
     const completionNotes = dto.observaciones.trim();
     const completionObservations = `${order.observaciones ?? ''}\n\nCierre tecnico:\n${completionNotes}`.trim();
     const result = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.ordenTrabajo.updateMany({
+        where: { idOt, estado: order.estado },
+        data: { estado: order.estado },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException('La orden cambio de estado durante el cierre');
+      }
+
       const updatedOrder = await tx.ordenTrabajo.update({
         where: { idOt },
         data: {
@@ -508,12 +559,12 @@ export class WorkOrdersService {
         },
       });
 
-      if (order.idCliente && dto.estadoFinalServicio) {
-        await tx.cliente.update({
-          where: { idCliente: order.idCliente },
-          data: { estado: dto.estadoFinalServicio },
-        });
-      }
+      const updatedService = order.idServicio && dto.estadoFinalServicio
+        ? await tx.servicioContratado.update({
+            where: { idServicio: order.idServicio },
+            data: { estadoOperativo: dto.estadoFinalServicio },
+          })
+        : null;
 
       await tx.historialOt.create({
         data: {
@@ -526,7 +577,7 @@ export class WorkOrdersService {
         },
       });
 
-      return { order: updatedOrder, ticket: updatedTicket };
+      return { order: updatedOrder, ticket: updatedTicket, servicio: updatedService };
     });
 
     await this.auditService.record({
@@ -562,6 +613,37 @@ export class WorkOrdersService {
     }
 
     return order;
+  }
+
+  private async assertCanCompleteOrder(
+    order: { idOt: number; estado: string },
+    currentUser: AuthUser,
+    operation: 'complete-installation' | 'complete-repair',
+  ) {
+    const decision = workOrderCompletionDecision(order.estado);
+
+    if (decision.allowed) {
+      return;
+    }
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'RECHAZAR_CIERRE_OT_ESTADO_INVALIDO',
+      entidadAfectada: 'orden_trabajo',
+      idEntidadAfectada: order.idOt,
+      valorAnterior: { estado: order.estado },
+      valorNuevo: { operacion: operation, motivo: decision.reason },
+    });
+
+    if (decision.reason === 'ALREADY_COMPLETED') {
+      throw new ConflictException('La orden de trabajo ya se encuentra completada');
+    }
+
+    if (decision.reason === 'UNKNOWN_STATE') {
+      throw new BadRequestException(`El estado de la orden no es reconocido: ${order.estado}`);
+    }
+
+    throw new BadRequestException(`El estado ${order.estado} no permite completar la orden`);
   }
 
   private async resolveInstallationEquipment(
