@@ -7,8 +7,9 @@ Rama de trabajo: `feat/zonas-incremento-3`.
 
 Primera integración implementada contra el contrato público de TomoDAT: consulta de
 factibilidad por ubicación, mapa para confirmar el domicilio y registro del resultado
-en el flujo de prospectos. **La conexión con la cuenta real de FiNet queda pendiente
-de configurar y verificar con su token.** No se ha inferido cobertura desde la captura.
+en el flujo de prospectos. **La conexión real de FiNet se verificó en Docker el
+23-09-2026; sigue pendiente confirmar un caso positivo de factibilidad.** No se ha
+inferido cobertura desde la captura.
 
 La dirección escrita todavía no se convierte automáticamente en coordenadas. El
 usuario selecciona el punto en el mapa o ingresa latitud/longitud; entonces la
@@ -123,8 +124,8 @@ No se agregó un geocodificador ni se envían direcciones a un buscador externo.
 
 ## Próximos datos necesarios
 
-1. Token y empresa configurados para probar al menos una dirección viable y otra sin
-   viabilidad, contrastándolas con la cuenta de FiNet.
+1. Confirmar en TomoDAT una dirección viable y sus parámetros de atención/puertos;
+   el token y la empresa ya están configurados y responden desde Docker.
 2. Significado de los colores, categorías y cajas de la captura; confirmar si las
    zonas existen como polígonos, etiquetas o agrupaciones operativas.
 3. Relación entre zonas técnicas y `ZonaPago`, planes disponibles y precios.
@@ -153,3 +154,99 @@ omitida; compilación backend/frontend correcta. Lint sin errores, con 79 advert
 preexistentes de variables sin uso. Mapa revisado en navegador con una página aislada
 y respuestas simuladas: ubicación manual, consulta, marcadores y eliminación del
 resultado al quitar el punto. No se validó el flujo completo contra la base compartida.
+
+### Prueba real en Docker — 23-09-2026
+
+- Backend, frontend y PostgreSQL iniciados correctamente; empresa local `1`
+  corresponde a `FiNet Limitada`. Token leído de la configuración privada, sin
+  incluirlo en este documento ni en Git.
+- Dirección facilitada por el usuario: Río Coya 204, Puente Alto. Punto confirmado
+  en Google Maps: `-33.6131734, -70.6229194`.
+- La consulta autenticada de viabilidad respondió HTTP 200 con `[]`, tanto con
+  el radio predeterminado como con `raio=250` en el diagnóstico.
+- La consulta de puntos de acceso con radio solicitado de 250 devolvió 183 nodos,
+  171 de categoría 5. Entre los más cercanos: `nap104` (ID 4422), `nap 107`
+  (ID 4097) y `nap105` (ID 4423). Cada uno tiene un splitter de 16 puertos
+  registrado; `percentage_free` es nulo. Esto no acredita puertos libres.
+- La consulta de viabilidad también devolvió `[]` en las coordenadas exactas de
+  esas tres cajas y en una muestra de otros seis puntos de la red. No constituye
+  una revisión exhaustiva ni demuestra ausencia de cobertura física.
+- Verificado en el navegador: iniciar sesión, seleccionar FiNet Limitada, abrir
+  Cobranza → Zonas de pago y reglas → Consultar cobertura de una dirección,
+  ingresar el domicilio y sus coordenadas. El CRM muestra `No Factible` y el
+  motivo recibido del servicio. No se crearon prospectos ni se alteró la red.
+
+La conectividad y el recorrido de consulta del CRM están comprobados. Para cerrar
+la validación funcional falta contrastar un caso positivo con TomoDAT y revisar
+con su administrador el radio de atención, la disponibilidad de puertos y los
+requisitos/permisos del endpoint de viabilidad. No se ha determinado cuál de esos
+factores explica la respuesta vacía. Los colores o la presencia de cajas en el
+mapa no sustituyen esa comprobación.
+
+### Ampliación de la prueba real
+
+A petición del usuario se amplió la búsqueda a un radio solicitado de 12.000 m
+centrado en `-33.595, -70.626`. El listado devolvió 1.067 nodos, incluyendo 917
+cajas de categoría 5, todas con tipo `CTO`. Se eligieron 60 ubicaciones mediante
+una muestra espacial dispersa y se consultó viabilidad en las coordenadas de
+cada caja. Las 60 respuestas fueron arreglos vacíos, sin errores HTTP o de
+conexión. En cinco ubicaciones se repitió con `raio=1000`, también sin resultados.
+La muestra no equivale a probar las 917 cajas ni a acreditar falta de cobertura.
+
+Se volvió a leer la documentación pública: el radio de búsqueda no sustituye
+el radio de atención del tipo de caja; el servicio comprueba también los puertos
+del splitter. El encabezado de autenticación y la ruta implementada coinciden
+con ese contrato. Las 16 pruebas unitarias del servicio pasaron, incluido un caso
+positivo simulado, que no sustituye un caso positivo real.
+
+### Revisión con sesión iniciada por el usuario
+
+La página `profiles` identifica el perfil de la sesión como **View**. El menú
+principal solo ofrece mapa y datos personales; no se dispone de la administración
+de tipos de caja desde esta sesión. Esto explica la limitación para revisar su
+configuración en la interfaz, pero no demuestra la causa de la viabilidad vacía.
+
+Desde el menú Documentación se encontraron contratos más completos:
+[API general](https://cl2.tomodat.com/tomodat/docs/general) y
+[API ERP](https://cl2.tomodat.com/tomodat/docs/erp_full).
+Con los endpoints de lectura de la API general se confirmó:
+
+- `GET /api/auth/`: token válido (`status: 1`, nivel numérico `1`).
+- `GET /api/access_points/{id}`: las cajas 4422, 4097 y 4423 usan el tipo CTO
+  ID 3, con radio de atención `50` m y campo `pon: false`. No se ha confirmado
+  qué efecto tiene ese último campo sobre el algoritmo de viabilidad.
+- `GET /api/access_points/ctos/paginated?ids=4422,4097,4423&limit=3`: cada caja
+  contiene un splitter de 16 puertos, los 16 sin cliente asociado. Esto no
+  demuestra disponibilidad operativa ni ausencia de otras reservas/restricciones.
+- `POST /api/access_points/get_olt_from_splitter` es una consulta documentada
+  de trazado, sin modificación. Para los splitters 4678 (nap104), 4397
+  (nap 107) y 4679 (nap105), devuelve `status: 1` y `data.status: unconnected`.
+  Según el contrato, la ruta registrada no alcanza una OLT. No demuestra que la
+  instalación física esté desconectada ni prueba por sí solo la causa del rechazo.
+- Las consultas documentadas bajo `/erp/` (viabilidad, cajas implantadas,
+  puertos y búsqueda por dirección) devuelven `status: 0`, `message: Auth error`
+  con el token actual. No confundir ese rechazo de autenticación con una lista
+  vacía de cobertura. No se cambió el CRM a esta API.
+
+Siguiente paso: el administrador de FiNet debe contrastar una CTO que esté
+operativa con su ruta registrada hasta la OLT y los criterios del tipo de caja;
+si persiste el resultado vacío, soporte TomoDAT puede revisar estos IDs y la
+consulta exacta de Río Coya 204. La integración obtiene datos reales de cajas,
+ubicaciones y ocupación, pero todavía no existe un caso positivo real verificado.
+No se cambió ninguna caja, splitter, puerto ni regla de cobertura.
+
+### Búsqueda dirigida de un caso positivo
+
+Se seleccionaron 24 CTO distribuidas espacialmente entre las 60 ubicaciones
+anteriores. El endpoint paginado encontró las 24; todas tienen un splitter con
+al menos una salida sin cliente asignado. Se consultó para cada splitter el
+endpoint documentado de trazado a OLT: los 24 respondieron `unconnected` y
+ninguno `connected`. Por tanto, en esta muestra no hay una caja conectada que
+permita una prueba positiva representativa. La respuesta no acredita el estado
+físico de la red ni prueba que todas las CTO de la cuenta estén desconectadas.
+
+La ruta de integración del CRM responde según el contrato publicado; la prueba
+positiva de punta a punta requiere que el administrador o soporte señale una
+ubicación que TomoDAT considere factible o corrija/aclare los datos de una CTO
+operativa. Mientras tanto, una revisión técnica manual sigue disponible en el
+CRM para no tomar la salida vacía como sentencia sobre la instalación física.
