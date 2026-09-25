@@ -52,6 +52,8 @@ export function ProspectsPanel({
         email: form.email.trim().toLowerCase() || undefined,
         telefono: form.telefono.trim().replace(/\s/g, ''),
         direccion: form.direccion.trim(),
+        comuna: form.comuna.trim() || undefined,
+        region: form.region.trim() || undefined,
         origenContacto: form.origenContacto.trim(),
         idEmpresa: writeCompanyId,
         ubicacion: location ?? undefined,
@@ -133,6 +135,14 @@ export function ProspectsPanel({
               maxLength={200}
               required
             />
+          </label>
+          <label>
+            Comuna
+            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} placeholder="Comuna" maxLength={80} />
+          </label>
+          <label>
+            Region
+            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} placeholder="Region" maxLength={80} />
           </label>
           {status && <p className="inline-status">{status}</p>}
           <details><summary>Confirmar ubicación y consultar cobertura</summary>

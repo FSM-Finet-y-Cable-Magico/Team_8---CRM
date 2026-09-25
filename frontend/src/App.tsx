@@ -10,6 +10,7 @@ import {
   FileUp,
   HandCoins,
   House,
+  Map as MapIcon,
   Router,
   Ticket as TicketIcon,
   UserCog,
@@ -52,6 +53,7 @@ import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
 import { BillingPanel } from './features/billing';
 import { CustomersPanel } from './features/customers';
+import { CoverageZonesPanel } from './features/coverage';
 import { DashboardHome } from './features/dashboard';
 import { ImportPanel } from './features/import';
 import { InstallationsPanel } from './features/installations';
@@ -92,6 +94,7 @@ import {
 type Tab =
   | 'dashboard'
   | 'prospects'
+  | 'coverage'
   | 'installations'
   | 'customers'
   | 'inventory'
@@ -306,6 +309,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const mainNavItems: NavItem[] = [
     { tab: 'dashboard', label: 'Dashboard', visible: true, icon: House },
     { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects, icon: UserRoundPlus },
+    { tab: 'coverage', label: 'Cobertura', visible: permissions.managePaymentZones, icon: MapIcon },
     { tab: 'customers', label: 'Clientes', visible: canManageCustomers, icon: Users },
     { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
@@ -392,6 +396,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               permissions={permissions}
               onCreated={() => void loadData()}
             />
+          )}
+          {activeTab === 'coverage' && permissions.managePaymentZones && (
+            <CoverageZonesPanel idEmpresa={writeCompanyId} canManage={permissions.managePaymentZones} />
           )}
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel

@@ -250,3 +250,18 @@ positiva de punta a punta requiere que el administrador o soporte señale una
 ubicación que TomoDAT considere factible o corrija/aclare los datos de una CTO
 operativa. Mientras tanto, una revisión técnica manual sigue disponible en el
 CRM para no tomar la salida vacía como sentencia sobre la instalación física.
+
+## Etapa 1: desacoplamiento de cobertura técnica
+
+Desde la Etapa 1, TomoDAT directo deja de ser la dependencia central de Coverage.
+La cobertura comercial se calcula localmente con polígonos de `ZonaPago` mediante
+`CommercialCoverageProvider`. La validación técnica predeterminada pasa por
+`G3CoverageProvider`; si G3 no está configurado o no responde, el resultado es
+`PENDIENTE_VALIDACION_TECNICA` y nunca `NO_FACTIBLE` por timeout.
+
+El acceso anterior queda encapsulado en `LegacyTomodatCoverageProvider`. Solo se
+activa expresamente con `COVERAGE_TECHNICAL_PROVIDER=LEGACY_TOMODAT`, además de
+las variables de empresa y token ya documentadas. Este adapter es transitorio y
+se eliminará cuando G3 ratifique y publique su servicio oficial. Los detalles del
+modelo geográfico, seguridad, migración y pruebas están en
+`docs/i3-geolocation-commercial-zones.md`.

@@ -22,7 +22,9 @@ import { InstallDayAvailabilityDto } from './dto/install-day-availability.dto';
 import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
-import { CoverageResult, CoverageService } from '../coverage/coverage.service';
+import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { CoverageDomainService } from '../coverage/coverage-domain.service';
+import { CoverageResult } from '../coverage/coverage.types';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
@@ -56,7 +58,7 @@ export class ProspectsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
-    private readonly coverageService: CoverageService,
+    private readonly coverageService: CoverageDomainService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -144,9 +146,18 @@ export class ProspectsService {
         email: dto.email?.trim().toLowerCase(),
         telefono: dto.telefono.trim(),
         direccion: dto.direccion.trim(),
+        comuna: dto.comuna?.trim() || null,
+        region: dto.region?.trim() || null,
+        latitud: dto.ubicacion?.latitud ?? null,
+        longitud: dto.ubicacion?.longitud ?? null,
+        idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
-        estadoPipeline: cobertura && cobertura.estado !== 'Pendiente' ? cobertura.estado : INITIAL_PIPELINE_STATUS,
-        ...(cobertura?.estado === 'Factible' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
+        estadoPipeline: cobertura?.estado === 'FACTIBLE'
+          ? FEASIBLE_PIPELINE_STATUS
+          : cobertura?.estado === 'NO_FACTIBLE'
+            ? NOT_FEASIBLE_PIPELINE_STATUS
+            : INITIAL_PIPELINE_STATUS,
+        ...(cobertura?.estado === 'FACTIBLE' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         fechaCreacion: new Date(),
       },
       include: {
@@ -210,15 +221,68 @@ export class ProspectsService {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     this.assertFeasibilityStage(prospect.estadoPipeline);
     const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, location, currentUser);
-    if (cobertura.estado === 'Pendiente') {
+    const locatedProspect = await this.prisma.prospecto.update({
+      where: { idProspecto },
+      data: {
+        latitud: location.latitud,
+        longitud: location.longitud,
+        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+      },
+      include: { empresa: true },
+    });
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+      entidadAfectada: 'prospecto',
+      idEntidadAfectada: idProspecto,
+      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
+      valorNuevo: { latitud: location.latitud, longitud: location.longitud, idZonaPago: locatedProspect.idZonaPago },
+    });
+    if (cobertura.estado === 'PENDIENTE_VALIDACION_TECNICA') {
       await this.auditService.record({
         idUsuario: currentUser.idUsuario, accion: 'CONSULTAR_COBERTURA_PENDIENTE',
         entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
         valorNuevo: { direccion: prospect.direccion, cobertura },
       });
-      return { ...prospect, cobertura };
+      return { ...locatedProspect, cobertura };
     }
-    const updated = await this.saveFeasibility(idProspecto, { resultado: cobertura.estado }, currentUser, cobertura);
+    const updated = await this.saveFeasibility(
+      idProspecto,
+      { resultado: cobertura.estado === 'FACTIBLE' ? 'Factible' : 'No Factible' },
+      currentUser,
+      cobertura,
+    );
+    return { ...updated, cobertura };
+  }
+
+  async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
+    const updated = await this.prisma.prospecto.update({
+      where: { idProspecto },
+      data: {
+        latitud: dto.ubicacion.latitud,
+        longitud: dto.ubicacion.longitud,
+        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+        ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
+        ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
+        ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
+      },
+      include: { empresa: true, zonaPago: true },
+    });
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+      entidadAfectada: 'prospecto',
+      idEntidadAfectada: idProspecto,
+      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
+      valorNuevo: {
+        latitud: updated.latitud,
+        longitud: updated.longitud,
+        idZonaPago: updated.idZonaPago,
+        estadoCobertura: cobertura.estado,
+      },
+    });
     return { ...updated, cobertura };
   }
 
@@ -264,7 +328,7 @@ export class ProspectsService {
         resultado: dto.resultado,
         observaciones: dto.observaciones,
         estadoPipeline: nextStatus,
-        origen: cobertura ? 'TomoDAT' : 'Manual',
+        origen: cobertura ? cobertura.tecnica.proveedor : 'Manual',
         ...(cobertura ? { direccion: prospect.direccion, cobertura } : {}),
       },
     });
@@ -274,6 +338,19 @@ export class ProspectsService {
 
   async generateQuote(idProspecto: number, dto: GenerateQuoteDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+
+    if (prospect.latitud === null || prospect.latitud === undefined || prospect.longitud === null || prospect.longitud === undefined) {
+      throw new BadRequestException('El prospecto debe tener una ubicacion valida antes de cotizar');
+    }
+
+    const commercial = await this.coverageService.plansForLocation(
+      prospect.idEmpresa ?? 0,
+      { latitud: prospect.latitud, longitud: prospect.longitud },
+      currentUser,
+    );
+    if (!commercial.coberturaComercial || !commercial.planes.some(plan => plan.idPlan === dto.planId)) {
+      throw new BadRequestException('El plan no esta disponible para la ubicacion del prospecto');
+    }
 
     if (!prospect.email?.trim()) {
       throw new BadRequestException('El prospecto debe tener correo electronico');
@@ -298,7 +375,7 @@ export class ProspectsService {
       where: { idPlan: dto.planId },
     });
 
-    if (!plan || plan.activo === false) {
+    if (!plan || plan.activo === false || plan.idEmpresa !== prospect.idEmpresa) {
       throw new BadRequestException('Plan inexistente o inactivo');
     }
 
