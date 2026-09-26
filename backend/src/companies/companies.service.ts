@@ -167,6 +167,7 @@ export class CompaniesService {
       : [];
     const categoryById = new Map(categories.map((category) => [category.idCategoria, category]));
     const churnBase = clientesActivos + churnBajasMensuales;
+    const expiryDays = this.expiryAlertDays();
     const contractAlerts = activeContracts
       .map((contract) => {
         const unpaidInvoice = contract.facturas.find((invoice) => {
@@ -189,7 +190,7 @@ export class CompaniesService {
           diasRestantes: daysUntilDue,
         };
       })
-      .filter((item) => item.diasRestantes <= 7);
+      .filter((item) => item.diasRestantes <= expiryDays);
     const alertasVencimiento = [
       ...contractAlerts
         .filter((item) => item.diasRestantes < 0)
@@ -240,7 +241,13 @@ export class CompaniesService {
         total,
       })),
       alertasVencimiento,
+      diasAnticipacionVencimiento: expiryDays,
     };
+  }
+
+  private expiryAlertDays() {
+    const value = Number(process.env.COMMERCIAL_PLAN_EXPIRY_ALERT_DAYS ?? 7);
+    return Number.isInteger(value) && value >= 1 && value <= 90 ? value : 7;
   }
 
   private resolveScope(currentUser: AuthUser, requestedScope: string) {

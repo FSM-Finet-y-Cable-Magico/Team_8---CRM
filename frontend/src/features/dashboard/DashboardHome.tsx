@@ -65,6 +65,7 @@ type Summary = {
     churnBajasMensuales?: number;
   };
   alertasVencimiento?: DashboardExpiryAlert[];
+  diasAnticipacionVencimiento?: number;
   ticketsCerradosPorTipo?: Array<{
     idCategoria: number;
     categoria: string;
@@ -211,8 +212,9 @@ export function DashboardHome({
     },
   ];
   const expiryAlerts = summary?.alertasVencimiento ?? [];
+  const expiryWindowDays = summary?.diasAnticipacionVencimiento ?? 7;
   const overdueAlerts = expiryAlerts.filter((alert) => alert.diasRestantes < 0);
-  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= 7);
+  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= expiryWindowDays);
   const filteredExpiryAlerts = expiryFilter === 'overdue' ? overdueAlerts : upcomingAlerts;
   const selectedAlert = filteredExpiryAlerts.find((alert) => expiryAlertKey(alert) === selectedAlertKey)
     ?? filteredExpiryAlerts[0]
@@ -364,7 +366,7 @@ export function DashboardHome({
                 aria-pressed={expiryFilter === 'upcoming'}
                 onClick={() => selectExpiryFilter('upcoming')}
               >
-                Próximos 7 días
+                Próximos {expiryWindowDays} días
                 <span>{upcomingAlerts.length}</span>
               </button>
             </div>
@@ -396,7 +398,7 @@ export function DashboardHome({
             <p className="empty-state">
               {expiryFilter === 'overdue'
                 ? 'No hay contratos vencidos para mostrar.'
-                : 'No hay contratos próximos a vencer durante los próximos 7 días.'}
+                : `No hay contratos próximos a vencer durante los próximos ${expiryWindowDays} días.`}
             </p>
           )}
 

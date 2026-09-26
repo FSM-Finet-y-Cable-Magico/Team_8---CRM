@@ -19,6 +19,11 @@ model Empresa {
   servicios  ServicioContratado[]
   solicitudes SolicitudCliente[]
   zonasPago   ZonaPago[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago ConvenioPago[]
+  prorrogasPago ProrrogaPago[]
+  cambiosCondicionPago CambioCondicionPago[]
+  cargosAdicionales CargoAdicional[]
 
   @@map("empresa")
 }
@@ -42,6 +47,12 @@ model Usuario {
   solicitudesRegistradas SolicitudCliente[]
   observacionesOperativas ObservacionOperativa[]
   contratosDigitalesGenerados ContratoDigital[]
+  eventosGestionResponsable EventoGestionComercial[]
+  conveniosRegistrados ConvenioPago[] @relation("ConvenioResponsable")
+  conveniosAprobados ConvenioPago[] @relation("ConvenioAprobador")
+  prorrogasRegistradas ProrrogaPago[]
+  cambiosCondicionRegistrados CambioCondicionPago[]
+  cargosAdicionalesRegistrados CargoAdicional[]
 
   @@map("usuario")
 }
@@ -104,6 +115,11 @@ model Cliente {
   solicitudes        SolicitudCliente[]
   contratosDigitales ContratoDigital[]
   cambiosPlan        HistorialCambioPlan[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago ConvenioPago[]
+  prorrogasPago ProrrogaPago[]
+  cambiosCondicionPago CambioCondicionPago[]
+  cargosAdicionales CargoAdicional[]
 
   @@map("cliente")
 }
@@ -130,6 +146,8 @@ model Prospecto {
   idUsuarioPerdida     Int?         @map("id_usuario_perdida")
   origenContacto       String?      @map("origen_contacto") @db.VarChar(40)
   tiempoConversionDias Int?         @map("tiempo_conversion_dias")
+  clasificacionComercial String      @default("PROSPECTO") @map("clasificacion_comercial") @db.VarChar(40)
+  disponibleRemarketing Boolean     @default(false) @map("disponible_remarketing")
   fechaCreacion        DateTime?    @map("fecha_creacion")
   fechaConversion      DateTime?    @map("fecha_conversion") @db.Date
   empresa              Empresa?     @relation(fields: [idEmpresa], references: [idEmpresa])
@@ -141,6 +159,7 @@ model Prospecto {
   zonaPago             ZonaPago?    @relation(fields: [idZonaPago], references: [idZonaPago])
 
   @@index([idEmpresa, idZonaPago])
+  @@index([idEmpresa, clasificacionComercial])
 
   @@map("prospecto")
 }
@@ -212,6 +231,11 @@ model Contrato {
   servicios       ServicioContratado[]
   cambiosPlan     HistorialCambioPlan[]
   contratosDigitales ContratoDigital[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago ConvenioPago[]
+  prorrogasPago ProrrogaPago[]
+  cambiosCondicionPago CambioCondicionPago[]
+  cargosAdicionales CargoAdicional[]
 
   @@map("contrato")
 }
@@ -225,9 +249,16 @@ model Factura {
   fechaEmision    DateTime? @map("fecha_emision") @db.Date
   fechaLimitePago DateTime  @map("fecha_limite_pago") @db.Date
   estado          String    @db.VarChar(20)
+  tipoDocumento   String?   @map("tipo_documento") @db.VarChar(30)
+  folioExterno    String?   @map("folio_externo") @db.VarChar(80)
   contrato        Contrato? @relation(fields: [idContrato], references: [idContrato])
   pagos           Pago[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago ConvenioPago[]
+  prorrogasPago ProrrogaPago[]
+  cambiosCondicionPago CambioCondicionPago[]
 
+  @@index([folioExterno])
   @@map("factura")
 }
 
@@ -422,6 +453,9 @@ model ServicioContratado {
   tickets   Ticket[]
   ordenes   OrdenTrabajo[]
   solicitudes SolicitudCliente[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago ConvenioPago[]
+  cargosAdicionales CargoAdicional[]
 
   @@map("servicio_contratado")
 }
@@ -497,6 +531,156 @@ model ZonaPago {
   @@index([idZonaPadre])
   @@index([fechaInicio, fechaFin])
   @@map("zona_pago")
+}
+
+model EventoGestionComercial {
+  idEvento             Int       @id @default(autoincrement()) @map("id_evento")
+  idEmpresa            Int       @map("id_empresa")
+  idCliente            Int       @map("id_cliente")
+  idServicio           Int?      @map("id_servicio")
+  idContrato           Int?      @map("id_contrato")
+  idFactura            Int?      @map("id_factura")
+  tipo                 String    @db.VarChar(40)
+  canal                String    @db.VarChar(20)
+  estadoGestion        String    @default("REGISTRADO") @map("estado_gestion") @db.VarChar(30)
+  fecha                DateTime  @db.Timestamptz(3)
+  observacion          String?
+  idUsuarioResponsable Int       @map("id_usuario_responsable")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  empresa     Empresa              @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente              @relation(fields: [idCliente], references: [idCliente])
+  servicio    ServicioContratado?  @relation(fields: [idServicio], references: [idServicio])
+  contrato    Contrato?            @relation(fields: [idContrato], references: [idContrato])
+  factura     Factura?             @relation(fields: [idFactura], references: [idFactura])
+  responsable Usuario              @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+
+  @@index([idEmpresa, tipo, fecha])
+  @@index([idCliente, fecha])
+  @@index([idFactura])
+  @@map("evento_gestion_comercial")
+}
+
+model ConvenioPago {
+  idConvenio          Int       @id @default(autoincrement()) @map("id_convenio")
+  idEmpresa           Int       @map("id_empresa")
+  idCliente           Int       @map("id_cliente")
+  idServicio          Int?      @map("id_servicio")
+  idContrato          Int?      @map("id_contrato")
+  idFactura           Int?      @map("id_factura")
+  montoComprometido   Decimal   @map("monto_comprometido") @db.Decimal(12, 2)
+  cantidadCuotas      Int       @map("cantidad_cuotas") @db.SmallInt
+  condiciones         String
+  fechaInicio         DateTime  @map("fecha_inicio") @db.Date
+  estado              String    @default("PENDIENTE") @db.VarChar(20)
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  idUsuarioAprobador  Int?      @map("id_usuario_aprobador")
+  fechaRegistro       DateTime  @default(now()) @map("fecha_registro") @db.Timestamptz(3)
+  fechaAprobacion     DateTime? @map("fecha_aprobacion") @db.Timestamptz(3)
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente])
+  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato])
+  factura     Factura?            @relation(fields: [idFactura], references: [idFactura])
+  responsable Usuario             @relation("ConvenioResponsable", fields: [idUsuarioResponsable], references: [idUsuario])
+  aprobador   Usuario?            @relation("ConvenioAprobador", fields: [idUsuarioAprobador], references: [idUsuario])
+  cuotas      CuotaConvenioPago[]
+
+  @@index([idEmpresa, estado, fechaInicio])
+  @@index([idCliente, estado])
+  @@index([idFactura])
+  @@map("convenio_pago")
+}
+
+model CuotaConvenioPago {
+  idCuota          Int       @id @default(autoincrement()) @map("id_cuota")
+  idConvenio       Int       @map("id_convenio")
+  numero           Int       @db.SmallInt
+  monto            Decimal   @db.Decimal(12, 2)
+  fechaVencimiento DateTime  @map("fecha_vencimiento") @db.Date
+  estado           String    @default("PENDIENTE") @db.VarChar(20)
+  fechaPago        DateTime? @map("fecha_pago") @db.Date
+
+  convenio ConvenioPago @relation(fields: [idConvenio], references: [idConvenio])
+
+  @@unique([idConvenio, numero])
+  @@index([fechaVencimiento, estado])
+  @@map("cuota_convenio_pago")
+}
+
+model ProrrogaPago {
+  idProrroga          Int      @id @default(autoincrement()) @map("id_prorroga")
+  idEmpresa           Int      @map("id_empresa")
+  idCliente           Int      @map("id_cliente")
+  idContrato          Int?     @map("id_contrato")
+  idFactura           Int      @map("id_factura")
+  fechaOriginal       DateTime @map("fecha_original") @db.Date
+  nuevaFecha          DateTime @map("nueva_fecha") @db.Date
+  motivo              String
+  estado              String   @default("APROBADA") @db.VarChar(20)
+  idUsuarioResponsable Int     @map("id_usuario_responsable")
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(3)
+
+  empresa     Empresa  @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente  @relation(fields: [idCliente], references: [idCliente])
+  contrato    Contrato? @relation(fields: [idContrato], references: [idContrato])
+  factura     Factura  @relation(fields: [idFactura], references: [idFactura])
+  responsable Usuario  @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+
+  @@index([idEmpresa, estado, nuevaFecha])
+  @@index([idFactura, fechaRegistro])
+  @@map("prorroga_pago")
+}
+
+model CambioCondicionPago {
+  idCambio             Int      @id @default(autoincrement()) @map("id_cambio")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idContrato           Int?     @map("id_contrato")
+  idFactura            Int?     @map("id_factura")
+  tipoCambio           String   @map("tipo_cambio") @db.VarChar(30)
+  valorAnterior        String   @map("valor_anterior") @db.VarChar(40)
+  valorNuevo           String   @map("valor_nuevo") @db.VarChar(40)
+  justificacion        String
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  fechaRegistro        DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(3)
+
+  empresa     Empresa   @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente   @relation(fields: [idCliente], references: [idCliente])
+  contrato    Contrato? @relation(fields: [idContrato], references: [idContrato])
+  factura     Factura?  @relation(fields: [idFactura], references: [idFactura])
+  responsable Usuario   @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+
+  @@index([idEmpresa, tipoCambio, fechaRegistro])
+  @@index([idCliente, fechaRegistro])
+  @@map("cambio_condicion_pago")
+}
+
+model CargoAdicional {
+  idCargo             Int      @id @default(autoincrement()) @map("id_cargo")
+  idEmpresa           Int      @map("id_empresa")
+  idCliente           Int      @map("id_cliente")
+  idContrato          Int?     @map("id_contrato")
+  idServicio          Int?     @map("id_servicio")
+  tipo                String   @db.VarChar(30)
+  monto               Decimal  @db.Decimal(12, 2)
+  fecha               DateTime @db.Date
+  estado              String   @default("PENDIENTE_FACTURACION") @db.VarChar(30)
+  afectaSaldo         Boolean  @default(false) @map("afecta_saldo")
+  observacion         String?
+  idUsuarioResponsable Int     @map("id_usuario_responsable")
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(3)
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente])
+  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato])
+  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  responsable Usuario             @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+
+  @@index([idEmpresa, estado, fecha])
+  @@index([idCliente, fechaRegistro])
+  @@map("cargo_adicional")
 }
 
 model PlanZonaPrecio {

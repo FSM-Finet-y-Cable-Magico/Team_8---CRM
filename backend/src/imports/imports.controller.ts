@@ -14,11 +14,15 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { ImportsService } from './imports.service';
+import { ControlBookImportPreviewService } from './control-book-import-preview.service';
 
 @Controller('imports')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ImportsController {
-  constructor(private readonly importsService: ImportsService) {}
+  constructor(
+    private readonly importsService: ImportsService,
+    private readonly controlBookPreview: ControlBookImportPreviewService,
+  ) {}
 
   @Post('clients')
   @Roles(...ACCESS_ROLES.ADMIN_ONLY)
@@ -29,5 +33,17 @@ export class ImportsController {
     @Query('idEmpresa') idEmpresa?: string,
   ) {
     return this.importsService.importClients(file, user, idEmpresa ? Number(idEmpresa) : undefined);
+  }
+
+  @Post('control-book/preview')
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }))
+  previewControlBook(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+    @Query('idEmpresa') idEmpresa?: string,
+    @Query('sheet') sheet?: string,
+  ) {
+    return this.controlBookPreview.preview(file, user, idEmpresa ? Number(idEmpresa) : undefined, sheet);
   }
 }
