@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { ContractsService } from './contracts.service';
+import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
@@ -15,7 +16,10 @@ import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-st
 @Controller('contracts')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractsController {
-  constructor(private readonly contractsService: ContractsService) {}
+  constructor(
+    private readonly contractsService: ContractsService,
+    private readonly installations: InstallationIntegrationService,
+  ) {}
 
   @Get(':id/plan-changes')
   @Roles(...ACCESS_ROLES.CHANGE_CUSTOMER_PLAN)
@@ -51,7 +55,7 @@ export class ContractsController {
     @Param('id', ParseIntPipe) idContrato: number,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.contractsService.prepareInstallation(idContrato, user);
+    return this.installations.requestInstallation({ idContrato }, user);
   }
 
   @Post(':id/change-plan')

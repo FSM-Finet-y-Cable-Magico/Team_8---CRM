@@ -99,6 +99,42 @@ export type InstallAvailability = {
   mensaje: string;
 };
 
+export type G3InstallationTracking = {
+  idIntegracion: number;
+  idEmpresa: number;
+  idProspecto: number | null;
+  idContrato: number;
+  idPlan: number;
+  idServicio: number | null;
+  requestId: string;
+  traceId: string;
+  idOtG3: string | null;
+  codigoOtG3: string | null;
+  estadoIntegracion: string;
+  estadoOtG3: string | null;
+  estadoOriginalG3: string | null;
+  estadoPresentacion: string;
+  fechaSolicitud: string;
+  fechaUltimaSincronizacion: string | null;
+  intentos: number;
+  ultimoErrorSanitizado: string | null;
+  fechaCierreProcesado: string | null;
+  fuente: 'G3';
+  detalle: null | {
+    idOtG3: string | null;
+    codigoOtG3: string | null;
+    tipo: string | null;
+    estado: string;
+    estadoOriginalG3: string | null;
+    fecha: string | null;
+    tecnico: unknown;
+    direccion: unknown;
+    persona: unknown;
+    telefono: string | null;
+    resultado: unknown;
+  };
+};
+
 export type Plan = {
   idPlan: number;
   idEmpresa: number | null;

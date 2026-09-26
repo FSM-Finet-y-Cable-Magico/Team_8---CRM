@@ -127,26 +127,26 @@ export function InstallationsPanel({
     <section className="installations-workspace">
       <div className="installations-overview">
         <details className="installation-collapsible">
-          <summary><h2>Pendientes de agendar</h2><span className="installation-count">{installationProspects.length}</span><ChevronDown size={18} /></summary>
+          <summary><h2>Instalaciones G3</h2><span className="installation-count">{installationProspects.length}</span><ChevronDown size={18} /></summary>
           <div className="installation-collapsible-content installation-queue">
             {installationProspects.map((prospect) => (
               <article className="installation-prospect-item" key={prospect.idProspecto}>
                 <div><strong>{prospect.nombreCompleto ?? 'Prospecto sin nombre'}</strong><span>{prospect.rut ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? 'Empresa sin asignar'}</span></div>
-                <button type="button" className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>Agendar</button>
+                <button type="button" className="secondary compact" onClick={() => openInstallModal(prospect.idProspecto)}>Gestionar en G3</button>
               </article>
             ))}
             {!installationProspects.length && <p className="inline-status">No hay prospectos habilitados para generar una orden de instalación.</p>}
           </div>
         </details>
         <details className="installation-collapsible">
-          <summary><h2>Agenda de instalaciones</h2><span className="installation-count">{pendingInstallationOrders.length}</span><ChevronDown size={18} /></summary>
+          <summary><h2>Agenda local histórica</h2><span className="installation-count">{pendingInstallationOrders.length}</span><ChevronDown size={18} /></summary>
           <div className="installation-collapsible-content installation-agenda">
             {pendingInstallationOrders.slice(0, 4).map((order) => {
               const relatedProspect = order.prospecto ?? prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`);
               return <article className="installation-agenda-item" key={order.idOt}>
                 <div className="installation-visit-date"><strong>{formatDateOnly(order.fechaProgramada)}</strong><span>{order.horaVisita ?? 'Sin hora'}</span></div>
                 <div className="installation-visit-copy"><strong>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</strong><span>{formatInstallationOrderCode(order)} · {order.tecnico?.nombreCompleto ?? 'Técnico sin asignar'}</span></div>
-                <div className="installation-visit-badges"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></div>
+                <div className="installation-visit-badges"><span className="source-badge">LEGACY_LOCAL</span><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></div>
                 <button type="button" className="secondary compact" onClick={() => setCompletionOrderId(order.idOt)}>Completar</button>
               </article>;
             })}
@@ -156,7 +156,7 @@ export function InstallationsPanel({
       </div>
       <section className="installation-history">
         <div className="installation-history-header">
-          <h2>Historial de instalaciones</h2>
+          <h2>Historial local de instalaciones</h2>
           <div className="installation-history-filters">
             <span className="installation-history-count">{filteredInstallationOrders.length} registros</span>
             <select aria-label="Filtrar historial por estado" value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value)}>
@@ -169,10 +169,10 @@ export function InstallationsPanel({
             </select>
           </div>
         </div>
-        <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{paginatedInstallationOrders.map((order) => { const relatedProspect = order.prospecto ?? prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
+        <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Fuente</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{paginatedInstallationOrders.map((order) => { const relatedProspect = order.prospecto ?? prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td><span className="source-badge">LEGACY_LOCAL</span></td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
         <TablePagination currentPage={historyPage} totalItems={filteredInstallationOrders.length} pageSize={historyPageSize} onPageChange={setHistoryPage} />
       </section>
-      <Modal title="Agendar instalación" open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title="Instalación técnica G3" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedProspect ? (
           <InstallOrderForm
             prospect={selectedProspect}

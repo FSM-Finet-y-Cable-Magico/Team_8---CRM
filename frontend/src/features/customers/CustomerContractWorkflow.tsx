@@ -1,24 +1,17 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { ChevronRight, CircleCheckBig, Plus } from 'lucide-react';
-import { api, apiErrorMessage, Customer, CustomerService, InstallDayAvailability, InstallTimeSlot, PaymentZone, Plan } from '../../api';
-import { addYearsToInputDate, dateInputValue, formatDateOnly, formatWorkOrderValue } from '../../lib';
+import { api, apiErrorMessage, Customer, CustomerService, PaymentZone, Plan } from '../../api';
+import { formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
-import { InstallSchedulePicker } from '../installations/InstallSchedulePicker';
+import { G3InstallationStatus } from '../installations/G3InstallationStatus';
 import { CustomerServiceManagementModal } from './CustomerServiceManagementModal';
 import { ContractDocuments } from './ContractDocuments';
 import './customer-contract-workflow.css';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
 type Stage = 1 | 2;
-type WorkOrder = NonNullable<CustomerService['ordenes']>[number];
-
-const CLOSED_INSTALL_ORDER_STATES = ['completada', 'cancelada'];
-
-function emptyInstallForm() {
-  return { fechaProgramada: '', horaVisita: '', prioridad: 'Media', observaciones: '' };
-}
 
 function normalize(value?: string | null) {
   return (value ?? '').trim().toLocaleLowerCase('es-CL').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -28,21 +21,8 @@ function signed(contract?: CustomerContract | null) {
   return ['firmado', 'activo', 'suspendido', 'moroso'].includes(normalize(contract?.estado));
 }
 
-function pendingInstall(service?: CustomerService | null) {
-  const state = normalize(service?.estadoOperativo);
-  return state === 'pendiente' || (state.includes('pendiente') && state.includes('instalacion'));
-}
-
 function isManagedService(service?: CustomerService | null) {
   return ['activo', 'suspendido', 'baja'].includes(normalize(service?.estadoOperativo));
-}
-
-function openInstallOrder(order: WorkOrder) {
-  return normalize(order.tipoOt) === 'instalacion' && !CLOSED_INSTALL_ORDER_STATES.includes(normalize(order.estado));
-}
-
-function orderCode(order?: WorkOrder | null) {
-  return order?.codigoSeguimiento?.trim() || (order ? 'OT-INS-' + String(order.idOt).padStart(6, '0') : '-');
 }
 
 function customerAddress(customer: Customer) {
@@ -64,12 +44,6 @@ function companyName(contract: CustomerContract, customer: Customer) {
 function formatCurrency(value?: string | number | null) {
   const amount = Number(value);
   return Number.isFinite(amount) ? '$' + amount.toLocaleString('es-CL') : '-';
-}
-
-function connectionTypeForService(service: CustomerService) {
-  return normalize(service.tipoServicio).includes('television') && !normalize(service.tipoServicio).includes('internet')
-    ? 'Television'
-    : 'Fibra Optica';
 }
 
 export function CustomerContractWorkflow({
@@ -106,12 +80,6 @@ export function CustomerContractWorkflow({
   const [stage, setStage] = useState<Stage>(1);
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [signatureObservation, setSignatureObservation] = useState('');
-  const [installForm, setInstallForm] = useState(emptyInstallForm());
-  const [dayAvailability, setDayAvailability] = useState<InstallDayAvailability | null>(null);
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
-  const [preparingInstallation, setPreparingInstallation] = useState(false);
-  const [cancellingOrder, setCancellingOrder] = useState(false);
-  const [technicianId, setTechnicianId] = useState('');
   const { message, showMessage, clearMessage } = useTransientMessage();
 
   useEffect(() => setContracts(customer.contratos ?? []), [customer.contratos]);
@@ -129,14 +97,8 @@ export function CustomerContractWorkflow({
   const activeServiceContract = activeService
     ? contracts.find((contract) => contract.idContrato === activeService.idContrato) ?? null
     : null;
-  const pendingOrder = useMemo(
-    () => (selectedService?.ordenes ?? []).find(openInstallOrder) ?? null,
-    [selectedService?.ordenes],
-  );
   const contractSigned = signed(selectedContract);
   const activePlans = plans.filter((plan) => plan.activo !== false);
-  const today = dateInputValue(new Date());
-  const latestDate = addYearsToInputDate(today, 1);
 
   useEffect(() => {
     if (!selectedContract) return;
@@ -154,8 +116,6 @@ export function CustomerContractWorkflow({
     setSelectedContractId(null);
     setSelectedServiceId(null);
     setSignatureOpen(false);
-    setDayAvailability(null);
-    setTechnicianId('');
   }
 
   function openContract(contract: CustomerContract) {
@@ -169,9 +129,6 @@ export function CustomerContractWorkflow({
     setStage(1);
     setSignatureOpen(false);
     setSignatureObservation('');
-    setInstallForm(emptyInstallForm());
-    setDayAvailability(null);
-    setTechnicianId('');
     clearMessage();
   }
 
@@ -180,9 +137,6 @@ export function CustomerContractWorkflow({
     setStage(nextStage);
     setSignatureOpen(false);
 
-    if (nextStage === 2 && !selectedService && selectedContract && permissions.manageServices) {
-      await prepareInstallation(selectedContract.idContrato);
-    }
   }
 
   async function addPlan(event: FormEvent) {
@@ -227,96 +181,7 @@ export function CustomerContractWorkflow({
       setSignatureOpen(false);
       setSignatureObservation('');
       setStage(2);
-      const service = await prepareInstallation(data.idContrato);
-      if (service) showMessage('Firma confirmada. Selecciona la fecha y el horario de instalación.');
-    } catch (error) {
-      showMessage(apiErrorMessage(error));
-    }
-  }
-
-  async function prepareInstallation(contractId = selectedContract?.idContrato) {
-    if (!contractId || preparingInstallation) return null;
-    setPreparingInstallation(true);
-    try {
-      const { data } = await api.post<CustomerService>(
-        '/contracts/' + contractId + '/prepare-installation',
-      );
-      await onRefresh(data.idServicio);
-      setSelectedServiceId(data.idServicio);
-      setInstallForm(emptyInstallForm());
-      setDayAvailability(null);
-      return data;
-    } catch (error) {
-      showMessage(apiErrorMessage(error));
-      return null;
-    } finally {
-      setPreparingInstallation(false);
-    }
-  }
-
-  async function selectInstallDate(value: string) {
-    setInstallForm((current) => ({ ...current, fechaProgramada: value, horaVisita: '' }));
-    setDayAvailability(null);
-    setTechnicianId('');
-    if (!selectedService || !value) return;
-    setAvailabilityLoading(true);
-    try {
-      const { data } = await api.get<InstallDayAvailability>(
-        '/services/' + selectedService.idServicio + '/install-day-availability',
-        { params: { fechaProgramada: value } },
-      );
-      setDayAvailability(data);
-    } catch (error) {
-      showMessage(apiErrorMessage(error));
-    } finally {
-      setAvailabilityLoading(false);
-    }
-  }
-
-  function selectInstallTime(slot: InstallTimeSlot) {
-    if (!slot.disponible) return;
-    setInstallForm((current) => ({ ...current, horaVisita: slot.horaVisita }));
-    setTechnicianId(slot.tecnicosDisponibles[0] ? String(slot.tecnicosDisponibles[0].idTecnico) : '');
-  }
-
-  async function cancelInstallAgenda() {
-    if (!pendingOrder || cancellingOrder) return;
-    if (!window.confirm('¿Deseas cancelar esta agenda de instalación? Luego podrás programar una nueva fecha.')) return;
-    setCancellingOrder(true);
-    try {
-      await api.patch('/work-orders/' + pendingOrder.idOt + '/cancel-installation');
-      await onRefresh(selectedService?.idServicio);
-      setInstallForm(emptyInstallForm());
-      setDayAvailability(null);
-      setTechnicianId('');
-      showMessage('Agenda cancelada. Ya puedes seleccionar una nueva fecha.');
-    } catch (error) {
-      showMessage(apiErrorMessage(error));
-    } finally {
-      setCancellingOrder(false);
-    }
-  }
-
-  async function createInstallOrder() {
-    if (!selectedService || !technicianId) {
-      showMessage('Verifica la disponibilidad y selecciona un técnico.');
-      return;
-    }
-    try {
-      const { data } = await api.post<{ orden: { codigoSeguimiento: string | null; tecnico: { nombreCompleto: string } } }>(
-        '/services/' + selectedService.idServicio + '/install-order',
-        {
-          ...installForm,
-          tipoConexion: connectionTypeForService(selectedService),
-          idTecnico: Number(technicianId),
-        },
-      );
-      await onRefresh(selectedService.idServicio);
-      showMessage(
-        'Orden ' + (data.orden.codigoSeguimiento ?? 'de instalación') +
-        ' creada y asignada a ' + data.orden.tecnico.nombreCompleto + '.',
-      );
-      closeContractManagement();
+      showMessage('Firma confirmada. La instalación técnica ya puede solicitarse a G3.');
     } catch (error) {
       showMessage(apiErrorMessage(error));
     }
@@ -390,43 +255,17 @@ export function CustomerContractWorkflow({
           </section>}
 
           {stage === 2 && <section className="workflow-panel customer-contract-stage">
-            <header className="section-heading compact-heading"><h3>Instalación</h3>{selectedService && <StatusBadge value={formatWorkOrderValue(selectedService.estadoOperativo)} />}</header>
-            {selectedService ? <>
-              <dl className="customer-readonly-details">
-                <div><dt>Plan</dt><dd>{selectedContract.plan?.nombreComercial ?? '-'}</dd></div>
-                <div><dt>Servicio</dt><dd>{selectedService.tipoServicio}</dd></div>
-                <div><dt>Dirección</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
-                <div><dt>Zona</dt><dd>{selectedService.zonaPago?.nombreZona ?? 'Sin zona'}</dd></div>
-              </dl>
-              {pendingOrder ? <>
-                <dl className="customer-readonly-details customer-installation-order">
-                  <div><dt>Orden de trabajo</dt><dd>{orderCode(pendingOrder)}</dd></div>
-                  <div><dt>Estado</dt><dd>{formatWorkOrderValue(pendingOrder.estado)}</dd></div>
-                  <div><dt>Visita</dt><dd>{pendingOrder.fechaProgramada ? formatDateOnly(pendingOrder.fechaProgramada) : 'Sin fecha'} {pendingOrder.horaVisita ?? ''}</dd></div>
-                  <div><dt>Técnico</dt><dd>{pendingOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</dd></div>
-                </dl>
-                {permissions.createInstallOrders && <button type="button" className="secondary customer-cancel-agenda" disabled={cancellingOrder} onClick={() => void cancelInstallAgenda()}>{cancellingOrder ? 'Cancelando…' : 'Cancelar agenda'}</button>}
-              </> : pendingInstall(selectedService) && permissions.createInstallOrders ? <div className="customer-install-schedule">
-                <InstallSchedulePicker
-                  date={installForm.fechaProgramada}
-                  time={installForm.horaVisita}
-                  min={today}
-                  max={latestDate}
-                  slots={dayAvailability?.horarios}
-                  loading={availabilityLoading}
-                  onDateChange={(value) => void selectInstallDate(value)}
-                  onTimeChange={selectInstallTime}
-                />
-                <div className="workflow-grid customer-install-details">
-                  <label>Prioridad<select value={installForm.prioridad} onChange={(event) => setInstallForm({ ...installForm, prioridad: event.target.value })}><option>Alta</option><option>Media</option><option>Baja</option></select></label>
-                  {installForm.horaVisita && <label>Técnico asignado<select value={technicianId} onChange={(event) => setTechnicianId(event.target.value)}>{dayAvailability?.horarios.find((slot) => slot.horaVisita === installForm.horaVisita)?.tecnicosDisponibles.map((technician) => <option key={technician.idTecnico} value={technician.idTecnico}>{technician.nombreCompleto}</option>)}</select></label>}
-                  <label className="customer-inline-form-wide">Observaciones<textarea value={installForm.observaciones} onChange={(event) => setInstallForm({ ...installForm, observaciones: event.target.value })} /></label>
-                  <div className="button-row customer-inline-form-wide"><button type="button" disabled={!technicianId || !installForm.horaVisita} onClick={() => void createInstallOrder()}>Generar orden de trabajo</button></div>
-                </div>
-              </div> : null}
-            </> : preparingInstallation
-              ? <p className="inline-status">Preparando la instalación…</p>
-              : permissions.manageServices && <button type="button" className="secondary" onClick={() => void prepareInstallation()}>Reintentar preparación de instalación</button>}
+            <header className="section-heading compact-heading"><h3>Instalación técnica</h3><span className="source-badge">Fuente G3</span></header>
+            <dl className="customer-readonly-details">
+              <div><dt>Plan</dt><dd>{selectedContract.plan?.nombreComercial ?? '-'}</dd></div>
+              <div><dt>Dirección solicitada</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
+              <div><dt>Responsable técnico</dt><dd>G3 FSM</dd></div>
+            </dl>
+            <G3InstallationStatus
+              contractId={selectedContract.idContrato}
+              canRequest={contractSigned && permissions.createInstallOrders}
+              onChanged={() => void onRefresh(selectedService?.idServicio)}
+            />
           </section>}
         </div>}
       </Modal>

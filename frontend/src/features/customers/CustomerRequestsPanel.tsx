@@ -1,12 +1,12 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api, apiErrorMessage, Customer, CustomerRequest, CustomerService } from '../../api';
-import { formatDateTime, formatWorkOrderValue } from '../../lib';
+import { dateInputValue, formatDateTime, formatWorkOrderValue } from '../../lib';
 import { Modal, StatusBadge } from '../../shared/components';
 import { ObservationsModal } from '../observations';
 
 const closed = ['Cerrada', 'No Factible', 'Cancelada'];
-const emptyForm = { tipoSolicitud: 'Cambio de plan', idServicio: '', descripcion: '' };
+const emptyForm = () => ({ tipoSolicitud: 'Cambio de plan', idServicio: '', descripcion: '', fechaSolicitada: dateInputValue(new Date()) });
 
 export function CustomerRequestsPanel({ customer, services, onChanged }: {
   customer: Customer; services: CustomerService[]; onChanged: () => void;
@@ -41,11 +41,20 @@ export function CustomerRequestsPanel({ customer, services, onChanged }: {
     event.preventDefault(); if (busy) return;
     setBusy(true); setMessage('');
     try {
-      await api.post('/requests', { ...form, idCliente: customer.idCliente,
-        idServicio: form.idServicio ? Number(form.idServicio) : undefined,
-        canalOrigen: 'CRM', estado: 'Abierta', descripcion: form.descripcion.trim() });
-      setCreating(false); setForm(emptyForm); await load(); onChanged(); setMessage('Solicitud registrada.');
-    } catch (error) { setMessage(apiErrorMessage(error)); }
+      if (form.tipoSolicitud === 'Retiro de servicio') {
+        if (!form.idServicio) throw new Error('Selecciona el servicio que se solicita retirar.');
+        await api.post('/service-withdrawals', {
+          idServicio: Number(form.idServicio), motivo: form.descripcion.trim(), fechaSolicitada: form.fechaSolicitada,
+        });
+        setMessage('Solicitud de retiro registrada. El despacho técnico está BLOQUEADO_CONTRATO_G3.');
+      } else {
+        await api.post('/requests', { ...form, idCliente: customer.idCliente,
+          idServicio: form.idServicio ? Number(form.idServicio) : undefined,
+          canalOrigen: 'CRM', estado: 'Abierta', descripcion: form.descripcion.trim() });
+        setMessage('Solicitud registrada.');
+      }
+      setCreating(false); setForm(emptyForm()); await load(); onChanged();
+    } catch (error) { setMessage(error instanceof Error && error.message.startsWith('Selecciona') ? error.message : apiErrorMessage(error)); }
     finally { setBusy(false); }
   }
   function manage(row: CustomerRequest) {
@@ -76,11 +85,12 @@ export function CustomerRequestsPanel({ customer, services, onChanged }: {
       {!rows.length && <p className="empty-state">Sin solicitudes registradas.</p>}</div>}
     <Modal title="Nueva solicitud" open={creating} onClose={() => { if (!busy) setCreating(false); }}>
       <form className="workflow-grid" onSubmit={create}>
-        <label>Tipo de solicitud<select value={form.tipoSolicitud} onChange={e => setForm({ ...form, tipoSolicitud: e.target.value })}>{['Cambio de plan', 'Consulta comercial', 'Actualización de datos', 'Baja de servicio', 'Otro'].map(x => <option key={x}>{x}</option>)}</select></label>
-        <label>Servicio asociado<select value={form.idServicio} onChange={e => setForm({ ...form, idServicio: e.target.value })}><option value="">General del cliente</option>{services.map(s => <option key={s.idServicio} value={s.idServicio}>{s.contrato?.plan?.nombreComercial ?? s.tipoServicio} · #{s.idServicio}</option>)}</select></label>
-        <label>Descripción<textarea required maxLength={1000} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} /></label>
+        <label>Tipo de solicitud<select value={form.tipoSolicitud} onChange={e => setForm({ ...form, tipoSolicitud: e.target.value })}>{['Cambio de plan', 'Consulta comercial', 'Actualización de datos', 'Retiro de servicio', 'Otro'].map(x => <option key={x}>{x}</option>)}</select></label>
+        <label>Servicio asociado<select required={form.tipoSolicitud === 'Retiro de servicio'} value={form.idServicio} onChange={e => setForm({ ...form, idServicio: e.target.value })}><option value="">General del cliente</option>{services.map(s => <option key={s.idServicio} value={s.idServicio}>{s.contrato?.plan?.nombreComercial ?? s.tipoServicio} · #{s.idServicio}</option>)}</select></label>
+        {form.tipoSolicitud === 'Retiro de servicio' && <label>Fecha solicitada<input type="date" required value={form.fechaSolicitada} onChange={e => setForm({ ...form, fechaSolicitada: e.target.value })} /></label>}
+        <label>Descripción / motivo<textarea required maxLength={1000} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} /></label>
         {message && <p role="alert" className="alert">{message}</p>}
-        <button disabled={busy || !form.descripcion.trim()}>{busy ? 'Guardando…' : 'Registrar solicitud'}</button>
+        <button disabled={busy || !form.descripcion.trim() || (form.tipoSolicitud === 'Retiro de servicio' && !form.idServicio)}>{busy ? 'Guardando…' : 'Registrar solicitud'}</button>
       </form>
     </Modal>
     <Modal title="Detalle de solicitud" open={Boolean(selected)} onClose={() => { if (!busy) setSelected(null); }}>

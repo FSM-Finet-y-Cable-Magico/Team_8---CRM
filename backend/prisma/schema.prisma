@@ -24,6 +24,8 @@ model Empresa {
   prorrogasPago ProrrogaPago[]
   cambiosCondicionPago CambioCondicionPago[]
   cargosAdicionales CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro ServicioRetiroSolicitud[]
 
   @@map("empresa")
 }
@@ -53,6 +55,7 @@ model Usuario {
   prorrogasRegistradas ProrrogaPago[]
   cambiosCondicionRegistrados CambioCondicionPago[]
   cargosAdicionalesRegistrados CargoAdicional[]
+  solicitudesRetiroRegistradas ServicioRetiroSolicitud[]
 
   @@map("usuario")
 }
@@ -120,6 +123,8 @@ model Cliente {
   prorrogasPago ProrrogaPago[]
   cambiosCondicionPago CambioCondicionPago[]
   cargosAdicionales CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro ServicioRetiroSolicitud[]
 
   @@map("cliente")
 }
@@ -157,6 +162,7 @@ model Prospecto {
   contratos            Contrato[]
   ordenesTrabajo       OrdenTrabajo[]
   zonaPago             ZonaPago?    @relation(fields: [idZonaPago], references: [idZonaPago])
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
 
   @@index([idEmpresa, idZonaPago])
   @@index([idEmpresa, clasificacionComercial])
@@ -180,6 +186,7 @@ model Plan {
   preciosZona     PlanZonaPrecio[]
   cambiosPlanAnteriores HistorialCambioPlan[] @relation("PlanAnterior")
   cambiosPlanNuevos     HistorialCambioPlan[] @relation("PlanNuevo")
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
 
   @@map("plan")
 }
@@ -236,6 +243,8 @@ model Contrato {
   prorrogasPago ProrrogaPago[]
   cambiosCondicionPago CambioCondicionPago[]
   cargosAdicionales CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro ServicioRetiroSolicitud[]
 
   @@map("contrato")
 }
@@ -443,6 +452,7 @@ model ServicioContratado {
   observaciones   String?
   datosTecnicos   Json?    @map("datos_tecnicos")
   fechaCreacion   DateTime @default(now()) @map("fecha_creacion")
+  fechaActivacion DateTime? @map("fecha_activacion")
 
   cliente   Cliente            @relation(fields: [idCliente], references: [idCliente])
   empresa   Empresa?           @relation(fields: [idEmpresa], references: [idEmpresa])
@@ -456,6 +466,8 @@ model ServicioContratado {
   eventosGestionComercial EventoGestionComercial[]
   conveniosPago ConvenioPago[]
   cargosAdicionales CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro ServicioRetiroSolicitud[]
 
   @@map("servicio_contratado")
 }
@@ -531,6 +543,90 @@ model ZonaPago {
   @@index([idZonaPadre])
   @@index([fechaInicio, fechaFin])
   @@map("zona_pago")
+}
+
+model IntegracionInstalacionG3 {
+  idIntegracion              Int       @id @default(autoincrement()) @map("id_integracion")
+  idEmpresa                  Int       @map("id_empresa")
+  idProspecto                Int?      @map("id_prospecto")
+  idCliente                  Int?      @map("id_cliente")
+  idContrato                 Int       @map("id_contrato")
+  idPlan                     Int       @map("id_plan")
+  idServicio                 Int?      @map("id_servicio")
+  requestId                  String    @unique @map("request_id") @db.Uuid
+  traceId                    String    @map("trace_id") @db.Uuid
+  idOtG3                     String?   @map("id_ot_g3") @db.VarChar(100)
+  codigoOtG3                 String?   @map("codigo_ot_g3") @db.VarChar(100)
+  estadoIntegracion          String    @default("PENDIENTE_ENVIO") @map("estado_integracion") @db.VarChar(30)
+  estadoOtG3                 String?   @map("estado_ot_g3") @db.VarChar(50)
+  estadoOriginalG3           String?   @map("estado_original_g3") @db.VarChar(100)
+  fechaSolicitud             DateTime  @default(now()) @map("fecha_solicitud")
+  ultimoIntento              DateTime? @map("ultimo_intento")
+  fechaUltimaSincronizacion  DateTime? @map("fecha_ultima_sincronizacion")
+  intentos                   Int       @default(0)
+  ultimoErrorSanitizado      String?   @map("ultimo_error_sanitizado")
+  payloadHash                String    @map("payload_hash") @db.Char(64)
+  payloadSnapshot            Json      @map("payload_snapshot")
+  fechaCierreProcesado       DateTime? @map("fecha_cierre_procesado")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa])
+  prospecto   Prospecto?          @relation(fields: [idProspecto], references: [idProspecto])
+  cliente     Cliente?            @relation(fields: [idCliente], references: [idCliente])
+  contrato    Contrato            @relation(fields: [idContrato], references: [idContrato])
+  plan        Plan                @relation(fields: [idPlan], references: [idPlan])
+  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  eventos     IntegracionEventoEntrante[]
+
+  @@index([idEmpresa, estadoIntegracion, fechaSolicitud])
+  @@index([idEmpresa, idOtG3])
+  @@index([idEmpresa, codigoOtG3])
+  @@index([idContrato, fechaSolicitud])
+  @@map("integracion_instalacion_g3")
+}
+
+model IntegracionEventoEntrante {
+  idEvento          Int       @id @default(autoincrement()) @map("id_evento")
+  idIntegracion     Int       @map("id_integracion")
+  source            String    @db.VarChar(30)
+  eventType         String    @map("event_type") @db.VarChar(50)
+  externalReference String    @map("external_reference") @db.VarChar(120)
+  payloadHash       String    @map("payload_hash") @db.Char(64)
+  processedAt       DateTime  @default(now()) @map("processed_at")
+  result            Json?
+
+  integracion IntegracionInstalacionG3 @relation(fields: [idIntegracion], references: [idIntegracion])
+
+  @@unique([idIntegracion, eventType])
+  @@index([externalReference, payloadHash])
+  @@map("integracion_evento_entrante")
+}
+
+model ServicioRetiroSolicitud {
+  idSolicitudRetiro Int       @id @default(autoincrement()) @map("id_solicitud_retiro")
+  idEmpresa         Int       @map("id_empresa")
+  idCliente         Int       @map("id_cliente")
+  idServicio        Int       @map("id_servicio")
+  idContrato        Int?      @map("id_contrato")
+  motivo            String
+  fechaSolicitada   DateTime  @map("fecha_solicitada") @db.Date
+  estado            String    @default("REGISTRADA") @db.VarChar(30)
+  estadoDespachoTecnico String @default("BLOQUEADO_CONTRATO_G3") @map("estado_despacho_tecnico") @db.VarChar(40)
+  idUsuarioResponsable Int    @map("id_usuario_responsable")
+  observaciones     String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente])
+  servicio    ServicioContratado  @relation(fields: [idServicio], references: [idServicio])
+  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato])
+  responsable Usuario             @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+
+  @@index([idEmpresa, estado, fechaSolicitada], map: "solicitud_retiro_empresa_estado_fecha_idx")
+  @@index([idServicio, createdAt])
+  @@map("solicitud_retiro_servicio")
 }
 
 model EventoGestionComercial {

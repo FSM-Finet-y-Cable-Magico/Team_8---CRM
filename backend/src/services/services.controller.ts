@@ -13,11 +13,15 @@ import { ServiceInstallAvailabilityDto } from './dto/service-install-availabilit
 import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ServicesService } from './services.service';
+import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
 
 @Controller('services')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ServicesController {
-  constructor(private readonly servicesService: ServicesService) {}
+  constructor(
+    private readonly servicesService: ServicesService,
+    private readonly installations: InstallationIntegrationService,
+  ) {}
 
   @Get('customer/:idCliente')
   @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
@@ -61,7 +65,8 @@ export class ServicesController {
     @Body() dto: CreateServiceInstallOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.servicesService.createInstallOrder(id, dto, user);
+    void dto;
+    return this.installations.requestInstallation({ idServicio: id }, user);
   }
 
   @Post()
