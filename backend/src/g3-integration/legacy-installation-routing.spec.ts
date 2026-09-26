@@ -15,7 +15,7 @@ describe('Etapa 3 - rutas legacy de instalacion', () => {
   it('47b. ruta de Servicio delega a G3 y no crea OT local', async () => {
     const services = { createInstallOrder: jest.fn() };
     const integrations = { requestInstallation: jest.fn().mockResolvedValue({ fuente: 'G3' }) };
-    const controller = new ServicesController(services as never, integrations as never);
+    const controller = new ServicesController(services as never, integrations as never, {} as never);
     await controller.createInstallOrder(50, {} as never, user);
     expect(integrations.requestInstallation).toHaveBeenCalledWith({ idServicio: 50 }, user); expect(services.createInstallOrder).not.toHaveBeenCalled();
   });

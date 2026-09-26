@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallationActivationService } from './installation-activation.service';
+import { G1ActivationService } from '../g1-integration/g1-activation.service';
 import { G3ClosurePayload, G3ClosureSource } from './g3-integration.types';
 import {
   externalWorkOrderCode,
@@ -18,6 +19,7 @@ export class G3ClosureProcessor {
     private readonly prisma: PrismaService,
     private readonly activationService: InstallationActivationService,
     private readonly auditService: AuditService,
+    @Optional() private readonly g1Activation?: G1ActivationService,
   ) {}
 
   async process(payload: G3ClosurePayload, source: G3ClosureSource, trackingHintId?: number) {
@@ -125,6 +127,32 @@ export class G3ClosureProcessor {
         },
       });
       await this.auditStatus(tracking.idIntegracion, normalized.state, normalized.known, processed.result);
+    }
+
+    const activationResult = processed.result && typeof processed.result === 'object' && !Array.isArray(processed.result)
+      ? processed.result as Record<string, unknown>
+      : {};
+    if (
+      !processed.duplicate &&
+      normalized.state === 'COMPLETADA' &&
+      activationResult.activated === true &&
+      typeof activationResult.idCliente === 'number' &&
+      typeof activationResult.idServicio === 'number' &&
+      this.g1Activation
+    ) {
+      try {
+        await this.g1Activation.afterG3Completion(
+          tracking,
+          { idCliente: activationResult.idCliente, idServicio: activationResult.idServicio },
+          record,
+        );
+      } catch (error) {
+        console.error('No se pudo registrar el tracking de activación G1 después del commit G8', {
+          idIntegracionG3: tracking.idIntegracion,
+          idEmpresa: tracking.idEmpresa,
+          error: error instanceof Error ? error.message : 'Error desconocido',
+        });
+      }
     }
 
     return processed;

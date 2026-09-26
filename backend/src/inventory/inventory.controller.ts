@@ -18,11 +18,15 @@ import { RegisterMaintenanceDto } from './dto/register-maintenance.dto';
 import { TransferEquipmentDto } from './dto/transfer-equipment.dto';
 import { UpdateEquipmentStatusDto } from './dto/update-equipment-status.dto';
 import { InventoryService } from './inventory.service';
+import { DomainOwnershipService } from '../domain-ownership/domain-ownership.service';
 
 @Controller('inventory')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class InventoryController {
-  constructor(private readonly inventoryService: InventoryService) {}
+  constructor(
+    private readonly inventoryService: InventoryService,
+    private readonly ownership: DomainOwnershipService,
+  ) {}
 
   @Get()
   @Roles(...ACCESS_ROLES.VIEW_INVENTORY)
@@ -39,19 +43,22 @@ export class InventoryController {
   @Post('equipment')
   @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   createEquipment(@Body() dto: CreateEquipmentDto, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.createEquipment(dto, user);
+    void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment');
   }
 
   @Post('nap-boxes')
   @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   createNapBox(@Body() dto: CreateNapBoxDto, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.createNapBox(dto, user);
+    void dto;
+    return this.ownership.rejectG3Write(user, 'POST /api/inventory/nap-boxes');
   }
 
   @Post('consumables')
   @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   createConsumableStock(@Body() dto: CreateConsumableStockDto, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.createConsumableStock(dto, user);
+    void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/consumables');
   }
 
   @Post('consumables/:id/movements')
@@ -61,13 +68,15 @@ export class InventoryController {
     @Body() dto: RecordConsumableMovementDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.recordConsumableMovement(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/consumables/:id/movements');
   }
 
   @Post('movements')
   @Roles(...ACCESS_ROLES.MANAGE_INVENTORY)
   recordMovement(@Body() dto: RecordMovementDto, @CurrentUser() user: AuthUser) {
-    return this.inventoryService.recordMovement(dto, user);
+    void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/movements');
   }
 
   @Patch('equipment/:id/status')
@@ -77,7 +86,8 @@ export class InventoryController {
     @Body() dto: UpdateEquipmentStatusDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.updateStatus(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'PATCH /api/inventory/equipment/:id/status');
   }
 
   @Post('equipment/:id/block')
@@ -87,7 +97,8 @@ export class InventoryController {
     @Body() dto: BlockEquipmentDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.blockEquipment(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment/:id/block');
   }
 
   @Post('equipment/:id/diagnosis')
@@ -97,7 +108,8 @@ export class InventoryController {
     @Body() dto: DiagnoseEquipmentDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.diagnoseEquipment(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment/:id/diagnosis');
   }
 
   @Post('equipment/:id/transfer')
@@ -107,7 +119,8 @@ export class InventoryController {
     @Body() dto: TransferEquipmentDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.transferEquipment(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment/:id/transfer');
   }
 
   @Post('equipment/:id/maintenance')
@@ -117,7 +130,8 @@ export class InventoryController {
     @Body() dto: RegisterMaintenanceDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.registerMaintenance(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment/:id/maintenance');
   }
 
   @Post('equipment/:id/install')
@@ -127,7 +141,8 @@ export class InventoryController {
     @Body() dto: InstallRouterDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.installRouter(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/inventory/equipment/:id/install');
   }
 
   @Post('work-orders/:id/evidence')
@@ -137,6 +152,7 @@ export class InventoryController {
     @Body() dto: AttachEvidenceDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.inventoryService.attachEvidence(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectG3Write(user, 'POST /api/inventory/work-orders/:id/evidence');
   }
 }

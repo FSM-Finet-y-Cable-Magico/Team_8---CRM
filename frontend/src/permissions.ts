@@ -45,6 +45,7 @@ export type DashboardPermissions = {
   exportControlBook: boolean;
   manageCommercialCollections: boolean;
   approveAgreements: boolean;
+  manageCommercialWarranties: boolean;
 };
 
 const ROLE_ALIASES: Record<string, RoleName> = {
@@ -102,6 +103,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   exportControlBook: ['Administrador', 'Comercial'],
   manageCommercialCollections: ['Administrador', 'Comercial'],
   approveAgreements: ['Administrador'],
+  manageCommercialWarranties: ['Administrador', 'Comercial'],
 };
 
 export function isRoleName(role: string): role is RoleName {

@@ -1,21 +1,26 @@
-import { useEffect, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
-import { api, apiErrorMessage, type AdvancedInventory, type Customer, type InventoryUnit, type WorkOrder } from '../../api';
-import { macPattern } from '../../constants';
-import { formatWorkOrderValue } from '../../lib';
+import { FormEvent, useEffect, useState } from 'react';
+import {
+  api,
+  apiErrorMessage,
+  type AdvancedInventory,
+  type Customer,
+  type G1EquipmentResponse,
+  type G1EquipmentType,
+  type G1Unit,
+  type InventoryUnit,
+  type WorkOrder,
+} from '../../api';
+import { formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { Modal, TablePagination } from '../../shared/components';
-import { InventoryAdvancedPanel } from './InventoryAdvancedPanel';
 
-export function InventoryPanel({
-  inventory,
-  advancedInventory,
-  customers,
-  workOrders,
-  writeCompanyId,
-  permissions,
-  onChanged,
-}: {
+function equipmentTypeLabel(unit: G1Unit) {
+  if (!unit.tipo_equipo) return '-';
+  return typeof unit.tipo_equipo === 'string'
+    ? unit.tipo_equipo
+    : [unit.tipo_equipo.nombre, unit.tipo_equipo.marca, unit.tipo_equipo.modelo].filter(Boolean).join(' · ');
+}
+
+export function InventoryPanel(props: {
   inventory: InventoryUnit[];
   advancedInventory: AdvancedInventory | null;
   customers: Customer[];
@@ -24,468 +29,135 @@ export function InventoryPanel({
   permissions: DashboardPermissions;
   onChanged: () => void;
 }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [createForm, setCreateForm] = useState({ numeroSerie: '', modelo: '', tipoNombre: 'Router/ONU', numeroPoste: '' });
-  const [movementForm, setMovementForm] = useState({ tipoMovimiento: 'Compra', idCliente: '', idEmpresaDestino: '' });
-  const [statusForm, setStatusForm] = useState({ estado: 'Disponible', motivo: '' });
-  const [installForm, setInstallForm] = useState({ idCliente: '', idOt: '', macAddress: '', puertoOlt: '', modelo: '' });
-  const [advancedUnitForm, setAdvancedUnitForm] = useState({
-    blockReason: '',
-    diagnosisResult: 'Funciona',
-    transferCompanyId: '',
-    maintenanceType: 'Preventiva',
-    maintenanceDesc: '',
-    evidenceOt: '',
-    evidenceUrl: '',
-  });
-  const [status, setStatus] = useState('');
-  const [managementOpen, setManagementOpen] = useState(false);
-  const [page, setPage] = useState(1);
-
-  const selectedUnit = inventory.find((unit) => unit.idUnidad === selectedId) ?? null;
-  const pageSize = 20;
-  const paginatedInventory = inventory.slice((page - 1) * pageSize, page * pageSize);
-  const eligibleCustomers = customers.filter(
-    (customer) =>
-      customer.idEmpresa === selectedUnit?.idEmpresa ||
-      customer.contratos?.some((contract) => contract.idEmpresa === selectedUnit?.idEmpresa),
-  );
-  const eligibleInstallOrders = workOrders.filter(
-    (order) =>
-      order.tipoOt === 'Instalacion' &&
-      order.idCliente === Number(installForm.idCliente) &&
-      order.idEmpresa === selectedUnit?.idEmpresa,
-  );
+  const [types, setTypes] = useState<G1EquipmentType[]>([]);
+  const [typesStatus, setTypesStatus] = useState('Cargando catálogo G1…');
+  const [serial, setSerial] = useState('');
+  const [unit, setUnit] = useState<G1Unit | null>(null);
+  const [serialStatus, setSerialStatus] = useState('');
 
   useEffect(() => {
-    if (selectedUnit) {
-      setStatusForm({ estado: selectedUnit.estado, motivo: '' });
-      setInstallForm((current) => ({ ...current, modelo: selectedUnit.modelo ?? '' }));
+    let active = true;
+    setTypesStatus('Cargando catálogo G1…');
+    api.get<G1EquipmentResponse<G1EquipmentType[]>>('/integrations/g1/equipment-types', {
+      params: { idEmpresa: props.writeCompanyId, activo: true },
+    }).then(({ data }) => {
+      if (!active) return;
+      setTypes(data.data);
+      setTypesStatus(data.data.length ? '' : 'G1 no devolvió tipos de equipo activos.');
+    }).catch((error) => {
+      if (!active) return;
+      setTypes([]);
+      setTypesStatus(apiErrorMessage(error));
+    });
+    return () => { active = false; };
+  }, [props.writeCompanyId]);
+
+  async function searchUnit(event: FormEvent) {
+    event.preventDefault();
+    const value = serial.trim();
+    if (!value) {
+      setSerialStatus('Ingresa un número de serie.');
+      return;
     }
-  }, [selectedUnit?.idUnidad]);
-
-  useEffect(() => { setPage(1); }, [inventory.length]);
-
-  async function run(action: () => Promise<unknown>, success: string) {
+    setUnit(null);
+    setSerialStatus('Consultando G1…');
     try {
-      await action();
-      setStatus(success);
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
+      const { data } = await api.get<G1EquipmentResponse<G1Unit>>('/integrations/g1/units/' + encodeURIComponent(value), {
+        params: { idEmpresa: props.writeCompanyId },
+      });
+      setUnit(data.data);
+      setSerialStatus('');
+    } catch (error) {
+      setSerialStatus(apiErrorMessage(error));
     }
-  }
-
-  function selectedUnitPayload() {
-    if (!selectedUnit) {
-      throw new Error('No hay equipo seleccionado');
-    }
-
-    return selectedUnit.idUnidad;
   }
 
   return (
     <section className="inventory-workspace">
-      {permissions.manageInventory && <form
-        className="inventory-create-form stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-
-          if (!createForm.numeroSerie.trim() || !createForm.tipoNombre.trim()) {
-            setStatus('Ingresa numero de serie y tipo de equipo.');
-            return;
-          }
-
-          void run(
-            () =>
-              api.post('/inventory/equipment', {
-                numeroSerie: createForm.numeroSerie.trim(),
-                modelo: createForm.modelo.trim() || undefined,
-                tipoNombre: createForm.tipoNombre.trim(),
-                numeroPoste: createForm.numeroPoste.trim() || undefined,
-                idEmpresa: writeCompanyId,
-              }),
-            'Equipo creado en inventario',
-          );
-        }}
-      >
-        <h2>Registrar equipo</h2>
-        <label>
-          Numero de serie
-          <input
-            value={createForm.numeroSerie}
-            onChange={(event) => setCreateForm({ ...createForm, numeroSerie: event.target.value })}
-            placeholder="DEMO-FINET-RTR-002"
-            maxLength={80}
-            required
-          />
-        </label>
-        <label>
-          Modelo
-          <input
-            value={createForm.modelo}
-            onChange={(event) => setCreateForm({ ...createForm, modelo: event.target.value })}
-            placeholder="Huawei AX3 / FiberHome ONU"
-            maxLength={80}
-          />
-        </label>
-        <label>
-          Tipo
-          <input
-            value={createForm.tipoNombre}
-            onChange={(event) => setCreateForm({ ...createForm, tipoNombre: event.target.value })}
-            placeholder="Router/ONU"
-            maxLength={100}
-            required
-          />
-        </label>
-        <button>Crear equipo</button>
-        {status && <p className="inline-status">{status}</p>}
-      </form>}
-
       <section className="inventory-list-section">
         <div className="inventory-list-heading">
-          <h2>Equipos por empresa</h2>
-          <span>{inventory.length}</span>
+          <div>
+            <h2>Consulta de Inventario/Bodega</h2>
+            <p>El inventario físico es administrado por G1. CRM solo consulta.</p>
+          </div>
+          <span>Fuente: G1</span>
         </div>
-        <div className="table-wrap">
-          <table className="operational-table inventory-table">
-            <thead>
-              <tr>
-                <th>Serie</th>
-                <th>Modelo</th>
-                <th>Tipo</th>
-                <th>Estado</th>
-                <th>Empresa</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedInventory.map((unit) => (
-                <tr key={unit.idUnidad}>
-                  <td>{unit.numeroSerie}</td>
-                  <td>{unit.modelo ?? '-'}</td>
-                  <td>{unit.tipoEquipo?.nombre ?? unit.idTipoEquipo ?? '-'}</td>
-                  <td className="inventory-status-cell">{formatWorkOrderValue(unit.estado)}</td>
-                  <td>{unit.empresa?.nombre ?? `Empresa ${unit.idEmpresa ?? '-'}`}</td>
-                  <td>
-                    <button
-                      className="secondary compact"
-                      onClick={() => {
-                        setSelectedId(unit.idUnidad);
-                        setManagementOpen(true);
-                      }}
-                    >
-                      Gestionar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <TablePagination currentPage={page} totalItems={inventory.length} pageSize={pageSize} onPageChange={setPage} />
 
-        <Modal title="Gestionar equipo" open={managementOpen} onClose={() => setManagementOpen(false)}>
-          {selectedUnit ? (
-            <div className="inventory-management-modal">
-              <div className="inventory-equipment-summary">
-                <div className="inventory-equipment-summary-heading"><span>{selectedUnit.numeroSerie.slice(0, 2)}</span><div><h3>{selectedUnit.numeroSerie}</h3><p>{selectedUnit.modelo ?? 'Modelo no registrado'} · {selectedUnit.tipoEquipo?.nombre ?? 'Equipo de inventario'}</p></div><strong>{formatWorkOrderValue(selectedUnit.estado)}</strong></div>
-              <p className="detail-line">
-                Empresa: {selectedUnit.empresa?.nombre ?? `Empresa ${selectedUnit.idEmpresa ?? '-'}`}
-                {selectedUnit.clienteInstalado ? ` - Cliente: ${selectedUnit.clienteInstalado.nombreCompleto}` : ''}
-              </p>
-              {(selectedUnit.macAddress || selectedUnit.puertoOlt) && (
-                <p className="detail-line">
-                  MAC: {selectedUnit.macAddress ?? '-'} - Puerto OLT: {selectedUnit.puertoOlt ?? '-'}
-                </p>
-              )}
-              </div>
-              <div className="inventory-management-flow">
-                <details className="inventory-management-section">
-                  <summary><span>Operación del equipo<small>Estado, movimiento y bloqueo</small></span><ChevronDown size={17} /></summary>
-                  <div className="inventory-management-section-content inventory-action-grid">
-                {permissions.manageInventory && <label>
-                  Estado logico
-                  <select value={statusForm.estado} onChange={(event) => setStatusForm({ ...statusForm, estado: event.target.value })}>
-                    {['Disponible', 'En Revision', 'Instalado', 'Baja Definitiva', 'Bloqueado'].map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    placeholder="Motivo del cambio de estado"
-                    value={statusForm.motivo}
-                    onChange={(event) => setStatusForm({ ...statusForm, motivo: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void run(
-                        () => api.patch(`/inventory/equipment/${selectedUnitPayload()}/status`, statusForm),
-                        'Estado de equipo actualizado',
-                      )
-                    }
-                  >
-                    Actualizar
-                  </button>
-                </label>}
+        <section className="customer-service-history">
+          <header><h3>Dependencias de integración</h3></header>
+          <p className="detail-line"><strong>CU-61: PARCIAL_BLOQUEADO_G1_P2.</strong> El consumo mensual actual requiere un endpoint G1 ratificado; los reportes locales disponibles son únicamente históricos.</p>
+          <p className="detail-line"><strong>CU-18: PARCIAL_BLOQUEADO_G3.</strong> Poste y NAP pertenecen a G3 y siguen pendientes de un contrato técnico ratificado.</p>
+        </section>
 
-                {permissions.manageInventory && <label>
-                  Movimiento
-                  <select
-                    value={movementForm.tipoMovimiento}
-                    onChange={(event) => setMovementForm({ ...movementForm, tipoMovimiento: event.target.value })}
-                  >
-                    {['Compra', 'Devolucion', 'Asignacion', 'Descarte', 'Transferencia'].map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                  <select value={movementForm.idCliente} onChange={(event) => setMovementForm({ ...movementForm, idCliente: event.target.value })}>
-                    <option value="">Cliente opcional</option>
-                    {customers.map((customer) => (
-                      <option key={customer.idCliente} value={customer.idCliente}>
-                        {customer.nombreCompleto}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    placeholder="ID empresa destino, ej: 2"
-                    value={movementForm.idEmpresaDestino}
-                    onChange={(event) => setMovementForm({ ...movementForm, idEmpresaDestino: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void run(
-                        () =>
-                          api.post('/inventory/movements', {
-                            idUnidad: selectedUnitPayload(),
-                            tipoMovimiento: movementForm.tipoMovimiento,
-                            idCliente: movementForm.idCliente ? Number(movementForm.idCliente) : undefined,
-                            idEmpresaDestino: movementForm.idEmpresaDestino ? Number(movementForm.idEmpresaDestino) : undefined,
-                            cantidad: 1,
-                          }),
-                        'Movimiento registrado',
-                      )
-                    }
-                  >
-                    Registrar
-                  </button>
-                </label>}
-                {permissions.manageInventory && <label>
-                  Bloquear equipo por uso malicioso
-                  <input
-                    placeholder="Motivo del bloqueo"
-                    value={advancedUnitForm.blockReason}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, blockReason: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    disabled={!advancedUnitForm.blockReason.trim()}
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/block`, { motivo: advancedUnitForm.blockReason.trim() }),
-                        'Equipo bloqueado y baja registrada',
-                      )
-                    }
-                  >
-                    Bloquear
-                  </button>
-                </label>}
+        <form className="inventory-create-form stack" onSubmit={searchUnit}>
+          <h3>Consultar unidad por serie</h3>
+          <label>
+            Número de serie
+            <input value={serial} onChange={(event) => setSerial(event.target.value)} maxLength={80} />
+          </label>
+          <button type="submit">Consultar en G1</button>
+          {serialStatus && <p className="inline-status">{serialStatus}</p>}
+        </form>
 
-                  </div>
-                </details>
-                <details className="inventory-management-section">
-                  <summary><span>Control técnico<small>Diagnóstico, traslado y mantención</small></span><ChevronDown size={17} /></summary>
-                  <div className="inventory-management-section-content inventory-action-grid">
-                {permissions.manageInventory && <label>
-                  Diagnosticar equipo devuelto
-                  <select
-                    value={advancedUnitForm.diagnosisResult}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, diagnosisResult: event.target.value })}
-                  >
-                    <option value="Funciona">Funciona</option>
-                    <option value="Danado">Danado</option>
-                    <option value="Bloqueado">Bloqueado</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/diagnosis`, { resultado: advancedUnitForm.diagnosisResult }),
-                        'Diagnostico de equipo registrado',
-                      )
-                    }
-                  >
-                    Registrar diagnostico
-                  </button>
-                </label>}
-
-                {permissions.manageInventory && <label>
-                  Transferir equipo entre empresas
-                  <input
-                    placeholder="ID empresa destino"
-                    value={advancedUnitForm.transferCompanyId}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, transferCompanyId: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    disabled={!advancedUnitForm.transferCompanyId}
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/transfer`, { idEmpresaDestino: Number(advancedUnitForm.transferCompanyId) }),
-                        'Equipo transferido entre empresas',
-                      )
-                    }
-                  >
-                    Transferir
-                  </button>
-                </label>}
-
-                {permissions.manageInventory && <label>
-                  Registrar mantencion
-                  <select
-                    value={advancedUnitForm.maintenanceType}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceType: event.target.value })}
-                  >
-                    <option value="Preventiva">Preventiva</option>
-                    <option value="Correctiva">Correctiva</option>
-                  </select>
-                  <input
-                    placeholder="Descripción de la mantencion"
-                    value={advancedUnitForm.maintenanceDesc}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, maintenanceDesc: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    disabled={!advancedUnitForm.maintenanceDesc.trim()}
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/inventory/equipment/${selectedUnitPayload()}/maintenance`, {
-                          tipo: advancedUnitForm.maintenanceType,
-                          descripcion: advancedUnitForm.maintenanceDesc.trim(),
-                        }),
-                        'Mantencion registrada',
-                      )
-                    }
-                  >
-                    Registrar mantencion
-                  </button>
-                </label>}
-
-                  </div>
-                </details>
-                <details className="inventory-management-section">
-                  <summary><span>Vinculación y evidencia<small>Cliente, orden y respaldo</small></span><ChevronDown size={17} /></summary>
-                  <div className="inventory-management-section-content inventory-action-grid">
-                {permissions.installEquipment && <label>
-                  Adjuntar evidencia a orden de trabajo
-                  <select value={advancedUnitForm.evidenceOt} onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceOt: event.target.value })}>
-                    <option value="">Seleccionar OT</option>
-                    {workOrders.map((order) => (
-                      <option key={order.idOt} value={order.idOt}>
-                        OT {order.idOt} - {order.tipoOt}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    placeholder="URL o ruta local /uploads/..."
-                    value={advancedUnitForm.evidenceUrl}
-                    onChange={(event) => setAdvancedUnitForm({ ...advancedUnitForm, evidenceUrl: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    disabled={!advancedUnitForm.evidenceOt || !advancedUnitForm.evidenceUrl.trim()}
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/inventory/work-orders/${advancedUnitForm.evidenceOt}/evidence`, { url: advancedUnitForm.evidenceUrl.trim() }),
-                        'Evidencia adjuntada a la OT',
-                      )
-                    }
-                  >
-                    Adjuntar evidencia
-                  </button>
-                </label>}
-
-
-                {permissions.installEquipment && <label>
-                  Asociando serie, MAC y puerto OLT al cliente
-                  <input value={selectedUnit.numeroSerie} readOnly aria-label="Número de serie asociado" />
-                  <select
-                    value={installForm.idCliente}
-                    onChange={(event) => setInstallForm({ ...installForm, idCliente: event.target.value, idOt: '' })}
-                  >
-                    <option value="">Seleccionar cliente</option>
-                    {eligibleCustomers.map((customer) => (
-                      <option key={customer.idCliente} value={customer.idCliente}>
-                        {customer.nombreCompleto} - {customer.rut ?? 'sin RUT'}
-                      </option>
-                    ))}
-                  </select>
-                  <select value={installForm.idOt} onChange={(event) => setInstallForm({ ...installForm, idOt: event.target.value })}>
-                    <option value="">Orden de instalación opcional</option>
-                    {eligibleInstallOrders.map((order) => (
-                      <option key={order.idOt} value={order.idOt}>
-                        Orden {order.idOt} - {order.estado}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    placeholder="MAC AA:BB:CC:DD:EE:FF"
-                    value={installForm.macAddress}
-                    onChange={(event) => setInstallForm({ ...installForm, macAddress: event.target.value })}
-                  />
-                  <input
-                    placeholder="Puerto OLT, ej: OLT-1/1/3"
-                    value={installForm.puertoOlt}
-                    onChange={(event) => setInstallForm({ ...installForm, puertoOlt: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    disabled={!installForm.idCliente || !installForm.macAddress.trim() || !installForm.puertoOlt.trim()}
-                    onClick={() =>
-                      !macPattern.test(installForm.macAddress.trim())
-                        ? setStatus('Ingresa una MAC valida, por ejemplo AA:BB:CC:DD:EE:FF.')
-                        : !installForm.puertoOlt.trim()
-                          ? setStatus('Ingresa el puerto OLT asociado a la instalación.')
-                          : void run(
-                            () =>
-                              api.post(`/inventory/equipment/${selectedUnitPayload()}/install`, {
-                                idCliente: Number(installForm.idCliente),
-                                idOt: installForm.idOt ? Number(installForm.idOt) : undefined,
-                                modelo: installForm.modelo.trim() || undefined,
-                                macAddress: installForm.macAddress.trim().toUpperCase(),
-                                puertoOlt: installForm.puertoOlt.trim(),
-                              }),
-                            'Equipo vinculado al cliente',
-                          )
-                    }
-                  >
-                    Vincular
-                  </button>
-                </label>}
-                  </div>
-                </details>
-              </div>
-              {status && <p className="inline-status">{status}</p>}
+        {unit && (
+          <div className="inventory-equipment-summary">
+            <div className="inventory-equipment-summary-heading">
+              <span>{unit.numero_serie.slice(0, 2)}</span>
+              <div><h3>{unit.numero_serie}</h3><p>{equipmentTypeLabel(unit)}</p></div>
+              <strong>{formatWorkOrderValue(unit.estado)}</strong>
             </div>
-          ) : (
-            <p className="inline-status">Selecciona un equipo del inventario para gestionarlo.</p>
-          )}
-        </Modal>
-      </section>
+            <dl className="customer-readonly-details">
+              <div><dt>Fuente</dt><dd>G1</dd></div>
+              <div><dt>Estado físico oficial</dt><dd>{unit.estadoFisicoOficial ? 'Sí' : 'Estado no reconocido'}</dd></div>
+              <div><dt>MAC</dt><dd>{unit.mac_address ?? '-'}</dd></div>
+              <div><dt>Bodega actual</dt><dd>{unit.id_bodega_actual ?? '-'}</dd></div>
+              <div><dt>Adquisición</dt><dd>{unit.fecha_adquisicion ? formatDateOnly(unit.fecha_adquisicion) : '-'}</dd></div>
+              <div><dt>Garantía física</dt><dd>{unit.garantia?.vigente === true ? 'Vigente' : unit.garantia?.vigente === false ? 'Vencida' : 'Sin dato'}</dd></div>
+              <div><dt>Vencimiento garantía física</dt><dd>{unit.garantia?.fecha_vencimiento ? formatDateOnly(unit.garantia.fecha_vencimiento) : '-'}</dd></div>
+            </dl>
+            <p className="detail-line">La garantía física proviene de G1 y es de solo lectura.</p>
+          </div>
+        )}
 
-      <InventoryAdvancedPanel
-        advancedInventory={advancedInventory}
-        workOrders={workOrders}
-        writeCompanyId={writeCompanyId}
-        permissions={permissions}
-        onChanged={onChanged}
-      />
+        <section className="customer-service-history">
+          <header><h3>Catálogo de tipos de equipo</h3><span>Fuente: G1</span></header>
+          {typesStatus && <p className="inline-status">{typesStatus}</p>}
+          {types.length > 0 && (
+            <div className="table-wrap">
+              <table className="operational-table inventory-table">
+                <thead><tr><th>Tipo</th><th>Categoría</th><th>Marca / modelo</th><th>Garantía</th></tr></thead>
+                <tbody>{types.map((type) => (
+                  <tr key={type.id_tipo_equipo}>
+                    <td>{type.nombre}</td>
+                    <td>{type.categoria ?? '-'}</td>
+                    <td>{[type.marca, type.modelo].filter(Boolean).join(' · ') || '-'}</td>
+                    <td>{type.garantia_dias ? `${type.garantia_dias} días` : '-'}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <details className="inventory-management-section">
+          <summary>Histórico local separado · Fuente: LEGACY_LOCAL</summary>
+          <p className="detail-line">Estos registros se conservan solo para trazabilidad. No representan disponibilidad actual y no tienen acciones de escritura.</p>
+          <div className="table-wrap">
+            <table className="operational-table inventory-table">
+              <thead><tr><th>Serie</th><th>Modelo</th><th>Estado histórico</th><th>Fuente</th></tr></thead>
+              <tbody>{props.inventory.map((legacy) => (
+                <tr key={legacy.idUnidad}>
+                  <td>{legacy.numeroSerie}</td>
+                  <td>{legacy.modelo ?? '-'}</td>
+                  <td>{formatWorkOrderValue(legacy.estado)}</td>
+                  <td>LEGACY_LOCAL</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          {!props.inventory.length && <p className="empty-state">No hay registros históricos locales.</p>}
+        </details>
+      </section>
     </section>
   );
 }

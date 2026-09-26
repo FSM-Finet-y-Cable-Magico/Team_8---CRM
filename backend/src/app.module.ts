@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -25,6 +25,7 @@ import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
 import { G3IntegrationModule } from './g3-integration/g3-integration.module';
+import { G1IntegrationModule } from './g1-integration/g1-integration.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { G3IntegrationModule } from './g3-integration/g3-integration.module';
     TvipModule,
     MonitoringModule,
     G3IntegrationModule,
+    G1IntegrationModule,
     UsersModule,
     CompaniesModule,
     CommercialModule,

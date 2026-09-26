@@ -937,3 +937,30 @@ TOMODAT vía G3 y SmartOLT escritura continúan P1. No se volvió a TOMODAT dire
 CU-84 agrega `ServicioRetiroSolicitud` real, permisos existentes de solicitudes, responsable y auditoría. Como no existe endpoint ratificado de retiro en el acuerdo G3, el despacho queda `BLOQUEADO_CONTRATO_G3`, no crea OT y su estado es `PARCIAL_BLOQUEADO_G3`.
 
 La única migración aditiva de esta etapa es `20260926120000_i3_g3_fsm_integration`. El detalle completo, endpoints y matriz están en `docs/i3-g3-fsm-integration.md`.
+## Etapa 4 — Integración G1
+
+La Etapa 4 parte del commit aprobado de Etapa 3 `ed0a2203` en `feat/i3-g1-inventory-integration`. G1 queda como owner de inventario/bodega y G8 conserva únicamente dominio comercial, garantías comerciales y referencias externas.
+
+### Resultado de los 33 writes
+
+La línea base era de 33 sitios físicos, 16 métodos y 13 endpoints. El resultado es: 23 sitios bloqueados/requieren contrato G1, 5 reemplazados o deprecados por cierre G3 más activación comercial G1, 5 convertidos en histórico no ejecutable al reemplazar borrado de usuario por desactivación lógica y **0 writes físicos activos alcanzables desde rutas de negocio G8**.
+
+Los endpoints write de Inventory y asociación local de Servicio responden `409 INVENTORY_OWNED_BY_G1`; cierre local, NAP y evidencia responden `410 G3_INTEGRATION_REQUIRED`. Las rutas read legacy permanecen para histórico y se identifican como `LEGACY_LOCAL`. Detalle fila por fila: `docs/i3-g1-inventory-write-migration.md`.
+
+### Adapter, activación y disponibilidad
+
+Se agregó `G1InventoryClient` con tipos de equipo, unidad por serie, activación y equipos por servicio, autenticado por `X-API-KEY`, con timeout y errores saneados. La integración se controla con `G1_INTEGRATION_ENABLED=false` por defecto. La evidencia aportada no demuestra despliegue de tipos, activación ni equipos por servicio; por eso se documentan `PENDIENTE_DESPLIEGUE_G1`. La consulta básica por serie existe en el código G1 aportado, pero la respuesta ampliada también queda pendiente de despliegue/verificación.
+
+Después de un cierre G3 `COMPLETADA`, G8 confirma su transacción comercial y recién entonces crea/envía `IntegracionActivacionG1`. `event_id` es estable entre retries; timeout no revierte Cliente/Servicio/Contrato y nunca activa un fallback físico local. El caso multiunidad queda `PENDIENTE_RATIFICACION_G1_EVENT_ID`.
+
+### Garantías y casos de uso
+
+`GarantiaComercial` implementa CU-85 como entidad G8 validada, multiempresa, auditable y separada de observaciones. La garantía física proviene de G1 y es solo lectura. Estado: `CU-85 IMPLEMENTADO`.
+
+CU-18 queda `PARCIAL_BLOQUEADO_G3`: poste/NAP pertenecen a G3 y el contrato vigente no ratifica esos campos. CU-61 queda `PARCIAL_BLOQUEADO_G1_P2`: no existe una fuente G1 ratificada para consumo, promedio, variación, costo y exportación. La UI expone ambos estados y no presenta legacy como dato actual.
+
+### Persistencia, seguridad y pendientes
+
+La migración aditiva `20260926180000_i3_g1_inventory_integration` crea tracking G1 y garantía comercial, sin eliminar tablas legacy. Consultas y respuestas validan empresa; la API key permanece en backend; logs no incluyen secretos ni payload completo; consultas, activaciones, garantías e intentos de write deprecado usan `LogAuditoria`.
+
+Pendientes externos: despliegue G1 P0/P1, contrato G1 P2, cardinalidad multiunidad de `event_id`, contrato G3 poste/NAP y retiro coordinado de tablas/lectores legacy. Railway no fue modificado y no recibió migraciones.

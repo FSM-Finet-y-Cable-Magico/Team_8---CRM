@@ -1,4 +1,4 @@
-﻿import { RoleName } from './roles';
+import { RoleName } from './roles';
 
 export const ACCESS_ROLES = {
   ADMIN_ONLY: ['Administrador'],
@@ -32,4 +32,7 @@ export const ACCESS_ROLES = {
   VIEW_CONTROL_BOOK: ['Administrador', 'Comercial', 'Soporte'],
   EXPORT_CONTROL_BOOK: ['Administrador', 'Comercial'],
   MANAGE_COMMERCIAL_COLLECTIONS: ['Administrador', 'Comercial'],
+  VIEW_G1_EQUIPMENT: ['Administrador', 'Comercial', 'Soporte'],
+  MANAGE_G1_ACTIVATION_RETRY: ['Administrador', 'Soporte'],
+  MANAGE_COMMERCIAL_WARRANTIES: ['Administrador', 'Comercial'],
 } as const satisfies Record<string, readonly RoleName[]>;

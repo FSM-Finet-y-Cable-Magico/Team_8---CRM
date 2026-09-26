@@ -252,6 +252,59 @@ export type CustomerService = {
   } | null;
 };
 
+export type G1EquipmentType = {
+  id_tipo_equipo: number;
+  id_empresa: number;
+  nombre: string;
+  categoria?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
+  descripcion_tecnica?: string | null;
+  unidad_medida?: string | null;
+  garantia_dias?: number | null;
+  requiere_serie_individual?: boolean | null;
+  activo?: boolean | null;
+};
+
+export type G1Unit = {
+  id_unidad?: number;
+  numero_serie: string;
+  id_empresa: number;
+  id_tipo_equipo?: number | null;
+  tipo_equipo?: G1EquipmentType | string | null;
+  mac_address?: string | null;
+  estado: string;
+  estadoFisicoOficial?: boolean;
+  id_bodega_actual?: number | null;
+  fecha_adquisicion?: string | null;
+  fecha_instalacion?: string | null;
+  id_ot?: number | string | null;
+  garantia?: { fecha_vencimiento?: string | null; vigente?: boolean | null } | null;
+};
+
+export type G1EquipmentResponse<T> = {
+  fuente: 'G1';
+  estadoContrato?: string;
+  data: T;
+};
+
+export type CommercialWarranty = {
+  idGarantia: number;
+  idEmpresa: number;
+  idCliente: number;
+  idServicio: number;
+  idContrato: number;
+  numeroSerieEquipo: string | null;
+  tipo: string;
+  fechaInicio: string;
+  fechaTermino: string;
+  cobertura: string;
+  monto: string | null;
+  observaciones: string | null;
+  estado: string;
+  responsable?: { idUsuario: number; nombreCompleto: string };
+};
+
 export type InventoryUnit = {
   idUnidad: number;
   idEmpresa: number | null;
