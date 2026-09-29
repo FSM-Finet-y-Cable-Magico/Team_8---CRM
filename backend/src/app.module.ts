@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { HealthController } from './health/health.controller';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -58,6 +59,6 @@ import { ExternalTaxDocumentsModule } from './external-tax-documents/external-ta
     ReportsModule,
     ImportsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
 })
 export class AppModule {}

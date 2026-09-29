@@ -361,7 +361,7 @@ export class CommercialControlBookService {
         accionSugerida: status.accionSugerida, convenioActivo: invoice.conveniosPago.length > 0, prorrogaActiva: Boolean(extension),
         ultimoAviso: Boolean(lastNotice),
         diaPago: contract.diaVencimiento, cambioFecha: contract.cambiosCondicionPago[0]?.valorNuevo ?? null,
-        fechaInstalacion: service?.fechaCreacion.toISOString().slice(0, 10) ?? null, fechaCorte: contract.fechaSuspension?.toISOString().slice(0, 10) ?? null,
+        fechaInstalacion: service?.fechaCreacion?.toISOString().slice(0, 10) ?? null, fechaCorte: contract.fechaSuspension?.toISOString().slice(0, 10) ?? null,
         estadoCorte: contract.estado === 'Suspendido' ? 'SUSPENDIDO_COMERCIAL' : null, fechaReactivacion: null,
         avisoRetiro: Boolean(withdrawal), retiroPendiente: Boolean(withdrawal), observacionRelevante: observationByCustomer.get(customer.idCliente) ?? null,
         ultimoPago: lastPayment?.fechaPago.toISOString().slice(0, 10) ?? null, formaPago: lastPayment?.pasarela ?? null,

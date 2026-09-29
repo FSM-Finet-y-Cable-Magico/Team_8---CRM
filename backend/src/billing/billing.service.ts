@@ -354,7 +354,7 @@ export class BillingService {
     return result;
   }
 
-  private isHistoricalService(value: Prisma.JsonValue | null, createdAt: Date) {
+  private isHistoricalService(value: Prisma.JsonValue | null, createdAt: Date | null) {
     const origin = value && typeof value === 'object' && !Array.isArray(value)
       ? String((value as Record<string, unknown>).origen ?? '')
       .trim()
@@ -363,7 +363,7 @@ export class BillingService {
       .replace(/[\u0300-\u036f]/g, '')
       : '';
 
-    return origin.includes('histor') || createdAt < CRM_ACTIVATION_FLOW_START;
+    return origin.includes('histor') || (createdAt !== null && createdAt < CRM_ACTIVATION_FLOW_START);
   }
 
   zones(currentUser: AuthUser, scope = 'consolidado') {

@@ -1,0 +1,70 @@
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+
+export const CONTRACT_HASH = 'af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da';
+export const contractPath = new URL('../db/global/init-global.sql', import.meta.url);
+export function splitSql(text) {
+  const parts = []; let start = 0, depth = 0, quote = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "'") { if (quote && text[i + 1] === "'") { i++; continue; } quote = !quote; }
+    if (quote) continue;
+    if (ch === '(' || ch === '[') depth++;
+    if (ch === ')' || ch === ']') depth--;
+    if (ch === ',' && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+  }
+  parts.push(text.slice(start).trim()); return parts.filter(Boolean);
+}
+export function normalizeType(type) {
+  return type.toLowerCase().replace(/character varying/g, 'varchar').replace(/timestamp(\(\d+\))? without time zone/g, 'timestamp$1')
+    .replace(/timestamp(\(\d+\))? with time zone/g, 'timestamptz$1').replace(/\btimestamp\(6\)/g, 'timestamp').replace(/\btimestamptz\(6\)/g, 'timestamptz')
+    .replace(/\bbigserial\b/g, 'bigint').replace(/\bserial\b/g, 'integer').replace(/\bint4\b/g, 'integer').replace(/\bint8\b/g, 'bigint')
+    .replace(/\bcharacter\b/g, 'char').replace(/\bdecimal\b/g, 'numeric').replace(/\s+/g, ' ').replace(/,\s+/g, ',').trim();
+}
+export function normalizeExpression(value) {
+  if (value == null) return null;
+  // Only remove presentation differences outside literals. Unknown forms remain DIFFERENT.
+  // Preserve parentheses and casts: unsafe algebraic simplification could mask real drift.
+  // Whitespace/case outside literals and the explicit public qualifier are cosmetic.
+  const normalized = value.split(/('(?:''|[^'])*')/).map((part, i) => i % 2 ? part : part.toLowerCase()
+    .replace(/\bpublic\./g, '').replace(/\s/g, '')).join('');
+  return normalized === 'current_timestamp' ? 'now()' : normalized;
+}
+export function ownerOf(table) {
+  if (/^(integracion_activacion|integracion_cierre|asignacion_equipo_servicio|unidad_equipo|tipo_equipo|bodega|stock_consumible|movimiento_inventario|historial_estado_equipo|orden_ingreso|detalle_orden_ingreso|proveedor|prestamo|donacion|salida_|baja_equipo|solicitud_baja|transferencia|inventario|secuencia_srv)/.test(table) && table !== 'integracion_activacion_g1') return 'G1';
+  if (/^(olt|ont|registro_ont|caja_nap|puerto_nap|monitoreo_|alerta_monitoreo|orden_trabajo|historial_ot|uso_material_ot|poste|sector)/.test(table)) return 'G3/Ops';
+  if (/^(sesion_portal|intento_fallido|solicitud_contrasena_wifi|preferencia_|notificacion_|consentimiento_)/.test(table)) return 'G2';
+  if (['empresa','usuario','usuario_rol','rol','log_auditoria'].includes(table)) return 'COMPARTIDO';
+  return 'G8 (coordinar columnas compartidas)';
+}
+export function parseGlobalSchema(bytes = readFileSync(contractPath), verifyHash = true) {
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  if (verifyHash && hash !== CONTRACT_HASH) throw new Error('GLOBAL_CONTRACT_HASH_MISMATCH');
+  const sql = bytes.toString('utf8').replace(/--[^\n]*/g, '');
+  const tables = [], fks = [], indexes = [];
+  for (const m of sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)\s*\(([\s\S]*?)\n\);/g)) {
+    const table = { name: m[1], columns: [], pk: [], checks: [], sql: m[0], owner: ownerOf(m[1]) };
+    for (const def of splitSql(m[2])) {
+      if (/^(?:CONSTRAINT\s+\w+\s+)?PRIMARY KEY/i.test(def)) { table.pk = /\(([^)]+)\)/.exec(def)[1].split(',').map(s => s.trim()); continue; }
+      if (/^CONSTRAINT/i.test(def)) { const c = /^CONSTRAINT\s+(\w+)\s+(CHECK[\s\S]*)/i.exec(def); if (!c) throw new Error('UNSUPPORTED_CONSTRAINT'); table.checks.push({ name:c[1], definition:c[2] }); continue; }
+      const c = /^(\w+)\s+(.+?)(?=\s+(?:NOT NULL|PRIMARY KEY|DEFAULT|CHECK|UNIQUE|REFERENCES)\b|$)/is.exec(def);
+      if (!c) throw new Error('UNSUPPORTED_COLUMN');
+      const pk = /\bPRIMARY KEY\b/i.test(def);
+      const serial = /^(BIG)?SERIAL$/i.test(c[2]);
+      const d = /\bDEFAULT\s+([\s\S]*?)(?=\s+(?:CHECK|NOT NULL|PRIMARY KEY|UNIQUE)\b|$)/i.exec(def);
+      table.columns.push({ name:c[1], type:normalizeType(c[2]), nullable: !pk && !/NOT NULL/i.test(def), default:serial ? `nextval('${table.name}_${c[1]}_seq'::regclass)` : d?.[1] ?? null, serial, definition:def });
+      if (pk) table.pk.push(c[1]);
+      const check = /\b(CHECK\s*\([\s\S]*)/i.exec(def);
+      if (check) table.checks.push({ name:`${table.name}_${c[1]}_check`, definition:check[1] });
+    }
+    tables.push(table);
+  }
+  for (const m of sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+FOREIGN KEY\s*\(([^)]+)\) REFERENCES (\w+)\s*\(([^)]+)\)([^;]*);/g)) {
+    const action = kind => new RegExp(`ON ${kind} (NO ACTION|RESTRICT|CASCADE|SET NULL|SET DEFAULT)`, 'i').exec(m[6])?.[1].toUpperCase() ?? 'NO ACTION';
+    fks.push({ table:m[1], name:m[2], columns:m[3].split(',').map(s=>s.trim()), referencedTable:m[4], referencedColumns:m[5].split(',').map(s=>s.trim()), onDelete:action('DELETE'), onUpdate:action('UPDATE'), sql:m[0] });
+  }
+  for (const m of sql.matchAll(/CREATE (UNIQUE )?INDEX IF NOT EXISTS (\w+) ON (\w+) ([^;]+);/g)) indexes.push({ name:m[2], table:m[3], unique:Boolean(m[1]), definition:m[4], sql:m[0] });
+  const counts = { tables:tables.length, columns:tables.reduce((n,t)=>n+t.columns.length,0), pk:tables.filter(t=>t.pk.length).length, fk:fks.length, checks:tables.reduce((n,t)=>n+t.checks.length,0), indexes:indexes.length };
+  if (verifyHash && (counts.tables!==90 || counts.columns!==876 || counts.pk!==90 || counts.fk!==210 || counts.checks!==33 || counts.indexes!==107)) throw new Error(`GLOBAL_PARSE_INCOMPLETE ${JSON.stringify(counts)}`);
+  return { hash, tables, fks, indexes, counts };
+}

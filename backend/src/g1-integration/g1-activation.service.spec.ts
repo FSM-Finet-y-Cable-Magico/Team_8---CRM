@@ -44,7 +44,7 @@ describe('Etapa 4 - activación G1 post G3', () => {
   it('genera y envía una activación solo después del resultado comercial G8', async () => {
     const { service, client, tracking, closure, getStored } = setup();
     await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
-    expect(client.sendActivation).toHaveBeenCalledWith(expect.objectContaining({ id_cliente: 30, id_servicio: 50, id_contrato: 20, id_ot: '901', equipos: [{ numero_serie: 'ONT-001' }] }));
+    expect(client.sendActivation).toHaveBeenCalledWith(expect.objectContaining({ id_cliente: 30, id_servicio: 50, id_contrato: 20, id_ot: 901, equipos: [{ numero_serie: 'ONT-001' }] }));
     expect(getStored().estadoIntegracion).toBe('COMPLETADA');
   });
 
@@ -139,5 +139,48 @@ describe('Etapa 4 - activación G1 post G3', () => {
     expect(payload).not.toHaveProperty('numero_poste');
     expect(payload).not.toHaveProperty('caja_nap');
     expect(prisma).not.toHaveProperty('cajaNap');
+  });
+});
+
+describe('Contrato G1 global', () => {
+  it.each([901, '901'])('normaliza OT real %s a entero', async id => {
+    const s = setup(); s.closure.id_ot = id;
+    await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);
+    expect(s.client.sendActivation.mock.calls[0][0].id_ot).toBe(901);
+  });
+  it.each(['G3-901', null, 'tracking-123', 0, -1, 1.5, true, '1e3', 2147483648])('no envia OT invalida %s', async id => {
+    const s = setup(); s.closure.id_ot = id; s.tracking.idOtG3 = null;
+    await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);
+    await s.service.retry(s.getStored().idIntegracion, user);
+    expect(s.client.sendActivation).not.toHaveBeenCalled();
+    expect(s.getStored().estadoIntegracion).toBe('ERROR_G1');
+  });
+  it('retry conserva RUT A y evento completo aunque Cliente cambie a RUT B', async () => {
+    const s = setup(); s.closure.resultado_tecnico.equipos_instalados.push({ numero_serie: ' ONT-001 ' }, {numero_serie:'ONT-002'});
+    s.client.sendActivation.mockRejectedValueOnce(new G1IntegrationError('G1_TIMEOUT', null, true, 'timeout'));
+    await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);
+    const original = structuredClone(s.client.sendActivation.mock.calls[0][0]);
+    s.prisma.cliente.findUnique.mockResolvedValue({ idCliente:30, idEmpresa:1, rut:'98.765.432-1' });
+    s.prisma.integracionActivacionG1.findUnique.mockImplementation(() => Promise.resolve({...s.getStored(),cliente:{rut:'98.765.432-1'}}));
+    await s.service.retry(s.getStored().idIntegracion, user);
+    expect(s.client.sendActivation.mock.calls[1][0]).toEqual(original);
+    expect(original.equipos).toEqual([{numero_serie:'ONT-001'},{numero_serie:'ONT-002'}]);
+    expect(s.prisma.cliente.findUnique).toHaveBeenCalledTimes(1);
+  });
+  it('bloquea legacy sin snapshot sin inventar RUT historico', async () => {
+    const s = setup();s.client.sendActivation.mockRejectedValueOnce(new G1IntegrationError('G1_TIMEOUT', null, true, 'timeout'));
+    await s.service.afterG3Completion(s.tracking, { idCliente:30,idServicio:50 }, s.closure);
+    s.getStored().payloadSnapshot=null;
+    await s.service.retry(s.getStored().idIntegracion,user);
+    expect(s.client.sendActivation).toHaveBeenCalledTimes(1);
+    expect(s.getStored().ultimoErrorSanitizado).toBe('G1_PAYLOAD_SNAPSHOT_MISSING');
+  });
+  it('rechaza snapshot alterado antes de reenviar', async () => {
+    const s = setup();s.client.sendActivation.mockRejectedValueOnce(new G1IntegrationError('G1_TIMEOUT', null, true, 'timeout'));
+    await s.service.afterG3Completion(s.tracking,{idCliente:30,idServicio:50},s.closure);
+    s.getStored().payloadSnapshot.rut_cliente='changed';
+    await s.service.retry(s.getStored().idIntegracion,user);
+    expect(s.client.sendActivation).toHaveBeenCalledTimes(1);
+    expect(s.getStored().ultimoErrorSanitizado).toBe('G1_PAYLOAD_SNAPSHOT_INCONSISTENT');
   });
 });

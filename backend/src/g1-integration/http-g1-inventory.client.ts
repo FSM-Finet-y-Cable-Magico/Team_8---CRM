@@ -16,7 +16,7 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   constructor(private readonly config: ConfigService) {}
 
   configured() {
-    return this.enabled() && Boolean(this.baseUrl() && this.apiKey());
+    try { return this.enabled() && Boolean(this.baseUrl() && this.apiKey()); } catch { return false; }
   }
 
   async getEquipmentTypes(input: {
@@ -38,6 +38,9 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   sendActivation(payload: G1ActivationPayload) {
+    if (!Number.isSafeInteger(payload.id_ot) || payload.id_ot <= 0 || payload.id_ot > 2147483647) {
+      throw new G1IntegrationError('G1_ID_OT_REQUIRED', null, false, 'G1 requiere un identificador numerico positivo real de G3.');
+    }
     return this.request<Record<string, unknown>>('/api/integraciones/activaciones', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -50,6 +53,7 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<G1ClientResult<T>> {
+    const baseUrl = this.baseUrl();
     if (!this.configured()) {
       throw new G1IntegrationError(
         'INTEGRACION_G1_NO_CONFIGURADA',
@@ -63,8 +67,9 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs());
     try {
-      const response = await fetch(`${this.baseUrl()}${path}`, {
+      const response = await fetch(`${baseUrl}${path}`, {
         ...init,
+        redirect: 'error',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
@@ -107,7 +112,7 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   private errorCode(status: number) {
-    if (status === 401) return 'G1_UNAUTHORIZED';
+    if (status === 401) return 'AUTH_CONFIGURATION_MISMATCH';
     if (status === 403) return 'G1_COMPANY_FORBIDDEN';
     if (status === 404) return 'G1_NOT_FOUND';
     if (status === 409) return 'G1_CONFLICT';
@@ -129,11 +134,22 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   private baseUrl() {
-    return (this.config.get<string>('G1_API_URL') ?? '').trim().replace(/\/$/, '');
+    const raw = this.config.get<string>('G1_API_URL') ?? '';
+    if (!raw) return '';
+    try {
+      const url = new URL(raw);
+      const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+      if (raw !== raw.trim() || url.username || url.password || url.search || url.hash
+        || url.pathname !== '/' || !/^https?:\/\/[^/]+\/?$/.test(raw)
+        || (url.protocol !== 'https:' && !(local && url.protocol === 'http:'))) throw new Error();
+      return url.origin;
+    } catch {
+      throw new G1IntegrationError('G1_INVALID_URL', null, false, 'G1_API_URL debe ser el origen HTTPS sin credenciales, rutas, query ni fragmento; solo un slash final opcional.');
+    }
   }
 
   private apiKey() {
-    return (this.config.get<string>('G1_API_KEY') ?? '').trim();
+    return this.config.get<string>('G1_API_KEY') ?? '';
   }
 
   private timeoutMs() {

@@ -37,7 +37,7 @@ describe('Etapa 4 - HttpG1InventoryClient', () => {
   });
 
   it.each([
-    [401, 'G1_UNAUTHORIZED', false],
+    [401, 'AUTH_CONFIGURATION_MISMATCH', false],
     [403, 'G1_COMPANY_FORBIDDEN', false],
     [404, 'G1_NOT_FOUND', false],
     [409, 'G1_CONFLICT', false],
@@ -67,5 +67,20 @@ describe('Etapa 4 - HttpG1InventoryClient', () => {
     for (const state of G1_PHYSICAL_STATES) expect(isOfficialG1PhysicalState(state)).toBe(true);
     expect(isOfficialG1PhysicalState('Bloqueado')).toBe(false);
     expect(isOfficialG1PhysicalState('Disponible')).toBe(false);
+  });
+});
+
+describe('URL y clave G1 global', () => {
+  afterEach(() => { global.fetch = originalFetch; });
+  it.each(['https://g1.example.test/api','https://g1.example.test//','https://g1.example.test/?x=1','https://g1.example.test/#frag','https://user:pass@g1.example.test','http://g1.example.test'])('rechaza URL ambigua %s', async url => {
+    global.fetch=jest.fn() as never;
+    await expect(setup({G1_API_URL:url}).getEquipmentTypes({idEmpresa:1})).rejects.toMatchObject({code:'G1_INVALID_URL'});
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+  it('envia key opaca literal sin transformacion y prohibe redirects', async () => {
+    global.fetch=jest.fn().mockImplementation(()=>response({success:true,data:[]})) as never;
+    const opaque=['opaque','hash','like'].join('-');
+    await setup({G1_API_KEY:opaque,G1_API_URL:'https://g1.example.test/'}).getEquipmentTypes({idEmpresa:1});
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('https://g1.example.test/api/integraciones/'),expect.objectContaining({redirect:'error',headers:expect.objectContaining({'X-API-KEY':opaque})}));
   });
 });
