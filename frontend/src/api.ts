@@ -44,6 +44,11 @@ export type Prospect = {
   email: string | null;
   telefono: string | null;
   direccion: string | null;
+  comuna?: string | null;
+  region?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
+  idZonaPago?: number | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
   observacionPerdida?: string | null;
@@ -289,6 +294,15 @@ export type PaymentZone = {
   descripcion: string | null;
   diaVencimientoSugerido: number | null;
   activo: boolean | null;
+  tipoZona?: 'COBERTURA_GENERAL' | 'MICROZONA_COMERCIAL' | null;
+  idZonaPadre?: number | null;
+  poligonoGeojson?: { type: 'Polygon'; coordinates: number[][][] } | null;
+  centroLat?: number | null;
+  centroLng?: number | null;
+  prioridad?: number;
+  fuenteCobertura?: string | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   empresa?: Company | null;
 };
 
@@ -299,6 +313,8 @@ export type ZonePriceRule = {
   precioMensual: string;
   valorInstalacion: string | null;
   activo: boolean | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   plan?: Plan | null;
   zonaPago?: PaymentZone | null;
 };

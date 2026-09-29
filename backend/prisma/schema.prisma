@@ -118,6 +118,11 @@ model Prospecto {
   email                String?      @db.VarChar(120)
   telefono             String?      @db.VarChar(20)
   direccion            String?      @db.VarChar(200)
+  comuna               String?      @db.VarChar(80)
+  region               String?      @db.VarChar(80)
+  latitud              Float?       @db.DoublePrecision
+  longitud             Float?       @db.DoublePrecision
+  idZonaPago           Int?         @map("id_zona_pago")
   estadoPipeline       String?      @map("estado_pipeline") @db.VarChar(30)
   motivoPerdida        String?      @map("motivo_perdida") @db.VarChar(30)
   observacionPerdida   String?      @map("observacion_perdida")
@@ -133,6 +138,9 @@ model Prospecto {
   cotizaciones         Cotizacion[]
   contratos            Contrato[]
   ordenesTrabajo       OrdenTrabajo[]
+  zonaPago             ZonaPago?    @relation(fields: [idZonaPago], references: [idZonaPago])
+
+  @@index([idEmpresa, idZonaPago])
 
   @@map("prospecto")
 }
@@ -467,12 +475,27 @@ model ZonaPago {
   descripcion             String?
   diaVencimientoSugerido  Int?                 @map("dia_vencimiento_sugerido") @db.SmallInt
   activo                  Boolean?             @default(true)
+  tipoZona                String?              @default("COBERTURA_GENERAL") @map("tipo_zona") @db.VarChar(30)
+  idZonaPadre             Int?                 @map("id_zona_padre")
+  poligonoGeojson         Json?                @map("poligono_geojson")
+  centroLat               Float?               @map("centro_lat") @db.DoublePrecision
+  centroLng               Float?               @map("centro_lng") @db.DoublePrecision
+  prioridad               Int                  @default(0)
+  fuenteCobertura         String?              @default("MANUAL") @map("fuente_cobertura") @db.VarChar(30)
+  fechaInicio             DateTime?            @map("fecha_inicio") @db.Date
+  fechaFin                DateTime?            @map("fecha_fin") @db.Date
 
   empresa   Empresa?              @relation(fields: [idEmpresa], references: [idEmpresa])
   precios   PlanZonaPrecio[]
   contratos Contrato[]
   servicios ServicioContratado[]
+  prospectos Prospecto[]
+  zonaPadre ZonaPago?              @relation("JerarquiaZonaPago", fields: [idZonaPadre], references: [idZonaPago])
+  zonasHijas ZonaPago[]            @relation("JerarquiaZonaPago")
 
+  @@index([idEmpresa, tipoZona, activo])
+  @@index([idZonaPadre])
+  @@index([fechaInicio, fechaFin])
   @@map("zona_pago")
 }
 
@@ -483,10 +506,14 @@ model PlanZonaPrecio {
   precioMensual    Decimal  @map("precio_mensual") @db.Decimal(10, 2)
   valorInstalacion Decimal? @map("valor_instalacion") @db.Decimal(10, 2)
   activo           Boolean? @default(true)
+  fechaInicio      DateTime? @map("fecha_inicio") @db.Date
+  fechaFin         DateTime? @map("fecha_fin") @db.Date
 
   plan     Plan     @relation(fields: [idPlan], references: [idPlan])
   zonaPago ZonaPago @relation(fields: [idZonaPago], references: [idZonaPago])
 
+  @@index([idPlan, idZonaPago])
+  @@index([idZonaPago, activo, fechaInicio, fechaFin])
   @@map("plan_zona_precio")
 }
 

@@ -28,7 +28,7 @@ export function BillingPanel({
   const [zones, setZones] = useState<PaymentZone[]>([]);
   const [zoneRules, setZoneRules] = useState<ZonePriceRule[]>([]);
   const [zoneForm, setZoneForm] = useState({ nombreZona: '', comuna: '', descripcion: '', diaVencimientoSugerido: '5' });
-  const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+  const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '', fechaInicio: '', fechaFin: '' });
   const [morososPage, setMorososPage] = useState(1);
   const [cortesPage, setCortesPage] = useState(1);
 
@@ -104,8 +104,10 @@ export function BillingPanel({
           idZonaPago: Number(ruleForm.idZonaPago),
           precioMensual: Number(ruleForm.precioMensual),
           valorInstalacion: ruleForm.valorInstalacion ? Number(ruleForm.valorInstalacion) : undefined,
+          fechaInicio: ruleForm.fechaInicio || undefined,
+          fechaFin: ruleForm.fechaFin || undefined,
         });
-        setRuleForm({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+        setRuleForm({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '', fechaInicio: '', fechaFin: '' });
         await loadZonesAndRules();
       },
       'Regla de precio por zona registrada',
@@ -352,6 +354,8 @@ export function BillingPanel({
               </select>
               <input type="number" min="0" placeholder="Precio mensual" value={ruleForm.precioMensual} onChange={(event) => setRuleForm({ ...ruleForm, precioMensual: event.target.value })} required />
               <input type="number" min="0" placeholder="Valor instalación" value={ruleForm.valorInstalacion} onChange={(event) => setRuleForm({ ...ruleForm, valorInstalacion: event.target.value })} />
+              <label>Inicio de vigencia<input type="date" value={ruleForm.fechaInicio} onChange={(event) => setRuleForm({ ...ruleForm, fechaInicio: event.target.value })} /></label>
+              <label>Fin de vigencia<input type="date" value={ruleForm.fechaFin} onChange={(event) => setRuleForm({ ...ruleForm, fechaFin: event.target.value })} /></label>
               <button type="submit">Guardar regla</button>
             </form>
           </div>

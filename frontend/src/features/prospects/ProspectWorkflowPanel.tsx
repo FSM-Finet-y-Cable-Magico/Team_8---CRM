@@ -37,13 +37,17 @@ export function ProspectWorkflowPanel({
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
   const [location, setLocation] = useState<CoverageLocation | null>(null);
+  const [availablePlanIds, setAvailablePlanIds] = useState<number[] | null>(null);
   const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   useEffect(() => {
     setFeasibilityResult('Factible');
-    setLocation(null);
+    setLocation(prospect.latitud !== null && prospect.latitud !== undefined && prospect.longitud !== null && prospect.longitud !== undefined
+      ? { latitud: prospect.latitud, longitud: prospect.longitud }
+      : null);
     setQuotePlanId('');
     setContractPlanId('');
+    setAvailablePlanIds(null);
     setContractConfirmationDate(new Date().toISOString().slice(0, 10));
     setContractObservation('');
     setLossOpen(false);
@@ -54,6 +58,12 @@ export function ProspectWorkflowPanel({
     setStatusIsError(false);
   }, [prospect.idProspecto]);
 
+  useEffect(() => {
+    if (availablePlanIds === null) return;
+    setQuotePlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
+    setContractPlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
+  }, [availablePlanIds]);
+
   const currentStatus = prospect.estadoPipeline ?? 'Prospecto Nuevo';
   const isFactible = FACTIBLE_STATUSES.includes(currentStatus);
   const isNoFactible = currentStatus === 'No Factible';
@@ -61,7 +71,9 @@ export function ProspectWorkflowPanel({
   const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(pendingContract);
-  const planOptions = plans.filter((plan) => plan.activo !== false);
+  const planOptions = plans.filter((plan) =>
+    plan.activo !== false && (availablePlanIds === null || availablePlanIds.includes(plan.idPlan)),
+  );
 
   function planOptionLabel(plan: Plan) {
     return `${plan.nombreComercial} - ${plan.empresa?.nombre ?? 'Sin empresa'}`;
@@ -187,7 +199,15 @@ export function ProspectWorkflowPanel({
       <div className="workflow-grid prospect-action-grid">
         {(permissions.verifyFeasibility || permissions.createProspects) && prospect.empresa && (
           <section className="prospect-action-card coverage-workspace">
-            <CoveragePicker key={prospect.idProspecto} idEmpresa={prospect.empresa.idEmpresa} direccion={prospect.direccion ?? ''} value={location} onChange={setLocation} disabled={isWorkflowLocked || isQuoted || checkingCoverage} />
+            <CoveragePicker
+              key={prospect.idProspecto}
+              idEmpresa={prospect.empresa.idEmpresa}
+              direccion={prospect.direccion ?? ''}
+              value={location}
+              onChange={setLocation}
+              onResult={(coverage) => setAvailablePlanIds(coverage ? coverage.planes.map((plan) => plan.idPlan) : location ? [] : null)}
+              disabled={isWorkflowLocked || isQuoted || checkingCoverage}
+            />
             <button type="button" disabled={!location || isWorkflowLocked || isQuoted || checkingCoverage} onClick={async () => {
               if (!location || checkingCoverage) return;
               setCheckingCoverage(true);
@@ -195,11 +215,11 @@ export function ProspectWorkflowPanel({
               try {
                 const { data } = await api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location);
                 setStatus(`${data.cobertura.estado}: ${data.cobertura.motivo}`);
-                setStatusIsError(data.cobertura.estado === 'Pendiente');
+                setStatusIsError(data.cobertura.estado === 'PENDIENTE_VALIDACION_TECNICA');
                 onChanged();
               } catch (err) { setStatus(apiErrorMessage(err)); setStatusIsError(true); }
               finally { setCheckingCoverage(false); }
-            }}>{checkingCoverage ? 'Verificando…' : 'Verificar y guardar con TomoDAT'}</button>
+            }}>{checkingCoverage ? 'Verificando…' : 'Guardar ubicacion y verificar cobertura'}</button>
           </section>
         )}
         {permissions.verifyFeasibility && (

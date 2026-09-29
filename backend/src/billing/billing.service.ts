@@ -477,6 +477,12 @@ export class BillingService {
       throw new BadRequestException('El plan y la zona pertenecen a empresas distintas');
     }
 
+    const fechaInicio = dto.fechaInicio ? new Date(`${dto.fechaInicio}T00:00:00.000Z`) : null;
+    const fechaFin = dto.fechaFin ? new Date(`${dto.fechaFin}T00:00:00.000Z`) : null;
+    if (fechaInicio && fechaFin && fechaInicio > fechaFin) {
+      throw new BadRequestException('La fecha de inicio no puede ser posterior a la fecha de fin');
+    }
+
     const created = await this.prisma.$transaction(async (tx) => {
       if (dto.activo !== false) {
         await tx.planZonaPrecio.updateMany({
@@ -492,6 +498,8 @@ export class BillingService {
           precioMensual: dto.precioMensual,
           valorInstalacion: dto.valorInstalacion,
           activo: dto.activo ?? true,
+          fechaInicio,
+          fechaFin,
         },
         include: { plan: true, zonaPago: true },
       });
@@ -507,6 +515,8 @@ export class BillingService {
         idZonaPago: created.idZonaPago,
         precioMensual: Number(created.precioMensual),
         valorInstalacion: created.valorInstalacion ? Number(created.valorInstalacion) : null,
+        fechaInicio: created.fechaInicio?.toISOString().slice(0, 10) ?? null,
+        fechaFin: created.fechaFin?.toISOString().slice(0, 10) ?? null,
       },
     });
 
