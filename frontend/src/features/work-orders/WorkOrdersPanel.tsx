@@ -164,6 +164,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
           <thead>
             <tr>
               <th>Código OT</th>
+              <th>Fuente</th>
               <th>Tipo</th>
               <th>Asociado</th>
               <th>Ticket</th>
@@ -178,6 +179,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
             {workOrders.map((order) => (
               <tr key={order.idOt}>
                 <td className="work-order-id">{formatWorkOrderCode(order)}</td>
+                <td><span className="source-badge">LEGACY_LOCAL</span></td>
                 <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
                 <td>{ownerLabel(order)}</td>
                 <td>{formatWorkOrderTicketCode(order)}</td>

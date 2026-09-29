@@ -18,11 +18,15 @@ import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
 import { ProspectsService } from './prospects.service';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
+import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
 
 @Controller('prospects')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProspectsController {
-  constructor(private readonly prospectsService: ProspectsService) {}
+  constructor(
+    private readonly prospectsService: ProspectsService,
+    private readonly installations: InstallationIntegrationService,
+  ) {}
 
   @Get()
   @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
@@ -114,7 +118,8 @@ export class ProspectsController {
     @Body() dto: CreateInstallOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.prospectsService.createInstallOrder(id, dto, user);
+    void dto;
+    return this.installations.requestInstallation({ idProspecto: id }, user);
   }
 
   @Get(':id/install-availability')

@@ -24,6 +24,7 @@ import { TvipModule } from './tvip/tvip.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
+import { G3IntegrationModule } from './g3-integration/g3-integration.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AppController } from './app.controller';
     BillingModule,
     TvipModule,
     MonitoringModule,
+    G3IntegrationModule,
     UsersModule,
     CompaniesModule,
     CommercialModule,

@@ -23,6 +23,9 @@ const requiredTables = [
   'prorroga_pago',
   'cambio_condicion_pago',
   'cargo_adicional',
+  'integracion_instalacion_g3',
+  'integracion_evento_entrante',
+  'solicitud_retiro_servicio',
 ];
 
 const requiredColumns = [
@@ -39,6 +42,10 @@ const requiredColumns = [
   ['prorroga_pago', 'fecha_original'], ['prorroga_pago', 'nueva_fecha'], ['prorroga_pago', 'estado'],
   ['cambio_condicion_pago', 'tipo_cambio'], ['cambio_condicion_pago', 'valor_anterior'], ['cambio_condicion_pago', 'valor_nuevo'],
   ['cargo_adicional', 'tipo'], ['cargo_adicional', 'monto'], ['cargo_adicional', 'estado'], ['cargo_adicional', 'afecta_saldo'],
+  ['servicio_contratado', 'fecha_activacion'],
+  ['integracion_instalacion_g3', 'request_id'], ['integracion_instalacion_g3', 'trace_id'], ['integracion_instalacion_g3', 'payload_hash'],
+  ['integracion_evento_entrante', 'payload_hash'], ['integracion_evento_entrante', 'processed_at'],
+  ['solicitud_retiro_servicio', 'id_servicio'], ['solicitud_retiro_servicio', 'estado_despacho_tecnico'],
 ];
 
 const requiredConstraints = [
@@ -60,6 +67,10 @@ const requiredConstraints = [
   'cambio_condicion_pago_id_cliente_fkey',
   'cargo_adicional_id_empresa_fkey',
   'cargo_adicional_id_cliente_fkey',
+  'integracion_instalacion_g3_id_empresa_fkey',
+  'integracion_instalacion_g3_id_contrato_fkey',
+  'integracion_evento_entrante_id_integracion_fkey',
+  'solicitud_retiro_servicio_id_servicio_fkey',
 ];
 
 const requiredIndexes = [
@@ -79,6 +90,9 @@ const requiredIndexes = [
   'cargo_adicional_id_cliente_fecha_registro_idx',
   'prospecto_id_empresa_clasificacion_comercial_idx',
   'factura_folio_externo_idx',
+  'integracion_instalacion_g3_request_id_key',
+  'integracion_evento_entrante_id_integracion_event_type_key',
+  'solicitud_retiro_empresa_estado_fecha_idx',
 ];
 
 try {
@@ -136,10 +150,13 @@ try {
     prorrogas: await prisma.prorrogaPago.count(),
     cambiosCondicion: await prisma.cambioCondicionPago.count(),
     cargos: await prisma.cargoAdicional.count(),
+    integracionesG3: await prisma.integracionInstalacionG3.count(),
+    solicitudesRetiro: await prisma.servicioRetiroSolicitud.count(),
   };
   await prisma.zonaPago.findFirst({ select: { idZonaPago: true, nombreZona: true, tipoZona: true, poligonoGeojson: true } });
   await prisma.factura.findFirst({ select: { idFactura: true, tipoDocumento: true, folioExterno: true } });
   await prisma.prospecto.findFirst({ select: { idProspecto: true, clasificacionComercial: true, disponibleRemarketing: true } });
+  await prisma.integracionInstalacionG3.findFirst({ select: { idIntegracion: true, requestId: true, estadoIntegracion: true } });
 
   console.log(JSON.stringify({
     status: 'OK',

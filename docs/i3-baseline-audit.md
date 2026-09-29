@@ -922,3 +922,18 @@ La siguiente matriz agrega el estado comercial posterior sin reemplazar el diagn
 | Import preview legacy | IMPLEMENTADO | `POST /imports/control-book/preview` | `FINET_LIBRO_CONTROL_V1`, validación defensiva, `persisted=false`; sin datos reales |
 
 La Etapa 2 agrega una sola migración aditiva: `20260925180000_i3_commercial_control_book`. El lifecycle protegido mantiene a `INTERESADO_NO_CONTRATANTE` fuera de consultas de prospectos activos mediante `clasificacionComercial='PROSPECTO'`. No se modificó `service-activation.policy.ts`, la geolocalización de Etapa 1, integraciones G1/G3 ni Railway.
+## Etapa 3 — Integración G3
+
+La instalación nueva dejó de crear `OrdenTrabajo` local desde los controladores de Prospecto, Servicio y Contrato. Esas rutas delegan a `InstallationIntegrationService`, que persiste `IntegracionInstalacionG3`, usa el contrato oficial P0 de G3 y conserva `request_id` en retries. No existe fallback local.
+
+G3 es dueño de OT, agenda, técnico, terreno, evidencia y cierre. G8 conserva Prospecto, Contrato, Cliente, Servicio y lifecycle. El cierre webhook y la reconciliación usan el mismo `G3ClosureProcessor`; solo `COMPLETADA` con resultado técnico llama la política central de activación. `CANCELADA`, cliente ausente y estados desconocidos no activan.
+
+`OrdenTrabajo` y sus endpoints de lectura/cierre permanecen como `LEGACY_LOCAL` para historia y reparación no migrada. `TicketsService.createWorkOrder` sigue identificado como duplicación pendiente de un contrato G3 de reparación, sin ampliar nuevas operaciones. El monitoreo ONT también queda `LEGACY / READ COMPATIBILITY`.
+
+El webhook queda protegido por un guard que falla cerrado con `PENDIENTE_CONTRATO_AUTENTICACION_WEBHOOK` hasta que G3 ratifique autenticación entrante. Las llamadas salientes usan `X-API-KEY`, timeout explícito, scope por empresa y logs saneados.
+
+TOMODAT vía G3 y SmartOLT escritura continúan P1. No se volvió a TOMODAT directo y no se incorporaron credenciales SmartOLT.
+
+CU-84 agrega `ServicioRetiroSolicitud` real, permisos existentes de solicitudes, responsable y auditoría. Como no existe endpoint ratificado de retiro en el acuerdo G3, el despacho queda `BLOQUEADO_CONTRATO_G3`, no crea OT y su estado es `PARCIAL_BLOQUEADO_G3`.
+
+La única migración aditiva de esta etapa es `20260926120000_i3_g3_fsm_integration`. El detalle completo, endpoints y matriz están en `docs/i3-g3-fsm-integration.md`.
