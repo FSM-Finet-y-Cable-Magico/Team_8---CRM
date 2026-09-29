@@ -14,6 +14,7 @@ import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-avai
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ServicesService } from './services.service';
 import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
+import { DomainOwnershipService } from '../domain-ownership/domain-ownership.service';
 
 @Controller('services')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -21,6 +22,7 @@ export class ServicesController {
   constructor(
     private readonly servicesService: ServicesService,
     private readonly installations: InstallationIntegrationService,
+    private readonly ownership: DomainOwnershipService,
   ) {}
 
   @Get('customer/:idCliente')
@@ -102,6 +104,7 @@ export class ServicesController {
     @Body() dto: AttachEquipmentDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.servicesService.attachEquipment(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectInventoryWrite(user, 'POST /api/services/:id/equipment');
   }
 }

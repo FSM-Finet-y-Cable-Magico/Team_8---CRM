@@ -101,74 +101,43 @@ export class UsersService {
   }
 
   async remove(id: number, currentUser: AuthUser) {
-    if (id === currentUser.idUsuario) throw new BadRequestException('No puedes eliminar tu propia cuenta');
+    if (id === currentUser.idUsuario) throw new BadRequestException('No puedes desactivar tu propia cuenta');
 
-    try {
-      return await this.prisma.$transaction(async tx => {
-        await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
-        const target = await tx.usuario.findUnique({
-          where: { idUsuario: id },
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
+      const target = await tx.usuario.findUnique({
+        where: { idUsuario: id },
+        include: { usuarioRoles: { include: { rol: true } } },
+      });
+      if (!target) throw new NotFoundException('Usuario no encontrado');
+
+      const targetRoles = target.usuarioRoles.map((item) => item.rol.nombreRol);
+      if (target.activo !== false && isAdministrator(targetRoles)) {
+        const others = await tx.usuario.findMany({
+          where: { idUsuario: { not: id }, activo: { not: false } },
           include: { usuarioRoles: { include: { rol: true } } },
         });
-
-        if (!target) throw new NotFoundException('Usuario no encontrado');
-
-        const targetRoles = target.usuarioRoles.map((item) => item.rol.nombreRol);
-        if (target.activo !== false && isAdministrator(targetRoles)) {
-          const others = await tx.usuario.findMany({
-            where: { idUsuario: { not: id }, activo: { not: false } },
-            include: { usuarioRoles: { include: { rol: true } } },
-          });
-          if (!others.some((user) => isAdministrator(user.usuarioRoles.map((item) => item.rol.nombreRol)))) {
-            throw new BadRequestException('Debe quedar al menos un administrador activo');
-          }
+        if (!others.some((user) => isAdministrator(user.usuarioRoles.map((item) => item.rol.nombreRol)))) {
+          throw new BadRequestException('Debe quedar al menos un administrador activo');
         }
-
-        // Se conserva el historial operativo, pero deja de apuntar a la cuenta eliminada.
-        await tx.$executeRaw`UPDATE baja_equipo SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE contrato_digital SET id_usuario_generador = NULL WHERE id_usuario_generador = ${id}`;
-        await tx.$executeRaw`UPDATE historial_cambio_plan SET id_usuario_registro = NULL WHERE id_usuario_registro = ${id}`;
-        await tx.$executeRaw`UPDATE historial_estado_equipo SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE historial_ot SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE lista_negra SET id_usuario_registro = NULL WHERE id_usuario_registro = ${id}`;
-        await tx.$executeRaw`UPDATE log_auditoria SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE movimiento_inventario SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE observacion_operativa SET id_usuario = NULL WHERE id_usuario = ${id}`;
-        await tx.$executeRaw`UPDATE orden_ingreso SET id_usuario_registro = NULL WHERE id_usuario_registro = ${id}`;
-        await tx.$executeRaw`UPDATE orden_trabajo SET id_tecnico = NULL WHERE id_tecnico = ${id}`;
-        await tx.$executeRaw`UPDATE prospecto SET id_usuario_comercial = NULL WHERE id_usuario_comercial = ${id}`;
-        await tx.$executeRaw`UPDATE prospecto SET id_usuario_perdida = NULL WHERE id_usuario_perdida = ${id}`;
-        await tx.$executeRaw`UPDATE solicitud_cliente SET id_usuario_registro = NULL WHERE id_usuario_registro = ${id}`;
-        await tx.$executeRaw`UPDATE ticket SET id_usuario_asignado = NULL WHERE id_usuario_asignado = ${id}`;
-        await tx.$executeRaw`UPDATE transferencia_equipo SET id_usuario_registro = NULL WHERE id_usuario_registro = ${id}`;
-
-        await tx.usuarioRol.deleteMany({ where: { idUsuario: id } });
-        await tx.usuario.delete({ where: { idUsuario: id } });
-        await tx.logAuditoria.create({
-          data: {
-            idUsuario: currentUser.idUsuario,
-            accion: 'ELIMINAR_USUARIO',
-            entidadAfectada: 'usuario',
-            idEntidadAfectada: id,
-            valorAnterior: {
-              nombreCompleto: target.nombreCompleto,
-              email: target.email,
-              activo: target.activo,
-              idEmpresa: target.idEmpresa,
-              roles: targetRoles,
-            },
-            valorNuevo: Prisma.JsonNull,
-          },
-        });
-
-        return { idUsuario: id, eliminado: true };
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
-        throw new ConflictException('No se pudo eliminar el usuario porque aún tiene referencias asociadas');
       }
-      throw error;
-    }
+
+      const saved = await tx.usuario.update({
+        where: { idUsuario: id },
+        data: { activo: false, versionSesion: { increment: 1 } },
+      });
+      await tx.logAuditoria.create({
+        data: {
+          idUsuario: currentUser.idUsuario,
+          accion: 'DESACTIVAR_USUARIO',
+          entidadAfectada: 'usuario',
+          idEntidadAfectada: id,
+          valorAnterior: { activo: target.activo, roles: targetRoles },
+          valorNuevo: { activo: false, sesionesRevocadas: true, inventarioFisicoModificado: false },
+        },
+      });
+      return { idUsuario: saved.idUsuario, desactivado: true, sesionesRevocadas: true };
+    });
   }
 
   async assignRole(userId: number, roleId: number, currentUser: AuthUser) {

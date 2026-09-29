@@ -24,9 +24,10 @@ function setup() {
   const prisma = { integracionEventoEntrante: events, integracionInstalacionG3: integrations, $transaction: jest.fn().mockImplementation((callback) => callback(tx)) };
   const activation = { activate: jest.fn().mockResolvedValue({ idCliente: 30, idDireccion: 40, idServicio: 50, fechaActivacion: new Date() }) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const processor = new G3ClosureProcessor(prisma as never, activation as never, audit as never);
+  const g1 = { afterG3Completion: jest.fn().mockResolvedValue(undefined) };
+  const processor = new G3ClosureProcessor(prisma as never, activation as never, audit as never, g1 as never);
   const completed = { request_id: tracking.requestId, estado: 'COMPLETADA', tipo: 'INSTALACION', resultado_tecnico: { potencia: -19 } };
-  return { processor, prisma, activation, audit, tracking, completed, getEvent: () => event, setEvent: (value: any) => { event = value; } };
+  return { processor, prisma, activation, audit, g1, tracking, completed, getEvent: () => event, setEvent: (value: any) => { event = value; } };
 }
 
 describe('Etapa 3 - G3ClosureProcessor', () => {
@@ -45,6 +46,20 @@ describe('Etapa 3 - G3ClosureProcessor', () => {
   it('28. cierre COMPLETADA ejecuta el servicio de activacion protegido', async () => {
     const { processor, activation, completed } = setup(); await processor.process(completed, 'WEBHOOK');
     expect(activation.activate).toHaveBeenCalledTimes(1);
+  });
+  it('28b. solo después del commit comercial solicita tracking de activación G1', async () => {
+    const { processor, g1, completed } = setup(); await processor.process(completed, 'WEBHOOK');
+    expect(g1.afterG3Completion).toHaveBeenCalledWith(expect.any(Object), { idCliente: 30, idServicio: 50 }, expect.objectContaining({ estado: 'COMPLETADA' }));
+  });
+  it('28c. un fallo G1 posterior al commit no revierte la activación comercial G8', async () => {
+    const { processor, activation, g1, completed, tracking } = setup();
+    g1.afterG3Completion.mockRejectedValueOnce(new Error('G1 no disponible'));
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(processor.process(completed, 'WEBHOOK')).resolves.toMatchObject({ duplicate: false });
+    expect(activation.activate).toHaveBeenCalledTimes(1);
+    expect(tracking.estadoIntegracion).toBe('COMPLETADA');
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('G1'), expect.objectContaining({ idEmpresa: 1 }));
+    errorLog.mockRestore();
   });
   it('32. retry del webhook no duplica activacion', async () => {
     const { processor, activation, completed } = setup(); await processor.process(completed, 'WEBHOOK'); await processor.process(completed, 'WEBHOOK');

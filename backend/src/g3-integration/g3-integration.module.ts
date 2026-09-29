@@ -8,9 +8,10 @@ import { HttpG3IntegrationClient } from './http-g3-integration.client';
 import { InstallationActivationService } from './installation-activation.service';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
+import { G1IntegrationModule } from '../g1-integration/g1-integration.module';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, G1IntegrationModule],
   controllers: [G3IntegrationController, ServiceWithdrawalController],
   providers: [
     HttpG3IntegrationClient,

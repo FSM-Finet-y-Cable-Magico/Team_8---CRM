@@ -1,7 +1,6 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CircleCheckBig, ClipboardList, Wrench } from 'lucide-react';
 import { api, apiErrorMessage, type WorkOrder } from '../../api';
-import { equipmentModeOptions } from '../../constants';
 import {
   formatConnectionType,
   formatDateOnly,
@@ -31,9 +30,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
   const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
   const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
   const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
-  const selectedOrderHasInstallContext = Boolean(selectedOrder?.prospecto?.fechaCreacion || selectedOrder?.idServicio);
-  const selectedOrderCanCompleteInstallation =
-    selectedOrderIsInstallation && !selectedOrderIsCompleted && selectedOrderHasInstallContext;
 
   useEffect(() => {
     setForm({
@@ -95,39 +91,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
           : 'OTR';
 
     return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
-  }
-
-  async function completeInstallation() {
-    if (!selectedOrder) {
-      return;
-    }
-
-    try {
-      const { data } = await api.patch(`/work-orders/${selectedOrder.idOt}/complete-installation`, {
-        potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
-        observaciones: form.observaciones,
-        numeroSerie: form.numeroSerie.trim() || undefined,
-        modelo: form.modelo.trim() || undefined,
-        macAddress: form.macAddress.trim() || undefined,
-        puertoOlt: form.puertoOlt.trim() || undefined,
-        modalidadAsignacion: form.numeroSerie.trim() ? form.modalidadAsignacion : undefined,
-        valorArriendoMensual: form.modalidadAsignacion === 'Arriendo' && form.valorArriendoMensual
-          ? Number(form.valorArriendoMensual)
-          : undefined,
-      });
-      if (data.prospect) {
-        setStatus(
-          `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
-          `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
-          `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
-        );
-      } else {
-        setStatus('Instalación completada y servicio activado desde la orden de trabajo.');
-      }
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
   }
 
   async function completeRepair() {
@@ -277,11 +240,11 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Cierre de instalación'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación administrada por G3'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'La orden ya fue completada. Puedes consultar aquí los datos registrados.'
-                        : 'Registra los datos técnicos para confirmar la instalación y activar al cliente.'}
+                        ? 'Esta orden local se conserva como antecedente histórico de solo lectura.'
+                        : 'El cierre técnico, los equipos y el resultado físico se registran en G3. CRM recibirá el cierre por integración.'}
                     </p>
                   </div>
                 </div>
@@ -297,83 +260,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                     }
                   />
                 </div>
-                {!selectedOrderHasInstallContext && (
-                  <p className="alert">No se puede completar la instalación: falta prospecto o servicio asociado.</p>
-                )}
-                {!selectedOrderIsCompleted && <div className="workflow-grid work-order-technical-grid">
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Potencia óptica</span>
-                    <span className="work-order-measurement">
-                      <input
-                        aria-label="Potencia óptica en dBm"
-                        type="number"
-                        step="0.01"
-                        placeholder="-19.50"
-                        value={form.potenciaOpticaDbm}
-                        onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-                      />
-                      <span>dBm</span>
-                    </span>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Observaciones</span>
-                    <textarea
-                      placeholder="Agrega observaciones técnicas"
-                      value={form.observaciones}
-                      onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
-                    />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Número de serie del equipo</span>
-                    <input
-                      placeholder="Serie registrada en inventario"
-                      value={form.numeroSerie}
-                      onChange={(event) => setForm({ ...form, numeroSerie: event.target.value })}
-                    />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Modelo</span>
-                    <input value={form.modelo} onChange={(event) => setForm({ ...form, modelo: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">MAC</span>
-                    <input value={form.macAddress} onChange={(event) => setForm({ ...form, macAddress: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Puerto OLT</span>
-                    <input value={form.puertoOlt} onChange={(event) => setForm({ ...form, puertoOlt: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Modalidad</span>
-                    <select
-                      value={form.modalidadAsignacion}
-                      onChange={(event) => setForm({
-                        ...form,
-                        modalidadAsignacion: event.target.value,
-                        valorArriendoMensual: event.target.value === 'Arriendo' ? form.valorArriendoMensual : '',
-                      })}
-                    >
-                      {equipmentModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                    </select>
-                  </label>
-                  {form.modalidadAsignacion === 'Arriendo' && <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Valor de arriendo mensual</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.valorArriendoMensual}
-                      onChange={(event) => setForm({ ...form, valorArriendoMensual: event.target.value })}
-                    />
-                  </label>}
-                </div>}
-                <button
-                  type="button"
-                  className="work-order-complete-button"
-                  disabled={!selectedOrderCanCompleteInstallation}
-                  onClick={completeInstallation}
-                >
-                  Confirmar instalación y activar cliente
-                </button>
+                <p className="inline-status">Fuente operativa: G3. No hay cierre local ni asignación física de inventario desde CRM.</p>
               </section>
             ) : selectedOrderHasTicket ? (
               <section className="work-order-completion">
