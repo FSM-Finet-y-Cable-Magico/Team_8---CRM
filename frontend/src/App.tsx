@@ -12,6 +12,7 @@ import {
   House,
   Map as MapIcon,
   Router,
+  Table2,
   Ticket as TicketIcon,
   UserCog,
   UserRoundPlus,
@@ -52,6 +53,7 @@ import {
 import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
 import { BillingPanel } from './features/billing';
+import { CommercialControlBookPanel } from './features/commercial';
 import { CustomersPanel } from './features/customers';
 import { CoverageZonesPanel } from './features/coverage';
 import { DashboardHome } from './features/dashboard';
@@ -100,6 +102,7 @@ type Tab =
   | 'inventory'
   | 'plans'
   | 'billing'
+  | 'commercial'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -315,6 +318,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
     { tab: 'plans', label: 'Planes', visible: permissions.managePlans, icon: ClipboardList },
     { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
+    { tab: 'commercial', label: 'Libro Control', visible: permissions.viewControlBook, icon: Table2 },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
     { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
     { tab: 'reports', label: 'Reportes', visible: permissions.viewReports, icon: BarChart3 },
@@ -452,6 +456,15 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               writeCompanyId={writeCompanyId}
               permissions={permissions}
               onChanged={() => void loadData()}
+            />
+          )}
+          {activeTab === 'commercial' && permissions.viewControlBook && (
+            <CommercialControlBookPanel
+              scope={scope}
+              writeCompanyId={writeCompanyId}
+              permissions={permissions}
+              onOpenCustomers={() => setActiveTab('customers')}
+              onOpenBilling={() => setActiveTab('billing')}
             />
           )}
           {activeTab === 'tickets' && canViewTickets && (

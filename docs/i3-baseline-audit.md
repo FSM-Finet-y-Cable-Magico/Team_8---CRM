@@ -902,3 +902,23 @@ Las tablas de la matriz se obtuvieron de DDL/DML del archivo; en dumps se resume
 | PATCH /api/work-orders/:id/complete-installation | `backend/src/work-orders/work-orders.controller.ts:23` WorkOrdersController.completeInstallation | this.workOrdersService.completeInstallation |
 | PATCH /api/work-orders/:id/cancel-installation | `backend/src/work-orders/work-orders.controller.ts:33` WorkOrdersController.cancelInstallation | this.workOrdersService.cancelInstallation |
 | PATCH /api/work-orders/:id/complete-repair | `backend/src/work-orders/work-orders.controller.ts:42` WorkOrdersController.completeRepair | this.workOrdersService.completeRepair |
+
+## Estado posterior - Incremento 3 Etapa 2
+
+La siguiente matriz agrega el estado comercial posterior sin reemplazar el diagnóstico ni el historial anteriores.
+
+| Función comercial | Estado posterior | Evidencia | Observación |
+| --- | --- | --- | --- |
+| Libro Control | IMPLEMENTADO | `CommercialControlBookService`, `GET /commercial/control-book`, tab `Libro Control` | Proyección normalizada por cliente/contrato/factura; no existe tabla plana mensual |
+| Convenio | IMPLEMENTADO | `ConvenioPago`, `CuotaConvenioPago`, creación y aprobación | Cuotas correlativas, suma/monto/deuda/empresa validados; aprobación administrativa |
+| Prórroga | IMPLEMENTADO | `ProrrogaPago`, `POST /commercial/extensions` | Conserva fecha original y usa fecha efectiva en estado comercial |
+| Día/fecha de pago | IMPLEMENTADO | `CambioCondicionPago`, `POST /commercial/payment-condition-changes` | Historial, justificación, rango 1-28 y transacción con actualización de contrato |
+| Cargo adicional | IMPLEMENTADO | `CargoAdicional`, `POST /commercial/additional-charges` | Separado de `Pago`; queda pendiente de facturación y no aumenta saldo exigible |
+| Alertas | IMPLEMENTADO | dashboard y `GET /commercial/expiring-plans` | Umbral `COMMERCIAL_PLAN_EXPIRY_ALERT_DAYS`, contador/listado y alcance por empresa |
+| Último aviso | IMPLEMENTADO | `EventoGestionComercial`, `POST /commercial/events` | Exige factura con deuda vencida; registra canal manual y responsable |
+| Aviso de retiro | IMPLEMENTADO | `POST /commercial/withdrawal-notices` | Exige servicio y observación; no crea OT ni llama G3/SmartOLT |
+| Exportación | IMPLEMENTADO | `GET /commercial/control-book/export` | CSV/XLSX con filtros, orden, columnas y empresa; registra auditoría |
+| Interesado no contratante | IMPLEMENTADO | `POST /commercial/non-contracting-leads` | Reutiliza `Prospecto`, queda fuera del pipeline activo y disponible para remarketing |
+| Import preview legacy | IMPLEMENTADO | `POST /imports/control-book/preview` | `FINET_LIBRO_CONTROL_V1`, validación defensiva, `persisted=false`; sin datos reales |
+
+La Etapa 2 agrega una sola migración aditiva: `20260925180000_i3_commercial_control_book`. El lifecycle protegido mantiene a `INTERESADO_NO_CONTRATANTE` fuera de consultas de prospectos activos mediante `clasificacionComercial='PROSPECTO'`. No se modificó `service-activation.policy.ts`, la geolocalización de Etapa 1, integraciones G1/G3 ni Railway.

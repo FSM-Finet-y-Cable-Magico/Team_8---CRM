@@ -16,6 +16,7 @@ export function activeProspectWhere(
           { estadoPipeline: { not: LOST_PROSPECT_PIPELINE_STATUS } },
         ],
       },
+      { clasificacionComercial: 'PROSPECTO' },
       { idCliente: null },
       { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
     ],
@@ -65,6 +66,7 @@ export function pendingActivationWhere(
   return {
     AND: [
       companyScope,
+      { clasificacionComercial: 'PROSPECTO' },
       { idCliente: null },
       { contratos: { some: { estado: { in: SIGNED_CONTRACT_STATES } } } },
     ],

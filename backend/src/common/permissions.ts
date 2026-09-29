@@ -29,4 +29,7 @@ export const ACCESS_ROLES = {
   MANAGE_OBSERVATIONS: ['Administrador', 'Comercial', 'Soporte', 'Terreno'],
   MANAGE_CUSTOMER_REQUESTS: ['Administrador', 'Comercial', 'Soporte'],
   MANAGE_EQUIPMENT_ASSIGNMENT_MODE: ['Administrador', 'Soporte', 'Terreno', 'Inventario'],
+  VIEW_CONTROL_BOOK: ['Administrador', 'Comercial', 'Soporte'],
+  EXPORT_CONTROL_BOOK: ['Administrador', 'Comercial'],
+  MANAGE_COMMERCIAL_COLLECTIONS: ['Administrador', 'Comercial'],
 } as const satisfies Record<string, readonly RoleName[]>;

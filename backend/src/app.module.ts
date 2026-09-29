@@ -4,6 +4,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { CompaniesModule } from './companies/companies.module';
+import { CommercialModule } from './commercial/commercial.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { CustomersModule } from './customers/customers.module';
 import { ImportsModule } from './imports/imports.module';
@@ -36,6 +37,7 @@ import { AppController } from './app.controller';
     MonitoringModule,
     UsersModule,
     CompaniesModule,
+    CommercialModule,
     ContractsModule,
     RequestsModule,
     ObservationsModule,
