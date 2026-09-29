@@ -16,7 +16,10 @@
 
 BEGIN;
 
+SET LOCAL crm.reconcile_reviewed = 'approved';
+SET LOCAL crm.legacy_timezone = 'America/Santiago';
 SET LOCAL lock_timeout='5s';
+
 
 SET LOCAL statement_timeout='120s';
 
