@@ -902,3 +902,75 @@ Las tablas de la matriz se obtuvieron de DDL/DML del archivo; en dumps se resume
 | PATCH /api/work-orders/:id/complete-installation | `backend/src/work-orders/work-orders.controller.ts:23` WorkOrdersController.completeInstallation | this.workOrdersService.completeInstallation |
 | PATCH /api/work-orders/:id/cancel-installation | `backend/src/work-orders/work-orders.controller.ts:33` WorkOrdersController.cancelInstallation | this.workOrdersService.cancelInstallation |
 | PATCH /api/work-orders/:id/complete-repair | `backend/src/work-orders/work-orders.controller.ts:42` WorkOrdersController.completeRepair | this.workOrdersService.completeRepair |
+
+## Estado posterior - Incremento 3 Etapa 2
+
+La siguiente matriz agrega el estado comercial posterior sin reemplazar el diagnóstico ni el historial anteriores.
+
+| Función comercial | Estado posterior | Evidencia | Observación |
+| --- | --- | --- | --- |
+| Libro Control | IMPLEMENTADO | `CommercialControlBookService`, `GET /commercial/control-book`, tab `Libro Control` | Proyección normalizada por cliente/contrato/factura; no existe tabla plana mensual |
+| Convenio | IMPLEMENTADO | `ConvenioPago`, `CuotaConvenioPago`, creación y aprobación | Cuotas correlativas, suma/monto/deuda/empresa validados; aprobación administrativa |
+| Prórroga | IMPLEMENTADO | `ProrrogaPago`, `POST /commercial/extensions` | Conserva fecha original y usa fecha efectiva en estado comercial |
+| Día/fecha de pago | IMPLEMENTADO | `CambioCondicionPago`, `POST /commercial/payment-condition-changes` | Historial, justificación, rango 1-28 y transacción con actualización de contrato |
+| Cargo adicional | IMPLEMENTADO | `CargoAdicional`, `POST /commercial/additional-charges` | Separado de `Pago`; queda pendiente de facturación y no aumenta saldo exigible |
+| Alertas | IMPLEMENTADO | dashboard y `GET /commercial/expiring-plans` | Umbral `COMMERCIAL_PLAN_EXPIRY_ALERT_DAYS`, contador/listado y alcance por empresa |
+| Último aviso | IMPLEMENTADO | `EventoGestionComercial`, `POST /commercial/events` | Exige factura con deuda vencida; registra canal manual y responsable |
+| Aviso de retiro | IMPLEMENTADO | `POST /commercial/withdrawal-notices` | Exige servicio y observación; no crea OT ni llama G3/SmartOLT |
+| Exportación | IMPLEMENTADO | `GET /commercial/control-book/export` | CSV/XLSX con filtros, orden, columnas y empresa; registra auditoría |
+| Interesado no contratante | IMPLEMENTADO | `POST /commercial/non-contracting-leads` | Reutiliza `Prospecto`, queda fuera del pipeline activo y disponible para remarketing |
+| Import preview legacy | IMPLEMENTADO | `POST /imports/control-book/preview` | `FINET_LIBRO_CONTROL_V1`, validación defensiva, `persisted=false`; sin datos reales |
+
+La Etapa 2 agrega una sola migración aditiva: `20260925180000_i3_commercial_control_book`. El lifecycle protegido mantiene a `INTERESADO_NO_CONTRATANTE` fuera de consultas de prospectos activos mediante `clasificacionComercial='PROSPECTO'`. No se modificó `service-activation.policy.ts`, la geolocalización de Etapa 1, integraciones G1/G3 ni Railway.
+## Etapa 3 — Integración G3
+
+La instalación nueva dejó de crear `OrdenTrabajo` local desde los controladores de Prospecto, Servicio y Contrato. Esas rutas delegan a `InstallationIntegrationService`, que persiste `IntegracionInstalacionG3`, usa el contrato oficial P0 de G3 y conserva `request_id` en retries. No existe fallback local.
+
+G3 es dueño de OT, agenda, técnico, terreno, evidencia y cierre. G8 conserva Prospecto, Contrato, Cliente, Servicio y lifecycle. El cierre webhook y la reconciliación usan el mismo `G3ClosureProcessor`; solo `COMPLETADA` con resultado técnico llama la política central de activación. `CANCELADA`, cliente ausente y estados desconocidos no activan.
+
+`OrdenTrabajo` y sus endpoints de lectura/cierre permanecen como `LEGACY_LOCAL` para historia y reparación no migrada. `TicketsService.createWorkOrder` sigue identificado como duplicación pendiente de un contrato G3 de reparación, sin ampliar nuevas operaciones. El monitoreo ONT también queda `LEGACY / READ COMPATIBILITY`.
+
+El webhook queda protegido por un guard que falla cerrado con `PENDIENTE_CONTRATO_AUTENTICACION_WEBHOOK` hasta que G3 ratifique autenticación entrante. Las llamadas salientes usan `X-API-KEY`, timeout explícito, scope por empresa y logs saneados.
+
+TOMODAT vía G3 y SmartOLT escritura continúan P1. No se volvió a TOMODAT directo y no se incorporaron credenciales SmartOLT.
+
+CU-84 agrega `ServicioRetiroSolicitud` real, permisos existentes de solicitudes, responsable y auditoría. Como no existe endpoint ratificado de retiro en el acuerdo G3, el despacho queda `BLOQUEADO_CONTRATO_G3`, no crea OT y su estado es `PARCIAL_BLOQUEADO_G3`.
+
+La única migración aditiva de esta etapa es `20260926120000_i3_g3_fsm_integration`. El detalle completo, endpoints y matriz están en `docs/i3-g3-fsm-integration.md`.
+## Etapa 4 — Integración G1
+
+La Etapa 4 parte del commit aprobado de Etapa 3 `ed0a2203` en `feat/i3-g1-inventory-integration`. G1 queda como owner de inventario/bodega y G8 conserva únicamente dominio comercial, garantías comerciales y referencias externas.
+
+### Resultado de los 33 writes
+
+La línea base era de 33 sitios físicos, 16 métodos y 13 endpoints. El resultado es: 23 sitios bloqueados/requieren contrato G1, 5 reemplazados o deprecados por cierre G3 más activación comercial G1, 5 convertidos en histórico no ejecutable al reemplazar borrado de usuario por desactivación lógica y **0 writes físicos activos alcanzables desde rutas de negocio G8**.
+
+Los endpoints write de Inventory y asociación local de Servicio responden `409 INVENTORY_OWNED_BY_G1`; cierre local, NAP y evidencia responden `410 G3_INTEGRATION_REQUIRED`. Las rutas read legacy permanecen para histórico y se identifican como `LEGACY_LOCAL`. Detalle fila por fila: `docs/i3-g1-inventory-write-migration.md`.
+
+### Adapter, activación y disponibilidad
+
+Se agregó `G1InventoryClient` con tipos de equipo, unidad por serie, activación y equipos por servicio, autenticado por `X-API-KEY`, con timeout y errores saneados. G1 confirmó el 2026-09-28 que su receptor de API key está configurado. La integración sigue con `G1_INTEGRATION_ENABLED=false` por defecto hasta intercambiar URL/clave de forma segura y completar smoke test; la confirmación de autenticación no acredita por sí sola el despliegue de cada endpoint P0/P1.
+
+Después de un cierre G3 `COMPLETADA`, G8 confirma su transacción comercial y recién entonces crea/envía `IntegracionActivacionG1`. `event_id` es estable entre retries; timeout no revierte Cliente/Servicio/Contrato y nunca activa un fallback físico local. La regla multiunidad queda implementada como cabecera única con todas las series en `equipos[]`, respaldada por `numeros_serie` y la migración `20260928120000_i3_g1_multiunit_api_key_readiness`.
+
+### Garantías y casos de uso
+
+`GarantiaComercial` implementa CU-85 como entidad G8 validada, multiempresa, auditable y separada de observaciones. La garantía física proviene de G1 y es solo lectura. Estado: `CU-85 IMPLEMENTADO`.
+
+CU-18 queda `PARCIAL_BLOQUEADO_G3`: poste/NAP pertenecen a G3 y el contrato vigente no ratifica esos campos. CU-61 queda `PARCIAL_BLOQUEADO_G1_P2`: no existe una fuente G1 ratificada para consumo, promedio, variación, costo y exportación. La UI expone ambos estados y no presenta legacy como dato actual.
+
+### Persistencia, seguridad y pendientes
+
+La migración aditiva `20260926180000_i3_g1_inventory_integration` crea tracking G1 y garantía comercial, sin eliminar tablas legacy. Consultas y respuestas validan empresa; la API key permanece en backend; logs no incluyen secretos ni payload completo; consultas, activaciones, garantías e intentos de write deprecado usan `LogAuditoria`.
+
+Pendientes externos: intercambio seguro de URL/API key y smoke test G1, despliegue verificable G1 P0/P1, contrato G1 P2, contrato G3 poste/NAP y retiro coordinado de tablas/lectores legacy. Railway no fue modificado y no recibió migraciones.
+
+## Etapa 5 — Documentos tributarios externos
+
+CU-86 queda implementado mediante `DocumentoTributarioExterno`, una entidad G8 separada de `Factura` y `Pago`. Registra metadata de `BOLETA` o `FACTURA` externas con fecha comercial, montos Decimal, referencia, estado, empresa, responsable y relaciones opcionales a Cliente, Contrato, Factura y CargoAdicional. La identidad normalizada por empresa, tipo, emisor y folio tiene constraint único.
+
+El módulo `external-tax-documents` ofrece alta, listado paginado, detalle, corrección y anulación lógica, exclusivamente para Administrador de la misma empresa. Todas las relaciones se validan en backend y las operaciones relevantes se auditan; las URLs solo admiten HTTP(S), nunca se consultan y se sanean antes de auditoría.
+
+`Factura + Pago` continúan como única fuente de cobranza. El registro tributario no crea ni modifica facturas, pagos, saldo, deuda, convenios, prórrogas, cargos, servicios u OT. La interfaz vive en Cobranza bajo el nombre **Documentos tributarios**, muestra `EXTERNO_MANUAL` y no ofrece emisión.
+
+La migración aditiva es `20260927120000_i3_external_tax_documents`. Facturación.cl permanece `NO_INTEGRADO` y `FACTURACION_CL_CONTRACT_PENDING`: no hay contrato API, credenciales ni sandbox ratificados en las fuentes, y CU-86 manual no depende de esa integración. El detalle se encuentra en `docs/i3-external-tax-documents.md`. Railway no fue modificado.

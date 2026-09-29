@@ -30,6 +30,16 @@ export class CreateProspectDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(80)
+  comuna?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  region?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(40)
   origenContacto?: string;
 

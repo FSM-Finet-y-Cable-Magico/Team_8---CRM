@@ -48,6 +48,7 @@ describe('CompaniesService', () => {
         AND: [
           { idEmpresa: 1 },
           { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          { clasificacionComercial: 'PROSPECTO' },
           { idCliente: null },
           { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
         ],
@@ -59,6 +60,7 @@ describe('CompaniesService', () => {
           AND: [
             { idEmpresa: 1 },
             { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
+          { clasificacionComercial: 'PROSPECTO' },
             { idCliente: null },
             { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
           ],

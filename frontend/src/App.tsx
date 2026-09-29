@@ -10,7 +10,9 @@ import {
   FileUp,
   HandCoins,
   House,
+  Map as MapIcon,
   Router,
+  Table2,
   Ticket as TicketIcon,
   UserCog,
   UserRoundPlus,
@@ -51,7 +53,9 @@ import {
 import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
 import { BillingPanel } from './features/billing';
+import { CommercialControlBookPanel } from './features/commercial';
 import { CustomersPanel } from './features/customers';
+import { CoverageZonesPanel } from './features/coverage';
 import { DashboardHome } from './features/dashboard';
 import { ImportPanel } from './features/import';
 import { InstallationsPanel } from './features/installations';
@@ -92,11 +96,13 @@ import {
 type Tab =
   | 'dashboard'
   | 'prospects'
+  | 'coverage'
   | 'installations'
   | 'customers'
   | 'inventory'
   | 'plans'
   | 'billing'
+  | 'commercial'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -306,11 +312,13 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const mainNavItems: NavItem[] = [
     { tab: 'dashboard', label: 'Dashboard', visible: true, icon: House },
     { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects, icon: UserRoundPlus },
+    { tab: 'coverage', label: 'Cobertura', visible: permissions.managePaymentZones, icon: MapIcon },
     { tab: 'customers', label: 'Clientes', visible: canManageCustomers, icon: Users },
     { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
     { tab: 'plans', label: 'Planes', visible: permissions.managePlans, icon: ClipboardList },
     { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
+    { tab: 'commercial', label: 'Libro Control', visible: permissions.viewControlBook, icon: Table2 },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
     { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
     { tab: 'reports', label: 'Reportes', visible: permissions.viewReports, icon: BarChart3 },
@@ -393,6 +401,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onCreated={() => void loadData()}
             />
           )}
+          {activeTab === 'coverage' && permissions.managePaymentZones && (
+            <CoverageZonesPanel idEmpresa={writeCompanyId} canManage={permissions.managePaymentZones} />
+          )}
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel
               prospects={prospects}
@@ -441,10 +452,20 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <BillingPanel
               overview={billingOverview}
               plans={plans}
+              customers={customers}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
               onChanged={() => void loadData()}
+            />
+          )}
+          {activeTab === 'commercial' && permissions.viewControlBook && (
+            <CommercialControlBookPanel
+              scope={scope}
+              writeCompanyId={writeCompanyId}
+              permissions={permissions}
+              onOpenCustomers={() => setActiveTab('customers')}
+              onOpenBilling={() => setActiveTab('billing')}
             />
           )}
           {activeTab === 'tickets' && canViewTickets && (

@@ -8,11 +8,15 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
 import { CompleteRepairOrderDto } from './dto/complete-repair-order.dto';
 import { WorkOrdersService } from './work-orders.service';
+import { DomainOwnershipService } from '../domain-ownership/domain-ownership.service';
 
 @Controller('work-orders')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class WorkOrdersController {
-  constructor(private readonly workOrdersService: WorkOrdersService) {}
+  constructor(
+    private readonly workOrdersService: WorkOrdersService,
+    private readonly ownership: DomainOwnershipService,
+  ) {}
 
   @Get()
   @Roles(...ACCESS_ROLES.VIEW_WORK_ORDERS)
@@ -27,7 +31,8 @@ export class WorkOrdersController {
     @Body() dto: CompleteInstallOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.workOrdersService.completeInstallation(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectG3Write(user, 'PATCH /api/work-orders/:id/complete-installation');
   }
 
   @Patch(':id/cancel-installation')

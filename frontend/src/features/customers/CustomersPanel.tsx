@@ -145,16 +145,6 @@ export function CustomersPanel({
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
   const [serviceUpdateForm, setServiceUpdateForm] = useState(emptyServiceForm());
-  const [equipmentForm, setEquipmentForm] = useState({
-    numeroSerie: '',
-    modelo: '',
-    macAddress: '',
-    puertoOlt: '',
-    observaciones: '',
-    modalidadAsignacion: 'Propiedad empresa',
-    valorArriendoMensual: '',
-    fechaInicioAsignacion: '',
-  });
   const [paymentZones, setPaymentZones] = useState<PaymentZone[]>([]);
   const [customerTechnicalForm, setCustomerTechnicalForm] = useState({
     tecnologiaPrincipal: '',
@@ -653,47 +643,6 @@ export function CustomersPanel({
       });
       await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
       setStatus('Perfil de servicio actualizado');
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  async function attachEquipment(event: FormEvent) {
-    event.preventDefault();
-
-    if (!selectedService || !selectedCustomer) {
-      return;
-    }
-
-    if (!equipmentForm.numeroSerie.trim()) {
-      setStatus('Ingresa el numero de serie del equipo a asociar.');
-      return;
-    }
-
-    try {
-      await api.post(`/services/${selectedService.idServicio}/equipment`, {
-        numeroSerie: equipmentForm.numeroSerie.trim(),
-        modelo: equipmentForm.modelo.trim() || undefined,
-        macAddress: equipmentForm.macAddress.trim() || undefined,
-        puertoOlt: equipmentForm.puertoOlt.trim() || undefined,
-        observaciones: equipmentForm.observaciones.trim() || undefined,
-        modalidadAsignacion: equipmentForm.modalidadAsignacion,
-        valorArriendoMensual: equipmentForm.valorArriendoMensual ? Number(equipmentForm.valorArriendoMensual) : undefined,
-        fechaInicioAsignacion: equipmentForm.fechaInicioAsignacion || undefined,
-      });
-      setEquipmentForm({
-        numeroSerie: '',
-        modelo: '',
-        macAddress: '',
-        puertoOlt: '',
-        observaciones: '',
-        modalidadAsignacion: 'Propiedad empresa',
-        valorArriendoMensual: '',
-        fechaInicioAsignacion: '',
-      });
-      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
-      setStatus('Equipo asociado al servicio contratado');
       onChanged();
     } catch (err) {
       setStatus(apiErrorMessage(err));

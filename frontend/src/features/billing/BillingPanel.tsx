@@ -1,12 +1,14 @@
 ﻿import { FormEvent, useEffect, useState } from 'react';
-import { api, apiErrorMessage, type BillingOverview, type PaymentZone, type Plan, type ZonePriceRule } from '../../api';
+import { api, apiErrorMessage, type BillingOverview, type Customer, type PaymentZone, type Plan, type ZonePriceRule } from '../../api';
 import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
 import { CoveragePicker, CoverageLocation } from '../coverage';
+import { ExternalTaxDocumentsPanel } from './ExternalTaxDocumentsPanel';
 export function BillingPanel({
   overview,
   plans,
+  customers,
   scope,
   writeCompanyId,
   permissions,
@@ -14,6 +16,7 @@ export function BillingPanel({
 }: {
   overview: BillingOverview | null;
   plans: Plan[];
+  customers: Customer[];
   scope: string;
   writeCompanyId: number;
   permissions: DashboardPermissions;
@@ -28,7 +31,7 @@ export function BillingPanel({
   const [zones, setZones] = useState<PaymentZone[]>([]);
   const [zoneRules, setZoneRules] = useState<ZonePriceRule[]>([]);
   const [zoneForm, setZoneForm] = useState({ nombreZona: '', comuna: '', descripcion: '', diaVencimientoSugerido: '5' });
-  const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+  const [ruleForm, setRuleForm] = useState({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '', fechaInicio: '', fechaFin: '' });
   const [morososPage, setMorososPage] = useState(1);
   const [cortesPage, setCortesPage] = useState(1);
 
@@ -104,8 +107,10 @@ export function BillingPanel({
           idZonaPago: Number(ruleForm.idZonaPago),
           precioMensual: Number(ruleForm.precioMensual),
           valorInstalacion: ruleForm.valorInstalacion ? Number(ruleForm.valorInstalacion) : undefined,
+          fechaInicio: ruleForm.fechaInicio || undefined,
+          fechaFin: ruleForm.fechaFin || undefined,
         });
-        setRuleForm({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '' });
+        setRuleForm({ idPlan: '', idZonaPago: '', precioMensual: '', valorInstalacion: '', fechaInicio: '', fechaFin: '' });
         await loadZonesAndRules();
       },
       'Regla de precio por zona registrada',
@@ -159,6 +164,15 @@ export function BillingPanel({
       </section>
 
       {status && <p className="inline-status">{status}</p>}
+
+      {permissions.viewExternalTaxDocuments && (
+        <ExternalTaxDocumentsPanel
+          customers={customers}
+          scope={scope}
+          writeCompanyId={writeCompanyId}
+          canManage={permissions.manageExternalTaxDocuments}
+        />
+      )}
 
       <details className="billing-workspace-section">
         <summary><span>Clientes morosos</span><strong>{morosos.length}</strong></summary>
@@ -352,6 +366,8 @@ export function BillingPanel({
               </select>
               <input type="number" min="0" placeholder="Precio mensual" value={ruleForm.precioMensual} onChange={(event) => setRuleForm({ ...ruleForm, precioMensual: event.target.value })} required />
               <input type="number" min="0" placeholder="Valor instalación" value={ruleForm.valorInstalacion} onChange={(event) => setRuleForm({ ...ruleForm, valorInstalacion: event.target.value })} />
+              <label>Inicio de vigencia<input type="date" value={ruleForm.fechaInicio} onChange={(event) => setRuleForm({ ...ruleForm, fechaInicio: event.target.value })} /></label>
+              <label>Fin de vigencia<input type="date" value={ruleForm.fechaFin} onChange={(event) => setRuleForm({ ...ruleForm, fechaFin: event.target.value })} /></label>
               <button type="submit">Guardar regla</button>
             </form>
           </div>

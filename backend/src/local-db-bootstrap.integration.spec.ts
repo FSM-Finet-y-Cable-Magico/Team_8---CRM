@@ -26,6 +26,9 @@ integration('bootstrap PostgreSQL local', () => {
       'solicitud_cliente',
       'observacion_operativa',
       'historial_cambio_plan',
+      'integracion_instalacion_g3',
+      'integracion_evento_entrante',
+      'solicitud_retiro_servicio',
     ];
     const tables = await prisma.$queryRaw<Array<{ tablename: string }>>`
       SELECT tablename
@@ -43,9 +46,12 @@ integration('bootstrap PostgreSQL local', () => {
           ('contrato', 'id_prospecto'),
           ('orden_trabajo', 'id_prospecto'),
           ('servicio_contratado', 'id_cliente')
+          ,('servicio_contratado', 'fecha_activacion')
+          ,('integracion_instalacion_g3', 'request_id')
+          ,('solicitud_retiro_servicio', 'estado_despacho_tecnico')
         )
     `;
-    expect(columns).toHaveLength(3);
+    expect(columns).toHaveLength(6);
 
     const constraints = await prisma.$queryRaw<Array<{ conname: string; count: number }>>`
       SELECT conname, COUNT(*)::integer AS count

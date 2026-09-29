@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
 
 export class CreateZoneRuleDto {
   @Type(() => Number)
@@ -26,4 +26,12 @@ export class CreateZoneRuleDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  fechaInicio?: string;
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  fechaFin?: string;
 }
