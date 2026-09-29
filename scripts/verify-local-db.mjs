@@ -24,8 +24,10 @@ const requiredTables = [
   'cambio_condicion_pago',
   'cargo_adicional',
   'integracion_instalacion_g3',
+  'integracion_activacion_g1',
   'integracion_evento_entrante',
   'solicitud_retiro_servicio',
+  'documento_tributario_externo',
 ];
 
 const requiredColumns = [
@@ -44,8 +46,13 @@ const requiredColumns = [
   ['cargo_adicional', 'tipo'], ['cargo_adicional', 'monto'], ['cargo_adicional', 'estado'], ['cargo_adicional', 'afecta_saldo'],
   ['servicio_contratado', 'fecha_activacion'],
   ['integracion_instalacion_g3', 'request_id'], ['integracion_instalacion_g3', 'trace_id'], ['integracion_instalacion_g3', 'payload_hash'],
+  ['integracion_activacion_g1', 'numeros_serie'],
   ['integracion_evento_entrante', 'payload_hash'], ['integracion_evento_entrante', 'processed_at'],
   ['solicitud_retiro_servicio', 'id_servicio'], ['solicitud_retiro_servicio', 'estado_despacho_tecnico'],
+  ['documento_tributario_externo', 'id_empresa'], ['documento_tributario_externo', 'tipo_documento'],
+  ['documento_tributario_externo', 'folio_normalizado'], ['documento_tributario_externo', 'emisor_normalizado'],
+  ['documento_tributario_externo', 'fecha_emision'], ['documento_tributario_externo', 'monto_total'],
+  ['documento_tributario_externo', 'fuente'], ['documento_tributario_externo', 'id_usuario_registro'],
 ];
 
 const requiredConstraints = [
@@ -71,6 +78,12 @@ const requiredConstraints = [
   'integracion_instalacion_g3_id_contrato_fkey',
   'integracion_evento_entrante_id_integracion_fkey',
   'solicitud_retiro_servicio_id_servicio_fkey',
+  'documento_tributario_externo_empresa_fkey',
+  'documento_tributario_externo_cliente_fkey',
+  'documento_tributario_externo_contrato_fkey',
+  'documento_tributario_externo_factura_fkey',
+  'documento_tributario_externo_cargo_fkey',
+  'documento_tributario_externo_usuario_fkey',
 ];
 
 const requiredIndexes = [
@@ -93,6 +106,9 @@ const requiredIndexes = [
   'integracion_instalacion_g3_request_id_key',
   'integracion_evento_entrante_id_integracion_event_type_key',
   'solicitud_retiro_empresa_estado_fecha_idx',
+  'documento_tributario_externo_identidad_key',
+  'documento_tributario_externo_empresa_fecha_idx',
+  'documento_tributario_externo_cliente_fecha_idx',
 ];
 
 try {
@@ -152,11 +168,13 @@ try {
     cargos: await prisma.cargoAdicional.count(),
     integracionesG3: await prisma.integracionInstalacionG3.count(),
     solicitudesRetiro: await prisma.servicioRetiroSolicitud.count(),
+    documentosTributariosExternos: await prisma.documentoTributarioExterno.count(),
   };
   await prisma.zonaPago.findFirst({ select: { idZonaPago: true, nombreZona: true, tipoZona: true, poligonoGeojson: true } });
   await prisma.factura.findFirst({ select: { idFactura: true, tipoDocumento: true, folioExterno: true } });
   await prisma.prospecto.findFirst({ select: { idProspecto: true, clasificacionComercial: true, disponibleRemarketing: true } });
   await prisma.integracionInstalacionG3.findFirst({ select: { idIntegracion: true, requestId: true, estadoIntegracion: true } });
+  await prisma.documentoTributarioExterno.findFirst({ select: { idDocumento: true, tipoDocumento: true, folioNormalizado: true, montoTotal: true, fuente: true } });
 
   console.log(JSON.stringify({
     status: 'OK',

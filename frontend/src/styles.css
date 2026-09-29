@@ -4138,3 +4138,41 @@ button.profile-menu-item.danger:hover {
   .import-preview dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .import-workspace > .import-panel { padding: 16px; }
 }
+
+.tax-document-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.tax-document-form label,
+.tax-document-filters label {
+  display: grid;
+  gap: 5px;
+}
+
+.tax-document-wide { grid-column: span 2; }
+
+.tax-document-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  align-items: end;
+  gap: 9px;
+  border-top: 1px solid #e1eae6;
+  padding-top: 16px;
+}
+
+.tax-documents td { vertical-align: top; }
+.tax-documents a { color: #1f735e; font-weight: 650; }
+
+@media (max-width: 1100px) {
+  .tax-document-form,
+  .tax-document-filters { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .tax-document-form,
+  .tax-document-filters { grid-template-columns: 1fr; }
+  .tax-document-wide { grid-column: auto; }
+}

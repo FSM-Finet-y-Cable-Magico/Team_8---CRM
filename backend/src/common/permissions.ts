@@ -35,4 +35,6 @@ export const ACCESS_ROLES = {
   VIEW_G1_EQUIPMENT: ['Administrador', 'Comercial', 'Soporte'],
   MANAGE_G1_ACTIVATION_RETRY: ['Administrador', 'Soporte'],
   MANAGE_COMMERCIAL_WARRANTIES: ['Administrador', 'Comercial'],
+  VIEW_EXTERNAL_TAX_DOCUMENTS: ['Administrador'],
+  MANAGE_EXTERNAL_TAX_DOCUMENTS: ['Administrador'],
 } as const satisfies Record<string, readonly RoleName[]>;

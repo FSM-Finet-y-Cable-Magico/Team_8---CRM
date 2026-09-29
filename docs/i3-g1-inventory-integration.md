@@ -24,13 +24,14 @@ Los acuerdos aportados describen contratos HTTP, pero el código G1 entregado so
 
 | Contrato G1 | ACORDADO | IMPLEMENTADO_G1 demostrado | DESPLEGADO_G1 demostrado | Estado usado por G8 |
 |---|---:|---:|---:|---|
+| Autenticación S2S `X-API-KEY` | Sí | G1 confirmó receptor configurado el 2026-09-28 | Pendiente smoke test desde G8 | `RECEPTOR_API_KEY_G1_CONFIRMADO` |
 | `GET /api/integraciones/tipos-equipo` | Sí | No | No | `PENDIENTE_DESPLIEGUE_G1` |
 | `GET /api/integraciones/unidades/{numeroSerie}` | Sí | Parcial: respuesta base | No se demostró el contrato ampliado | Adapter listo; ampliación `PENDIENTE_DESPLIEGUE_G1` |
 | `POST /api/integraciones/activaciones` | Sí | No | No | Tracking y retry listos; `PENDIENTE_DESPLIEGUE_G1` |
 | `GET /api/integraciones/equipos?id_empresa=&id_servicio=` | Sí, P1 | No | No | `PENDIENTE_DESPLIEGUE_G1`; sin fallback local |
 | `POST /api/integraciones/ordenes/{idOt}/cierre` | Sí | Sí, en G1 aportado | No probado en esta etapa | No se llama desde G8; corresponde a G3→G1 |
 | Lectura de consumo/stock suficiente para CU-61 | No | No | No | `PARCIAL_BLOQUEADO_G1_P2` |
-| Semántica multiunidad de `event_id` | Incompleta | No | No | `PENDIENTE_RATIFICACION_G1_EVENT_ID` |
+| Semántica multiunidad de `event_id` | Sí: cabecera única con `equipos[]` | Adapter y tracking G8 actualizados | Pendiente smoke test | `LISTO_PARA_VALIDACION_G1` |
 
 `CONTRATO_ACORDADO` no se interpreta como `DESPLEGADO_G1`. Los adaptadores, mocks y pantallas permiten integrar cuando G1 despliegue los contratos, sin declarar disponibilidad productiva anticipada.
 
@@ -51,6 +52,10 @@ G1_API_KEY=
 G1_REQUEST_TIMEOUT_MS=8000
 G1_INTEGRATION_ENABLED=false
 ```
+
+G1 confirmó el 2026-09-28 que su receptor está configurado para validar la clave compartida enviada en `X-API-KEY`. Esta confirmación acredita preparación de autenticación, no una prueba de conectividad ni el despliegue de todos los endpoints. La feature flag permanece en `false` hasta recibir `G1_API_URL`, intercambiar `G1_API_KEY` por un canal seguro y aprobar un smoke test P0/P1. La clave no se incluye en Git, frontend, logs ni documentación.
+
+La URL publica entregada por G1 se configura como `G1_API_URL`: en `backend/.env` si NestJS se ejecuta directamente, en `.env` para Docker local o en `.env.railway` para el stack local conectado a la base Railway. En un backend desplegado directamente en Railway, las cuatro variables G1 se configuran en la pestana Variables del servicio backend. Los contratos actuales son salientes desde G8 hacia G1 y no requieren entregar a G1 una URL G8. Si se acuerda un callback futuro, debe definirse primero su ruta, autenticacion e idempotencia.
 
 El cliente aplica timeout con `AbortController` y normaliza `401`, `403`, `404`, `409`, `429`, `5xx`, timeout, respuesta inválida y falta de configuración. Los mensajes no incorporan el body remoto ni la API key. `429`, `5xx`, timeout e indisponibilidad son reintentables; `403`, `404` y `409` quedan controlados sin ocultar su semántica.
 
@@ -108,13 +113,13 @@ Estados principales del tracking:
 - `PENDIENTE_SINCRONIZACION_G1` para timeout o indisponibilidad reintentable;
 - `ERROR_G1` para rechazo no reintentable;
 - `PENDIENTE_DATOS_EQUIPO_G1` cuando G3 no entregó serie;
-- `PENDIENTE_RATIFICACION_G1_EVENT_ID` si aparecen varias unidades.
+- `PENDIENTE_ENVIO` también para varias unidades, usando una cabecera de evento y `equipos[]`.
 
 No existe fallback a `UnidadEquipo`, `MovimientoInventario` ni stock local.
 
-### Riesgo multiunidad
+### Multiunidad ratificada
 
-El acuerdo no ratifica si `event_id` identifica un encabezado, una unidad o la combinación evento/unidad. Por eso una activación con más de una serie no se envía: conserva tracking y queda `PENDIENTE_RATIFICACION_G1_EVENT_ID`. Así se evita inventar una cardinalidad o generar eventos nuevos que rompan idempotencia.
+El acuerdo define `event_id` único a nivel evento y permite múltiples equipos bajo la misma cabecera. G8 persiste `numeros_serie`, conserva `numero_serie` como compatibilidad para la primera unidad y envía todas las series en `equipos[]`. Los retries reutilizan el mismo `event_id`, el mismo orden de series normalizadas y el mismo payload. La migración `20260928120000_i3_g1_multiunit_api_key_readiness` agrega el arreglo y rellena los registros históricos de una sola serie.
 
 ## Garantías
 
@@ -175,6 +180,8 @@ La migración aditiva `backend/prisma/migrations/20260926180000_i3_g1_inventory_
 - `integracion_activacion_g1`, con `event_id` único, correlaciones, estado, intentos, hash, respuesta y fechas;
 - `garantia_comercial`, con relaciones G8, referencia de serie externa e índice único parcial para garantías activas equivalentes.
 
+La migración aditiva `backend/prisma/migrations/20260928120000_i3_g1_multiunit_api_key_readiness/migration.sql` agrega `numeros_serie` y migra la serie histórica individual al arreglo, sin eliminar `numero_serie`.
+
 No elimina tablas legacy ni crea tablas físicas G1. El bootstrap se ejecuta únicamente sobre PostgreSQL local descartable.
 
 ## Pruebas cubiertas
@@ -183,12 +190,13 @@ Las suites verifican cliente G1, filtros y autenticación; todos los códigos de
 
 ## Pendientes externos
 
-1. Despliegue G1 de tipos de equipo, activación y equipos por servicio.
-2. Respuesta ampliada por serie desplegada y verificada.
-3. Ratificación de cardinalidad multiunidad de `event_id`.
-4. Contrato G1 P2 para consumos/materiales de CU-61.
-5. Contrato G3 para poste/NAP de CU-18.
-6. Decisión coordinada para retirar schema y servicios físicos legacy después de migrar todos los lectores históricos.
+1. Recibir `G1_API_URL` y la clave compartida por un canal seguro, sin incorporarlas al repositorio.
+2. Ejecutar smoke test autenticado de tipos, unidad, activación multiunidad y equipos por servicio.
+3. Confirmar despliegue G1 de tipos de equipo, activación y equipos por servicio.
+4. Verificar la respuesta ampliada por serie.
+5. Obtener contrato G1 P2 para consumos/materiales de CU-61.
+6. Obtener contrato G3 para poste/NAP de CU-18.
+7. Coordinar el retiro de schema y servicios físicos legacy después de migrar todos los lectores históricos.
 
 Railway permaneció intacto:
 

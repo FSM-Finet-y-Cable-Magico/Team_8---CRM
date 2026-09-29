@@ -452,6 +452,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <BillingPanel
               overview={billingOverview}
               plans={plans}
+              customers={customers}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}

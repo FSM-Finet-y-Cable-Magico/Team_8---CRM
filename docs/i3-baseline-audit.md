@@ -949,9 +949,9 @@ Los endpoints write de Inventory y asociación local de Servicio responden `409 
 
 ### Adapter, activación y disponibilidad
 
-Se agregó `G1InventoryClient` con tipos de equipo, unidad por serie, activación y equipos por servicio, autenticado por `X-API-KEY`, con timeout y errores saneados. La integración se controla con `G1_INTEGRATION_ENABLED=false` por defecto. La evidencia aportada no demuestra despliegue de tipos, activación ni equipos por servicio; por eso se documentan `PENDIENTE_DESPLIEGUE_G1`. La consulta básica por serie existe en el código G1 aportado, pero la respuesta ampliada también queda pendiente de despliegue/verificación.
+Se agregó `G1InventoryClient` con tipos de equipo, unidad por serie, activación y equipos por servicio, autenticado por `X-API-KEY`, con timeout y errores saneados. G1 confirmó el 2026-09-28 que su receptor de API key está configurado. La integración sigue con `G1_INTEGRATION_ENABLED=false` por defecto hasta intercambiar URL/clave de forma segura y completar smoke test; la confirmación de autenticación no acredita por sí sola el despliegue de cada endpoint P0/P1.
 
-Después de un cierre G3 `COMPLETADA`, G8 confirma su transacción comercial y recién entonces crea/envía `IntegracionActivacionG1`. `event_id` es estable entre retries; timeout no revierte Cliente/Servicio/Contrato y nunca activa un fallback físico local. El caso multiunidad queda `PENDIENTE_RATIFICACION_G1_EVENT_ID`.
+Después de un cierre G3 `COMPLETADA`, G8 confirma su transacción comercial y recién entonces crea/envía `IntegracionActivacionG1`. `event_id` es estable entre retries; timeout no revierte Cliente/Servicio/Contrato y nunca activa un fallback físico local. La regla multiunidad queda implementada como cabecera única con todas las series en `equipos[]`, respaldada por `numeros_serie` y la migración `20260928120000_i3_g1_multiunit_api_key_readiness`.
 
 ### Garantías y casos de uso
 
@@ -963,4 +963,14 @@ CU-18 queda `PARCIAL_BLOQUEADO_G3`: poste/NAP pertenecen a G3 y el contrato vige
 
 La migración aditiva `20260926180000_i3_g1_inventory_integration` crea tracking G1 y garantía comercial, sin eliminar tablas legacy. Consultas y respuestas validan empresa; la API key permanece en backend; logs no incluyen secretos ni payload completo; consultas, activaciones, garantías e intentos de write deprecado usan `LogAuditoria`.
 
-Pendientes externos: despliegue G1 P0/P1, contrato G1 P2, cardinalidad multiunidad de `event_id`, contrato G3 poste/NAP y retiro coordinado de tablas/lectores legacy. Railway no fue modificado y no recibió migraciones.
+Pendientes externos: intercambio seguro de URL/API key y smoke test G1, despliegue verificable G1 P0/P1, contrato G1 P2, contrato G3 poste/NAP y retiro coordinado de tablas/lectores legacy. Railway no fue modificado y no recibió migraciones.
+
+## Etapa 5 — Documentos tributarios externos
+
+CU-86 queda implementado mediante `DocumentoTributarioExterno`, una entidad G8 separada de `Factura` y `Pago`. Registra metadata de `BOLETA` o `FACTURA` externas con fecha comercial, montos Decimal, referencia, estado, empresa, responsable y relaciones opcionales a Cliente, Contrato, Factura y CargoAdicional. La identidad normalizada por empresa, tipo, emisor y folio tiene constraint único.
+
+El módulo `external-tax-documents` ofrece alta, listado paginado, detalle, corrección y anulación lógica, exclusivamente para Administrador de la misma empresa. Todas las relaciones se validan en backend y las operaciones relevantes se auditan; las URLs solo admiten HTTP(S), nunca se consultan y se sanean antes de auditoría.
+
+`Factura + Pago` continúan como única fuente de cobranza. El registro tributario no crea ni modifica facturas, pagos, saldo, deuda, convenios, prórrogas, cargos, servicios u OT. La interfaz vive en Cobranza bajo el nombre **Documentos tributarios**, muestra `EXTERNO_MANUAL` y no ofrece emisión.
+
+La migración aditiva es `20260927120000_i3_external_tax_documents`. Facturación.cl permanece `NO_INTEGRADO` y `FACTURACION_CL_CONTRACT_PENDING`: no hay contrato API, credenciales ni sandbox ratificados en las fuentes, y CU-86 manual no depende de esa integración. El detalle se encuentra en `docs/i3-external-tax-documents.md`. Railway no fue modificado.

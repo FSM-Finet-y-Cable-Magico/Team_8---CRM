@@ -46,12 +46,8 @@ export class G1ActivationService {
       id_servicio: activation.idServicio,
       id_contrato: tracking.idContrato,
     };
-    const state = series.length > 1
-      ? 'PENDIENTE_RATIFICACION_G1_EVENT_ID'
-      : series.length === 0
-        ? 'PENDIENTE_DATOS_EQUIPO_G1'
-        : 'PENDIENTE_ENVIO';
-    const payload: G1ActivationPayload = { ...basePayload, equipos: series.slice(0, 1).map((numero_serie) => ({ numero_serie })) };
+    const state = series.length === 0 ? 'PENDIENTE_DATOS_EQUIPO_G1' : 'PENDIENTE_ENVIO';
+    const payload: G1ActivationPayload = { ...basePayload, equipos: series.map((numero_serie) => ({ numero_serie })) };
     const record = await this.prisma.integracionActivacionG1.upsert({
       where: { eventId },
       create: {
@@ -60,7 +56,8 @@ export class G1ActivationService {
         idServicio: activation.idServicio,
         idContrato: tracking.idContrato,
         idOtG3: String(idOtG3),
-        numeroSerie: series.length === 1 ? series[0] : null,
+        numeroSerie: series[0] ?? null,
+        numerosSerie: series,
         eventId,
         traceId: tracking.traceId,
         estadoIntegracion: state,
@@ -92,7 +89,8 @@ export class G1ActivationService {
       include: { cliente: { select: { rut: true } } },
     });
     if (!record) throw new NotFoundException('Tracking de activación G1 no encontrado.');
-    if (!record.numeroSerie) return record;
+    const series = record.numerosSerie.length ? record.numerosSerie : record.numeroSerie ? [record.numeroSerie] : [];
+    if (!series.length) return record;
 
     const payload: G1ActivationPayload = {
       event_id: record.eventId,
@@ -103,7 +101,7 @@ export class G1ActivationService {
       rut_cliente: record.cliente.rut ?? '',
       id_servicio: record.idServicio,
       id_contrato: record.idContrato,
-      equipos: [{ numero_serie: record.numeroSerie }],
+      equipos: series.map((numero_serie) => ({ numero_serie })),
     };
     const now = new Date();
     await this.prisma.integracionActivacionG1.update({

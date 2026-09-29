@@ -99,12 +99,28 @@ describe('Etapa 4 - activación G1 post G3', () => {
     expect(prisma).not.toHaveProperty('movimientoInventario');
   });
 
-  it('no inventa semántica multiunidad mientras event_id siga pendiente de ratificación final', async () => {
+  it('envía múltiples equipos bajo un event_id único ratificado a nivel evento', async () => {
     const { service, client, tracking, closure, getStored } = setup();
     closure.resultado_tecnico.equipos_instalados.push({ numero_serie: 'ONT-002' });
     await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
-    expect(client.sendActivation).not.toHaveBeenCalled();
-    expect(getStored().estadoIntegracion).toBe('PENDIENTE_RATIFICACION_G1_EVENT_ID');
+    expect(client.sendActivation).toHaveBeenCalledWith(expect.objectContaining({
+      event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111',
+      equipos: [{ numero_serie: 'ONT-001' }, { numero_serie: 'ONT-002' }],
+    }));
+    expect(getStored()).toMatchObject({ estadoIntegracion: 'COMPLETADA', numeroSerie: 'ONT-001', numerosSerie: ['ONT-001', 'ONT-002'] });
+  });
+
+  it('retry conserva todas las series y el mismo event_id', async () => {
+    const { service, client, tracking, closure, getStored } = setup();
+    closure.resultado_tecnico.equipos_instalados.push({ numero_serie: 'ONT-002' });
+    client.sendActivation.mockRejectedValueOnce(new G1IntegrationError('G1_TIMEOUT', null, true, 'timeout'));
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    const eventId = getStored().eventId;
+    await service.retry(getStored().idIntegracion, user);
+    expect(client.sendActivation.mock.calls[1][0]).toMatchObject({
+      event_id: eventId,
+      equipos: [{ numero_serie: 'ONT-001' }, { numero_serie: 'ONT-002' }],
+    });
   });
 
   it('sin serie conserva tracking pendiente y no escribe una unidad local', async () => {

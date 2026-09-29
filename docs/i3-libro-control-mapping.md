@@ -136,3 +136,19 @@ Los valores auxiliares observados se clasifican antes de cualquier uso:
 No existe confirmación activa en esta etapa. Antes de habilitarla se requiere un identificador de lote o hash de archivo, idempotencia, conciliación de factura/pago, transacción y revisión explícita de los campos `REQUIERE ACLARACIÓN`.
 
 No se importaron clientes, prospectos, facturas, pagos, convenios ni eventos desde la planilla real. Los tests usan únicamente datos sintéticos.
+
+## Actualización Etapa 5 — metadata tributaria externa
+
+Esta clasificación reemplaza únicamente el destino conceptual de metadata tributaria; no habilita importación ni modifica el cálculo del Libro Control.
+
+| Columnas legacy | Destino eventual | Regla |
+| --- | --- | --- |
+| `BOLETA O FACTURA [1]`, `EMISION`, folio y monto documental | `DocumentoTributarioExterno.tipoDocumento`, `folioONumero`, `fechaEmision`, `montoTotal` | Solo preview; exige tipo BOLETA/FACTURA, empresa, emisor, fecha, monto y resolución inequívoca del folio. |
+| `BOLETA O FACTURA [2]` | `DocumentoTributarioExterno` o proyección de la relación con `Factura` | `REQUIERE_ACLARACION`: no duplicar el primer documento ni crear una segunda deuda. |
+| `EMITIDA BOLETA SII REPOSICION` | vínculo opcional `DocumentoTributarioExterno.idCargoAdicional` | El indicador no acredita emisión ni pago; requiere documento identificable y cargo conciliado. |
+| `EMITIDA BOLETA SII`, `EMITIDA BOLETA SII SALDOS` | `DocumentoTributarioExterno` relacionado opcionalmente con `Factura` | No inferir estado SII. La fuente financiera sigue siendo `Factura + Pago`. |
+| `FECHA SUBIDA AL DRIVE`, `SUBIDA AL DRIVE` y equivalentes | `urlDocumento` o `referenciaExterna`, solo con referencia HTTP(S) explícita | No comprobar Drive, no descargar archivos y no importar valores reales en esta etapa. |
+| `RESPONSABLE EMISION` | `idUsuarioRegistro`, solo con identidad interna resoluble | No crear usuarios desde texto libre. |
+| `CORREO SUBIDO A FACTURACION` | sin destino en CU-86 | No existe integración Facturación.cl; `FACTURACION_CL_CONTRACT_PENDING`. |
+
+La futura importación debe aplicar la unicidad `(empresa, tipo, emisor normalizado, folio normalizado)`, validar relaciones multiempresa y mantenerse idempotente. En esta etapa el flujo permanece `preview`, `persisted=false`, sin PII real ni confirmación.
