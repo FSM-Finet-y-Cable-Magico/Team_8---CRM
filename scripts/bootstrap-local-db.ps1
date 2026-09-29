@@ -5,8 +5,6 @@ param(
   [ValidatePattern('^[a-zA-Z][a-zA-Z0-9_]*$')]
   [string]$DatabaseUser = 'postgres',
 
-  [string]$DatabasePassword = 'postgres',
-
   [ValidateRange(1024, 65535)]
   [int]$Port = 55432,
 
@@ -19,6 +17,22 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repoRoot
+$DatabasePassword = $env:FINET_LOCAL_DB_PASSWORD
+
+if ([string]::IsNullOrWhiteSpace($DatabasePassword)) {
+  $passwordBytes = New-Object byte[] 32
+  $randomNumberGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $randomNumberGenerator.GetBytes($passwordBytes)
+  } finally {
+    $randomNumberGenerator.Dispose()
+  }
+
+  $DatabasePassword = [Convert]::ToBase64String($passwordBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+  Write-Host 'FINET_LOCAL_DB_PASSWORD no definida: se genero una contrasena aleatoria para este contenedor descartable.'
+} elseif ($DatabasePassword.Length -lt 16) {
+  throw 'FINET_LOCAL_DB_PASSWORD debe contener al menos 16 caracteres.'
+}
 
 function Invoke-NativeCommand {
   param(

@@ -26,7 +26,14 @@ Valores locales predeterminados:
 | Puerto | `55432` |
 | Contenedor | `finet-crm-i3-baseline-db` |
 | Usuario | `postgres` |
-| Contraseña | `postgres`, solo local y descartable |
+| Contraseña | Aleatoria por ejecución; también puede definirse con `FINET_LOCAL_DB_PASSWORD` |
+
+Si no se define `FINET_LOCAL_DB_PASSWORD`, el script genera una contraseña criptográficamente aleatoria y la usa únicamente durante esa ejecución. No la imprime ni la guarda en el repositorio. Para conectarte manualmente al contenedor después del bootstrap, define primero una contraseña temporal de al menos 16 caracteres:
+
+```powershell
+$env:FINET_LOCAL_DB_PASSWORD = Read-Host 'Contraseña temporal para PostgreSQL local'
+npm run db:bootstrap:local
+```
 
 El script reemplaza únicamente el contenedor local con ese nombre. Luego ejecuta, en este orden:
 
@@ -55,10 +62,11 @@ Los archivos `02_seed_local_adjustments.sql` y `08_seed_reunion_duenos_servicios
 
 ## Pruebas de integración locales
 
-Con el contenedor levantado por el bootstrap:
+Con el contenedor levantado por el bootstrap y una contraseña temporal definida en `FINET_LOCAL_DB_PASSWORD`:
 
 ```powershell
-$env:DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/fsm_i3_baseline_test?schema=public'
+$encodedPassword = [Uri]::EscapeDataString($env:FINET_LOCAL_DB_PASSWORD)
+$env:DATABASE_URL = "postgresql://postgres:${encodedPassword}@127.0.0.1:55432/fsm_i3_baseline_test?schema=public"
 $env:CRM_INTEGRATION_TESTS='1'
 npm run test -w backend -- --runInBand crm.integration.spec.ts local-db-bootstrap.integration.spec.ts
 ```
@@ -68,7 +76,8 @@ Antes de ejecutar una prueba que escriba, comprueba que el host sea `localhost` 
 ## Ejecución del backend
 
 ```powershell
-$env:DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:55432/fsm_i3_baseline_test?schema=public'
+$encodedPassword = [Uri]::EscapeDataString($env:FINET_LOCAL_DB_PASSWORD)
+$env:DATABASE_URL = "postgresql://postgres:${encodedPassword}@127.0.0.1:55432/fsm_i3_baseline_test?schema=public"
 npm run start:dev -w backend
 ```
 
