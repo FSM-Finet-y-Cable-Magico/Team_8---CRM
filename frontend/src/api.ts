@@ -44,6 +44,11 @@ export type Prospect = {
   email: string | null;
   telefono: string | null;
   direccion: string | null;
+  comuna?: string | null;
+  region?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
+  idZonaPago?: number | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
   observacionPerdida?: string | null;
@@ -69,6 +74,18 @@ export type InstallTechnician = {
   email: string | null;
 };
 
+export type InstallTimeSlot = {
+  horaVisita: string;
+  disponible: boolean;
+  motivo: string;
+  tecnicosDisponibles: InstallTechnician[];
+};
+
+export type InstallDayAvailability = {
+  fechaProgramada: string;
+  horarios: InstallTimeSlot[];
+};
+
 export type InstallAvailability = {
   fechaProgramada: string;
   horaVisita: string;
@@ -78,7 +95,44 @@ export type InstallAvailability = {
     horaVisita: string;
     tecnicosDisponibles: InstallTechnician[];
   }>;
+  horarios?: InstallTimeSlot[];
   mensaje: string;
+};
+
+export type G3InstallationTracking = {
+  idIntegracion: number;
+  idEmpresa: number;
+  idProspecto: number | null;
+  idContrato: number;
+  idPlan: number;
+  idServicio: number | null;
+  requestId: string;
+  traceId: string;
+  idOtG3: string | null;
+  codigoOtG3: string | null;
+  estadoIntegracion: string;
+  estadoOtG3: string | null;
+  estadoOriginalG3: string | null;
+  estadoPresentacion: string;
+  fechaSolicitud: string;
+  fechaUltimaSincronizacion: string | null;
+  intentos: number;
+  ultimoErrorSanitizado: string | null;
+  fechaCierreProcesado: string | null;
+  fuente: 'G3';
+  detalle: null | {
+    idOtG3: string | null;
+    codigoOtG3: string | null;
+    tipo: string | null;
+    estado: string;
+    estadoOriginalG3: string | null;
+    fecha: string | null;
+    tecnico: unknown;
+    direccion: unknown;
+    persona: unknown;
+    telefono: string | null;
+    resultado: unknown;
+  };
 };
 
 export type Plan = {
@@ -145,6 +199,40 @@ export type Customer = {
   }>;
 };
 
+export type ExternalTaxDocument = {
+  idDocumento: number;
+  idEmpresa: number;
+  tipoDocumento: 'BOLETA' | 'FACTURA';
+  folioONumero: string;
+  emisorProveedor: string;
+  fechaEmision: string;
+  montoNeto: string | null;
+  montoExento: string | null;
+  iva: string | null;
+  montoTotal: string;
+  urlDocumento: string | null;
+  referenciaExterna: string | null;
+  estado: 'REGISTRADO' | 'ANULADO';
+  fuente: 'EXTERNO_MANUAL';
+  idCliente: number | null;
+  idContrato: number | null;
+  idFactura: number | null;
+  idCargoAdicional: number | null;
+  fechaRegistro: string;
+  fechaActualizacion: string;
+  cliente?: { idCliente: number; nombreCompleto: string; rut: string | null } | null;
+  contrato?: { idContrato: number; estado: string } | null;
+  factura?: { idFactura: number; tipoDocumento: string | null; folioExterno: string | null } | null;
+  cargoAdicional?: { idCargo: number; tipo: string; estado: string } | null;
+  empresa?: { idEmpresa: number; nombre: string };
+  usuarioRegistro?: { idUsuario: number; nombreCompleto: string };
+};
+
+export type ExternalTaxDocumentPage = {
+  items: ExternalTaxDocument[];
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+};
+
 export type CustomerService = {
   idServicio: number;
   idCliente: number;
@@ -196,6 +284,59 @@ export type CustomerService = {
       nombreCompleto: string;
     } | null;
   } | null;
+};
+
+export type G1EquipmentType = {
+  id_tipo_equipo: number;
+  id_empresa: number;
+  nombre: string;
+  categoria?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
+  descripcion_tecnica?: string | null;
+  unidad_medida?: string | null;
+  garantia_dias?: number | null;
+  requiere_serie_individual?: boolean | null;
+  activo?: boolean | null;
+};
+
+export type G1Unit = {
+  id_unidad?: number;
+  numero_serie: string;
+  id_empresa: number;
+  id_tipo_equipo?: number | null;
+  tipo_equipo?: G1EquipmentType | string | null;
+  mac_address?: string | null;
+  estado: string;
+  estadoFisicoOficial?: boolean;
+  id_bodega_actual?: number | null;
+  fecha_adquisicion?: string | null;
+  fecha_instalacion?: string | null;
+  id_ot?: number | string | null;
+  garantia?: { fecha_vencimiento?: string | null; vigente?: boolean | null } | null;
+};
+
+export type G1EquipmentResponse<T> = {
+  fuente: 'G1';
+  estadoContrato?: string;
+  data: T;
+};
+
+export type CommercialWarranty = {
+  idGarantia: number;
+  idEmpresa: number;
+  idCliente: number;
+  idServicio: number;
+  idContrato: number;
+  numeroSerieEquipo: string | null;
+  tipo: string;
+  fechaInicio: string;
+  fechaTermino: string;
+  cobertura: string;
+  monto: string | null;
+  observaciones: string | null;
+  estado: string;
+  responsable?: { idUsuario: number; nombreCompleto: string };
 };
 
 export type InventoryUnit = {
@@ -276,6 +417,15 @@ export type PaymentZone = {
   descripcion: string | null;
   diaVencimientoSugerido: number | null;
   activo: boolean | null;
+  tipoZona?: 'COBERTURA_GENERAL' | 'MICROZONA_COMERCIAL' | null;
+  idZonaPadre?: number | null;
+  poligonoGeojson?: { type: 'Polygon'; coordinates: number[][][] } | null;
+  centroLat?: number | null;
+  centroLng?: number | null;
+  prioridad?: number;
+  fuenteCobertura?: string | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   empresa?: Company | null;
 };
 
@@ -286,6 +436,8 @@ export type ZonePriceRule = {
   precioMensual: string;
   valorInstalacion: string | null;
   activo: boolean | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   plan?: Plan | null;
   zonaPago?: PaymentZone | null;
 };
@@ -493,6 +645,7 @@ export type Ticket = {
 
 export type WorkOrder = {
   idOt: number;
+  idProspecto?: number | null;
   idEmpresa: number | null;
   idCliente: number | null;
   idTecnico: number | null;
@@ -554,6 +707,23 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error)) {
+      const authorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
+
+      if (error.response?.status === 401 && authorization) {
+        localStorage.removeItem('finet_token');
+        localStorage.removeItem('finet_user');
+        window.dispatchEvent(new Event('finet:auth-expired'));
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
 
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {

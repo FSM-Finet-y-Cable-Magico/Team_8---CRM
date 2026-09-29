@@ -1,9 +1,10 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { CompaniesModule } from './companies/companies.module';
+import { CommercialModule } from './commercial/commercial.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { CustomersModule } from './customers/customers.module';
 import { ImportsModule } from './imports/imports.module';
@@ -23,6 +24,9 @@ import { TvipModule } from './tvip/tvip.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
+import { G3IntegrationModule } from './g3-integration/g3-integration.module';
+import { G1IntegrationModule } from './g1-integration/g1-integration.module';
+import { ExternalTaxDocumentsModule } from './external-tax-documents/external-tax-documents.module';
 
 @Module({
   imports: [
@@ -34,8 +38,12 @@ import { AppController } from './app.controller';
     BillingModule,
     TvipModule,
     MonitoringModule,
+    G3IntegrationModule,
+    G1IntegrationModule,
+    ExternalTaxDocumentsModule,
     UsersModule,
     CompaniesModule,
+    CommercialModule,
     ContractsModule,
     RequestsModule,
     ObservationsModule,

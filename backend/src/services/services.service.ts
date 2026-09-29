@@ -17,7 +17,9 @@ import { CreateServiceInstallOrderDto } from './dto/create-service-install-order
 import { CreateServiceDto } from './dto/create-service.dto';
 import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
+import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { canActivateService } from './service-activation.policy';
 
 const SERVICE_INCLUDE = {
   cliente: true,
@@ -104,6 +106,22 @@ export class ServicesService {
     const idDireccion = dto.idDireccion ?? await this.resolvePrimaryAddressId(dto.idCliente);
     await this.assertAddress(idDireccion, dto.idCliente);
     await this.assertPaymentZone(dto.idZonaPago, idEmpresa);
+
+    if (!canActivateService({
+      intent: 'MANUAL_SERVICE_CHANGE',
+      targetStatus: dto.estadoOperativo,
+      installationCompleted: false,
+    })) {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+        entidadAfectada: 'servicio_contratado',
+        valorNuevo: { idCliente: dto.idCliente, idContrato: dto.idContrato, estadoSolicitado: dto.estadoOperativo },
+      });
+      throw new BadRequestException(
+        'Un servicio nuevo no puede quedar Activo sin una instalacion completada',
+      );
+    }
 
     const created = await this.prisma.servicioContratado.create({
       data: {
@@ -223,6 +241,36 @@ export class ServicesService {
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    if (dto.estadoOperativo === 'Activo' && service.estadoOperativo !== 'Activo') {
+      const completedInstallation = await this.prisma.ordenTrabajo.findFirst({
+        where: {
+          idServicio,
+          tipoOt: 'Instalacion',
+          estado: 'Completada',
+        },
+        select: { idOt: true },
+      });
+
+      if (!canActivateService({
+        intent: 'MANUAL_SERVICE_CHANGE',
+        targetStatus: dto.estadoOperativo,
+        currentStatus: service.estadoOperativo,
+        installationCompleted: Boolean(completedInstallation),
+      })) {
+        await this.auditService.record({
+          idUsuario: currentUser.idUsuario,
+          accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+          entidadAfectada: 'servicio_contratado',
+          idEntidadAfectada: idServicio,
+          valorAnterior: { estadoOperativo: service.estadoOperativo },
+          valorNuevo: { estadoSolicitado: dto.estadoOperativo },
+        });
+        throw new BadRequestException(
+          'El servicio no puede activarse sin una instalacion completada asociada',
+        );
+      }
+    }
     const data: Prisma.ServicioContratadoUncheckedUpdateInput = {
       tipoServicio: dto.tipoServicio,
       estadoOperativo: dto.estadoOperativo,
@@ -406,6 +454,28 @@ export class ServicesService {
     this.validateInstallSchedule(dto.fechaProgramada, dto.horaVisita);
 
     return this.buildInstallAvailability(service.idEmpresa, dto.fechaProgramada, dto.horaVisita);
+  }
+
+  async installDayAvailability(
+    idServicio: number,
+    dto: ServiceInstallDayAvailabilityDto,
+    currentUser: AuthUser,
+  ) {
+    const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    await this.validateServiceInstallOrderPreconditions(service);
+    this.validateInstallDate(dto.fechaProgramada);
+
+    const availability = await this.buildInstallAvailability(
+      service.idEmpresa,
+      dto.fechaProgramada,
+      ALTERNATIVE_VISIT_TIMES[0],
+    );
+
+    return {
+      fechaProgramada: dto.fechaProgramada,
+      horarios: availability.horarios,
+    };
   }
 
   async createInstallOrder(
@@ -780,17 +850,13 @@ export class ServicesService {
     }
   }
 
-  private validateInstallSchedule(dateValue: string, timeValue: string) {
+  private validateInstallDate(dateValue: string) {
     const scheduledDate = parseDateOnly(dateValue);
     const today = todayDateOnly();
     const latestScheduledDate = addYearsToDateOnly(today, 1);
 
     if (!scheduledDate) {
       throw new BadRequestException('La fecha programada no es una fecha calendario valida');
-    }
-
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
-      throw new BadRequestException('La hora de visita no tiene un formato valido');
     }
 
     if (dateValue < today) {
@@ -801,7 +867,17 @@ export class ServicesService {
       throw new BadRequestException('La fecha programada no puede superar un ano desde hoy');
     }
 
-    if (dateValue === today && timeValue <= this.currentChileTime()) {
+    return scheduledDate;
+  }
+
+  private validateInstallSchedule(dateValue: string, timeValue: string) {
+    const scheduledDate = this.validateInstallDate(dateValue);
+
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
+      throw new BadRequestException('La hora de visita no tiene un formato valido');
+    }
+
+    if (dateValue === todayDateOnly() && timeValue <= this.currentChileTime()) {
       throw new BadRequestException('La fecha y hora de visita deben ser posteriores a la hora actual');
     }
 
@@ -844,6 +920,12 @@ export class ServicesService {
         horaVisita: requestedTime,
         tecnicosDisponibles: [],
         alternativas: [],
+        horarios: ALTERNATIVE_VISIT_TIMES.map((horaVisita) => ({
+          horaVisita,
+          disponible: false,
+          motivo: 'No hay técnicos activos para esta empresa',
+          tecnicosDisponibles: [],
+        })),
         mensaje: 'No existen tecnicos en terreno activos para la empresa seleccionada',
       };
     }
@@ -894,6 +976,21 @@ export class ServicesService {
         email: technician.email,
       }));
     const availableTechnicians = availableAt(requestedDate, requestedTime);
+    const horarios = ALTERNATIVE_VISIT_TIMES.map((horaVisita) => {
+      const pasado = requestedDate === todayDateOnly() && horaVisita <= this.currentChileTime();
+      const tecnicosDisponibles = pasado ? [] : availableAt(requestedDate, horaVisita);
+
+      return {
+        horaVisita,
+        disponible: tecnicosDisponibles.length > 0,
+        motivo: pasado
+          ? 'Horario ya pasado'
+          : tecnicosDisponibles.length
+            ? `${tecnicosDisponibles.length} técnico(s) disponible(s)`
+            : 'Horario ocupado',
+        tecnicosDisponibles,
+      };
+    });
     const alternatives: Array<{
       fechaProgramada: string;
       horaVisita: string;
@@ -941,6 +1038,7 @@ export class ServicesService {
       horaVisita: requestedTime,
       tecnicosDisponibles: availableTechnicians,
       alternativas: alternatives,
+      horarios,
       mensaje: availableTechnicians.length
         ? `${availableTechnicians.length} tecnico(s) disponible(s) para la visita`
         : 'No existen tecnicos disponibles en el horario solicitado. Selecciona una alternativa',

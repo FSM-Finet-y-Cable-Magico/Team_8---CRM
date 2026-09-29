@@ -65,6 +65,7 @@ type Summary = {
     churnBajasMensuales?: number;
   };
   alertasVencimiento?: DashboardExpiryAlert[];
+  diasAnticipacionVencimiento?: number;
   ticketsCerradosPorTipo?: Array<{
     idCategoria: number;
     categoria: string;
@@ -211,8 +212,9 @@ export function DashboardHome({
     },
   ];
   const expiryAlerts = summary?.alertasVencimiento ?? [];
+  const expiryWindowDays = summary?.diasAnticipacionVencimiento ?? 7;
   const overdueAlerts = expiryAlerts.filter((alert) => alert.diasRestantes < 0);
-  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= 7);
+  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= expiryWindowDays);
   const filteredExpiryAlerts = expiryFilter === 'overdue' ? overdueAlerts : upcomingAlerts;
   const selectedAlert = filteredExpiryAlerts.find((alert) => expiryAlertKey(alert) === selectedAlertKey)
     ?? filteredExpiryAlerts[0]
@@ -281,7 +283,6 @@ export function DashboardHome({
       </section>
 
       <section className="dashboard-command-center">
-        {permissions.manageCustomerRequests && <article className="dashboard-activity-panel"><div className="dashboard-panel-heading"><h2>Seguimiento de solicitudes</h2></div><p><strong>{summary?.metricas.solicitudesAbiertas ?? 0}</strong> abiertas o en gestión</p><p><strong>{summary?.metricas.solicitudesNoFactibles ?? 0}</strong> cerradas como no factibles</p><p>Totales de la empresa seleccionada. Las solicitudes se gestionan desde la ficha del cliente.</p><button className="secondary compact" onClick={() => onNavigate('customers')}>Ver clientes</button></article>}
         <article className="dashboard-activity-panel">
           <div className="dashboard-panel-heading">
             <h2>Origen de captación</h2>
@@ -365,7 +366,7 @@ export function DashboardHome({
                 aria-pressed={expiryFilter === 'upcoming'}
                 onClick={() => selectExpiryFilter('upcoming')}
               >
-                Próximos 7 días
+                Próximos {expiryWindowDays} días
                 <span>{upcomingAlerts.length}</span>
               </button>
             </div>
@@ -397,7 +398,7 @@ export function DashboardHome({
             <p className="empty-state">
               {expiryFilter === 'overdue'
                 ? 'No hay contratos vencidos para mostrar.'
-                : 'No hay contratos próximos a vencer durante los próximos 7 días.'}
+                : `No hay contratos próximos a vencer durante los próximos ${expiryWindowDays} días.`}
             </p>
           )}
 

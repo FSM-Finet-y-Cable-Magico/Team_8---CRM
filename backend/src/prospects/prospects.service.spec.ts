@@ -5,6 +5,7 @@ import { buildInstallOrderObservations } from '../common/install-order-metadata'
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { ProspectsService } from './prospects.service';
+import { CoverageDomainService } from '../coverage/coverage-domain.service';
 
 describe('ProspectsService', () => {
   const admin: AuthUser = {
@@ -40,6 +41,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.updatePipeline(10, { estadoPipeline: 'Servicio Activo' }, admin);
@@ -83,6 +85,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.create(
@@ -114,6 +117,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     await service.list(admin, 'consolidado');
@@ -138,6 +142,8 @@ describe('ProspectsService', () => {
           idEmpresa: 1,
           email: 'cliente@example.com',
           estadoPipeline: 'No Factible',
+          latitud: -33.58,
+          longitud: -70.63,
         }),
       },
       cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1, factibilidadVerificada: true }) },
@@ -146,17 +152,20 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 8 }] }) } as unknown as CoverageDomainService,
     );
 
     await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('Factible');
   });
-  it('permite cotizar un plan activo de otra empresa y conserva su idPlan', async () => {
+  it('rechaza cotizar un plan activo de otra empresa', async () => {
     const prospect = {
       idProspecto: 12,
       idEmpresa: 1,
       email: 'cliente@example.com',
       nombreCompleto: 'Prospecto FiNet',
       estadoPipeline: 'Factible',
+      latitud: -33.58,
+      longitud: -70.63,
     };
     const quote = {
       idCotizacion: 22,
@@ -184,15 +193,12 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn().mockResolvedValue({ status: 'skipped' }) } as unknown as MailService,
+      { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 9 }] }) } as unknown as CoverageDomainService,
     );
     jest.spyOn(service as any, 'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('pdf'));
 
-    await service.generateQuote(12, { planId: 9 }, admin);
-
-    expect(prisma.cotizacion.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ idProspecto: 12, idPlan: 9 }) }),
-    );
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ idPlan: 9 }) }));
+    await expect(service.generateQuote(12, { planId: 9 }, admin)).rejects.toThrow('inactivo');
+    expect(prisma.cotizacion.create).not.toHaveBeenCalled();
   });
 
   it('no permite cotizar un plan inactivo', async () => {
@@ -203,6 +209,8 @@ describe('ProspectsService', () => {
           idEmpresa: 1,
           email: 'cliente@example.com',
           estadoPipeline: 'Factible',
+          latitud: -33.58,
+          longitud: -70.63,
         }),
       },
       cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1, factibilidadVerificada: true }) },
@@ -212,11 +220,12 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 10 }] }) } as unknown as CoverageDomainService,
     );
 
     await expect(service.generateQuote(13, { planId: 10 }, admin)).rejects.toThrow('inactivo');
   });
-  it('confirma contratacion manual y convierte el prospecto en cliente pendiente de firma sin crear servicio ni OT', async () => {
+  it('registra el contrato pendiente sin crear cliente, servicio ni OT', async () => {
     const prospect = {
       idProspecto: 20,
       idEmpresa: 1,
@@ -231,20 +240,10 @@ describe('ProspectsService', () => {
       fechaCreacion: new Date('2026-06-01T00:00:00.000Z'),
       origenContacto: 'Formulario web',
     };
-    const createdCustomer = {
-      idCliente: 5,
-      idEmpresa: 1,
-      rut: '21600781-6',
-      nombreCompleto: 'Xiao Zhong',
-      email: 'xiao@example.com',
-      telefono: '+56940618332',
-      estado: 'Pendiente firma contrato',
-      origenContacto: 'Formulario web',
-      importadoMasivo: false,
-    };
     const createdContract = {
       idContrato: 30,
-      idCliente: 5,
+      idCliente: null,
+      idProspecto: 20,
       idPlan: 8,
       idEmpresa: 1,
       estado: 'Pendiente firma contrato',
@@ -252,7 +251,7 @@ describe('ProspectsService', () => {
     const transaction = {
       cliente: {
         findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue(createdCustomer),
+        create: jest.fn(),
         update: jest.fn(),
       },
       contrato: {
@@ -292,6 +291,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.contractPlan(
@@ -303,7 +303,6 @@ describe('ProspectsService', () => {
       admin,
     );
 
-    expect(result.cliente.estado).toBe('Pendiente firma contrato');
     expect(result.contrato).toBe(createdContract);
     expect(transaction.contrato.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -315,27 +314,19 @@ describe('ProspectsService', () => {
         }),
       }),
     );
-    expect(transaction.direccionServicio.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          idCliente: 5,
-          direccionCompleta: 'Claudio Gay 2547, Santiago',
-          esPrincipal: true,
-        }),
-      }),
-    );
+    expect(transaction.cliente.create).not.toHaveBeenCalled();
+    expect(transaction.direccionServicio.create).not.toHaveBeenCalled();
     expect(transaction).not.toHaveProperty('servicioContratado');
     expect(transaction.prospecto.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { idProspecto: 20 },
         data: expect.objectContaining({
-          idCliente: 5,
-          estadoPipeline: 'Contrato externo registrado',
+          estadoPipeline: 'Pendiente firma',
         }),
       }),
     );
     expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ accion: 'CONFIRMAR_CONTRATACION_MANUAL' }),
+      expect.objectContaining({ accion: 'GENERAR_CONTRATO_PROSPECTO' }),
     );
   });
 
@@ -362,6 +353,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     await expect(
@@ -391,6 +383,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.recordLoss(
@@ -425,6 +418,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     await expect(
@@ -467,7 +461,7 @@ describe('ProspectsService', () => {
             fechaProgramada: new Date(`${requestedDate}T00:00:00.000Z`),
             observaciones: buildInstallOrderObservations({
               tipoConexion: 'Fibra Optica',
-              horaVisita: '10:00',
+              horaVisita: '11:00',
             }),
           },
         ]),
@@ -477,17 +471,24 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.installAvailability(
       10,
-      { fechaProgramada: requestedDate, horaVisita: '10:00' },
+      { fechaProgramada: requestedDate, horaVisita: '11:00' },
       admin,
     );
 
     expect(result.tecnicosDisponibles).toEqual([]);
     expect(result.alternativas.length).toBeGreaterThan(0);
     expect(result.alternativas[0].tecnicosDisponibles[0].idTecnico).toBe(4);
+
+    const day = await service.installDayAvailability(10, { fechaProgramada: requestedDate }, admin);
+    expect(day.horarios).toEqual(expect.arrayContaining([
+      expect.objectContaining({ horaVisita: '09:00', disponible: true }),
+      expect.objectContaining({ horaVisita: '11:00', disponible: false, motivo: 'Horario ocupado' }),
+    ]));
   });
 
   it('crea la orden asignada y avanza el prospecto a Instalacion Programada', async () => {
@@ -560,6 +561,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
     );
 
     const result = await service.createInstallOrder(
@@ -594,5 +596,78 @@ describe('ProspectsService', () => {
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'GENERAR_ORDEN_INSTALACION' }),
     );
+  });
+
+  it('agenda una instalación para un prospecto firmado sin crear antes el cliente', async () => {
+    const requestedDate = futureDate();
+    const prospect = {
+      idProspecto: 22,
+      idEmpresa: 1,
+      idCliente: null,
+      estadoPipeline: 'Pendiente activacion',
+      direccion: 'Av. Las Condes 123',
+    };
+    const contract = {
+      idContrato: 45,
+      idProspecto: 22,
+      idCliente: null,
+      idEmpresa: 1,
+      estado: 'Firmado',
+      direccionInstalacion: 'Av. Las Condes 123',
+      comunaInstalacion: 'Las Condes',
+      ciudadInstalacion: 'Santiago',
+    };
+    const transaction = {
+      direccionServicio: { findFirst: jest.fn(), create: jest.fn() },
+      servicioContratado: { findFirst: jest.fn(), update: jest.fn() },
+      ordenTrabajo: {
+        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 44, ...data })),
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 44, ...data })),
+      },
+      prospecto: {
+        update: jest.fn().mockResolvedValue({ ...prospect, estadoPipeline: 'Instalacion Programada' }),
+      },
+    };
+    const prisma = {
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
+      cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 3 }) },
+      contrato: { findFirst: jest.fn().mockResolvedValue(contract) },
+      usuario: {
+        findMany: jest.fn().mockResolvedValue([
+          { idUsuario: 4, nombreCompleto: 'Tecnico FiNet', email: 'terreno@finet.local' },
+        ]),
+      },
+      ordenTrabajo: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: jest.fn().mockImplementation(
+        (callback: (tx: typeof transaction) => unknown) => callback(transaction),
+      ),
+    };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { sendQuote: jest.fn() } as unknown as MailService,
+      {} as CoverageDomainService,
+    );
+
+    await service.createInstallOrder(22, {
+      fechaProgramada: requestedDate,
+      horaVisita: '10:00',
+      tipoConexion: 'Fibra Optica',
+      idTecnico: 4,
+    }, admin);
+
+    expect(transaction.ordenTrabajo.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        idProspecto: 22,
+        idCliente: null,
+        idServicio: undefined,
+        idDireccion: undefined,
+      }),
+    }));
+    expect(transaction.direccionServicio.create).not.toHaveBeenCalled();
+    expect(transaction.servicioContratado.findFirst).not.toHaveBeenCalled();
   });
 });

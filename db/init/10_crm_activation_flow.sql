@@ -1,11 +1,6 @@
-ALTER TABLE contrato
-  ADD COLUMN IF NOT EXISTS id_prospecto INTEGER,
-  ADD COLUMN IF NOT EXISTS direccion_instalacion VARCHAR(200),
-  ADD COLUMN IF NOT EXISTS comuna_instalacion VARCHAR(80),
-  ADD COLUMN IF NOT EXISTS ciudad_instalacion VARCHAR(80);
-
-ALTER TABLE contrato
-  ADD CONSTRAINT fk_contrato_id_prospecto
-  FOREIGN KEY (id_prospecto) REFERENCES prospecto(id_prospecto);
-
-CREATE INDEX IF NOT EXISTS idx_contrato_id_prospecto ON contrato(id_prospecto);
+-- La definicion de contrato.id_prospecto, su FK y su indice pertenece a:
+-- backend/prisma/migrations/20260912150000_crm_activation_flow/migration.sql
+--
+-- Este archivo se conserva como marcador historico para no cambiar el orden
+-- nominal de db/init. El bootstrap local ejecuta la migracion Prisma una sola
+-- vez y evita duplicar fk_contrato_id_prospecto.

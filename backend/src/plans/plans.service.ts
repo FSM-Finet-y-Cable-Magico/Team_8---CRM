@@ -6,6 +6,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
+import { PLAN_CUSTOMER_TYPES, PLAN_TYPES, planTypeRequiresSpeed } from './plan-catalog';
 
 @Injectable()
 export class PlansService {
@@ -30,6 +31,13 @@ export class PlansService {
   }
 
   async create(dto: CreatePlanDto, currentUser: AuthUser) {
+    this.validatePlanFields({
+      nombreComercial: dto.nombreComercial,
+      tipoPlan: dto.tipoPlan,
+      tipoCliente: dto.tipoCliente,
+      velocidadMbps: dto.velocidadMbps,
+      precioMensual: dto.precioMensual,
+    });
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
     const created = await this.prisma.plan.create({
       data: {
@@ -64,6 +72,13 @@ export class PlansService {
   async update(idPlan: number, dto: UpdatePlanDto, currentUser: AuthUser) {
     const plan = await this.getPlanOrThrow(idPlan, currentUser);
     const nextCompany = dto.idEmpresa === undefined ? plan.idEmpresa : this.resolveCompanyId(dto.idEmpresa, currentUser);
+    this.validatePlanFields({
+      nombreComercial: dto.nombreComercial ?? plan.nombreComercial,
+      tipoPlan: dto.tipoPlan ?? plan.tipoPlan,
+      tipoCliente: dto.tipoCliente ?? plan.tipoCliente,
+      velocidadMbps: dto.velocidadMbps ?? plan.velocidadMbps,
+      precioMensual: dto.precioMensual ?? Number(plan.precioMensual),
+    });
 
     const updated = await this.prisma.plan.update({
       where: { idPlan },
@@ -110,6 +125,42 @@ export class PlansService {
     });
 
     return updated;
+  }
+
+  async remove(idPlan: number, currentUser: AuthUser) {
+    const removed = await this.prisma.$transaction(async tx => {
+      const plan = await tx.plan.findUnique({ where: { idPlan }, include: { empresa: true } });
+
+      if (!plan) {
+        throw new NotFoundException('Plan no encontrado');
+      }
+
+      this.assertCompanyAccess(plan.idEmpresa, currentUser);
+
+      const [contracts, quotations, planChanges] = await Promise.all([
+        tx.contrato.count({ where: { idPlan } }),
+        tx.cotizacion.count({ where: { idPlan } }),
+        tx.historialCambioPlan.count({ where: { OR: [{ idPlanAnterior: idPlan }, { idPlanNuevo: idPlan }] } }),
+      ]);
+
+      if (contracts + quotations + planChanges > 0) {
+        throw new BadRequestException('Este plan tiene historial asociado y no se puede eliminar. Puedes desactivarlo.');
+      }
+
+      await tx.planZonaPrecio.deleteMany({ where: { idPlan } });
+      await tx.plan.delete({ where: { idPlan } });
+      return plan;
+    });
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ELIMINAR_PLAN_COMERCIAL',
+      entidadAfectada: 'plan',
+      idEntidadAfectada: idPlan,
+      valorAnterior: this.planAuditValue(removed),
+    });
+
+    return { idPlan, eliminado: true };
   }
 
   private async getPlanOrThrow(idPlan: number, currentUser: AuthUser) {
@@ -177,6 +228,37 @@ export class PlansService {
 
     if (!currentUser.idEmpresa || idEmpresa !== currentUser.idEmpresa) {
       throw new BadRequestException('El plan no pertenece a tu empresa');
+    }
+  }
+
+  private validatePlanFields(input: {
+    nombreComercial: string;
+    tipoPlan: string;
+    tipoCliente: string;
+    velocidadMbps?: number | null;
+    precioMensual: number;
+  }) {
+    if (!input.nombreComercial?.trim() || !input.tipoPlan?.trim() || !input.tipoCliente?.trim()) {
+      throw new BadRequestException('Completa todos los campos obligatorios del plan');
+    }
+
+    if (!PLAN_TYPES.includes(input.tipoPlan.trim() as (typeof PLAN_TYPES)[number])) {
+      throw new BadRequestException('El tipo de plan no pertenece al catálogo permitido');
+    }
+
+    if (!PLAN_CUSTOMER_TYPES.includes(input.tipoCliente.trim() as (typeof PLAN_CUSTOMER_TYPES)[number])) {
+      throw new BadRequestException('El tipo de cliente no pertenece al catálogo permitido');
+    }
+
+    if (!Number.isFinite(input.precioMensual) || input.precioMensual <= 0) {
+      throw new BadRequestException('El precio mensual debe ser mayor que cero');
+    }
+
+    if (
+      planTypeRequiresSpeed(input.tipoPlan.trim())
+      && (!Number.isInteger(input.velocidadMbps) || Number(input.velocidadMbps) <= 0)
+    ) {
+      throw new BadRequestException('La velocidad es obligatoria y debe ser mayor que cero para planes de Internet');
     }
   }
 

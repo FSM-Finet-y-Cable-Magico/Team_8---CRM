@@ -40,7 +40,6 @@ export function Topbar({
         )}
         <div className="active-company" aria-label={`Empresa activa: ${currentCompanyName}`}>
           <strong>{currentCompanyName}</strong>
-          <span className="company-status-dot" aria-hidden="true" />
         </div>
         <details className="profile-menu">
           <summary className="profile-trigger" aria-label="Abrir menú de perfil">

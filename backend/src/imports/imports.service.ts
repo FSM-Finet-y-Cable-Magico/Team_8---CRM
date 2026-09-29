@@ -6,6 +6,7 @@ import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
+import { canActivateService } from '../services/service-activation.policy';
 
 type RawRow = Record<string, unknown>;
 
@@ -18,6 +19,8 @@ type NormalizedImportRow = {
   direccion: string;
   estado?: string;
   tipoRegistro: 'cliente' | 'prospecto';
+  tipoServicio?: 'Internet' | 'Television' | 'Internet + Television';
+  estadoServicio?: 'Activo' | 'Pendiente Instalacion' | 'Suspendido' | 'Baja';
 };
 
 type RejectedRow = {
@@ -27,6 +30,8 @@ type RejectedRow = {
 };
 
 const MAX_REJECTION_RATE = 0.3;
+const HISTORICAL_SERVICE_TYPES = ['Internet', 'Television', 'Internet + Television'] as const;
+const HISTORICAL_SERVICE_STATES = ['Activo', 'Pendiente Instalacion', 'Suspendido', 'Baja'] as const;
 
 @Injectable()
 export class ImportsService {
@@ -99,10 +104,12 @@ export class ImportsService {
       };
     }
 
+    let importedServices = 0;
+
     await this.prisma.$transaction(async (tx) => {
       for (const row of validRows) {
         if (row.tipoRegistro === 'cliente') {
-          await tx.cliente.create({
+          const customer = await tx.cliente.create({
             data: {
               idEmpresa,
               rut: row.rut,
@@ -111,8 +118,46 @@ export class ImportsService {
               telefono: row.telefono,
               estado: row.estado ?? 'Activo',
               importadoMasivo: true,
+              origenContacto: 'Importacion historica',
             },
           });
+          const address = await tx.direccionServicio.create({
+            data: {
+              idCliente: customer.idCliente,
+              direccionCompleta: row.direccion,
+              comuna: 'Por confirmar',
+              ciudad: null,
+              esPrincipal: true,
+            },
+          });
+
+          if (row.tipoServicio) {
+            const estadoOperativo = row.estadoServicio ?? 'Activo';
+
+            if (!canActivateService({
+              intent: 'HISTORICAL_IMPORT',
+              targetStatus: estadoOperativo,
+              historicalImport: true,
+            })) {
+              throw new BadRequestException('La fila historica no cumple la politica de activacion');
+            }
+
+            await tx.servicioContratado.create({
+              data: {
+                idCliente: customer.idCliente,
+                idEmpresa,
+                idDireccion: address.idDireccion,
+                tipoServicio: row.tipoServicio,
+                estadoOperativo,
+                observaciones: 'Servicio preexistente registrado por importacion historica',
+                datosTecnicos: {
+                  origen: 'Importacion historica',
+                  filaImportacion: row.rowNumber,
+                },
+              },
+            });
+            importedServices += 1;
+          }
         } else {
           await tx.prospecto.create({
             data: {
@@ -133,13 +178,16 @@ export class ImportsService {
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'IMPORTACION_CLIENTES',
+      accion: 'IMPORTACION_HISTORICA_CLIENTES',
       entidadAfectada: 'cliente',
       valorNuevo: {
         total: totalRows,
         importadas: validRows.length,
         rechazadas: rejected.length,
         idEmpresa,
+        clientesHistoricos: validRows.filter((row) => row.tipoRegistro === 'cliente').length,
+        serviciosHistoricos: importedServices,
+        creaOrdenTrabajo: false,
       },
     });
 
@@ -149,6 +197,7 @@ export class ImportsService {
       importedRows: validRows.length,
       rejectedRows: rejected.length,
       rejectionRate,
+      importedServices,
       errors: rejected,
     };
   }
@@ -236,6 +285,8 @@ export class ImportsService {
       const direccion = this.value(row, ['direccion', 'direccion_fisica', 'Direccion']);
       const tipoRegistro = this.value(row, ['tipo_registro', 'tipo', 'Tipo']).toLowerCase();
       const estado = this.value(row, ['estado', 'Estado']);
+      const tipoServicio = this.value(row, ['tipo_servicio', 'tipoServicio', 'Tipo Servicio']);
+      const estadoServicio = this.value(row, ['estado_servicio', 'estadoServicio', 'Estado Servicio']);
 
       if (!rut || !nombreCompleto || !telefono || !direccion) {
         rejected.push({
@@ -243,6 +294,25 @@ export class ImportsService {
           rut: rut || undefined,
           reason: 'Faltan campos obligatorios (rut, nombre/nombre_completo, telefono/celular y direccion)',
         });
+        return;
+      }
+
+      if (tipoRegistro === 'cliente' && tipoServicio && !HISTORICAL_SERVICE_TYPES.includes(
+        tipoServicio as (typeof HISTORICAL_SERVICE_TYPES)[number],
+      )) {
+        rejected.push({ rowNumber, rut, reason: 'tipo_servicio historico no reconocido' });
+        return;
+      }
+
+      if (tipoRegistro === 'cliente' && estadoServicio && !HISTORICAL_SERVICE_STATES.includes(
+        estadoServicio as (typeof HISTORICAL_SERVICE_STATES)[number],
+      )) {
+        rejected.push({ rowNumber, rut, reason: 'estado_servicio historico no reconocido' });
+        return;
+      }
+
+      if (estadoServicio && !tipoServicio) {
+        rejected.push({ rowNumber, rut, reason: 'estado_servicio requiere tipo_servicio' });
         return;
       }
 
@@ -255,6 +325,12 @@ export class ImportsService {
         direccion,
         estado: estado || undefined,
         tipoRegistro: tipoRegistro === 'cliente' ? 'cliente' : 'prospecto',
+        tipoServicio: tipoServicio
+          ? tipoServicio as NormalizedImportRow['tipoServicio']
+          : undefined,
+        estadoServicio: estadoServicio
+          ? estadoServicio as NormalizedImportRow['estadoServicio']
+          : undefined,
       });
     });
 

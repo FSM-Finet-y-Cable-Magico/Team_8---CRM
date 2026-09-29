@@ -55,7 +55,7 @@ describe('ContractsService', () => {
     expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
   });
 
-  it('confirma la firma manual y prepara el servicio pendiente de instalación', async () => {
+  it('confirma la firma manual sin crear servicio ni OT', async () => {
     const contract = {
       idContrato: 30,
       idCliente: 10,
@@ -81,6 +81,9 @@ describe('ContractsService', () => {
         }),
         update: jest.fn().mockResolvedValue({ idCliente: 10, estado: 'Pendiente Instalacion' }),
       },
+      $transaction: jest.fn().mockImplementation(
+        (callback: (tx: { contrato: typeof prisma.contrato }) => unknown) => callback({ contrato: prisma.contrato }),
+      ),
     };
     const audit = { record: jest.fn() };
     const servicesService = {
@@ -108,7 +111,7 @@ describe('ContractsService', () => {
       where: { idCliente: 10 },
       data: { estado: 'Pendiente Instalacion' },
     });
-    expect(servicesService.ensureInstallationServiceForContract).toHaveBeenCalledWith(30, comercial);
+    expect(servicesService.ensureInstallationServiceForContract).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL' }));
   });
 });

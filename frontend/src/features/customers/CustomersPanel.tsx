@@ -126,12 +126,14 @@ export function CustomersPanel({
   plans,
   scope,
   permissions,
+  onManageInstallation,
   onChanged,
 }: {
   customers: Customer[];
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
+  onManageInstallation: (idProspecto: number) => void;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -143,16 +145,6 @@ export function CustomersPanel({
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
   const [serviceUpdateForm, setServiceUpdateForm] = useState(emptyServiceForm());
-  const [equipmentForm, setEquipmentForm] = useState({
-    numeroSerie: '',
-    modelo: '',
-    macAddress: '',
-    puertoOlt: '',
-    observaciones: '',
-    modalidadAsignacion: 'Propiedad empresa',
-    valorArriendoMensual: '',
-    fechaInicioAsignacion: '',
-  });
   const [paymentZones, setPaymentZones] = useState<PaymentZone[]>([]);
   const [customerTechnicalForm, setCustomerTechnicalForm] = useState({
     tecnologiaPrincipal: '',
@@ -657,47 +649,6 @@ export function CustomersPanel({
     }
   }
 
-  async function attachEquipment(event: FormEvent) {
-    event.preventDefault();
-
-    if (!selectedService || !selectedCustomer) {
-      return;
-    }
-
-    if (!equipmentForm.numeroSerie.trim()) {
-      setStatus('Ingresa el numero de serie del equipo a asociar.');
-      return;
-    }
-
-    try {
-      await api.post(`/services/${selectedService.idServicio}/equipment`, {
-        numeroSerie: equipmentForm.numeroSerie.trim(),
-        modelo: equipmentForm.modelo.trim() || undefined,
-        macAddress: equipmentForm.macAddress.trim() || undefined,
-        puertoOlt: equipmentForm.puertoOlt.trim() || undefined,
-        observaciones: equipmentForm.observaciones.trim() || undefined,
-        modalidadAsignacion: equipmentForm.modalidadAsignacion,
-        valorArriendoMensual: equipmentForm.valorArriendoMensual ? Number(equipmentForm.valorArriendoMensual) : undefined,
-        fechaInicioAsignacion: equipmentForm.fechaInicioAsignacion || undefined,
-      });
-      setEquipmentForm({
-        numeroSerie: '',
-        modelo: '',
-        macAddress: '',
-        puertoOlt: '',
-        observaciones: '',
-        modalidadAsignacion: 'Propiedad empresa',
-        valorArriendoMensual: '',
-        fechaInicioAsignacion: '',
-      });
-      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
-      setStatus('Equipo asociado al servicio contratado');
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
   function updateInstallOrderSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
     setInstallOrderForm((current) => ({ ...current, [field]: value }));
     setInstallAvailability(null);
@@ -1049,6 +1000,14 @@ export function CustomersPanel({
                 <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
               </dl>
               <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>
+              {permissions.createInstallOrders && (
+                <button
+                  type="button"
+                  onClick={() => onManageInstallation(selectedPendingActivation.idProspecto)}
+                >
+                  Gestionar instalación
+                </button>
+              )}
             </section>
           );
         })()}

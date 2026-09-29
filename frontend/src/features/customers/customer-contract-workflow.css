@@ -119,25 +119,212 @@
 }
 
 .customer-install-schedule {
-  align-items: end;
+  display: grid;
+  gap: 18px;
   margin-top: 16px;
 }
 
-.availability-button {
-  align-self: end;
-  background: #237b65;
-  border: 1px solid #237b65;
-  border-radius: 7px;
-  color: #fff;
-  font-size: .82rem;
-  min-height: 36px;
-  padding: 7px 11px;
-  width: auto;
+.customer-schedule-picker {
+  align-items: stretch;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(210px, .75fr) minmax(320px, 1.6fr);
 }
 
-.availability-button:hover {
-  background: #176d58;
-  border-color: #176d58;
+.customer-calendar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.customer-calendar-field > span,
+.customer-time-slots legend {
+  color: #43574d;
+  font-size: .83rem;
+  font-weight: 750;
+}
+
+.customer-inline-calendar {
+  width: min(100%, 310px);
+}
+
+.customer-calendar-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.customer-calendar-header strong {
+  color: #293d34;
+  font-size: .92rem;
+}
+
+.customer-calendar-header > div {
+  display: flex;
+  gap: 3px;
+}
+
+.customer-calendar-header button,
+.customer-calendar-today {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #24765f;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 32px;
+  padding: 4px 7px;
+}
+
+.customer-calendar-header button:hover:not(:disabled),
+.customer-calendar-today:hover:not(:disabled) {
+  background: #e7f3ee;
+}
+
+.customer-calendar-grid {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.customer-calendar-weekdays {
+  margin-bottom: 4px;
+}
+
+.customer-calendar-weekdays span {
+  color: #65766e;
+  font-size: .7rem;
+  font-weight: 750;
+  padding: 5px 0;
+  text-align: center;
+}
+
+.customer-calendar-grid button {
+  aspect-ratio: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #30443a;
+  min-height: 34px;
+  padding: 0;
+}
+
+.customer-calendar-grid button:hover:not(:disabled) {
+  background: #e7f3ee;
+  color: #176d58;
+}
+
+.customer-calendar-grid button.outside {
+  color: #a9b4af;
+}
+
+.customer-calendar-grid button.today {
+  box-shadow: inset 0 0 0 1px #65ad97;
+}
+
+.customer-calendar-grid button.selected,
+.customer-calendar-grid button.selected:hover {
+  background: #237b65;
+  color: #fff;
+}
+
+.customer-calendar-grid button:disabled {
+  color: #c4ccc8;
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.customer-calendar-today {
+  font-size: .76rem;
+  margin-top: 7px;
+}
+
+.customer-time-slots {
+  border: 0;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.customer-time-slots legend {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+}
+
+.customer-time-slots > p {
+  align-items: center;
+  background: #eef5f1;
+  border-radius: 10px;
+  color: #667970;
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: center;
+  margin: 0;
+  min-height: 84px;
+  padding: 12px;
+  text-align: center;
+}
+
+.customer-time-slots button {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #abd5c6;
+  color: #176d58;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 62px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.customer-time-slots button strong {
+  font-size: .95rem;
+}
+
+.customer-time-slots button span {
+  color: #61766c;
+  font-size: .7rem;
+  font-weight: 500;
+}
+
+.customer-time-slots button:hover:not(:disabled),
+.customer-time-slots button.selected {
+  background: #dff2ea;
+  border-color: #27866d;
+  box-shadow: 0 0 0 2px rgb(39 134 109 / 13%);
+}
+
+.customer-time-slots button:disabled {
+  background: #edf1ef;
+  border-color: #e0e6e3;
+  color: #9ca9a3;
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.customer-time-slots button:disabled span {
+  color: #9ca9a3;
+}
+
+.customer-install-details {
+  border-top: 1px solid #dce8e1;
+  padding-top: 16px;
+}
+
+.customer-contract-stage .customer-cancel-agenda {
+  border-color: #e7b3ad;
+  color: #a13e35;
+  margin-top: 2px;
+}
+
+.customer-contract-stage .customer-cancel-agenda:hover:not(:disabled) {
+  background: #fff0ed;
+  border-color: #d88980;
 }
 
 .customer-transient-status {
@@ -225,6 +412,14 @@
 
   .customer-readonly-details {
     grid-template-columns: 1fr;
+  }
+
+  .customer-schedule-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-time-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .customer-service-summary-header {

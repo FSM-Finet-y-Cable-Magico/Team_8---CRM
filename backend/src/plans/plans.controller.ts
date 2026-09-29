@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -42,5 +42,11 @@ export class PlansController {
   @Roles(...ACCESS_ROLES.MANAGE_PLANS)
   deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.plansService.setActive(id, false, user);
+  }
+
+  @Delete(':id')
+  @Roles(...ACCESS_ROLES.MANAGE_PLANS)
+  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.plansService.remove(id, user);
   }
 }

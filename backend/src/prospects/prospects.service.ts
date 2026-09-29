@@ -18,9 +18,14 @@ import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
 import { GenerateQuoteDto } from './dto/generate-quote.dto';
 import { InstallAvailabilityDto } from './dto/install-availability.dto';
+import { InstallDayAvailabilityDto } from './dto/install-day-availability.dto';
 import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
+import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { CoverageDomainService } from '../coverage/coverage-domain.service';
+import { CoverageResult } from '../coverage/coverage.types';
+import { CoverageLocationDto } from '../coverage/coverage.dto';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
 const FEASIBLE_PIPELINE_STATUS = 'Factible';
@@ -53,6 +58,7 @@ export class ProspectsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
+    private readonly coverageService: CoverageDomainService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -128,6 +134,9 @@ export class ProspectsService {
       throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
+    const cobertura = dto.ubicacion
+      ? await this.coverageService.check(idEmpresa, dto.ubicacion, currentUser)
+      : null;
     const prospect = await this.prisma.prospecto.create({
       data: {
         idEmpresa,
@@ -137,8 +146,18 @@ export class ProspectsService {
         email: dto.email?.trim().toLowerCase(),
         telefono: dto.telefono.trim(),
         direccion: dto.direccion.trim(),
+        comuna: dto.comuna?.trim() || null,
+        region: dto.region?.trim() || null,
+        latitud: dto.ubicacion?.latitud ?? null,
+        longitud: dto.ubicacion?.longitud ?? null,
+        idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
-        estadoPipeline: INITIAL_PIPELINE_STATUS,
+        estadoPipeline: cobertura?.estado === 'FACTIBLE'
+          ? FEASIBLE_PIPELINE_STATUS
+          : cobertura?.estado === 'NO_FACTIBLE'
+            ? NOT_FEASIBLE_PIPELINE_STATUS
+            : INITIAL_PIPELINE_STATUS,
+        ...(cobertura?.estado === 'FACTIBLE' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         fechaCreacion: new Date(),
       },
       include: {
@@ -156,10 +175,11 @@ export class ProspectsService {
         estadoPipeline: prospect.estadoPipeline,
         idEmpresa: prospect.idEmpresa,
         origenContacto: prospect.origenContacto,
+        ...(cobertura ? { direccion: dto.direccion.trim(), cobertura } : {}),
       },
     });
 
-    return prospect;
+    return { ...prospect, cobertura };
   }
 
   async updatePipeline(idProspecto: number, dto: UpdatePipelineDto, currentUser: AuthUser) {
@@ -194,7 +214,87 @@ export class ProspectsService {
   }
 
   async verifyFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser) {
+    return this.saveFeasibility(idProspecto, dto, currentUser);
+  }
+
+  async verifyTomodat(idProspecto: number, location: CoverageLocationDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
+    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, location, currentUser);
+    const locatedProspect = await this.prisma.prospecto.update({
+      where: { idProspecto },
+      data: {
+        latitud: location.latitud,
+        longitud: location.longitud,
+        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+      },
+      include: { empresa: true },
+    });
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+      entidadAfectada: 'prospecto',
+      idEntidadAfectada: idProspecto,
+      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
+      valorNuevo: { latitud: location.latitud, longitud: location.longitud, idZonaPago: locatedProspect.idZonaPago },
+    });
+    if (cobertura.estado === 'PENDIENTE_VALIDACION_TECNICA') {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'CONSULTAR_COBERTURA_PENDIENTE',
+        entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
+        valorNuevo: { direccion: prospect.direccion, cobertura },
+      });
+      return { ...locatedProspect, cobertura };
+    }
+    const updated = await this.saveFeasibility(
+      idProspecto,
+      { resultado: cobertura.estado === 'FACTIBLE' ? 'Factible' : 'No Factible' },
+      currentUser,
+      cobertura,
+    );
+    return { ...updated, cobertura };
+  }
+
+  async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
+    const updated = await this.prisma.prospecto.update({
+      where: { idProspecto },
+      data: {
+        latitud: dto.ubicacion.latitud,
+        longitud: dto.ubicacion.longitud,
+        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+        ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
+        ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
+        ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
+      },
+      include: { empresa: true, zonaPago: true },
+    });
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+      entidadAfectada: 'prospecto',
+      idEntidadAfectada: idProspecto,
+      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
+      valorNuevo: {
+        latitud: updated.latitud,
+        longitud: updated.longitud,
+        idZonaPago: updated.idZonaPago,
+        estadoCobertura: cobertura.estado,
+      },
+    });
+    return { ...updated, cobertura };
+  }
+
+  private assertFeasibilityStage(status: string | null) {
+    if (!['Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible'].includes(status ?? INITIAL_PIPELINE_STATUS)) {
+      throw new BadRequestException('La factibilidad solo puede cambiarse antes de cotizar o contratar');
+    }
+  }
+
+  private async saveFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser, cobertura?: CoverageResult) {
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
 
     if (!prospect.direccion?.trim()) {
       throw new BadRequestException('La direccion del prospecto debe estar completa');
@@ -204,23 +304,19 @@ export class ProspectsService {
     const nextStatus = dto.resultado === 'Factible' ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS;
     const lossReason = prospect.motivoPerdida;
 
-    const updated = await this.prisma.prospecto.update({
-      where: { idProspecto },
-      data: {
-        estadoPipeline: nextStatus,
-        motivoPerdida: lossReason,
-      },
-      include: { empresa: true },
-    });
-
-    if (dto.resultado === 'Factible') {
-      await this.prisma.cotizacion.create({
+    const updated = await this.prisma.$transaction(async tx => {
+      // A negative recheck invalidates previous positive checks used by installation scheduling.
+      await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      return tx.prospecto.update({
+        where: { idProspecto, estadoPipeline: prospect.estadoPipeline },
         data: {
-          idProspecto,
-          factibilidadVerificada: true,
+          estadoPipeline: nextStatus,
+          motivoPerdida: lossReason,
+          ...(dto.resultado === 'Factible' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         },
+        include: { empresa: true },
       });
-    }
+    });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -232,6 +328,8 @@ export class ProspectsService {
         resultado: dto.resultado,
         observaciones: dto.observaciones,
         estadoPipeline: nextStatus,
+        origen: cobertura ? cobertura.tecnica.proveedor : 'Manual',
+        ...(cobertura ? { direccion: prospect.direccion, cobertura } : {}),
       },
     });
 
@@ -240,6 +338,19 @@ export class ProspectsService {
 
   async generateQuote(idProspecto: number, dto: GenerateQuoteDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+
+    if (prospect.latitud === null || prospect.latitud === undefined || prospect.longitud === null || prospect.longitud === undefined) {
+      throw new BadRequestException('El prospecto debe tener una ubicacion valida antes de cotizar');
+    }
+
+    const commercial = await this.coverageService.plansForLocation(
+      prospect.idEmpresa ?? 0,
+      { latitud: prospect.latitud, longitud: prospect.longitud },
+      currentUser,
+    );
+    if (!commercial.coberturaComercial || !commercial.planes.some(plan => plan.idPlan === dto.planId)) {
+      throw new BadRequestException('El plan no esta disponible para la ubicacion del prospecto');
+    }
 
     if (!prospect.email?.trim()) {
       throw new BadRequestException('El prospecto debe tener correo electronico');
@@ -264,7 +375,7 @@ export class ProspectsService {
       where: { idPlan: dto.planId },
     });
 
-    if (!plan || plan.activo === false) {
+    if (!plan || plan.activo === false || plan.idEmpresa !== prospect.idEmpresa) {
       throw new BadRequestException('Plan inexistente o inactivo');
     }
 
@@ -493,20 +604,36 @@ export class ProspectsService {
     );
   }
 
+  async installDayAvailability(idProspecto: number, dto: InstallDayAvailabilityDto, currentUser: AuthUser) {
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    await this.validateInstallOrderPreconditions(prospect);
+    this.validateInstallDate(dto.fechaProgramada);
+
+    const availability = await this.buildInstallAvailability(
+      prospect.idEmpresa,
+      dto.fechaProgramada,
+      ALTERNATIVE_VISIT_TIMES[0],
+    );
+
+    return { fechaProgramada: dto.fechaProgramada, horarios: availability.horarios };
+  }
+
   async createInstallOrder(idProspecto: number, dto: CreateInstallOrderDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const scheduledDate = this.validateInstallSchedule(dto.fechaProgramada, dto.horaVisita);
 
-    await this.validateInstallOrderPreconditions(prospect);
+    const contract = await this.validateInstallOrderPreconditions(prospect);
 
     const idCliente = prospect.idCliente;
     const idEmpresa = prospect.idEmpresa;
 
-    if (!idCliente || !idEmpresa) {
-      throw new BadRequestException('La orden requiere cliente y empresa asociados');
+    if (!idEmpresa) {
+      throw new BadRequestException('La orden requiere una empresa asociada');
     }
 
-    if (!prospect.direccion?.trim()) {
+    const installationAddress = contract.direccionInstalacion?.trim() || prospect.direccion?.trim();
+
+    if (!installationAddress) {
       throw new BadRequestException('El prospecto no tiene direccion para instalar');
     }
 
@@ -526,47 +653,50 @@ export class ProspectsService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      let direccion = await tx.direccionServicio.findFirst({
-        where: {
-          idCliente,
-          esPrincipal: true,
-        },
-      });
+      let direccion = null;
+      let servicio = null;
 
-      if (!direccion) {
-        direccion = await tx.direccionServicio.create({
-          data: {
+      if (idCliente) {
+        direccion = await tx.direccionServicio.findFirst({
+          where: { idCliente, esPrincipal: true },
+        });
+
+        if (!direccion) {
+          direccion = await tx.direccionServicio.create({
+            data: {
+              idCliente,
+              direccionCompleta: installationAddress,
+              comuna: contract.comunaInstalacion?.trim() || 'Por confirmar',
+              ciudad: contract.ciudadInstalacion?.trim() || 'Por confirmar',
+              esPrincipal: true,
+            },
+          });
+        }
+
+        servicio = await tx.servicioContratado.findFirst({
+          where: {
             idCliente,
-            direccionCompleta: prospect.direccion ?? '',
-            comuna: 'Por confirmar',
-            ciudad: 'Por confirmar',
-            esPrincipal: true,
+            idEmpresa,
+            estadoOperativo: { not: 'Baja' },
           },
+          orderBy: { fechaCreacion: 'desc' },
         });
-      }
 
-      const servicio = await tx.servicioContratado.findFirst({
-        where: {
-          idCliente,
-          idEmpresa,
-          estadoOperativo: { not: 'Baja' },
-        },
-        orderBy: { fechaCreacion: 'desc' },
-      });
-
-      if (servicio && !servicio.idDireccion) {
-        await tx.servicioContratado.update({
-          where: { idServicio: servicio.idServicio },
-          data: { idDireccion: direccion.idDireccion },
-        });
+        if (servicio && !servicio.idDireccion) {
+          await tx.servicioContratado.update({
+            where: { idServicio: servicio.idServicio },
+            data: { idDireccion: direccion.idDireccion },
+          });
+        }
       }
 
       const createdOrder = await tx.ordenTrabajo.create({
         data: {
           idEmpresa,
           idCliente,
+          idProspecto,
           idTecnico: dto.idTecnico,
-          idDireccion: direccion.idDireccion,
+          idDireccion: direccion?.idDireccion,
           idServicio: servicio?.idServicio,
           tipoOt: 'Instalacion',
           prioridad: dto.prioridad ?? 'Media',
@@ -638,9 +768,13 @@ export class ProspectsService {
       throw new BadRequestException('El prospecto no tiene empresa asociada');
     }
 
-    if (!prospect.idCliente || prospect.estadoPipeline !== 'Aceptado') {
+    const isLegacyReady = Boolean(prospect.idCliente) && prospect.estadoPipeline === 'Aceptado';
+    const isPendingActivation = !prospect.idCliente
+      && ['Pendiente activacion', 'Instalacion Programada'].includes(prospect.estadoPipeline ?? '');
+
+    if (!isLegacyReady && !isPendingActivation) {
       throw new BadRequestException(
-        'La orden requiere un prospecto con cotizacion aceptada y plan contratado',
+        'La orden requiere un prospecto con contrato firmado pendiente de instalacion',
       );
     }
 
@@ -653,17 +787,24 @@ export class ProspectsService {
       }),
       this.prisma.contrato.findFirst({
         where: {
-          idCliente: prospect.idCliente,
+          OR: [
+            { idProspecto: prospect.idProspecto },
+            ...(prospect.idCliente ? [{ idCliente: prospect.idCliente }] : []),
+          ],
           idEmpresa: prospect.idEmpresa,
-          estado: { in: ['Pendiente', 'Activo'] },
+          estado: { in: ['Firmado', 'Activo', 'Pendiente'] },
         },
+        orderBy: { idContrato: 'desc' },
       }),
       this.prisma.ordenTrabajo.findFirst({
         where: {
-          idCliente: prospect.idCliente,
           idEmpresa: prospect.idEmpresa,
           tipoOt: 'Instalacion',
           estado: { notIn: CLOSED_INSTALL_ORDER_STATES },
+          OR: [
+            { idProspecto: prospect.idProspecto },
+            ...(prospect.idCliente ? [{ idCliente: prospect.idCliente }] : []),
+          ],
         },
       }),
     ]);
@@ -677,21 +818,19 @@ export class ProspectsService {
     }
 
     if (existingOrder) {
-      throw new BadRequestException('El cliente ya tiene una orden de instalacion pendiente');
+      throw new BadRequestException('El prospecto ya tiene una orden de instalacion pendiente');
     }
+
+    return contract;
   }
 
-  private validateInstallSchedule(dateValue: string, timeValue: string) {
+  private validateInstallDate(dateValue: string) {
     const scheduledDate = parseDateOnly(dateValue);
     const today = todayDateOnly();
     const latestScheduledDate = addYearsToDateOnly(today, 1);
 
     if (!scheduledDate) {
       throw new BadRequestException('La fecha programada no es una fecha calendario valida');
-    }
-
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
-      throw new BadRequestException('La hora de visita no tiene un formato valido');
     }
 
     if (dateValue < today) {
@@ -702,7 +841,17 @@ export class ProspectsService {
       throw new BadRequestException('La fecha programada no puede superar un ano desde hoy');
     }
 
-    if (dateValue === today && timeValue <= this.currentChileTime()) {
+    return scheduledDate;
+  }
+
+  private validateInstallSchedule(dateValue: string, timeValue: string) {
+    const scheduledDate = this.validateInstallDate(dateValue);
+
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
+      throw new BadRequestException('La hora de visita no tiene un formato valido');
+    }
+
+    if (dateValue === todayDateOnly() && timeValue <= this.currentChileTime()) {
       throw new BadRequestException('La fecha y hora de visita deben ser posteriores a la hora actual');
     }
 
@@ -745,6 +894,12 @@ export class ProspectsService {
         horaVisita: requestedTime,
         tecnicosDisponibles: [],
         alternativas: [],
+        horarios: ALTERNATIVE_VISIT_TIMES.map((horaVisita) => ({
+          horaVisita,
+          disponible: false,
+          motivo: 'No hay técnicos activos para esta empresa',
+          tecnicosDisponibles: [],
+        })),
         mensaje: 'No existen tecnicos en terreno activos para la empresa seleccionada',
       };
     }
@@ -795,6 +950,21 @@ export class ProspectsService {
         email: technician.email,
       }));
     const availableTechnicians = availableAt(requestedDate, requestedTime);
+    const horarios = ALTERNATIVE_VISIT_TIMES.map((horaVisita) => {
+      const pasado = requestedDate === todayDateOnly() && horaVisita <= this.currentChileTime();
+      const tecnicosDisponibles = pasado ? [] : availableAt(requestedDate, horaVisita);
+
+      return {
+        horaVisita,
+        disponible: tecnicosDisponibles.length > 0,
+        motivo: pasado
+          ? 'Horario ya pasado'
+          : tecnicosDisponibles.length
+            ? `${tecnicosDisponibles.length} técnico(s) disponible(s)`
+            : 'Horario ocupado',
+        tecnicosDisponibles,
+      };
+    });
     const alternatives: Array<{
       fechaProgramada: string;
       horaVisita: string;
@@ -842,6 +1012,7 @@ export class ProspectsService {
       horaVisita: requestedTime,
       tecnicosDisponibles: availableTechnicians,
       alternativas: alternatives,
+      horarios,
       mensaje: availableTechnicians.length
         ? `${availableTechnicians.length} tecnico(s) disponible(s) para la visita`
         : 'No existen tecnicos disponibles en el horario solicitado. Selecciona una alternativa',

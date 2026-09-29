@@ -41,6 +41,13 @@ export type DashboardPermissions = {
   classifyTickets: boolean;
   updateTicketStatus: boolean;
   diagnoseTickets: boolean;
+  viewControlBook: boolean;
+  exportControlBook: boolean;
+  manageCommercialCollections: boolean;
+  approveAgreements: boolean;
+  manageCommercialWarranties: boolean;
+  viewExternalTaxDocuments: boolean;
+  manageExternalTaxDocuments: boolean;
 };
 
 const ROLE_ALIASES: Record<string, RoleName> = {
@@ -94,6 +101,13 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   classifyTickets: ['Administrador', 'Soporte'],
   updateTicketStatus: ['Administrador', 'Soporte', 'Terreno'],
   diagnoseTickets: ['Administrador', 'Soporte', 'Terreno'],
+  viewControlBook: ['Administrador', 'Comercial', 'Soporte'],
+  exportControlBook: ['Administrador', 'Comercial'],
+  manageCommercialCollections: ['Administrador', 'Comercial'],
+  approveAgreements: ['Administrador'],
+  manageCommercialWarranties: ['Administrador', 'Comercial'],
+  viewExternalTaxDocuments: ['Administrador'],
+  manageExternalTaxDocuments: ['Administrador'],
 };
 
 export function isRoleName(role: string): role is RoleName {

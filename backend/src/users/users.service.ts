@@ -59,7 +59,7 @@ export class UsersService {
     try {
       return await this.prisma.$transaction(async tx => {
         // Serializa cambios de acceso para impedir que dos administradores se den de baja simultáneamente.
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(8044)`;
+        await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
         const role = await tx.rol.findUnique({ where: { idRol: dto.roleId } });
         if (!role) throw new BadRequestException('Perfil inexistente');
         const company = dto.idEmpresa ? await tx.empresa.findUnique({ where: { idEmpresa: dto.idEmpresa } }) : null;
@@ -98,6 +98,46 @@ export class UsersService {
       await tx.logAuditoria.create({ data: { idUsuario: currentUser.idUsuario, accion: 'RESTABLECER_ACCESO', entidadAfectada: 'usuario', idEntidadAfectada: id, valorNuevo: { sesionesRevocadas: true } } });
     });
     return { idUsuario: id, sesionesRevocadas: true };
+  }
+
+  async remove(id: number, currentUser: AuthUser) {
+    if (id === currentUser.idUsuario) throw new BadRequestException('No puedes desactivar tu propia cuenta');
+
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
+      const target = await tx.usuario.findUnique({
+        where: { idUsuario: id },
+        include: { usuarioRoles: { include: { rol: true } } },
+      });
+      if (!target) throw new NotFoundException('Usuario no encontrado');
+
+      const targetRoles = target.usuarioRoles.map((item) => item.rol.nombreRol);
+      if (target.activo !== false && isAdministrator(targetRoles)) {
+        const others = await tx.usuario.findMany({
+          where: { idUsuario: { not: id }, activo: { not: false } },
+          include: { usuarioRoles: { include: { rol: true } } },
+        });
+        if (!others.some((user) => isAdministrator(user.usuarioRoles.map((item) => item.rol.nombreRol)))) {
+          throw new BadRequestException('Debe quedar al menos un administrador activo');
+        }
+      }
+
+      const saved = await tx.usuario.update({
+        where: { idUsuario: id },
+        data: { activo: false, versionSesion: { increment: 1 } },
+      });
+      await tx.logAuditoria.create({
+        data: {
+          idUsuario: currentUser.idUsuario,
+          accion: 'DESACTIVAR_USUARIO',
+          entidadAfectada: 'usuario',
+          idEntidadAfectada: id,
+          valorAnterior: { activo: target.activo, roles: targetRoles },
+          valorNuevo: { activo: false, sesionesRevocadas: true, inventarioFisicoModificado: false },
+        },
+      });
+      return { idUsuario: saved.idUsuario, desactivado: true, sesionesRevocadas: true };
+    });
   }
 
   async assignRole(userId: number, roleId: number, currentUser: AuthUser) {

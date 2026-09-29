@@ -1,0 +1,2 @@
+ALTER TABLE plan
+  ALTER COLUMN tipo_plan TYPE VARCHAR(40);
