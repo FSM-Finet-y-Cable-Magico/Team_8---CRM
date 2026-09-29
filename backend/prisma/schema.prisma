@@ -8,10 +8,10 @@ datasource db {
 }
 
 model Empresa {
-  idEmpresa                  Int                        @id @default(autoincrement()) @map("id_empresa")
-  nombre                     String                     @db.VarChar(100)
-  rutEmpresa                 String?                    @unique @map("rut_empresa") @db.VarChar(12)
-  esquemaDb                  String?                    @map("esquema_db") @db.VarChar(50)
+  idEmpresa                  Int                          @id @default(autoincrement()) @map("id_empresa")
+  nombre                     String                       @db.VarChar(100)
+  rutEmpresa                 String?                      @unique @map("rut_empresa") @db.VarChar(12)
+  esquemaDb                  String?                      @map("esquema_db") @db.VarChar(50)
   usuarios                   Usuario[]
   clientes                   Cliente[]
   prospectos                 Prospecto[]
@@ -28,37 +28,39 @@ model Empresa {
   solicitudesRetiro          ServicioRetiroSolicitud[]
   integracionesActivacionG1  IntegracionActivacionG1[]
   garantiasComerciales       GarantiaComercial[]
+  documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("empresa")
 }
 
 model Usuario {
-  idUsuario                       Int                       @id @default(autoincrement()) @map("id_usuario")
-  idEmpresa                       Int?                      @map("id_empresa")
-  nombreCompleto                  String                    @map("nombre_completo") @db.VarChar(80)
-  nombreUsuario                   String?                   @unique @map("nombre_usuario") @db.VarChar(50)
-  email                           String?                   @unique @db.VarChar(120)
-  passwordHash                    String                    @map("password_hash") @db.VarChar(72)
-  versionSesion                   Int                       @default(0) @map("version_sesion")
-  activo                          Boolean?                  @default(true)
-  fechaCreacion                   DateTime?                 @default(now()) @map("fecha_creacion")
-  esPasswordTemporal              Boolean?                  @default(true) @map("es_password_temporal")
-  intentosFallidos                Int?                      @default(0) @map("intentos_fallidos")
-  empresa                         Empresa?                  @relation(fields: [idEmpresa], references: [idEmpresa])
-  usuarioRoles                    UsuarioRol[]
-  auditorias                      LogAuditoria[]
-  prospectos                      Prospecto[]
-  solicitudesRegistradas          SolicitudCliente[]
-  observacionesOperativas         ObservacionOperativa[]
-  contratosDigitalesGenerados     ContratoDigital[]
-  eventosGestionResponsable       EventoGestionComercial[]
-  conveniosRegistrados            ConvenioPago[]            @relation("ConvenioResponsable")
-  conveniosAprobados              ConvenioPago[]            @relation("ConvenioAprobador")
-  prorrogasRegistradas            ProrrogaPago[]
-  cambiosCondicionRegistrados     CambioCondicionPago[]
-  cargosAdicionalesRegistrados    CargoAdicional[]
-  solicitudesRetiroRegistradas    ServicioRetiroSolicitud[]
-  garantiasComercialesResponsable GarantiaComercial[]
+  idUsuario                        Int                          @id @default(autoincrement()) @map("id_usuario")
+  idEmpresa                        Int?                         @map("id_empresa")
+  nombreCompleto                   String                       @map("nombre_completo") @db.VarChar(80)
+  nombreUsuario                    String?                      @unique @map("nombre_usuario") @db.VarChar(50)
+  email                            String?                      @unique @db.VarChar(120)
+  passwordHash                     String                       @map("password_hash") @db.VarChar(72)
+  versionSesion                    Int                          @default(0) @map("version_sesion")
+  activo                           Boolean?                     @default(true)
+  fechaCreacion                    DateTime?                    @default(now()) @map("fecha_creacion")
+  esPasswordTemporal               Boolean?                     @default(true) @map("es_password_temporal")
+  intentosFallidos                 Int?                         @default(0) @map("intentos_fallidos")
+  empresa                          Empresa?                     @relation(fields: [idEmpresa], references: [idEmpresa])
+  usuarioRoles                     UsuarioRol[]
+  auditorias                       LogAuditoria[]
+  prospectos                       Prospecto[]
+  solicitudesRegistradas           SolicitudCliente[]
+  observacionesOperativas          ObservacionOperativa[]
+  contratosDigitalesGenerados      ContratoDigital[]
+  eventosGestionResponsable        EventoGestionComercial[]
+  conveniosRegistrados             ConvenioPago[]               @relation("ConvenioResponsable")
+  conveniosAprobados               ConvenioPago[]               @relation("ConvenioAprobador")
+  prorrogasRegistradas             ProrrogaPago[]
+  cambiosCondicionRegistrados      CambioCondicionPago[]
+  cargosAdicionalesRegistrados     CargoAdicional[]
+  solicitudesRetiroRegistradas     ServicioRetiroSolicitud[]
+  garantiasComercialesResponsable  GarantiaComercial[]
+  documentosTributariosRegistrados DocumentoTributarioExterno[]
 
   @@map("usuario")
 }
@@ -100,20 +102,20 @@ model LogAuditoria {
 }
 
 model Cliente {
-  idCliente                  Int                        @id @default(autoincrement()) @map("id_cliente")
-  idEmpresa                  Int?                       @map("id_empresa")
-  rut                        String?                    @unique @db.VarChar(12)
-  nombreCompleto             String                     @map("nombre_completo") @db.VarChar(120)
-  email                      String?                    @db.VarChar(120)
-  telefono                   String?                    @db.VarChar(20)
-  estado                     String                     @db.VarChar(40)
-  esConflictivo              Boolean?                   @default(false) @map("es_conflictivo")
-  importadoMasivo            Boolean?                   @default(false) @map("importado_masivo")
-  obsConflictivo             String?                    @map("obs_conflictivo")
-  origenContacto             String?                    @map("origen_contacto") @db.VarChar(40)
-  datosTecnicos              Json?                      @map("datos_tecnicos")
-  fechaCreacion              DateTime?                  @default(now()) @map("fecha_creacion")
-  empresa                    Empresa?                   @relation(fields: [idEmpresa], references: [idEmpresa])
+  idCliente                  Int                          @id @default(autoincrement()) @map("id_cliente")
+  idEmpresa                  Int?                         @map("id_empresa")
+  rut                        String?                      @unique @db.VarChar(12)
+  nombreCompleto             String                       @map("nombre_completo") @db.VarChar(120)
+  email                      String?                      @db.VarChar(120)
+  telefono                   String?                      @db.VarChar(20)
+  estado                     String                       @db.VarChar(40)
+  esConflictivo              Boolean?                     @default(false) @map("es_conflictivo")
+  importadoMasivo            Boolean?                     @default(false) @map("importado_masivo")
+  obsConflictivo             String?                      @map("obs_conflictivo")
+  origenContacto             String?                      @map("origen_contacto") @db.VarChar(40)
+  datosTecnicos              Json?                        @map("datos_tecnicos")
+  fechaCreacion              DateTime?                    @default(now()) @map("fecha_creacion")
+  empresa                    Empresa?                     @relation(fields: [idEmpresa], references: [idEmpresa])
   prospectos                 Prospecto[]
   contratos                  Contrato[]
   direcciones                DireccionServicio[]
@@ -130,6 +132,7 @@ model Cliente {
   solicitudesRetiro          ServicioRetiroSolicitud[]
   integracionesActivacionG1  IntegracionActivacionG1[]
   garantiasComerciales       GarantiaComercial[]
+  documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("cliente")
 }
@@ -236,7 +239,7 @@ model Contrato {
   cliente                 Cliente?   @relation(fields: [idCliente], references: [idCliente])
   prospecto               Prospecto? @relation(fields: [idProspecto], references: [idProspecto])
 
-  zonaPago                   ZonaPago?                  @relation(fields: [idZonaPago], references: [idZonaPago])
+  zonaPago                   ZonaPago?                    @relation(fields: [idZonaPago], references: [idZonaPago])
   facturas                   Factura[]
   servicios                  ServicioContratado[]
   cambiosPlan                HistorialCambioPlan[]
@@ -250,27 +253,29 @@ model Contrato {
   solicitudesRetiro          ServicioRetiroSolicitud[]
   integracionesActivacionG1  IntegracionActivacionG1[]
   garantiasComerciales       GarantiaComercial[]
+  documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("contrato")
 }
 
 model Factura {
-  idFactura               Int                      @id @default(autoincrement()) @map("id_factura")
-  idContrato              Int?                     @map("id_contrato")
-  periodoMes              Int                      @map("periodo_mes") @db.SmallInt
-  periodoAnio             Int                      @map("periodo_anio") @db.SmallInt
-  monto                   Decimal?                 @db.Decimal(10, 2)
-  fechaEmision            DateTime?                @map("fecha_emision") @db.Date
-  fechaLimitePago         DateTime                 @map("fecha_limite_pago") @db.Date
-  estado                  String                   @db.VarChar(20)
-  tipoDocumento           String?                  @map("tipo_documento") @db.VarChar(30)
-  folioExterno            String?                  @map("folio_externo") @db.VarChar(80)
-  contrato                Contrato?                @relation(fields: [idContrato], references: [idContrato])
+  idFactura               Int                          @id @default(autoincrement()) @map("id_factura")
+  idContrato              Int?                         @map("id_contrato")
+  periodoMes              Int                          @map("periodo_mes") @db.SmallInt
+  periodoAnio             Int                          @map("periodo_anio") @db.SmallInt
+  monto                   Decimal?                     @db.Decimal(10, 2)
+  fechaEmision            DateTime?                    @map("fecha_emision") @db.Date
+  fechaLimitePago         DateTime                     @map("fecha_limite_pago") @db.Date
+  estado                  String                       @db.VarChar(20)
+  tipoDocumento           String?                      @map("tipo_documento") @db.VarChar(30)
+  folioExterno            String?                      @map("folio_externo") @db.VarChar(80)
+  contrato                Contrato?                    @relation(fields: [idContrato], references: [idContrato])
   pagos                   Pago[]
   eventosGestionComercial EventoGestionComercial[]
   conveniosPago           ConvenioPago[]
   prorrogasPago           ProrrogaPago[]
   cambiosCondicionPago    CambioCondicionPago[]
+  documentosTributarios   DocumentoTributarioExterno[]
 
   @@index([folioExterno])
   @@map("factura")
@@ -289,6 +294,48 @@ model Pago {
   factura            Factura? @relation(fields: [idFactura], references: [idFactura])
 
   @@map("pago")
+}
+
+model DocumentoTributarioExterno {
+  idDocumento        Int      @id @default(autoincrement()) @map("id_documento")
+  idEmpresa          Int      @map("id_empresa")
+  tipoDocumento      String   @map("tipo_documento") @db.VarChar(20)
+  folioONumero       String   @map("folio_o_numero") @db.VarChar(80)
+  folioNormalizado   String   @map("folio_normalizado") @db.VarChar(80)
+  emisorProveedor    String   @map("emisor_proveedor") @db.VarChar(160)
+  emisorNormalizado  String   @map("emisor_normalizado") @db.VarChar(160)
+  fechaEmision       DateTime @map("fecha_emision") @db.Date
+  montoNeto          Decimal? @map("monto_neto") @db.Decimal(14, 2)
+  montoExento        Decimal? @map("monto_exento") @db.Decimal(14, 2)
+  iva                Decimal? @db.Decimal(14, 2)
+  montoTotal         Decimal  @map("monto_total") @db.Decimal(14, 2)
+  urlDocumento       String?  @map("url_documento")
+  referenciaExterna  String?  @map("referencia_externa") @db.VarChar(200)
+  estado             String   @default("REGISTRADO") @db.VarChar(20)
+  fuente             String   @default("EXTERNO_MANUAL") @db.VarChar(30)
+  idCliente          Int?     @map("id_cliente")
+  idContrato         Int?     @map("id_contrato")
+  idFactura          Int?     @map("id_factura")
+  idCargoAdicional   Int?     @map("id_cargo_adicional")
+  idUsuarioRegistro  Int      @map("id_usuario_registro")
+  fechaRegistro      DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(3)
+  fechaActualizacion DateTime @updatedAt @map("fecha_actualizacion") @db.Timestamptz(3)
+
+  empresa         Empresa         @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente         Cliente?        @relation(fields: [idCliente], references: [idCliente], onDelete: SetNull)
+  contrato        Contrato?       @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull)
+  factura         Factura?        @relation(fields: [idFactura], references: [idFactura], onDelete: SetNull)
+  cargoAdicional  CargoAdicional? @relation(fields: [idCargoAdicional], references: [idCargo], onDelete: SetNull)
+  usuarioRegistro Usuario         @relation(fields: [idUsuarioRegistro], references: [idUsuario])
+
+  @@unique([idEmpresa, tipoDocumento, emisorNormalizado, folioNormalizado], map: "documento_tributario_externo_identidad_key")
+  @@index([idEmpresa, fechaEmision], map: "documento_tributario_externo_empresa_fecha_idx")
+  @@index([idCliente, fechaEmision], map: "documento_tributario_externo_cliente_fecha_idx")
+  @@index([idContrato], map: "documento_tributario_externo_contrato_idx")
+  @@index([idFactura], map: "documento_tributario_externo_factura_idx")
+  @@index([idCargoAdicional], map: "documento_tributario_externo_cargo_idx")
+  @@index([idEmpresa, estado], map: "documento_tributario_externo_empresa_estado_idx")
+  @@map("documento_tributario_externo")
 }
 
 model DireccionServicio {
@@ -618,6 +665,7 @@ model IntegracionActivacionG1 {
   idContrato            Int       @map("id_contrato")
   idOtG3                String    @map("id_ot_g3") @db.VarChar(100)
   numeroSerie           String?   @map("numero_serie") @db.VarChar(80)
+  numerosSerie          String[]  @default([]) @map("numeros_serie")
   eventId               String    @unique @map("event_id") @db.VarChar(120)
   traceId               String    @map("trace_id") @db.VarChar(120)
   estadoIntegracion     String    @default("PENDIENTE_ENVIO") @map("estado_integracion") @db.VarChar(50)
@@ -835,11 +883,12 @@ model CargoAdicional {
   idUsuarioResponsable Int      @map("id_usuario_responsable")
   fechaRegistro        DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(3)
 
-  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa])
-  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente])
-  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato])
-  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
-  responsable Usuario             @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+  empresa               Empresa                      @relation(fields: [idEmpresa], references: [idEmpresa])
+  cliente               Cliente                      @relation(fields: [idCliente], references: [idCliente])
+  contrato              Contrato?                    @relation(fields: [idContrato], references: [idContrato])
+  servicio              ServicioContratado?          @relation(fields: [idServicio], references: [idServicio])
+  responsable           Usuario                      @relation(fields: [idUsuarioResponsable], references: [idUsuario])
+  documentosTributarios DocumentoTributarioExterno[]
 
   @@index([idEmpresa, estado, fecha])
   @@index([idCliente, fechaRegistro])

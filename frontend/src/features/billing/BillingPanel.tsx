@@ -1,12 +1,14 @@
 ﻿import { FormEvent, useEffect, useState } from 'react';
-import { api, apiErrorMessage, type BillingOverview, type PaymentZone, type Plan, type ZonePriceRule } from '../../api';
+import { api, apiErrorMessage, type BillingOverview, type Customer, type PaymentZone, type Plan, type ZonePriceRule } from '../../api';
 import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
 import { CoveragePicker, CoverageLocation } from '../coverage';
+import { ExternalTaxDocumentsPanel } from './ExternalTaxDocumentsPanel';
 export function BillingPanel({
   overview,
   plans,
+  customers,
   scope,
   writeCompanyId,
   permissions,
@@ -14,6 +16,7 @@ export function BillingPanel({
 }: {
   overview: BillingOverview | null;
   plans: Plan[];
+  customers: Customer[];
   scope: string;
   writeCompanyId: number;
   permissions: DashboardPermissions;
@@ -161,6 +164,15 @@ export function BillingPanel({
       </section>
 
       {status && <p className="inline-status">{status}</p>}
+
+      {permissions.viewExternalTaxDocuments && (
+        <ExternalTaxDocumentsPanel
+          customers={customers}
+          scope={scope}
+          writeCompanyId={writeCompanyId}
+          canManage={permissions.manageExternalTaxDocuments}
+        />
+      )}
 
       <details className="billing-workspace-section">
         <summary><span>Clientes morosos</span><strong>{morosos.length}</strong></summary>

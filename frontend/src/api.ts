@@ -199,6 +199,40 @@ export type Customer = {
   }>;
 };
 
+export type ExternalTaxDocument = {
+  idDocumento: number;
+  idEmpresa: number;
+  tipoDocumento: 'BOLETA' | 'FACTURA';
+  folioONumero: string;
+  emisorProveedor: string;
+  fechaEmision: string;
+  montoNeto: string | null;
+  montoExento: string | null;
+  iva: string | null;
+  montoTotal: string;
+  urlDocumento: string | null;
+  referenciaExterna: string | null;
+  estado: 'REGISTRADO' | 'ANULADO';
+  fuente: 'EXTERNO_MANUAL';
+  idCliente: number | null;
+  idContrato: number | null;
+  idFactura: number | null;
+  idCargoAdicional: number | null;
+  fechaRegistro: string;
+  fechaActualizacion: string;
+  cliente?: { idCliente: number; nombreCompleto: string; rut: string | null } | null;
+  contrato?: { idContrato: number; estado: string } | null;
+  factura?: { idFactura: number; tipoDocumento: string | null; folioExterno: string | null } | null;
+  cargoAdicional?: { idCargo: number; tipo: string; estado: string } | null;
+  empresa?: { idEmpresa: number; nombre: string };
+  usuarioRegistro?: { idUsuario: number; nombreCompleto: string };
+};
+
+export type ExternalTaxDocumentPage = {
+  items: ExternalTaxDocument[];
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+};
+
 export type CustomerService = {
   idServicio: number;
   idCliente: number;
