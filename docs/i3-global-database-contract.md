@@ -1,44 +1,48 @@
 # Contrato global y proyección G8
 
-Estado al 29-09-2026: IMPLEMENTADO_LOCAL para auditorías/alineación; PENDIENTE_RECONCILIACION_GLOBAL en Railway. Fuente física prioritaria: [init-global.sql](../db/global/init-global.sql), hash `af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da`. El contrato tiene 90 tablas, 876 columnas, 90 PK, 210 FK, 33 checks y 107 índices explícitos. No incluye seeds.
+Estado al 29-09-2026: **CONTRATO ACTUALIZADO / RAILWAY READ ONLY PASS**. La fuente física prioritaria es [init-global.sql](../db/global/init-global.sql), SHA-256 `e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c`. Contiene 90 tablas, 877 columnas, 90 PK, 210 FK, 33 checks y 106 índices explícitos; no incluye seeds.
 
-## Precedencia y límites de dominio
+## CONTRACT_CHANGE 2026-09-29
+
+La reconciliación fue aplicada manualmente por el operador con respaldo y verificación. Luego se corrigió el contrato que conservaba dos expectativas obsoletas:
+
+- `REMOVE invalid unique prospecto_id_cliente_key`: la base admite legítimamente varios prospectos asociados a un cliente. Prisma tampoco declara `Prospecto.idCliente` como único. La restricción no debe recrearse y no se deben alterar datos para satisfacerla.
+- `ADD integracion_activacion_g1.payload_snapshot JSONB NULL`: la columna aplicada por el operador ahora es parte del contrato. Permite persistir el evento original para reintentos inmutables sin reconstruirlo desde el estado actual del cliente.
+
+El contrato anterior y los reportes que mostraban `PENDIENTE_RECONCILIACION_GLOBAL` se conservan como evidencia histórica. El SQL de reconciliación y la propuesta aislada de `payload_snapshot` están marcados como históricos y no deben volver a ejecutarse.
+
+## Precedencia y ownership
 
 1. Init global: tipos, nulabilidad, restricciones y objetos físicos compartidos.
 2. Código real de cada grupo: comportamiento implementado.
-3. Acuerdos: contrato funcional/API que aún puede requerir implementación.
-4. Railway: estado observado que debe converger al contrato, no una definición alternativa.
+3. Acuerdos ratificados: contrato funcional y de API.
+4. Railway: estado observado que debe coincidir con el contrato, no una definición alternativa.
 
 |Dominio|Owner funcional|Acceso G8|
 |---|---|---|
-|CRM, comercial, tracking saliente|G8|Servicios G8 con RBAC, ámbito de empresa y auditoría|
-|Inventario físico, bodegas, unidades, movimientos|G1|API S2S; no sustituirla por SQL directo|
-|Red, terreno, cierre técnico de OT|G3/Ops|Contrato API ratificado|
+|CRM, comercial y tracking saliente|G8|Servicios G8 con RBAC, empresa y auditoría|
+|Inventario físico, bodegas, unidades y movimientos|G1|API S2S; sin sustituirla por SQL directo|
+|Red, terreno y cierre técnico de OT|G3/Ops|Contrato API ratificado|
 |Portal|G2|Mantener acuerdos y ownership|
-|Identidad, clientes y referencias compartidas|Coordinación intergrupo|Cambios físicos acordados; no propiedad exclusiva por aparecer en Prisma|
+|Identidad, clientes y referencias compartidas|Coordinación intergrupo|Cambios físicos coordinados|
 
-Los owners que calcula el auditor son orientativos, no autorizaciones de escritura. `OWNER_EXTERNAL` clasifica objetos fuera de la proyección Prisma G8; no significa necesariamente que toda esa tabla pertenezca exclusivamente a otro grupo.
+`OWNER_EXTERNAL` solo indica que un objeto no está en la proyección Prisma G8. No concede ni quita ownership funcional. Tampoco deben fusionarse las tablas receptoras G1 (`integracion_activacion`, `integracion_cierre`, `asignacion_equipo_servicio`) con el tracking G8 (`integracion_activacion_g1`, `integracion_instalacion_g3`, `integracion_evento_entrante`).
 
-No fusionar `integracion_activacion`, `integracion_cierre`, `asignacion_equipo_servicio` (G1) con `integracion_activacion_g1`, `integracion_instalacion_g3`, `integracion_evento_entrante` (G8). Cada grupo registra su lado del intercambio.
+## Proyección Prisma
 
-## Prisma
+Se mantienen 58 modelos para las partes que usa G8, sin duplicar las 90 tablas globales. `npm.cmd run db:audit:prisma-global` produce [el reporte completo](i3-prisma-vs-global-schema.md) y JSON. Resultado vigente: 799 coincidencias, 36 columnas globales no modeladas, 304 objetos externos, 47 índices físicos no modelados y 65 FK físicas no modeladas. No hay objetos `PRISMA_ONLY`.
 
-Se mantienen 58 modelos, sin crear modelos para las 90 tablas. Auditoría reproducible: `npm.cmd run db:audit:prisma-global`. El [reporte completo](i3-prisma-vs-global-schema.md) y sus JSON antes/después incluyen cada columna, PK, relación e índice modelado, y los objetos globales fuera de la proyección. El estado anterior se reconstruyó desde `git show HEAD:backend/prisma/schema.prisma`, usando el mismo auditor final.
+Los índices y FK con Prisma `null` se conservan en PostgreSQL. No se usa `db push` para eliminarlos. El auditor de Prisma no intenta deducir defaults ni checks SQL; esos objetos los valida el comparador físico.
 
-Se corrigieron 69 diferencias de tipo/precisión, 5 de nulabilidad y 43 de acciones referenciales. Esto incluye anchos de usuario, IP como VARCHAR(45), TIMESTAMPTZ frente a DATE/TIMESTAMP, hashes VARCHAR(64), puerto NAP y campos nullable. Las PK de los 58 modelos coinciden. No quedan diferencias de tipo/nulabilidad en columnas canónicas modeladas ni conflictos en las relaciones/índices modelados.
+## Igualdad física
 
-Las 66 filas `FK_MISMATCH` y 49 `INDEX_MISMATCH` restantes tienen `prisma: null`: son objetos físicos no representados, no relaciones incompatibles generadas por G8. Se conservan en PostgreSQL. Hay 37 columnas globales adicionales dentro de tablas modeladas. Las 304 filas `OWNER_EXTERNAL` incluyen 260 columnas y 44 FK fuera de la proyección. El auditor no infiere los defaults/checks físicos desde defaults de aplicación: esos se comparan en el verificador PostgreSQL.
+El verificador consulta catálogos en una transacción `READ ONLY` y compara tablas, columnas, tipos, nulabilidad, defaults, PK, FK y acciones, checks, índices y propiedades básicas de secuencias. `_prisma_migrations` es metadato permitido. No certifica permisos, triggers, vistas, contenido comercial ni valores actuales de secuencias.
 
-La lectura de NULL también se corrigió en código: versión de sesión interpretada como cero, inicialización transaccional de NULL antes de incrementar para invalidar sesiones, y fechas comerciales/facturación admitiendo NULL. No se cambió el contrato para obligar a otros grupos a insertar valores ficticios.
+La normalización ahora reconoce de forma conservadora:
 
-## Única extensión propuesta
+- `NOT NULL` implícito por columnas que pertenecen a una PK compuesta;
+- casts de literales de texto agregados por PostgreSQL en defaults de columnas `varchar`/`text`;
+- paréntesis redundantes alrededor de átomos casteados y arrays usados por `ANY`, preservando el resto de la expresión y el árbol `AND`/`OR`;
+- casts textuales equivalentes en checks.
 
-`integracion_activacion_g1.payload_snapshot JSONB NULL` tiene estado **GLOBAL_SCHEMA_CHANGE_PROPOSED**. Prisma contiene el campo, el init original no. [SQL aditivo separado](../db/global/proposals/001-g1-payload-snapshot.sql), no aplicado.
-
-Los campos existentes no conservan el RUT original completo del evento; usar la respuesta de G1 para guardar la solicitud mezclaría significados. El snapshot permite reutilizar el mismo payload, hash e identificadores aunque cambie Cliente. No se reconstruyen eventos históricos a partir del cliente actual. Los registros sin snapshot quedan bloqueados con error explícito y necesitan revisión de evidencia original.
-
-La rama no está lista para desplegarse en la BD actual: primero reconciliación y después decisión/aplicación coordinada de esta extensión, o una solución alternativa revisada. Una columna nullable ausente también hace fallar SELECT de Prisma. Una futura versión acordada del contrato debe incorporar esta extensión y actualizar su hash y la generación de health; no modificar silenciosamente el archivo recibido.
-
-## Alcance de igualdad física
-
-El verificador lee catálogos en READ ONLY y compara tablas/columnas completas, tipos, nulabilidad, defaults, PK, FK y sus acciones, checks, índices y características básicas de secuencias seriales. Conserva `_prisma_migrations` como metadato permitido. La normalización SQL es conservadora: no elimina paréntesis/casts para forzar coincidencias; equivalencias no demostradas requieren revisión. No audita permisos, triggers, vistas, contenido comercial ni el valor actual de secuencias como prueba de igualdad. Los tests sintéticos del comparador no son evidencia de una BD local ni remota.
+Las pruebas negativas demuestran que no se igualan expresiones con distinta precedencia ni literales diferentes. La lectura Railway del `2026-09-29T22:48:09.805Z` obtuvo `PASS`, con 1.495 coincidencias y solo `_prisma_migrations` como extra permitido. Ver [clasificación final](i3-global-verification-final.md).

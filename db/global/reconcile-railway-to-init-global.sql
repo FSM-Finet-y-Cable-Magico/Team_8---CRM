@@ -1,3 +1,6 @@
+-- HISTORICAL / OBSOLETO DESPUES DE LA RECONCILIACION DEL OPERADOR 2026-09-29.
+-- NO EJECUTAR: corresponde al contrato anterior y conserva expectativas que ya
+-- fueron corregidas en db/global/init-global.sql.
 -- PREPARADO_NO_EJECUTADO. Requiere revision humana y acuerdo entre grupos.
 
 -- Contrato SHA256: af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da

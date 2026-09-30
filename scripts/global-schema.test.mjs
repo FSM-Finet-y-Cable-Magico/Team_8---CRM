@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseGlobalSchema,splitSql,normalizeExpression} from './global-schema.mjs';
+import {parseGlobalSchema,splitSql,normalizeExpression,normalizeCheckExpression} from './global-schema.mjs';
 import {compareCatalog,readCatalog} from './verify-global-db.mjs';
 const global=parseGlobalSchema();
 function fixture(){
@@ -14,10 +14,25 @@ function fixture(){
  sequences:global.tables.flatMap(t=>t.columns.filter(c=>c.serial).map(c=>({name:t.name+'_'+c.name+'_seq',type:c.type,increment:'1',cycle:false}))),migrations:[]};
 }
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:90,columns:876,pk:90,fk:210,checks:33,indexes:107});
+ assert.deepEqual(global.counts,{tables:90,columns:877,pk:90,fk:210,checks:33,indexes:106});
  assert.equal(splitSql("a numeric(12,2), b text DEFAULT 'x,y', CHECK(a IN (1,2))").length,3);
  assert.throws(()=>parseGlobalSchema(Buffer.from('changed')),/HASH_MISMATCH/);
  assert.notEqual(normalizeExpression('(a+b)*c'),normalizeExpression('a+b*c'));
+});
+test('normaliza solo diferencias seguras de CHECK y preserva precedencia booleana',()=>{
+ assert.equal(
+  normalizeCheckExpression("CHECK (((estado)::text = ANY ((ARRAY['A'::character varying, 'B'::character varying])::text[])))"),
+  normalizeCheckExpression("CHECK (estado::text = ANY (ARRAY['A'::character varying::text, 'B'::character varying::text]))"),
+ );
+ assert.equal(normalizeCheckExpression('CHECK ((monto > (0)::numeric))'),normalizeCheckExpression('CHECK (monto > 0::numeric)'));
+ assert.notEqual(normalizeCheckExpression('CHECK ((a OR b) AND c)'),normalizeCheckExpression('CHECK (a OR b AND c)'));
+ assert.notEqual(normalizeCheckExpression('CHECK ((a + b) * c > 0)'),normalizeCheckExpression('CHECK (a + (b * c) > 0)'));
+ assert.notEqual(normalizeCheckExpression("CHECK (estado = 'A')"),normalizeCheckExpression("CHECK (estado = 'B')"));
+});
+test('las columnas de PK compuesta son no nulas aunque el SQL no repita NOT NULL',()=>{
+ const sequence=global.tables.find(table=>table.name==='secuencia_srv');
+ assert.equal(sequence.columns.find(column=>column.name==='id_empresa').nullable,false);
+ assert.equal(sequence.columns.find(column=>column.name==='anio').nullable,false);
 });
 test('exact synthetic catalog passes; this is not Railway evidence',()=>{
  assert.equal(compareCatalog(global,fixture()).status,'PASS');

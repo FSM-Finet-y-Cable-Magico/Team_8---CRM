@@ -174,3 +174,31 @@ Plan de baseline: [documento detallado](i3-prisma-global-baseline-plan.md). Las 
 |21–23|Tests/build/lint, seguridad saneada e informe final|
 
 La preparación autorizada está terminada; la reconciliación productiva, aprobación de extensión y validación real G1 permanecen pendientes explícitos.
+
+## 21. Continuación Billing y lectura Railway del 2026-09-29
+
+Se completó el workstream de facturación/cobranza sobre la misma rama y sin reescribir la trazabilidad anterior. El detalle funcional, técnico y de riesgos está en [i3-billing-continuation-report.md](i3-billing-continuation-report.md).
+
+Estado Billing: **IMPLEMENTADO_LOCAL / UNIT_TESTED / READY_FOR_GLOBAL_SCHEMA / PROBADO_RAILWAY_READ / PENDIENTE_RAILWAY_WRITE_TEST / PENDIENTE_RECONCILIACION_GLOBAL**. Se agregaron listado y detalle consolidado de facturas, saldo Decimal, pagos parciales/completos protegidos contra sobrepago y concurrencia, vencimiento efectivo con prórrogas, mora reversible, suspensión y reactivación segura frente a múltiples deudas, avisos funcionales/auditoría atómica y UI para pagos, convenios, cuotas, prórrogas, cargos, condiciones y eventos. La implementación existente de documentos tributarios externos fue reutilizada sin duplicarla.
+
+La proyección Prisma incorporó `plantilla_notificacion.id_empresa` y su relación, ya presentes en el contrato canónico, para evitar reutilizar plantillas de otra empresa. `init-global.sql` y el reconciliador no se modificaron.
+
+Una nueva introspección Railway `READ ONLY` capturada el `2026-09-29T21:49:15.786Z` demuestra avance de la reconciliación humana: las 90 tablas, 876 columnas y 210 FK esperadas están presentes. El verificador continúa en `FAIL`: falta `prospecto_id_cliente_key`, existen 3 defaults y 2 nulabilidades distintos, y 31 `CHECK` requieren revisión de equivalencia. Se conservan como extras `_prisma_migrations` y la propuesta `integracion_activacion_g1.payload_snapshot`. No se ejecutó ninguna escritura, migración, reconciliación ni deploy.
+
+Validación acumulada posterior a Billing: `npm.cmd test` aprobó 450 tests backend y 10 tests Node; 5 suites/8 tests permanecen omitidos. Build backend/frontend aprobado. Lint aprobado con cero errores y las mismas 79 advertencias preexistentes. Prisma válido. La validación visual quedó pendiente porque el navegador integrado no estaba disponible.
+
+Los bloqueos externos se mantienen: CU-61 **PENDIENTE_G1 / BLOQUEADO_CONTRATO**; proveedor de notificaciones o portal acordado **PENDIENTE_G2**; corte/reactivación técnica, CU-18 y CU-84 **PENDIENTE_G3 / BLOQUEADO_CONTRATO**; WiFi/SmartOLT **BLOQUEADO_CONTRATO**. `G1_INTEGRATION_ENABLED` no se activó y no se ejecutaron POST G1.
+
+## 22. POST-RECONCILIATION STATE
+
+Los apartados anteriores que indican `PENDIENTE_RECONCILIACION_GLOBAL` describen lecturas históricas. Posteriormente, el operador humano aplicó la reconciliación con respaldo, dry-run con rollback y verificación, además de `integracion_activacion_g1.payload_snapshot JSONB NULL`. Codex no repitió ese proceso ni escribió en Railway.
+
+El contrato canónico se versionó lógicamente con trazabilidad explícita: se incorporó `payload_snapshot` nullable y se eliminó la expectativa inválida `prospecto_id_cliente_key`. Nuevo SHA-256: `e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c`; 90 tablas, 877 columnas, 90 PK, 210 FK, 33 checks y 106 índices.
+
+La nueva lectura Railway `READ ONLY` del `2026-09-29T22:48:09.805Z` obtuvo **PASS**: 1.495 coincidencias, cero objetos contractuales ausentes o diferentes y `_prisma_migrations` como único extra permitido. Las 3 diferencias de defaults eran casts textuales equivalentes; las 2 nulabilidades eran un error del parser ante PK compuesta; los 31 checks conservaban el mismo árbol semántico. La clasificación objeto por objeto está en [i3-global-verification-final.md](i3-global-verification-final.md).
+
+Se preparó autenticación S2S entrante G8 independiente de JWT, con SHA-256, `timingSafeEqual`, rotación, grupo y scope de empresa. No se creó endpoint de negocio porque no existe contrato G1 → G8 suficiente: **BLOQUEADO_CONTRATO_G1_INBOUND**. El código G1 observado confirma solo `X-API-KEY` para G8 → G1; no hay evidencia de una segunda credencial HTTP. Ver [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
+
+También quedaron listos el [validador de entorno y checklist de despliegue](i3-production-deployment-readiness.md) y el smoke Billing reversible con gate. Ninguno fue usado para desplegar, cambiar Railway ni ejecutar escrituras.
+
+Validación final: 55 suites y 455 tests backend aprobados, 5 suites/8 tests omitidos; 19 tests Node aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias frontend preexistentes; Prisma válido; auditor Prisma/global aprobado; `git diff --check` aprobado. El verificador Railway final fue exclusivamente `READ ONLY`. No se ejecutaron GET G1 reales, POST externos ni el smoke Billing de escritura.

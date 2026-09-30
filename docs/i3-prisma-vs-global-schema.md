@@ -1,10 +1,10 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da. Modelos G8: 58.
+Hash canónico: e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c. Modelos G8: 58.
 
-Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. PRISMA_ONLY payload_snapshot es GLOBAL_SCHEMA_CHANGE_PROPOSED y requiere aprobación. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
+Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente ya incluye integracion_activacion_g1.payload_snapshot nullable y elimina la unicidad inválida prospecto_id_cliente_key. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
-Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY":1,"COLUMN_GLOBAL_ONLY":37,"OWNER_EXTERNAL":304,"INDEX_MISMATCH":49,"FK_MISMATCH":66}.
+Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":799,"COLUMN_GLOBAL_ONLY":36,"OWNER_EXTERNAL":304,"INDEX_MISMATCH":47,"FK_MISMATCH":65}.
 
 |Tabla|Objeto|Owner|Estado|Prisma|Global|
 |---|---|---|---|---|---|
@@ -448,7 +448,7 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |integracion_evento_entrante|FK:integracion|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
 |integracion_evento_entrante|INDEX:id_integracion,event_type|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_integracion","event_type"],"unique":true}|null|
 |integracion_evento_entrante|INDEX:external_reference,payload_hash|G8 (coordinar columnas compartidas)|MATCH|{"columns":["external_reference","payload_hash"],"unique":false}|null|
-|integracion_activacion_g1|payload_snapshot|G8 (coordinar columnas compartidas)|PRISMA_ONLY|{"type":"jsonb","nullable":true}|null|
+|integracion_activacion_g1|payload_snapshot|G8 (coordinar columnas compartidas)|MATCH|{"type":"jsonb","nullable":true}|{"type":"jsonb","nullable":true}|
 |integracion_activacion_g1|id_integracion|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |integracion_activacion_g1|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |integracion_activacion_g1|id_cliente|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
@@ -694,7 +694,10 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |plantilla_notificacion|canal|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(20)","nullable":false}|{"type":"varchar(20)","nullable":false}|
 |plantilla_notificacion|contenido_texto|G8 (coordinar columnas compartidas)|MATCH|{"type":"text","nullable":true}|{"type":"text","nullable":true}|
 |plantilla_notificacion|activa|G8 (coordinar columnas compartidas)|MATCH|{"type":"boolean","nullable":true}|{"type":"boolean","nullable":true}|
+|plantilla_notificacion|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |plantilla_notificacion|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_plantilla"]|["id_plantilla"]|
+|plantilla_notificacion|FK:empresa|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|
+|plantilla_notificacion|INDEX:id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa"],"unique":false}|null|
 |log_notificacion|id_notificacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"bigint","nullable":false}|{"type":"bigint","nullable":false}|
 |log_notificacion|id_cliente|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |log_notificacion|id_plantilla|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
@@ -920,8 +923,8 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |salida_detalle|id_tipo_equipo|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":true}|
 |salida_detalle|id_unidad|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":true}|
 |salida_detalle|cantidad|G1|OWNER_EXTERNAL|null|{"type":"numeric(10,2)","nullable":true}|
-|secuencia_srv|id_empresa|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":true}|
-|secuencia_srv|anio|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":true}|
+|secuencia_srv|id_empresa|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
+|secuencia_srv|anio|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |secuencia_srv|ultimo|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |solicitud_baja|id_solicitud|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |solicitud_baja|id_unidad|G1|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
@@ -1067,7 +1070,6 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |mensaje_whatsapp|timestamp|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"type":"timestamp","nullable":true}|
 |mensaje_whatsapp|origen|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"type":"varchar(10)","nullable":true}|
 |mensaje_whatsapp|estado|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"type":"varchar(15)","nullable":true}|
-|plantilla_notificacion|id_empresa|G8 (coordinar columnas compartidas)|COLUMN_GLOBAL_ONLY|null|{"type":"integer","nullable":true}|
 |plantilla_notificacion|tiempo_estimado_reparacion|G8 (coordinar columnas compartidas)|COLUMN_GLOBAL_ONLY|null|{"type":"varchar(60)","nullable":true}|
 |plantilla_whatsapp|id_plantilla_wa|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |plantilla_whatsapp|id_canal|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"type":"integer","nullable":true}|
@@ -1114,7 +1116,6 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |orden_ingreso|INDEX:orden_ingreso_correlativo_key|G1|INDEX_MISMATCH|null|"(correlativo)"|
 |plan_zona_precio|INDEX:uq_plan_zona_precio_activo|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_plan, id_zona_pago) WHERE (activo = true)"|
 |prestamo_externo|INDEX:prestamo_externo_correlativo_key|G1|INDEX_MISMATCH|null|"(correlativo)"|
-|prospecto|INDEX:prospecto_id_cliente_key|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_cliente)"|
 |proveedor|INDEX:proveedor_rut_key|G1|INDEX_MISMATCH|null|"(rut)"|
 |proveedor_tipo_equipo|INDEX:uq_pte|G1|INDEX_MISMATCH|null|"(id_proveedor, id_tipo_equipo)"|
 |registro_ont|INDEX:registro_ont_numero_serie_key|G3/Ops|INDEX_MISMATCH|null|"(numero_serie)"|
@@ -1143,7 +1144,6 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |orden_trabajo|INDEX:idx_orden_trabajo_id_prospecto|G3/Ops|INDEX_MISMATCH|null|"(id_prospecto)"|
 |orden_trabajo|INDEX:orden_trabajo_id_tecnico_estado_idx|G3/Ops|INDEX_MISMATCH|null|"(id_tecnico, estado)"|
 |plan|INDEX:plan_id_empresa_idx|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_empresa)"|
-|plantilla_notificacion|INDEX:plantilla_notificacion_id_empresa_idx|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_empresa)"|
 |registro_ont|INDEX:registro_ont_id_empresa_idx|G3/Ops|INDEX_MISMATCH|null|"(id_empresa)"|
 |solicitud_cliente|INDEX:idx_solicitud_cliente_cliente|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_cliente)"|
 |solicitud_cliente|INDEX:idx_solicitud_cliente_servicio|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_servicio)"|
@@ -1220,7 +1220,6 @@ Antes: ver i3-prisma-vs-global-before.json. Después: {"MATCH":795,"PRISMA_ONLY"
 |orden_trabajo|FK:fk_orden_trabajo_id_tecnico_externo|G3/Ops|FK_MISMATCH|null|{"columns":["id_tecnico_externo"],"referencedTable":"tecnico_externo","referencedColumns":["id_tecnico_ext"],"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |orden_trabajo|FK:fk_orden_trabajo_id_ticket|G3/Ops|FK_MISMATCH|null|{"columns":["id_ticket"],"referencedTable":"ticket","referencedColumns":["id_ticket"],"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |pago|FK:fk_pago_id_cliente|G8 (coordinar columnas compartidas)|FK_MISMATCH|null|{"columns":["id_cliente"],"referencedTable":"cliente","referencedColumns":["id_cliente"],"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
-|plantilla_notificacion|FK:plantilla_notificacion_id_empresa_fkey|G8 (coordinar columnas compartidas)|FK_MISMATCH|null|{"columns":["id_empresa"],"referencedTable":"empresa","referencedColumns":["id_empresa"],"onDelete":"SET NULL","onUpdate":"CASCADE"}|
 |plantilla_whatsapp|FK:fk_plantilla_whatsapp_id_canal|G8 (coordinar columnas compartidas)|OWNER_EXTERNAL|null|{"columns":["id_canal"],"referencedTable":"canal_whatsapp","referencedColumns":["id_canal"],"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |prestamo_detalle|FK:fk_prestamo_detalle_prestamo|G1|OWNER_EXTERNAL|null|{"columns":["id_prestamo"],"referencedTable":"prestamo_externo","referencedColumns":["id_prestamo"],"onDelete":"CASCADE","onUpdate":"NO ACTION"}|
 |prestamo_detalle|FK:fk_prestamo_detalle_unidad|G1|OWNER_EXTERNAL|null|{"columns":["id_unidad"],"referencedTable":"unidad_equipo","referencedColumns":["id_unidad"],"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|

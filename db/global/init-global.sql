@@ -1,3 +1,6 @@
+-- CONTRACT_CHANGE 2026-09-29:
+-- - REMOVE invalid unique prospecto_id_cliente_key (un cliente puede relacionarse con varios prospectos).
+-- - ADD integracion_activacion_g1.payload_snapshot JSONB NULL.
 -- ============================================================================
 --  init-global.sql · Esquema consolidado de la base de datos compartida
 --  Grupos integrados:
@@ -1183,6 +1186,7 @@ CREATE TABLE IF NOT EXISTS integracion_activacion_g1 (
     ultimo_intento               TIMESTAMP,
     ultimo_error_sanitizado      VARCHAR(500),
     payload_hash                 VARCHAR(64) NOT NULL,
+    payload_snapshot             JSONB,
     respuesta_estado_g1          JSONB,
     fecha_completado             TIMESTAMP,
     created_at                   TIMESTAMP NOT NULL DEFAULT now(),
@@ -1276,7 +1280,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS orden_trabajo_id_ticket_key ON orden_trabajo (
 CREATE UNIQUE INDEX IF NOT EXISTS pago_codigo_transaccion_key ON pago (codigo_transaccion);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_zona_precio_activo ON plan_zona_precio (id_plan, id_zona_pago) WHERE (activo = true);
 CREATE UNIQUE INDEX IF NOT EXISTS prestamo_externo_correlativo_key ON prestamo_externo (correlativo);
-CREATE UNIQUE INDEX IF NOT EXISTS prospecto_id_cliente_key ON prospecto (id_cliente);
 CREATE UNIQUE INDEX IF NOT EXISTS proveedor_rut_key ON proveedor (rut);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pte ON proveedor_tipo_equipo (id_proveedor, id_tipo_equipo);
 CREATE UNIQUE INDEX IF NOT EXISTS registro_ont_numero_serie_key ON registro_ont (numero_serie);

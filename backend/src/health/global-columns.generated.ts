@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da; no seeds or credentials.
+// Generated from init-global.sql SHA256 e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -1072,13 +1072,13 @@ export const GLOBAL_COLUMNS = [
     "table": "secuencia_srv",
     "name": "id_empresa",
     "type": "integer",
-    "nullable": true
+    "nullable": false
   },
   {
     "table": "secuencia_srv",
     "name": "anio",
     "type": "integer",
-    "nullable": true
+    "nullable": false
   },
   {
     "table": "secuencia_srv",
@@ -4955,6 +4955,12 @@ export const GLOBAL_COLUMNS = [
     "name": "payload_hash",
     "type": "varchar(64)",
     "nullable": false
+  },
+  {
+    "table": "integracion_activacion_g1",
+    "name": "payload_snapshot",
+    "type": "jsonb",
+    "nullable": true
   },
   {
     "table": "integracion_activacion_g1",

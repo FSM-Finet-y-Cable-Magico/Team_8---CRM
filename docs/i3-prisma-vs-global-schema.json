@@ -1,13 +1,12 @@
 {
-  "contractHash": "af5892827b2e41ce15aec0d620cb10a2336d3236596f487af61cc6b41c2b87da",
+  "contractHash": "e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c",
   "modeledTables": 58,
   "summary": {
-    "MATCH": 795,
-    "PRISMA_ONLY": 1,
-    "COLUMN_GLOBAL_ONLY": 37,
+    "MATCH": 799,
+    "COLUMN_GLOBAL_ONLY": 36,
     "OWNER_EXTERNAL": 304,
-    "INDEX_MISMATCH": 49,
-    "FK_MISMATCH": 66
+    "INDEX_MISMATCH": 47,
+    "FK_MISMATCH": 65
   },
   "rows": [
     {
@@ -6103,12 +6102,15 @@
       "table": "integracion_activacion_g1",
       "column": "payload_snapshot",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "jsonb",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "jsonb",
+        "nullable": true
+      }
     },
     {
       "table": "integracion_activacion_g1",
@@ -9525,6 +9527,20 @@
     },
     {
       "table": "plantilla_notificacion",
+      "column": "id_empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": true
+      },
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "plantilla_notificacion",
       "column": "PRIMARY KEY",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "MATCH",
@@ -9534,6 +9550,33 @@
       "global": [
         "id_plantilla"
       ]
+    },
+    {
+      "table": "plantilla_notificacion",
+      "column": "FK:empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "SET NULL",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "SET NULL",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "plantilla_notificacion",
+      "column": "INDEX:id_empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_empresa"
+        ],
+        "unique": false
+      },
+      "global": null
     },
     {
       "table": "log_notificacion",
@@ -12311,7 +12354,7 @@
       "prisma": null,
       "global": {
         "type": "integer",
-        "nullable": true
+        "nullable": false
       }
     },
     {
@@ -12322,7 +12365,7 @@
       "prisma": null,
       "global": {
         "type": "integer",
-        "nullable": true
+        "nullable": false
       }
     },
     {
@@ -13922,17 +13965,6 @@
     },
     {
       "table": "plantilla_notificacion",
-      "column": "id_empresa",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "COLUMN_GLOBAL_ONLY",
-      "prisma": null,
-      "global": {
-        "type": "integer",
-        "nullable": true
-      }
-    },
-    {
-      "table": "plantilla_notificacion",
       "column": "tiempo_estimado_reparacion",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "COLUMN_GLOBAL_ONLY",
@@ -14399,14 +14431,6 @@
       "global": "(correlativo)"
     },
     {
-      "table": "prospecto",
-      "column": "INDEX:prospecto_id_cliente_key",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
-      "prisma": null,
-      "global": "(id_cliente)"
-    },
-    {
       "table": "proveedor",
       "column": "INDEX:proveedor_rut_key",
       "owner": "G1",
@@ -14625,14 +14649,6 @@
     {
       "table": "plan",
       "column": "INDEX:plan_id_empresa_idx",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
-      "prisma": null,
-      "global": "(id_empresa)"
-    },
-    {
-      "table": "plantilla_notificacion",
-      "column": "INDEX:plantilla_notificacion_id_empresa_idx",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "INDEX_MISMATCH",
       "prisma": null,
@@ -15944,24 +15960,6 @@
         ],
         "onDelete": "NO ACTION",
         "onUpdate": "NO ACTION"
-      }
-    },
-    {
-      "table": "plantilla_notificacion",
-      "column": "FK:plantilla_notificacion_id_empresa_fkey",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
-      "prisma": null,
-      "global": {
-        "columns": [
-          "id_empresa"
-        ],
-        "referencedTable": "empresa",
-        "referencedColumns": [
-          "id_empresa"
-        ],
-        "onDelete": "SET NULL",
-        "onUpdate": "CASCADE"
       }
     },
     {

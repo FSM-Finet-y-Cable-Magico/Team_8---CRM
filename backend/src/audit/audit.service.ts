@@ -16,7 +16,13 @@ type AuditInput = {
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: AuditInput) {
+  async record(input: AuditInput, transaction?: Prisma.TransactionClient) {
+    // Financial operations require audit persistence in the same transaction.
+    if (transaction) return transaction.logAuditoria.create({ data: {
+      idUsuario: input.idUsuario ?? null, accion: input.accion, entidadAfectada: input.entidadAfectada,
+      idEntidadAfectada: input.idEntidadAfectada ?? null, valorAnterior: input.valorAnterior ?? Prisma.JsonNull,
+      valorNuevo: input.valorNuevo ?? Prisma.JsonNull, ipOrigen: input.ipOrigen ?? null,
+    } });
     try {
       await this.prisma.logAuditoria.create({
         data: {

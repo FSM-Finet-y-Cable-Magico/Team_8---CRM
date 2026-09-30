@@ -1,10 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
-import { isAdministrator } from '../common/roles';
+import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { canActivateService } from '../services/service-activation.policy';
 import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
@@ -13,7 +13,7 @@ import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { SendBillingNotificationDto } from './dto/send-billing-notification.dto';
 import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 
-const CLOSED_INVOICE_STATES = ['Pagada', 'Anulada'];
+import { APPROVED_EXTENSIONS, CLOSED_INVOICE_STATES, invoiceBalance } from './invoice-balance';
 const CRM_ACTIVATION_FLOW_START = new Date('2026-09-12T15:00:00.000Z');
 
 @Injectable()
@@ -32,10 +32,7 @@ export class BillingService {
     const notificationCustomerIds = companyFilter.idEmpresa
       ? await this.prisma.cliente.findMany({
           where: {
-            OR: [
-              { idEmpresa: companyFilter.idEmpresa },
-              { contratos: { some: { idEmpresa: companyFilter.idEmpresa } } },
-            ],
+            idEmpresa: companyFilter.idEmpresa,
           },
           select: { idCliente: true },
         })
@@ -67,291 +64,179 @@ export class BillingService {
   }
 
   async refreshDelinquency(currentUser: AuthUser, scope = 'consolidado') {
-    const rows = await this.overdueInvoiceRows(currentUser, scope);
-    const customerIds = [...new Set(rows.map((row) => row.cliente.idCliente))];
-    const contractIds = [...new Set(rows.map((row) => row.contrato.idContrato))];
-
-    if (!customerIds.length) {
-      return { updatedCustomers: 0, updatedContracts: 0 };
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const customers = await tx.cliente.updateMany({
-        where: {
-          idCliente: { in: customerIds },
-          estado: { notIn: ['Baja', 'Suspendido'] },
-        },
-        data: { estado: 'Moroso' },
-      });
-      const contracts = await tx.contrato.updateMany({
-        where: {
-          idContrato: { in: contractIds },
-          estado: { notIn: ['Baja', 'Suspendido'] },
-        },
-        data: { estado: 'Moroso' },
-      });
-
-      return { customers, contracts };
+    this.assertBillingWriter(currentUser);
+    const company = this.companyScope(currentUser, scope);
+    return this.billingTransaction(async tx => {
+      const contracts = await tx.contrato.findMany({ where: { ...company, estado: { in: ['Activo', 'Moroso'] } },
+        include: { cliente: true, facturas: { include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } } } });
+      let updatedContracts = 0, updatedCustomers = 0;
+      const affected = new Map<number, number>();
+      for (const contract of contracts) {
+        if (!contract.idEmpresa || contract.cliente?.idEmpresa !== contract.idEmpresa) continue;
+        const state = contract.facturas.some(invoice => invoiceBalance(invoice).diasAtraso > 0) ? 'Moroso' : 'Activo';
+        if (contract.estado !== state) {
+          await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { estado: state } }); updatedContracts++;
+        }
+        affected.set(contract.cliente.idCliente, contract.idEmpresa);
+      }
+      for (const [idCliente, idEmpresa] of affected) {
+        const debts = await tx.factura.findMany({ where: { contrato: { is: { idCliente, idEmpresa } }, estado: { notIn: CLOSED_INVOICE_STATES } },
+          include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } });
+        const state = debts.some(invoice => invoiceBalance(invoice).diasAtraso > 0) ? 'Moroso' : 'Activo';
+        const result = await tx.cliente.updateMany({ where: { idCliente, idEmpresa, estado: state === 'Moroso' ? 'Activo' : 'Moroso' }, data: { estado: state } });
+        updatedCustomers += result.count;
+      }
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'ETIQUETAR_CLIENTE_MOROSO', entidadAfectada: 'cliente',
+        valorNuevo: { scope, idEmpresa: company.idEmpresa ?? null, updatedCustomers, updatedContracts, contratosEvaluados: contracts.length },
+      }, tx);
+      return { updatedCustomers, updatedContracts };
     });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ETIQUETAR_CLIENTE_MOROSO',
-      entidadAfectada: 'cliente',
-      valorNuevo: {
-        scope,
-        clientes: customerIds,
-        contratos: contractIds,
-        facturasVencidas: rows.map((row) => row.idFactura),
-      },
-    });
-
-    return {
-      updatedCustomers: result.customers.count,
-      updatedContracts: result.contracts.count,
-    };
   }
 
   async sendNotification(dto: SendBillingNotificationDto, currentUser: AuthUser) {
-    const customer = await this.getCustomerOrThrow(dto.idCliente, currentUser);
-    const template = await this.notificationTemplate(dto.tipo);
-    const status = this.notificationMode() === 'disabled' ? 'Desactivado' : 'Simulado';
-    const notification = await this.prisma.logNotificacion.create({
-      data: {
-        idCliente: customer.idCliente,
-        idPlantilla: template.idPlantilla,
-        canal: template.canal,
-        fechaEnvio: new Date(),
-        estadoEnvio: status,
-      },
+    this.assertBillingWriter(currentUser);
+    return this.billingTransaction(async tx => {
+      const customer = await tx.cliente.findUnique({ where: { idCliente: dto.idCliente } });
+      if (!customer) throw new NotFoundException('Cliente no encontrado');
+      this.assertCompanyAccess(customer.idEmpresa, currentUser);
+      if (!customer.idEmpresa) throw new BadRequestException('El cliente no tiene empresa');
+      const invoice = dto.idFactura ? await tx.factura.findUnique({
+        where: { idFactura: dto.idFactura }, include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, contrato: true },
+      }) : null;
+      if (dto.idFactura && (!invoice || invoice.contrato?.idCliente !== customer.idCliente || invoice.contrato.idEmpresa !== customer.idEmpresa)) {
+        throw new BadRequestException('La factura no corresponde al cliente y empresa');
+      }
+      if (invoice && !invoiceBalance(invoice).aceptaPagos) throw new BadRequestException('La factura no tiene saldo cobrable');
+      if (dto.tipo === 'Ultimo aviso' && (!invoice || invoiceBalance(invoice).diasAtraso === 0)) {
+        throw new BadRequestException('El último aviso requiere una factura vencida con saldo');
+      }
+      const template = await this.notificationTemplate(dto.tipo, customer.idEmpresa, tx);
+      const status = this.notificationMode() === 'disabled' ? 'Desactivado' : 'Simulado';
+      const notification = await tx.logNotificacion.create({ data: {
+        idCliente: customer.idCliente, idPlantilla: template.idPlantilla, canal: template.canal, fechaEnvio: new Date(), estadoEnvio: status,
+      } });
+      // Functional commercial event is distinct from the technical audit entry.
+      const event = await tx.eventoGestionComercial.create({ data: {
+        idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idContrato: invoice?.idContrato,
+        idFactura: invoice?.idFactura, tipo: dto.tipo === 'Preventiva' ? 'AVISO_PREVENTIVO' : 'ULTIMO_AVISO_CORTE',
+        canal: 'OTRO', fecha: new Date(), estadoGestion: 'REGISTRADO',
+        observacion: `Aviso ${status.toLowerCase()}; no acredita entrega externa.`, idUsuarioResponsable: currentUser.idUsuario,
+      } });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: dto.tipo === 'Preventiva' ? 'ENVIAR_AVISO_COBRO_PREVENTIVO' : 'ENVIAR_ULTIMO_AVISO_CORTE',
+        entidadAfectada: 'evento_gestion_comercial', idEntidadAfectada: event.idEvento,
+        valorNuevo: { idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idFactura: dto.idFactura ?? null,
+          idNotificacion: notification.idNotificacion.toString(), tipo: dto.tipo, modo: this.notificationMode(), estadoEnvio: status },
+      }, tx);
+      return { ...notification, idNotificacion: notification.idNotificacion.toString(), plantilla: template };
     });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: dto.tipo === 'Preventiva' ? 'ENVIAR_AVISO_COBRO_PREVENTIVO' : 'ENVIAR_ULTIMO_AVISO_CORTE',
-      entidadAfectada: 'log_notificacion',
-      idEntidadAfectada: Number(notification.idNotificacion),
-      valorNuevo: {
-        idCliente: customer.idCliente,
-        idFactura: dto.idFactura,
-        tipo: dto.tipo,
-        modo: this.notificationMode(),
-        estadoEnvio: status,
-      },
-    });
-
-    return {
-      ...notification,
-      idNotificacion: notification.idNotificacion.toString(),
-      plantilla: template,
-    };
   }
 
   async suspendContract(idContrato: number, currentUser: AuthUser) {
-    const contract = await this.prisma.contrato.findUnique({
-      where: { idContrato },
-      include: {
-        cliente: true,
-        facturas: { include: { pagos: true } },
-      },
+    this.assertBillingWriter(currentUser);
+    return this.billingTransaction(async tx => {
+      const contract = await tx.contrato.findUnique({ where: { idContrato }, include: {
+        cliente: true, facturas: { include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } },
+      } });
+      if (!contract?.cliente) throw new NotFoundException('Contrato no encontrado');
+      this.assertCompanyAccess(contract.idEmpresa, currentUser);
+      if (!contract.idEmpresa || contract.cliente.idEmpresa !== contract.idEmpresa) throw new BadRequestException('Cliente y contrato deben pertenecer a la misma empresa');
+      if (!['Activo', 'Moroso', 'Suspendido'].includes(contract.estado)) throw new BadRequestException('El estado del contrato no permite suspensión comercial');
+      const overdue = contract.facturas.filter(invoice => invoiceBalance(invoice).diasAtraso >= this.cutDays());
+      if (!overdue.length) throw new BadRequestException('No existen facturas con saldo que cumplan los días de corte');
+      const result = await tx.contrato.update({ where: { idContrato }, data: { estado: 'Suspendido', fechaSuspension: this.todayDate() } });
+      await tx.cliente.updateMany({ where: { idCliente: contract.cliente.idCliente, idEmpresa: contract.idEmpresa, estado: { not: 'Baja' } }, data: { estado: 'Suspendido' } });
+      await tx.servicioContratado.updateMany({ where: { idContrato, idEmpresa: contract.idEmpresa, estadoOperativo: 'Activo' }, data: { estadoOperativo: 'Suspendido' } });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'SUSPENDER_SERVICIO_NO_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
+        valorAnterior: { estado: contract.estado }, valorNuevo: { idEmpresa: contract.idEmpresa, estado: 'Suspendido', facturasVencidas: overdue.map(i => i.idFactura) },
+      }, tx);
+      return result;
     });
-
-    if (!contract || !contract.cliente) {
-      throw new NotFoundException('Contrato no encontrado');
-    }
-
-    this.assertCompanyAccess(contract.idEmpresa, currentUser);
-
-    const overdue = contract.facturas.some(
-      (invoice) =>
-        invoice.fechaLimitePago < this.todayDate() &&
-        !CLOSED_INVOICE_STATES.includes(invoice.estado) &&
-        !this.isInvoicePaid(invoice),
-    );
-
-    if (!overdue) {
-      throw new BadRequestException('No existen facturas vencidas impagas para suspender el servicio');
-    }
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const updatedContract = await tx.contrato.update({
-        where: { idContrato },
-        data: {
-          estado: 'Suspendido',
-          fechaSuspension: this.todayDate(),
-        },
-      });
-
-      await tx.cliente.update({
-        where: { idCliente: contract.cliente?.idCliente ?? 0 },
-        data: { estado: 'Suspendido' },
-      });
-
-      await tx.servicioContratado.updateMany({
-        where: { idContrato, estadoOperativo: 'Activo' },
-        data: { estadoOperativo: 'Suspendido' },
-      });
-
-      return updatedContract;
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'SUSPENDER_SERVICIO_NO_PAGO',
-      entidadAfectada: 'contrato',
-      idEntidadAfectada: idContrato,
-      valorAnterior: { estado: contract.estado },
-      valorNuevo: {
-        estado: 'Suspendido',
-        idCliente: contract.cliente.idCliente,
-        facturasVencidas: contract.facturas.map((invoice) => invoice.idFactura),
-      },
-    });
-
-    return result;
   }
 
   async registerPayment(dto: RegisterPaymentDto, currentUser: AuthUser) {
-    const invoice = await this.prisma.factura.findUnique({
-      where: { idFactura: dto.idFactura },
-      include: {
-        pagos: true,
-        contrato: {
-          include: {
-            cliente: true,
-            servicios: {
-              select: {
-                idServicio: true,
-                estadoOperativo: true,
-                datosTecnicos: true,
-                fechaCreacion: true,
-                ordenes: {
-                  where: { tipoOt: 'Instalacion', estado: 'Completada' },
-                  select: { idOt: true },
-                  take: 1,
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!invoice || !invoice.contrato || !invoice.contrato.cliente) {
-      throw new NotFoundException('Factura no encontrada');
-    }
-
-    this.assertCompanyAccess(invoice.contrato.idEmpresa, currentUser);
-
-    if (CLOSED_INVOICE_STATES.includes(invoice.estado)) {
-      throw new BadRequestException('La factura ya se encuentra cerrada y no acepta pagos adicionales');
-    }
-
-    const reactivatableServiceIds = invoice.contrato.servicios
-      .filter((service) => canActivateService({
-        intent: 'COMMERCIAL_PAYMENT_REACTIVATION',
-        targetStatus: 'Activo',
-        currentStatus: service.estadoOperativo,
-        contractStatus: invoice.contrato?.estado,
-        installationCompleted: service.ordenes.length > 0,
-        historicalImport: invoice.contrato?.cliente?.importadoMasivo === true
-          || this.isHistoricalService(service.datosTecnicos, service.fechaCreacion),
-        serviceExists: true,
-      }))
-      .map((service) => service.idServicio);
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const payment = await tx.pago.create({
-        data: {
-          idFactura: invoice.idFactura,
-          idCliente: invoice.contrato?.cliente?.idCliente,
-          monto: dto.monto,
-          fechaPago: new Date(),
-          codigoTransaccion: dto.codigoTransaccion?.trim() || undefined,
-          pasarela: dto.pasarela.trim(),
-          comprobantePdfUrl: dto.comprobantePdfUrl?.trim() || undefined,
-        },
-      });
-      const totalPaid = this.paidAmount(invoice.pagos) + dto.monto;
-      const invoiceAmount = Number(invoice.monto ?? 0);
-      const paidInFull = invoiceAmount > 0 && totalPaid >= invoiceAmount;
+    this.assertBillingWriter(currentUser);
+    if (!Number.isFinite(dto.monto) || dto.monto <= 0 || dto.monto > 99999999.99 || new Prisma.Decimal(dto.monto).decimalPlaces() > 2) throw new BadRequestException('Monto inválido: positivo y máximo dos decimales');
+    if (!dto.pasarela.trim()) throw new BadRequestException('Debe indicar el medio de pago');
+    return this.billingTransaction(async tx => {
+      // Read inside Serializable: concurrent partial payments cannot reuse a stale balance.
+      const invoice = await tx.factura.findUnique({ where: { idFactura: dto.idFactura }, include: {
+        pagos: true, prorrogasPago: APPROVED_EXTENSIONS,
+        contrato: { include: { cliente: true, servicios: { select: {
+          idServicio: true, idEmpresa: true, estadoOperativo: true, datosTecnicos: true, fechaCreacion: true,
+          ordenes: { where: { tipoOt: 'Instalacion', estado: 'Completada' }, select: { idOt: true }, take: 1 },
+        } } } },
+      } });
+      if (!invoice?.contrato?.cliente) throw new NotFoundException('Factura no encontrada');
+      const contract = invoice.contrato, customer = contract.cliente!;
+      this.assertCompanyAccess(contract.idEmpresa, currentUser);
+      if (!contract.idEmpresa || customer.idEmpresa !== contract.idEmpresa) throw new BadRequestException('Cliente y contrato deben pertenecer a la misma empresa');
+      const balance = invoiceBalance(invoice);
+      if (!balance.aceptaPagos) throw new BadRequestException('La factura está cerrada o no tiene saldo cobrable');
+      if (new Prisma.Decimal(dto.monto).gt(balance.saldo!)) throw new BadRequestException('El pago supera el saldo pendiente');
+      const payment = await tx.pago.create({ data: {
+        idFactura: invoice.idFactura, idCliente: customer.idCliente, monto: dto.monto, fechaPago: new Date(),
+        codigoTransaccion: dto.codigoTransaccion?.trim() || undefined, pasarela: dto.pasarela.trim(),
+        comprobantePdfUrl: dto.comprobantePdfUrl?.trim() || undefined,
+      }, select: { idPago: true, idFactura: true, monto: true, fechaPago: true, pasarela: true, codigoTransaccion: true } });
+      const remaining = new Prisma.Decimal(balance.saldo!).minus(dto.monto);
+      const paidInFull = remaining.isZero();
       let reactivatedServiceIds: number[] = [];
-
       if (paidInFull) {
-        await tx.factura.update({
-          where: { idFactura: invoice.idFactura },
-          data: { estado: 'Pagada' },
-        });
-
-        const pendingOverdue = await tx.factura.findFirst({
-          where: {
-            idContrato: invoice.idContrato,
-            idFactura: { not: invoice.idFactura },
-            estado: { notIn: CLOSED_INVOICE_STATES },
-            fechaLimitePago: { lt: this.todayDate() },
-          },
-        });
-
-        if (!pendingOverdue && reactivatableServiceIds.length > 0) {
-          await tx.contrato.update({
-            where: { idContrato: invoice.contrato?.idContrato ?? 0 },
-            data: { estado: 'Activo', fechaSuspension: null },
-          });
-          await tx.cliente.update({
-            where: { idCliente: invoice.contrato?.cliente?.idCliente ?? 0 },
-            data: { estado: 'Activo' },
-          });
-          await tx.servicioContratado.updateMany({
-            where: {
-              idServicio: { in: reactivatableServiceIds },
-              estadoOperativo: 'Suspendido',
-            },
+        await tx.factura.update({ where: { idFactura: invoice.idFactura }, data: { estado: 'Pagada' } });
+        const otherInvoices = await tx.factura.findMany({ where: {
+          idFactura: { not: invoice.idFactura }, estado: { notIn: CLOSED_INVOICE_STATES },
+          contrato: { is: { idCliente: customer.idCliente, idEmpresa: contract.idEmpresa } },
+        }, include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } });
+        const pendingOverdue = otherInvoices.some(row => invoiceBalance(row).diasAtraso > 0);
+        if (!pendingOverdue) {
+          reactivatedServiceIds = contract.servicios.filter(service => service.idEmpresa === contract.idEmpresa && canActivateService({
+            intent: 'COMMERCIAL_PAYMENT_REACTIVATION', targetStatus: 'Activo', currentStatus: service.estadoOperativo,
+            contractStatus: contract.estado, installationCompleted: service.ordenes.length > 0,
+            historicalImport: customer.importadoMasivo === true || this.isHistoricalService(service.datosTecnicos, service.fechaCreacion), serviceExists: true,
+          })).map(service => service.idServicio);
+          if (reactivatedServiceIds.length || contract.estado === 'Moroso') {
+            await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { estado: 'Activo', fechaSuspension: null } });
+          }
+          if (reactivatedServiceIds.length) await tx.servicioContratado.updateMany({
+            where: { idServicio: { in: reactivatedServiceIds }, idContrato: contract.idContrato, idEmpresa: contract.idEmpresa, estadoOperativo: 'Suspendido' },
             data: { estadoOperativo: 'Activo' },
           });
-          reactivatedServiceIds = [...reactivatableServiceIds];
+          const otherSuspended = await tx.contrato.findFirst({ where: {
+            idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: 'Suspendido',
+          }, select: { idContrato: true } });
+          if (!otherSuspended && (reactivatedServiceIds.length || customer.estado === 'Moroso')) await tx.cliente.updateMany({
+            where: { idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: { in: ['Moroso', 'Suspendido'] } }, data: { estado: 'Activo' },
+          });
         }
       }
-
-      return {
-        payment,
-        paidInFull,
-        reactivatedServiceIds,
-      };
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_PAGO',
-      entidadAfectada: 'pago',
-      idEntidadAfectada: result.payment.idPago,
-      valorNuevo: {
-        idFactura: invoice.idFactura,
-        idCliente: invoice.contrato.cliente.idCliente,
-        monto: dto.monto,
-        pagadaCompleta: result.paidInFull,
-        serviciosReactivados: result.reactivatedServiceIds,
-      },
-    });
-
-    if (result.reactivatedServiceIds.length > 0) {
       await this.auditService.record({
-        idUsuario: currentUser.idUsuario,
-        accion: 'REACTIVAR_SERVICIO_POR_PAGO',
-        entidadAfectada: 'contrato',
-        idEntidadAfectada: invoice.contrato.idContrato,
-        valorAnterior: {
-          estadoContrato: invoice.contrato.estado,
-          estadoServicios: 'Suspendido',
-        },
-        valorNuevo: {
-          estadoContrato: 'Activo',
-          estadoServicios: 'Activo',
-          serviciosReactivados: result.reactivatedServiceIds,
-        },
-      });
-    }
+        idUsuario: currentUser.idUsuario, accion: 'REGISTRAR_PAGO', entidadAfectada: 'pago', idEntidadAfectada: payment.idPago,
+        valorNuevo: { idEmpresa: contract.idEmpresa, idFactura: invoice.idFactura, idCliente: customer.idCliente,
+          monto: dto.monto, saldoAnterior: balance.saldo, saldoNuevo: remaining.toNumber(), pagadaCompleta: paidInFull, serviciosReactivados: reactivatedServiceIds },
+      }, tx);
+      if (reactivatedServiceIds.length) await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
+        valorAnterior: { estadoContrato: contract.estado }, valorNuevo: { estadoContrato: 'Activo', serviciosReactivados: reactivatedServiceIds },
+      }, tx);
+      return { payment, paidInFull, saldoPendiente: remaining.toNumber(), reactivatedServiceIds };
+    });
+  }
 
-    return result;
+  private async billingTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await this.prisma.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
+      catch (error) {
+        const code = (error as { code?: string })?.code;
+        if (code === 'P2034' && attempt < 2) continue;
+        if (code === 'P2034') throw new ConflictException('La cobranza cambió durante la operación; actualiza y vuelve a intentar');
+        if (code === 'P2002') throw new ConflictException('La referencia de pago ya está registrada');
+        throw error;
+      }
+    }
+    throw new ConflictException('No fue posible completar la operación');
   }
 
   private isHistoricalService(value: Prisma.JsonValue | null, createdAt: Date | null) {
@@ -382,7 +267,9 @@ export class BillingService {
   }
 
   async createZone(dto: CreatePaymentZoneDto, currentUser: AuthUser) {
+    this.assertBillingWriter(currentUser);
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
+    if (!dto.nombreZona.trim()) throw new BadRequestException('El nombre de zona es obligatorio');
     const created = await this.prisma.zonaPago.create({
       data: {
         idEmpresa,
@@ -410,7 +297,9 @@ export class BillingService {
   }
 
   async updateZone(idZonaPago: number, dto: UpdatePaymentZoneDto, currentUser: AuthUser) {
+    this.assertBillingWriter(currentUser);
     const zone = await this.getZoneOrThrow(idZonaPago, currentUser);
+    if (dto.nombreZona !== undefined && !dto.nombreZona.trim()) throw new BadRequestException('El nombre de zona es obligatorio');
     const updated = await this.prisma.zonaPago.update({
       where: { idZonaPago },
       data: {
@@ -461,6 +350,7 @@ export class BillingService {
   }
 
   async createZoneRule(dto: CreateZoneRuleDto, currentUser: AuthUser) {
+    this.assertBillingWriter(currentUser);
     const [plan, zone] = await Promise.all([
       this.prisma.plan.findUnique({ where: { idPlan: dto.idPlan } }),
       this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } }),
@@ -477,8 +367,9 @@ export class BillingService {
       throw new BadRequestException('El plan y la zona pertenecen a empresas distintas');
     }
 
-    const fechaInicio = dto.fechaInicio ? new Date(`${dto.fechaInicio}T00:00:00.000Z`) : null;
-    const fechaFin = dto.fechaFin ? new Date(`${dto.fechaFin}T00:00:00.000Z`) : null;
+    const fechaInicio = dto.fechaInicio ? parseDateOnly(dto.fechaInicio) : null;
+    const fechaFin = dto.fechaFin ? parseDateOnly(dto.fechaFin) : null;
+    if ((dto.fechaInicio && !fechaInicio) || (dto.fechaFin && !fechaFin)) throw new BadRequestException('Vigencia inválida');
     if (fechaInicio && fechaFin && fechaInicio > fechaFin) {
       throw new BadRequestException('La fecha de inicio no puede ser posterior a la fecha de fin');
     }
@@ -535,6 +426,7 @@ export class BillingService {
       },
       include: {
         pagos: true,
+        prorrogasPago: APPROVED_EXTENSIONS,
         contrato: {
           include: {
             cliente: { include: { empresa: true } },
@@ -543,11 +435,10 @@ export class BillingService {
         },
       },
       orderBy: { fechaLimitePago: 'asc' },
-      take: 150,
-    });
+          });
 
     return invoices
-      .filter((invoice) => invoice.contrato?.cliente && !this.isInvoicePaid(invoice))
+      .filter((invoice) => invoice.contrato?.cliente && invoice.contrato.idEmpresa === invoice.contrato.cliente.idEmpresa && invoiceBalance(invoice).diasAtraso > 0)
       .map((invoice) => {
         const cliente = invoice.contrato?.cliente;
         const contrato = invoice.contrato;
@@ -563,7 +454,8 @@ export class BillingService {
           pagado: this.paidAmount(invoice.pagos),
           saldo: Math.max(0, Number(invoice.monto ?? 0) - this.paidAmount(invoice.pagos)),
           fechaLimitePago: invoice.fechaLimitePago.toISOString().slice(0, 10),
-          diasAtraso: this.daysBetween(invoice.fechaLimitePago, this.todayDate()),
+          diasAtraso: invoiceBalance(invoice).diasAtraso,
+          fechaVencimientoEfectiva: invoiceBalance(invoice).fechaVencimientoEfectiva,
           estadoFactura: invoice.estado,
           cliente: {
             idCliente: cliente.idCliente,
@@ -583,10 +475,14 @@ export class BillingService {
       });
   }
 
-  private async notificationTemplate(type: SendBillingNotificationDto['tipo']) {
+  private async notificationTemplate(
+    type: SendBillingNotificationDto['tipo'],
+    idEmpresa: number,
+    client: Prisma.TransactionClient = this.prisma,
+  ) {
     const tipoEvento = type === 'Preventiva' ? 'COBRO_PREVENTIVO' : 'ULTIMO_AVISO_CORTE';
-    const existing = await this.prisma.plantillaNotificacion.findFirst({
-      where: { tipoEvento, canal: 'Sistema', activa: true },
+    const existing = await client.plantillaNotificacion.findFirst({
+      where: { tipoEvento, canal: 'Sistema', activa: true, idEmpresa },
       orderBy: { idPlantilla: 'desc' },
     });
 
@@ -594,7 +490,7 @@ export class BillingService {
       return existing;
     }
 
-    return this.prisma.plantillaNotificacion.create({
+    return client.plantillaNotificacion.create({
       data: {
         tipoEvento,
         canal: 'Sistema',
@@ -603,31 +499,9 @@ export class BillingService {
             ? 'Aviso preventivo de cobranza registrado por CRM.'
             : 'Ultimo aviso previo al corte registrado por CRM.',
         activa: true,
+        idEmpresa,
       },
     });
-  }
-
-  private async getCustomerOrThrow(idCliente: number, currentUser: AuthUser) {
-    const customer = await this.prisma.cliente.findUnique({
-      where: { idCliente },
-      include: {
-        contratos: { select: { idEmpresa: true } },
-      },
-    });
-
-    if (!customer) {
-      throw new NotFoundException('Cliente no encontrado');
-    }
-
-    if (
-      !isAdministrator(currentUser.roles) &&
-      customer.idEmpresa !== currentUser.idEmpresa &&
-      !customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)
-    ) {
-      throw new BadRequestException('El cliente no pertenece a tu empresa');
-    }
-
-    return customer;
   }
 
   private async getZoneOrThrow(idZonaPago: number, currentUser: AuthUser) {
@@ -642,13 +516,8 @@ export class BillingService {
     return zone;
   }
 
-  private isInvoicePaid(invoice: { monto: Prisma.Decimal | null; pagos: Array<{ monto: Prisma.Decimal }> }) {
-    const invoiceAmount = Number(invoice.monto ?? 0);
-    return invoiceAmount > 0 && this.paidAmount(invoice.pagos) >= invoiceAmount;
-  }
-
   private paidAmount(payments: Array<{ monto: Prisma.Decimal }>) {
-    return payments.reduce((total, payment) => total + Number(payment.monto), 0);
+    return payments.reduce((total, payment) => total.plus(payment.monto), new Prisma.Decimal(0)).toNumber();
   }
 
   private todayDate() {
@@ -662,10 +531,6 @@ export class BillingService {
     return parsed;
   }
 
-  private daysBetween(from: Date, to: Date) {
-    return Math.max(0, Math.floor((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
-  }
-
   private cutDays() {
     const value = Number(this.configService.get('BILLING_CUT_DAYS') ?? 5);
     return Number.isInteger(value) && value > 0 ? value : 5;
@@ -674,6 +539,10 @@ export class BillingService {
   private notificationMode() {
     const mode = (this.configService.get<string>('BILLING_NOTIFICATION_MODE') ?? 'mock').trim().toLowerCase();
     return ['disabled', 'mock', 'provider'].includes(mode) ? mode : 'mock';
+  }
+
+  private assertBillingWriter(user: AuthUser) {
+    if (!isAdministrator(user.roles) && !hasRole(user.roles, 'Comercial')) throw new ForbiddenException('Sin permiso para gestionar facturación');
   }
 
   private assertCompanyAccess(idEmpresa: number | null, currentUser: AuthUser) {

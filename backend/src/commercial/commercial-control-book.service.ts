@@ -132,14 +132,18 @@ export class CommercialControlBookService {
     const [service, contract, invoice] = await Promise.all([
       dto.idServicio ? this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } }) : null,
       dto.idContrato ? this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } }) : null,
-      dto.idFactura ? this.prisma.factura.findUnique({ where: { idFactura: dto.idFactura }, include: { pagos: true, contrato: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 } } }) : null,
+      dto.idFactura ? this.prisma.factura.findUnique({ where: { idFactura: dto.idFactura }, include: { pagos: true, contrato: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } }) : null,
     ]);
+    if ((dto.idServicio && !service) || (dto.idContrato && !contract) || (dto.idFactura && !invoice)) throw new NotFoundException('La relación indicada no existe');
+    if (service && dto.idContrato && service.idContrato !== dto.idContrato) throw new BadRequestException('El servicio no corresponde al contrato');
+    if (invoice && dto.idContrato && invoice.idContrato !== dto.idContrato) throw new BadRequestException('La factura no corresponde al contrato');
+    if (invoice && service && service.idContrato !== invoice.idContrato) throw new BadRequestException('El servicio no corresponde a la factura');
     this.assertRelated(customer.idCliente, companyId, service, contract, invoice);
 
     if (dto.tipo === 'ULTIMO_AVISO_CORTE') {
       if (!invoice) throw new BadRequestException('El último aviso requiere una factura');
       const status = this.invoiceStatus(invoice);
-      if (!status.saldoPendiente || status.saldoPendiente <= 0) throw new BadRequestException('La deuda ya se encuentra pagada');
+      if (CLOSED_INVOICE_STATES.includes(invoice.estado) || !status.saldoPendiente || status.saldoPendiente <= 0) throw new BadRequestException('La deuda ya se encuentra pagada');
       if (!status.diasAtraso) throw new BadRequestException('El último aviso requiere deuda vencida');
     }
     if (dto.tipo === 'AVISO_PREVIO_RETIRO' && (!service || !dto.observacion?.trim())) {
@@ -204,12 +208,12 @@ export class CommercialControlBookService {
     if (!isAdministrator(user.roles)) throw new ForbiddenException('Solo un administrador puede aprobar convenios');
     const agreement = await this.prisma.convenioPago.findUnique({
       where: { idConvenio },
-      include: { factura: { include: { pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 } } } },
+      include: { factura: { include: { pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } } },
     });
     if (!agreement) throw new NotFoundException('Convenio no encontrado');
     this.assertCompany(agreement.idEmpresa, user);
     if (agreement.estado !== 'PENDIENTE') throw new BadRequestException('Solo se pueden aprobar convenios pendientes');
-    if (!agreement.factura || !this.invoiceStatus(agreement.factura).saldoPendiente) {
+    if (!agreement.factura || CLOSED_INVOICE_STATES.includes(agreement.factura.estado) || !this.invoiceStatus(agreement.factura).saldoPendiente || Number(agreement.montoComprometido) > this.invoiceStatus(agreement.factura).saldoPendiente!) {
       throw new BadRequestException('El convenio ya no tiene deuda vigente para aprobar');
     }
     const updated = await this.prisma.convenioPago.update({ where: { idConvenio }, data: { estado: 'APROBADO', idUsuarioAprobador: user.idUsuario, fechaAprobacion: new Date() }, include: { cuotas: true } });
@@ -256,7 +260,7 @@ export class CommercialControlBookService {
 
     if (!dto.idFactura) throw new BadRequestException('La fecha comprometida requiere factura');
     const invoice = await this.debtInvoice(dto.idFactura);
-    if (invoice.contrato?.cliente?.idCliente !== customer.idCliente || invoice.contrato.idEmpresa !== companyId) throw new BadRequestException('Factura incompatible con el cliente o empresa');
+    if ((dto.idContrato && dto.idContrato !== invoice.idContrato) || invoice.contrato?.cliente?.idCliente !== customer.idCliente || invoice.contrato.idEmpresa !== companyId) throw new BadRequestException('Factura incompatible con el cliente o empresa');
     const newDate = this.dateOnly(dto.valorNuevo, 'valorNuevo');
     const currentDate = invoice.prorrogasPago[0]?.nuevaFecha ?? invoice.fechaLimitePago;
     if (newDate <= currentDate) throw new BadRequestException('La fecha comprometida debe ser posterior a la vigente');
@@ -278,6 +282,8 @@ export class CommercialControlBookService {
       dto.idContrato ? this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } }) : null,
       dto.idServicio ? this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } }) : null,
     ]);
+    if ((dto.idServicio && !service) || (dto.idContrato && !contract)) throw new NotFoundException('La relación indicada no existe');
+    if (service && dto.idContrato && service.idContrato !== dto.idContrato) throw new BadRequestException('El servicio no corresponde al contrato');
     this.assertRelated(customer.idCliente, companyId, service, contract, null);
     const charge = await this.prisma.cargoAdicional.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: contract?.idContrato, idServicio: service?.idServicio, tipo: dto.tipo, monto: dto.monto, fecha: this.dateOnly(dto.fecha, 'fecha'), estado: 'PENDIENTE_FACTURACION', afectaSaldo: false, observacion: dto.observacion?.trim() || null, idUsuarioResponsable: user.idUsuario } });
     await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_CARGO_ADICIONAL', entidadAfectada: 'cargo_adicional', idEntidadAfectada: charge.idCargo, valorNuevo: { idCliente: customer.idCliente, tipo: dto.tipo, monto: dto.monto, estado: charge.estado, afectaSaldo: false } });
@@ -306,8 +312,19 @@ export class CommercialControlBookService {
     const company = this.queryCompany(requestedCompany, user);
     const today = this.dateOnly(todayDateOnly(), 'hoy');
     const limit = new Date(today); limit.setUTCDate(limit.getUTCDate() + horizon);
-    const invoices = await this.prisma.factura.findMany({ where: { estado: { notIn: CLOSED_INVOICE_STATES }, fechaLimitePago: { lte: limit }, ...(company ? { contrato: { is: { idEmpresa: company } } } : {}) }, include: { pagos: true, contrato: { include: { cliente: true, plan: true } } }, orderBy: { fechaLimitePago: 'asc' }, take: 200 });
-    const items = invoices.filter((invoice) => this.invoiceStatus({ ...invoice, prorrogasPago: [] }).saldoPendiente).map((invoice) => ({ idFactura: invoice.idFactura, idContrato: invoice.idContrato, idCliente: invoice.contrato?.idCliente, cliente: invoice.contrato?.cliente?.nombreCompleto ?? 'Cliente sin nombre', plan: invoice.contrato?.plan?.nombreComercial ?? null, fechaVencimiento: invoice.fechaLimitePago.toISOString().slice(0, 10), diasRestantes: Math.ceil((invoice.fechaLimitePago.getTime() - today.getTime()) / 86_400_000) }));
+    const invoices = await this.prisma.factura.findMany({
+      where: { estado: { notIn: CLOSED_INVOICE_STATES }, fechaLimitePago: { lte: limit }, ...(company ? { contrato: { is: { idEmpresa: company, cliente: { is: { idEmpresa: company } } } } } : {}) },
+      include: { pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 }, contrato: { include: { cliente: true, plan: true } } },
+      orderBy: { fechaLimitePago: 'asc' }, take: 500,
+    });
+    const items = invoices.flatMap((invoice) => {
+      const status = this.invoiceStatus(invoice);
+      if (!status.saldoPendiente || status.fechaVencimientoEfectiva > limit) return [];
+      return [{ idFactura: invoice.idFactura, idContrato: invoice.idContrato, idCliente: invoice.contrato?.idCliente,
+        cliente: invoice.contrato?.cliente?.nombreCompleto ?? 'Cliente sin nombre', plan: invoice.contrato?.plan?.nombreComercial ?? null,
+        fechaVencimiento: status.fechaVencimientoEfectiva.toISOString().slice(0, 10),
+        diasRestantes: Math.ceil((status.fechaVencimientoEfectiva.getTime() - today.getTime()) / 86_400_000) }];
+    });
     return { diasAnticipacion: horizon, count: items.length, items };
   }
 
@@ -315,15 +332,15 @@ export class CommercialControlBookService {
     const company = this.queryCompany(query.idEmpresa, user);
     const invoices = await this.prisma.factura.findMany({
       where: {
-        ...(company ? { contrato: { is: { idEmpresa: company } } } : {}),
-        ...(query.idPlan ? { contrato: { is: { ...(company ? { idEmpresa: company } : {}), idPlan: query.idPlan } } } : {}),
+        ...(company ? { contrato: { is: { idEmpresa: company, cliente: { is: { idEmpresa: company } } } } } : {}),
+        ...(query.idPlan ? { contrato: { is: { ...(company ? { idEmpresa: company, cliente: { is: { idEmpresa: company } } } : {}), idPlan: query.idPlan } } } : {}),
         ...(query.fechaVencimientoDesde || query.fechaVencimientoHasta ? { fechaLimitePago: { ...(query.fechaVencimientoDesde ? { gte: this.dateOnly(query.fechaVencimientoDesde, 'fechaVencimientoDesde') } : {}), ...(query.fechaVencimientoHasta ? { lte: this.dateOnly(query.fechaVencimientoHasta, 'fechaVencimientoHasta') } : {}) } } : {}),
       },
       include: {
         pagos: { orderBy: { fechaPago: 'desc' } },
         eventosGestionComercial: { include: { responsable: { select: { nombreCompleto: true } } }, orderBy: { fecha: 'desc' }, take: 10 },
         conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 },
-        prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 },
+        prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 },
         contrato: { include: { cliente: true, plan: true, zonaPago: true, servicios: { include: { direccion: true, zonaPago: true }, orderBy: { fechaCreacion: 'asc' } }, cambiosCondicionPago: { orderBy: { fechaRegistro: 'desc' }, take: 1 }, cargosAdicionales: { where: { estado: 'PENDIENTE_FACTURACION' } } } },
       },
       orderBy: { idFactura: 'desc' },
@@ -406,7 +423,7 @@ export class CommercialControlBookService {
   }
 
   private debtInvoice(idFactura: number) {
-    return this.prisma.factura.findUnique({ where: { idFactura }, include: { pagos: true, contrato: { include: { cliente: true } }, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 } } }).then((invoice) => { if (!invoice) throw new NotFoundException('Factura no encontrada'); if (!this.invoiceStatus(invoice).saldoPendiente) throw new BadRequestException('La factura no tiene deuda vigente'); return invoice; });
+    return this.prisma.factura.findUnique({ where: { idFactura }, include: { pagos: true, contrato: { include: { cliente: true } }, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } }).then((invoice) => { if (!invoice) throw new NotFoundException('Factura no encontrada'); if (CLOSED_INVOICE_STATES.includes(invoice.estado) || !this.invoiceStatus(invoice).saldoPendiente) throw new BadRequestException('La factura no tiene deuda vigente'); return invoice; });
   }
 
   private async customer(idCliente: number) {

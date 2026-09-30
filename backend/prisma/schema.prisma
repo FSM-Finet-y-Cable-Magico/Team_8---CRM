@@ -28,6 +28,7 @@ model Empresa {
   solicitudesRetiro          ServicioRetiroSolicitud[]
   integracionesActivacionG1  IntegracionActivacionG1[]
   garantiasComerciales       GarantiaComercial[]
+  plantillasNotificacion     PlantillaNotificacion[]
   documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("empresa")
@@ -966,7 +967,10 @@ model PlantillaNotificacion {
   canal          String   @db.VarChar(20)
   contenidoTexto String?  @map("contenido_texto")
   activa         Boolean? @default(true)
+  idEmpresa      Int?     @map("id_empresa")
+  empresa        Empresa? @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: SetNull, onUpdate: Cascade)
 
+  @@index([idEmpresa])
   @@map("plantilla_notificacion")
 }
 

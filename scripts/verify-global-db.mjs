@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { parseGlobalSchema, normalizeType, normalizeExpression, ownerOf } from './global-schema.mjs';
+import { parseGlobalSchema, normalizeType, normalizeExpression, normalizeCheckExpression, ownerOf } from './global-schema.mjs';
 
 export async function readCatalog(prisma) {
   return prisma.$transaction(async tx => {
@@ -40,6 +40,16 @@ export async function readCatalog(prisma) {
 }
 const actions = { a:'NO ACTION', r:'RESTRICT', c:'CASCADE', n:'SET NULL', d:'SET DEFAULT' };
 const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
+function sameDefault(expected, observed, columnType) {
+  const clean = value => {
+    let result = normalizeExpression(value);
+    if (result && /^varchar(?:\(|$)/.test(columnType)) {
+      result = result.replace(/^(('(?:''|[^'])*'))::(?:charactervarying|varchar|text)$/, '$1');
+    }
+    return result;
+  };
+  return clean(expected) === clean(observed);
+}
 export function compareCatalog(global, actual) {
   const rows = []; const add=(kind,table,name,status,expected,observed,action) => rows.push({kind,table,name,owner:ownerOf(table),status,expected,observed,action:action ?? (status==='MATCH'?'Ninguna':'Revisar y reconciliar antes de baseline')});
   const tableMap=new Map(actual.tables.map(t=>[t.name,t])); const columnMap=new Map(actual.columns.map(c=>[`${c.table}.${c.name}`,c]));
@@ -52,7 +62,7 @@ export function compareCatalog(global, actual) {
         if(normalizeType(a.type)!==c.type) flags.push('TYPE_DIFFERENCE');
         if(a.nullable!==c.nullable) flags.push('NULLABILITY_DIFFERENCE');
         // Serial defaults are compared with sequence ownership as well as expression.
-        if(normalizeExpression(a.default)!==normalizeExpression(c.default)) flags.push('DEFAULT_DIFFERENCE');
+        if(!sameDefault(c.default,a.default,c.type)) flags.push('DEFAULT_DIFFERENCE');
         if(c.serial && !a.sequence) flags.push('REQUIRES_REVIEW');
       }
       add('COLUMN',table.name,c.name,flags.length?flags.join(','):'MATCH', {type:c.type,nullable:c.nullable,default:c.default}, a?{type:a.type,nullable:a.nullable,default:a.default}:null);
@@ -60,7 +70,7 @@ export function compareCatalog(global, actual) {
     const pk=actual.constraints.find(c=>c.table===table.name&&c.kind==='p');
     add('PK',table.name,`${table.name}_pkey`,same(pk?.columns,table.pk)?'MATCH':'REQUIRES_REVIEW',table.pk,pk?.columns??null);
     for(const c of table.checks){ const a=actual.constraints.find(x=>x.table===table.name&&x.name===c.name&&x.kind==='c');
-      add('CHECK',table.name,c.name,a&&a.validated&&normalizeExpression(a.definition)===normalizeExpression(c.definition)?'MATCH':'REQUIRES_REVIEW',c.definition,a?.definition??null);
+      add('CHECK',table.name,c.name,a&&a.validated&&normalizeCheckExpression(a.definition)===normalizeCheckExpression(c.definition)?'MATCH':'REQUIRES_REVIEW',c.definition,a?.definition??null);
     }
   }
   for(const fk of global.fks){

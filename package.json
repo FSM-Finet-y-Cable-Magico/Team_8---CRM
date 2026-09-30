@@ -20,11 +20,13 @@
     "docker:railway": "docker compose --env-file .env.railway -f docker-compose.railway.yml up --build -d",
     "docker:railway:down": "docker compose --env-file .env.railway -f docker-compose.railway.yml down",
     "test": "npm run test -w backend -- --runInBand && npm run test:global-tools",
-    "test:global-tools": "node --test scripts/global-schema.test.mjs scripts/g1-smoke.test.mjs",
+    "test:global-tools": "node --test scripts/global-schema.test.mjs scripts/g1-smoke.test.mjs scripts/validate-production-env.test.mjs scripts/smoke-billing-write.test.mjs",
     "db:verify:global": "node scripts/verify-global-db.mjs",
     "db:audit:prisma-global": "node scripts/audit-prisma-global.mjs",
     "smoke:g1:readonly": "node scripts/smoke-g1-readonly.mjs",
-    "smoke:g1:activation": "node scripts/smoke-g1-activation.mjs"
+    "smoke:g1:activation": "node scripts/smoke-g1-activation.mjs",
+    "env:validate:production": "node scripts/validate-production-env.mjs",
+    "smoke:billing:write": "npm run build -w backend && node scripts/smoke-billing-write.mjs"
   },
   "engines": {
     "node": ">=20.11"

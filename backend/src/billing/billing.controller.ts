@@ -5,6 +5,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
+import { BillingReadService } from './billing-read.service';
+import { InvoiceQueryDto } from './dto/invoice-query.dto';
 import { BillingService } from './billing.service';
 import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
 import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
@@ -15,7 +17,19 @@ import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 @Controller('billing')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class BillingController {
-  constructor(private readonly billingService: BillingService) {}
+  constructor(private readonly billingService: BillingService, private readonly billingRead: BillingReadService) {}
+
+  @Get('invoices')
+  @Roles(...ACCESS_ROLES.VIEW_BILLING)
+  invoices(@Query() query: InvoiceQueryDto, @CurrentUser() user: AuthUser) {
+    return this.billingRead.invoices(query, user);
+  }
+
+  @Get('invoices/:id')
+  @Roles(...ACCESS_ROLES.VIEW_BILLING)
+  invoiceDetail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
+    return this.billingRead.detail(id, user, scope);
+  }
 
   @Get('overview')
   @Roles(...ACCESS_ROLES.VIEW_BILLING)

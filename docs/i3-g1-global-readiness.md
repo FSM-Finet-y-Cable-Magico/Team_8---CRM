@@ -30,7 +30,7 @@ No había `G1_API_KEY` utilizable en la configuración local inspeccionada; `G1_
 - Series: trim, deduplicación y orden estable. `numero_serie` conserva la primera; `numeros_serie` conserva la lista real. Un solo `event_id` para todo el evento.
 - Persistencia de snapshot y hash en la primera creación; un upsert posterior no sobrescribe el evento. Dispatch verifica hash e identificadores y envía el snapshot; no consulta el RUT actual.
 - Registros completados no se reenvían. Snapshot histórico ausente: `G1_PAYLOAD_SNAPSHOT_MISSING`; inconsistente: `G1_PAYLOAD_SNAPSHOT_INCONSISTENT`. No se hace backfill especulativo. Eventos originalmente incompletos necesitan corrección revisada antes de poder enviarse.
-- La columna JSONB es una [propuesta global](../db/global/proposals/001-g1-payload-snapshot.sql); no existe en el init canónico ni se aplicó a Railway. Es una dependencia obligatoria antes del despliegue.
+- La columna JSONB fue aplicada manualmente por el operador y ahora pertenece al [contrato global canónico](../db/global/init-global.sql). La lectura Railway `READ ONLY` posterior confirmó su presencia y el verificador final obtuvo PASS.
 
 Tests puros cubren RUT A al crear, cambio a RUT B antes de retry, envío de RUT A y conservación de event_id/OT/servicio/contrato/series; identificadores inválidos; múltiples unidades; snapshot alterado o ausente; respuestas 401 y URL inválida.
 
@@ -51,6 +51,8 @@ node --env-file=backend/.env scripts/smoke-g1-readonly.mjs
 Requeridas: `G1_API_URL`, `G1_API_KEY`, `G1_SMOKE_COMPANY_ID` autorizada por G1. Opcionales: `G1_SMOKE_SERIAL`, `G1_SMOKE_SERVICE_ID`, `G1_SMOKE_STOCK=1`, `G1_REQUEST_TIMEOUT_MS`. Solo GET; salida con endpoint plantilla, status, duración y resultado saneado. Sin cuerpos de clientes, series, headers ni secretos.
 
 Intento realizado: abortó con `G1_API_KEY_NOT_CONFIGURED` antes de fetch. No es una prueba real de autenticación, conectividad ni respuesta G1.
+
+La revisión adicional del guard G1 confirmó que este flujo HTTP solo consume `X-API-KEY`. No se observó segundo header ni validación de password/hash, por lo que no se inventó ni configuró una segunda credencial. La key entrante que G8 emitirá para G1 es independiente y se documenta en [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
 
 `scripts/smoke-g1-activation.mjs` está separado y requiere `ALLOW_G1_ACTIVATION_WRITE=1` antes de cualquier fetch, además del payload explícito `G1_ACTIVATION_PAYLOAD_JSON` y configuración. No se ejecutó POST real. La variable técnica no sustituye aprobación operativa ni coordinación de IDs/series con G1/G3.
 

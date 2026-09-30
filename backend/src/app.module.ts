@@ -28,6 +28,7 @@ import { AppController } from './app.controller';
 import { G3IntegrationModule } from './g3-integration/g3-integration.module';
 import { G1IntegrationModule } from './g1-integration/g1-integration.module';
 import { ExternalTaxDocumentsModule } from './external-tax-documents/external-tax-documents.module';
+import { IntegrationAuthModule } from './integration-auth/integration-auth.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ExternalTaxDocumentsModule } from './external-tax-documents/external-ta
     G3IntegrationModule,
     G1IntegrationModule,
     ExternalTaxDocumentsModule,
+    IntegrationAuthModule,
     UsersModule,
     CompaniesModule,
     CommercialModule,

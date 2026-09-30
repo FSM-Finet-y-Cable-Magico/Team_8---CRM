@@ -1,16 +1,18 @@
-import { IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Matches, Min } from 'class-validator';
 
 export class RegisterPaymentDto {
   @IsInt()
   @Min(1)
   idFactura!: number;
 
-  @IsNumber()
-  @Min(1)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(99999999.99)
   monto!: number;
 
   @IsString()
   @MaxLength(30)
+  @Matches(/\S/, { message: 'El medio de pago no puede estar vacío' })
   pasarela!: string;
 
   @IsOptional()
