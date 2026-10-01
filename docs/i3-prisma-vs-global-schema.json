@@ -1,11 +1,11 @@
 {
-  "contractHash": "e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c",
+  "contractHash": "bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1",
   "modeledTables": 58,
   "summary": {
     "MATCH": 799,
     "COLUMN_GLOBAL_ONLY": 36,
-    "OWNER_EXTERNAL": 304,
-    "INDEX_MISMATCH": 47,
+    "OWNER_EXTERNAL": 325,
+    "INDEX_MISMATCH": 50,
     "FK_MISMATCH": 65
   },
   "rows": [
@@ -14327,6 +14327,226 @@
       }
     },
     {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_solicitud",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "request_id",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(100)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "trace_id",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(100)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "hash_payload",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(64)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_empresa",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_prospecto_externo",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_contrato_externo",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_plan_externo",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "rut",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(12)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "nombre_completo",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(120)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "telefono",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(21)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "direccion_completa",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(200)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "comuna",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(80)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "ciudad",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(80)",
+        "nullable": true
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "observaciones",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "text",
+        "nullable": true
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "requisitos_equipamiento",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "jsonb",
+        "nullable": true
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "id_ot",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "estado",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "fecha_creacion",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "fecha_actualizacion",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    {
       "table": "asignacion_equipo_servicio",
       "column": "INDEX:ux_asignacion_evento_unidad",
       "owner": "G1",
@@ -14389,6 +14609,22 @@
       "status": "INDEX_MISMATCH",
       "prisma": null,
       "global": "(clave_idempotencia)"
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "INDEX:solicitud_instalacion_integracion_request_id_key",
+      "owner": "G3",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(request_id)"
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "INDEX:solicitud_instalacion_integracion_id_ot_key",
+      "owner": "G3",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(id_ot)"
     },
     {
       "table": "inventario_personal_tecnico",
@@ -14549,6 +14785,14 @@
       "status": "INDEX_MISMATCH",
       "prisma": null,
       "global": "(id_ot, fecha_hora)"
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "INDEX:solicitud_instalacion_integracion_id_empresa_idx",
+      "owner": "G3",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(id_empresa)"
     },
     {
       "table": "intento_fallido",
@@ -15240,6 +15484,24 @@
         ],
         "onDelete": "NO ACTION",
         "onUpdate": "NO ACTION"
+      }
+    },
+    {
+      "table": "solicitud_instalacion_integracion",
+      "column": "FK:solicitud_instalacion_integracion_id_ot_fkey",
+      "owner": "G3",
+      "status": "OWNER_EXTERNAL",
+      "prisma": null,
+      "global": {
+        "columns": [
+          "id_ot"
+        ],
+        "referencedTable": "orden_trabajo",
+        "referencedColumns": [
+          "id_ot"
+        ],
+        "onDelete": "SET NULL",
+        "onUpdate": "CASCADE"
       }
     },
     {

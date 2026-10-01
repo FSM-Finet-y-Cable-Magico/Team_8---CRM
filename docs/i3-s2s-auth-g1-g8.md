@@ -4,8 +4,8 @@
 
 |Dirección|Credencial|Uso|
 |---|---|---|
-|G8 → G1|`G1_API_URL` + `G1_API_KEY`|G8 consume la API de inventario de G1 y envía la key literal en `X-API-KEY`.|
-|G1 → G8|Key independiente emitida por G8; G8 guarda solo su SHA-256 en `G8_INTEGRATION_API_KEYS`|Un servicio externo podrá autenticarse en futuros endpoints S2S de G8.|
+|G8 → G1|`G1_API_URL` + `G1_API_KEY`|Flujo contractual vigente. G8 consume la API de inventario de G1 y envía la key literal en `X-API-KEY`.|
+|G1 → G8|`G8_INTEGRATION_API_KEYS=[]`|G1 confirmó que no consume operaciones G8 en el contrato actual. Solo comprobó el health público.|
 
 Una credencial nunca sustituye a la otra. No se generó, cambió, rehasheó ni reveló `G1_API_KEY`.
 
@@ -18,19 +18,17 @@ El acuerdo actualizado G8/G1 y el snapshot recibido de G1 describen `X-API-KEY`.
 3. compara la key recibida con `k.key === key.trim()`;
 4. aplica grupo y empresas.
 
-No se observó un segundo header, DTO, middleware ni comparación de password/hash en ese flujo HTTP. Por tanto, la credencial adicional mencionada por el usuario tiene un propósito no acreditado por el contrato inspeccionado y **no se envía ni se inventa un header para ella**. El adaptador y el smoke existentes conservan exclusivamente `G1_API_KEY → X-API-KEY`.
+G1 confirmó que no existe una segunda credencial HTTP para cada request. El adaptador y los smokes conservan exclusivamente `G1_API_KEY → X-API-KEY`.
 
 ## Contrato entrante G1 → G8
 
-Los documentos disponibles detallan la activación G8 → G1 y el cierre G3 → G1, pero no definen de forma suficiente un callback G1 → G8: faltan ruta, método, payload, evento, idempotencia y ownership ratificados.
+G1 confirmó que actualmente no consume endpoints de negocio G8. Estado: `G1_TO_G8_CONNECTIVITY=CONFIRMED_HEALTH` y `G1_TO_G8_BUSINESS_OPERATIONS=NOT_REQUIRED_CURRENT_CONTRACT`.
 
-Estado: **BLOQUEADO_CONTRATO_G1_INBOUND**.
-
-No se creó ningún endpoint de negocio ni payload ficticio. Solo se preparó una capa reusable para conectarla cuando exista contrato.
+No se creó `/api/integrations/g1/status`, callback ni payload inbound. La capa reusable preexistente permanece sin ampliar y desactivada con `G8_INTEGRATION_API_KEYS=[]`.
 
 ## Infraestructura entrante G8
 
-`IntegrationApiKeyGuard` es independiente del JWT humano. Requiere:
+`IntegrationApiKeyGuard` continúa disponible para un contrato futuro y es independiente del JWT humano. No tiene una ruta G1 activa. Si en el futuro se acuerda una operación inbound, requiere:
 
 - header `X-API-KEY`;
 - grupo permitido declarado con `@IntegrationGroups(...)`;
@@ -57,4 +55,6 @@ La rotación se realiza agregando una segunda entrada activa, distribuyendo la n
 
 Pruebas implementadas: 401 sin key, 401 key inválida y sin filtrarla, 403 grupo no permitido, 403 empresa fuera de scope, 200 autorizado con principal saneado y rotación con key antigua inactiva.
 
-La URL pública documentada de G8 es `https://team8-crm-production-3be0.up.railway.app/api`, configurable como `G8_PUBLIC_API_URL`. No está hardcodeada en lógica de negocio y no se modificaron variables Railway.
+La URL pública documentada de G8 es `https://team8-crm-production-3be0.up.railway.app/api`, configurable como `G8_PUBLIC_API_URL`. G1 confirmó acceso a su health; esto no crea una integración de negocio inbound. No se modificaron variables Railway.
+
+La evidencia real y los pendientes salientes están en [el cierre G8 → G1](i3-g1-real-integration-closure.md).

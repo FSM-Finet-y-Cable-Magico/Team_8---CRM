@@ -11,10 +11,10 @@ const base = {
   G1_INTEGRATION_ENABLED: 'false',
 };
 
-test('variables G1 opcionales no bloquean módulos independientes', () => {
+test('variables G1 opcionales no bloquean módulos independientes ni inventan credenciales', () => {
   const result = validateProductionEnv(base);
   assert.equal(result.ok, true);
-  assert.ok(result.rows.includes('G1_SECOND_CREDENTIAL: not used by observed X-API-KEY contract; pending G1 confirmation'));
+  assert.equal(result.rows.some(row => row.startsWith('G1_SECOND_CREDENTIAL:')), false);
   assert.ok(result.rows.includes('G8_S2S_AUTH: not configured'));
 });
 

@@ -40,8 +40,15 @@ export async function readCatalog(prisma) {
 }
 const actions = { a:'NO ACTION', r:'RESTRICT', c:'CASCADE', n:'SET NULL', d:'SET DEFAULT' };
 const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
-export const isAllowedDifference = row => row.status==='EXTRA_LEGACY'
-  && row.kind==='TABLE' && row.table==='_prisma_migrations';
+export const classifyDifference = row => {
+  if (row.status === 'MATCH') return null;
+  if (row.status === 'EXTRA_LEGACY' && row.kind === 'TABLE' && row.table === '_prisma_migrations') {
+    return 'TECHNICAL_ALLOWED_EXTRA';
+  }
+  if (row.status === 'EXTRA_LEGACY') return 'UNOWNED_EXTRA';
+  return 'CONTRACT_DIFFERENCE';
+};
+export const isAllowedDifference = row => classifyDifference(row)==='TECHNICAL_ALLOWED_EXTRA';
 function sameDefault(expected, observed, columnType) {
   const clean = value => {
     let result = normalizeExpression(value);
@@ -98,6 +105,12 @@ export function compareCatalog(global, actual) {
     if(!known&&globalNames.has(c.table)) add('CONSTRAINT',c.table,c.name,'EXTRA_LEGACY',null,c.definition,'Revisar restricciones adicionales; no eliminar');
   }
   for(const i of actual.indexes) if(!i.primary&&globalNames.has(i.table)&&!global.indexes.some(x=>x.table===i.table&&x.name===i.name)) add('INDEX',i.table,i.name,'EXTRA_LEGACY',null,i.definition,'Revisar índice adicional; no eliminar');
+  for (const row of rows) {
+    const classification=classifyDifference(row);
+    if (classification) row.classification=classification;
+    if (classification==='TECHNICAL_ALLOWED_EXTRA') row.owner='Prisma';
+    if (classification==='UNOWNED_EXTRA') row.owner='UNDETERMINED';
+  }
   const summary=rows.reduce((r,x)=>{r[x.status]=(r[x.status]??0)+1;return r;},{});
   const differences=rows.filter(r=>r.status!=='MATCH'&&!isAllowedDifference(r));
   return { contractHash:global.hash, capturedAt:actual.capturedAt, status:differences.length?'FAIL':'PASS', counts:global.counts, summary, rows };
@@ -112,7 +125,11 @@ export async function verifyMain() {
     if(process.env.GLOBAL_DB_REPORT_PATH) writeFileSync(process.env.GLOBAL_DB_REPORT_PATH,JSON.stringify(report,null,2)+'\n');
     if(process.env.GLOBAL_DB_CATALOG_PATH) writeFileSync(process.env.GLOBAL_DB_CATALOG_PATH,JSON.stringify(actual,null,2)+'\n');
     const blockingRows=report.rows.filter(r=>r.status!=='MATCH'&&!isAllowedDifference(r));
-    console.log(JSON.stringify({status:report.status,counts:report.counts,summary:report.summary,
+    const classifications=report.rows.reduce((result,row)=>{
+      if(row.classification) result[row.classification]=(result[row.classification]??0)+1;
+      return result;
+    },{});
+    console.log(JSON.stringify({status:report.status,counts:report.counts,summary:report.summary,classifications,
       allowedExtras:report.rows.filter(isAllowedDifference).length,
       missing:blockingRows.filter(r=>r.status.includes('MISSING')).length,
       different:blockingRows.filter(r=>!r.status.includes('MISSING')).length}));

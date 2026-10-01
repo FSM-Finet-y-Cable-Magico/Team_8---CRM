@@ -21,7 +21,7 @@ Estado: **PREPARADO_LOCAL / NO DESPLEGADO**. Este documento no autoriza merge, d
 |`FRONTEND_URL`|Uno o más orígenes HTTPS separados por coma.|
 |`TRUST_PROXY_HOPS`|0..10; propuesto 1 en Railway.|
 |`REQUEST_TIMEOUT_MS`|1.000..120.000; default 30.000.|
-|`G1_INTEGRATION_ENABLED`|Debe permanecer `false` hasta smoke y autorización operativa.|
+|`G1_INTEGRATION_ENABLED`|Debe permanecer `false` hasta aprobar el E2E con cierre originado por G3 real; la conciliación con cierre simulado por G1 ya está aprobada.|
 |`G1_API_URL`, `G1_API_KEY`|Obligatorias solo si se activa G1. La key es la entregada por G1.|
 |`G1_REQUEST_TIMEOUT_MS`|1..60.000; default 8.000.|
 |`G8_PUBLIC_API_URL`|Opcional; si existe debe ser HTTPS y terminar en `/api`. Valor documentado: `https://team8-crm-production-3be0.up.railway.app/api`.|
@@ -37,7 +37,7 @@ Ejecutar en el entorno preparado, sin pasar secretos como argumentos:
 npm.cmd run env:validate:production
 ```
 
-`scripts/validate-production-env.mjs` informa solamente estados y códigos de error; no imprime valores. Verifica formatos, dependencias condicionales de G1, configuración multikey S2S y el bloqueo Facturacion.cl. El contrato G1 observado solo usa `X-API-KEY`; la función de una segunda credencial permanece `PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA` hasta recibir confirmación explícita.
+`scripts/validate-production-env.mjs` informa solamente estados y códigos de error; no imprime valores. Verifica formatos, dependencias condicionales de G1, configuración multikey S2S y el bloqueo Facturacion.cl. El contrato G1 confirmado usa exclusivamente la key literal en `X-API-KEY`; no se define una segunda credencial.
 
 ## Health y verificaciones
 
@@ -53,15 +53,15 @@ Orden recomendado para el operador:
 3. ejecutar el validador en un entorno con la misma configuración;
 4. desplegar backend con root `/backend`;
 5. comprobar `/api/health` y `/api/ready`;
-6. mantener G1 desactivado hasta ejecutar el smoke GET con credencial legítima;
-7. no ejecutar POST G1 hasta coordinar IDs, series y autorización;
+6. mantener G1 desactivado aunque el smoke Railway y la conciliación interna G1 ya aprobaron; falta el E2E con cierre originado por G3 real;
+7. no repetir el POST G1; ejecutar en otra ventana el E2E coordinado con G3 real;
 8. ejecutar el smoke Billing de escritura solo en una ventana autorizada y con su flag explícito.
 
 ## Smokes pendientes
 
-- `npm.cmd run smoke:g1:readonly`: preparado, pero no ejecutado contra G1 real porque no hay key configurada legítimamente en este entorno.
+- Los GET reales de tipos, unidad y equipos por servicio aprobaron. Tras el cierre simulado por G1, equipos por servicio y unidad confirmaron instalación y asignación activa. No repetir los casos aprobados sin necesidad.
 - `npm.cmd run smoke:billing:write`: preparado y **no ejecutado**. Aborta antes de conectarse salvo `ALLOW_RAILWAY_BILLING_WRITE_TEST=1`, se niega a correr con `NODE_ENV=production`, usa datos `TEST_G8_BILLING_*` dentro de una única transacción y fuerza rollback.
-- POST G1, migraciones, reconcile y cambios de variables Railway: no ejecutados.
+- El POST G1 autorizado confirmó activación, idempotencia y el estado válido `PENDIENTE_CIERRE`; la conciliación posterior aprobó tras el cierre simulado por G1. No repetir el POST. Migraciones y cambios de variables Railway no fueron ejecutados.
 
 La advertencia Vite por un chunk cercano a 590 kB no impide el build, pero conviene planificar code splitting. La validación visual Billing sigue pendiente porque esta sesión no dispone del navegador integrado y el frontend no tiene framework de tests de componentes.
 

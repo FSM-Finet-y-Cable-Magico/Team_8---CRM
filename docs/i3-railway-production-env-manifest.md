@@ -27,8 +27,8 @@ Convenciones: **REQUIRED** significa necesario para arrancar o para declarar el 
 
 |NAME|REQUIRED / OPTIONAL|SECRET / NON_SECRET|CONSUMER|PURPOSE|FORMAT|DEFAULT|VALIDATION|NEEDED_AT_STARTUP|FEATURE_FLAG_RELATION|RAILWAY_ACTION|
 |---|---|---|---|---|---|---|---|---|---|---|
-|`G1_INTEGRATION_ENABLED`|REQUIRED|NON_SECRET|HttpG1InventoryClient|Gate de llamadas G1|`true`/`false`|`false`|mantener `false` hasta smoke aprobado|Sí|flag principal G1|KEEP `false`|
-|`G1_API_URL`|CONDITIONAL|NON_SECRET|HttpG1InventoryClient|Base URL pública G1|HTTPS sin credenciales/query/hash|ninguno|obligatoria si flag `true`|Sí|G1|KEEP valor recibido; no imprimir|
+|`G1_INTEGRATION_ENABLED`|REQUIRED|NON_SECRET|HttpG1InventoryClient|Gate común de GET y POST G1|`true`/`false`|`false`|mantener `false` hasta aprobar el E2E con cierre originado por G3 real; conciliación simulada G1 ya aprobada|Sí|flag principal G1|KEEP `false`|
+|`G1_API_URL`|CONDITIONAL|NON_SECRET|HttpG1InventoryClient|Base URL pública G1|Origen HTTPS exacto, sin `/api`, credenciales, query ni hash|ninguno|obligatoria si flag `true`|Sí|G1|ADD/VERIFY `https://backend-production-6ada.up.railway.app`|
 |`G1_API_KEY`|CONDITIONAL|SECRET|HttpG1InventoryClient|Header literal `X-API-KEY`|cadena opaca sin CR/LF|ninguno|obligatoria si flag `true`|Sí|G1|KEEP; ya existe, confirmar por canal seguro|
 |`G1_REQUEST_TIMEOUT_MS`|OPTIONAL|NON_SECRET|HttpG1InventoryClient|Timeout G1|entero 1–60000|`8000`|rango|Sí|G1|KEEP/VERIFY `8000`|
 
@@ -36,10 +36,10 @@ Convenciones: **REQUIRED** significa necesario para arrancar o para declarar el 
 
 |NAME|REQUIRED / OPTIONAL|SECRET / NON_SECRET|CONSUMER|PURPOSE|FORMAT|DEFAULT|VALIDATION|NEEDED_AT_STARTUP|FEATURE_FLAG_RELATION|RAILWAY_ACTION|
 |---|---|---|---|---|---|---|---|---|---|---|
-|`G8_INTEGRATION_API_KEYS`|OPTIONAL ahora; CONDITIONAL al publicar ruta S2S|SECRET por sensibilidad operativa aunque solo contiene hashes|IntegrationApiKeyGuard|Keys entrantes, rotación, grupo y scope|JSON `[{keyId,group,sha256,companies,active}]`|`[]`|SHA-256 hex 64, IDs únicos, grupo `G#`, empresas positivas|Sí|sin ruta de negocio todavía|ADD/VERIFY `[]`; cargar hashes reales solo tras contrato inbound|
+|`G8_INTEGRATION_API_KEYS`|OPTIONAL e inactiva|SECRET si alguna vez contiene hashes|IntegrationApiKeyGuard|Infraestructura inbound reservada|JSON `[{keyId,group,sha256,companies,active}]`|`[]`|mantener arreglo vacío bajo el contrato actual|Sí|G1 no consume operaciones G8|KEEP `[]`|
 |`G8_PUBLIC_API_URL`|OPTIONAL|NON_SECRET|scripts/documentación|Base pública G8|HTTPS terminada en `/api`|ninguno|URL válida|No|ninguna|ADD/VERIFY `https://team8-crm-production-3be0.up.railway.app/api`|
 
-No existe variable runtime para una “segunda contraseña/hash G1”. Su función sigue como `PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA`; no crear una variable hasta recibir el contrato exacto.
+No existe ni se necesita una segunda credencial HTTP G8 → G1. G1 confirmó el uso exclusivo de la key literal en `X-API-KEY`; no crear otra variable.
 
 ## G3, cobertura y geocodificación
 
@@ -107,6 +107,6 @@ No se definen usuario, RUT, clave, token, URL ni formato de DTE en variables por
 
 ## Variables nuevas necesarias antes del siguiente deploy
 
-Sin alterar las ya existentes, agregar o verificar: `NODE_ENV=production`, `FRONTEND_URL=<frontend HTTPS real>`, `TRUST_PROXY_HOPS=1`, `REQUEST_TIMEOUT_MS=30000`, `JWT_EXPIRES_IN=8h`, `BILLING_NOTIFICATION_MODE=disabled`, `FACTURACION_CL_INTEGRATION_ENABLED=false`, `FACTURACION_CL_COMPANIES=[]` y `SMTP_REJECT_UNAUTHORIZED=true`. `G8_INTEGRATION_API_KEYS=[]` es el estado seguro mientras no haya endpoint inbound contratado.
+Sin alterar las ya existentes, agregar o verificar: `NODE_ENV=production`, `FRONTEND_URL=<frontend HTTPS real>`, `TRUST_PROXY_HOPS=1`, `REQUEST_TIMEOUT_MS=30000`, `JWT_EXPIRES_IN=8h`, `BILLING_NOTIFICATION_MODE=disabled`, `FACTURACION_CL_INTEGRATION_ENABLED=false`, `FACTURACION_CL_COMPANIES=[]` y `SMTP_REJECT_UNAUTHORIZED=true`. Para G1, verificar la URL pública confirmada, mantener el flag en `false` y conservar `G8_INTEGRATION_API_KEYS=[]`.
 
 En el servicio frontend, `VITE_API_URL` es variable de build y `PORT` es variable runtime inyectada. El backend requiere `FRONTEND_URL` solo después de que Railway genere el dominio HTTPS frontend real.

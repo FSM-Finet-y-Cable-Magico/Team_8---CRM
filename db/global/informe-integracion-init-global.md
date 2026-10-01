@@ -1,5 +1,7 @@
 # Informe de integración · `init-global.sql`
 
+> **SNAPSHOT HISTÓRICO.** Este informe describe la fusión inicial de 90 tablas. El contrato vigente incorpora posteriormente `solicitud_instalacion_integracion` y tiene 91 tablas; consultar [README.md](README.md).
+
 **Fecha:** 2026-09-28
 **Objetivo:** fusionar los 4 esquemas (`init.sql`) de los grupos que comparten la base de
 datos en un único esquema global, consistente y aplicable a una base vacía.

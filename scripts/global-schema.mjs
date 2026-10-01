@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-export const CONTRACT_HASH = 'e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c';
+export const CONTRACT_HASH = 'bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1';
 export const contractPath = new URL('../db/global/init-global.sql', import.meta.url);
 export function splitSql(text) {
   const parts = []; let start = 0, depth = 0, quote = false;
@@ -97,6 +97,7 @@ export function normalizeCheckExpression(value) {
   return JSON.stringify(checkAst(match[1]));
 }
 export function ownerOf(table) {
+  if (table === 'solicitud_instalacion_integracion') return 'G3';
   if (/^(integracion_activacion|integracion_cierre|asignacion_equipo_servicio|unidad_equipo|tipo_equipo|bodega|stock_consumible|movimiento_inventario|historial_estado_equipo|orden_ingreso|detalle_orden_ingreso|proveedor|prestamo|donacion|salida_|baja_equipo|solicitud_baja|transferencia|inventario|secuencia_srv)/.test(table) && table !== 'integracion_activacion_g1') return 'G1';
   if (/^(olt|ont|registro_ont|caja_nap|puerto_nap|monitoreo_|alerta_monitoreo|orden_trabajo|historial_ot|uso_material_ot|poste|sector)/.test(table)) return 'G3/Ops';
   if (/^(sesion_portal|intento_fallido|solicitud_contrasena_wifi|preferencia_|notificacion_|consentimiento_)/.test(table)) return 'G2';
@@ -132,6 +133,6 @@ export function parseGlobalSchema(bytes = readFileSync(contractPath), verifyHash
   }
   for (const m of sql.matchAll(/CREATE (UNIQUE )?INDEX IF NOT EXISTS (\w+) ON (\w+) ([^;]+);/g)) indexes.push({ name:m[2], table:m[3], unique:Boolean(m[1]), definition:m[4], sql:m[0] });
   const counts = { tables:tables.length, columns:tables.reduce((n,t)=>n+t.columns.length,0), pk:tables.filter(t=>t.pk.length).length, fk:fks.length, checks:tables.reduce((n,t)=>n+t.checks.length,0), indexes:indexes.length };
-  if (verifyHash && (counts.tables!==90 || counts.columns!==877 || counts.pk!==90 || counts.fk!==210 || counts.checks!==33 || counts.indexes!==106)) throw new Error(`GLOBAL_PARSE_INCOMPLETE ${JSON.stringify(counts)}`);
+  if (verifyHash && (counts.tables!==91 || counts.columns!==897 || counts.pk!==91 || counts.fk!==211 || counts.checks!==33 || counts.indexes!==109)) throw new Error(`GLOBAL_PARSE_INCOMPLETE ${JSON.stringify(counts)}`);
   return { hash, tables, fks, indexes, counts };
 }

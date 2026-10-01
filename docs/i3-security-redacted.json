@@ -3,15 +3,6 @@
   "findings": [
     {
       "source": "G8_WORKTREE",
-      "file": "docs/i3-release-candidate-audit.md",
-      "line": 49,
-      "type": "DOCUMENTED_INTEGRATION_KEY",
-      "value": "[REDACTED]",
-      "status": "POTENTIAL_COMMITTED_SECRET",
-      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
-    },
-    {
-      "source": "G8_WORKTREE",
       "file": ".env.example",
       "line": 6,
       "type": "DATABASE_URI",
@@ -273,24 +264,6 @@
     },
     {
       "source": "G8_WORKTREE",
-      "file": "docs/i3-g1-global-readiness.md",
-      "line": 55,
-      "type": "DOCUMENTED_INTEGRATION_KEY",
-      "value": "[REDACTED]",
-      "status": "POTENTIAL_COMMITTED_SECRET",
-      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
-    },
-    {
-      "source": "G8_WORKTREE",
-      "file": "docs/i3-g1-inventory-integration.md",
-      "line": 27,
-      "type": "DOCUMENTED_INTEGRATION_KEY",
-      "value": "[REDACTED]",
-      "status": "POTENTIAL_COMMITTED_SECRET",
-      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
-    },
-    {
-      "source": "G8_WORKTREE",
       "file": "docs/i3-g3-fsm-integration.md",
       "line": 17,
       "type": "DOCUMENTED_INTEGRATION_KEY",
@@ -318,8 +291,8 @@
     },
     {
       "source": "G8_WORKTREE",
-      "file": "docs/i3-production-deployment-readiness.md",
-      "line": 40,
+      "file": "docs/i3-release-candidate-audit.md",
+      "line": 49,
       "type": "DOCUMENTED_INTEGRATION_KEY",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",

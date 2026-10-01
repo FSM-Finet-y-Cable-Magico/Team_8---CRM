@@ -96,8 +96,8 @@ Detalle: [G1 readiness](i3-g1-global-readiness.md).
 |Multiunidad|Trim/dedupe/orden estable; una cabecera/event_id; primera serie y lista completa|
 |Retry|Payload JSONB original + hash; no reconstrucción desde Cliente; requiere extensión aprobada|
 |Idempotencia|Unicidades G1 contrastadas; tracking COMPLETADA G8 indica aceptación del evento, no cierre físico|
-|Smoke GET|LISTO_PARA_SMOKE_TEST; abortó antes de HTTP por G1_API_KEY_NOT_CONFIGURED|
-|Smoke POST|Preparado con ALLOW_G1_ACTIVATION_WRITE=1; no ejecutado|
+|Smoke GET|Tipos, unidad y equipos por servicio `PASS_REAL`; asignación activa confirmada tras cierre simulado por G1|
+|Smoke POST|Ejecutado manualmente con autorización G1; HTTP PASS, repetición idéntica `duplicado=true`, asociación esperando cierre G3|
 |CU-61|PARCIAL_BLOQUEADO_G1_P2; stock actual no demuestra consumo mensual|
 
 G1_INTEGRATION_ENABLED local permanece false. No se inspeccionaron ni cambiaron flags del servicio Railway. No se usó la posible key encontrada en documentación.
@@ -125,7 +125,7 @@ La lectura de readiness a `2026-09-29T14:59:36.185Z` informó BD UP y esquema DE
 |LINT|npm.cmd run lint|Aprobado: cero errores, 79 advertencias preexistentes|
 |PRISMA|Formato/generación y auditoría|Completados; proyección alineada con excepción propuesta|
 |RAILWAY_READ_TEST|verify-global-db y probe-readiness-readonly|Lectura exitosa; verificador FAIL por drift real, readiness DEGRADED|
-|G1_REAL_GET_TEST|smoke-g1-readonly|Pendiente: falta key; aborto antes de HTTP|
+|G1_REAL_GET_TEST|smoke manual autorizado|Tipos, unidad, equipos por servicio y asignación activa `PASS_REAL`; cierre simulado por G1, E2E G3 real pendiente|
 |G1_REAL_WRITE_TEST|No ejecutado|Requiere aprobación y datos reales coordinados|
 |Revisión estática|git diff --check; hash canónico|Sin errores de whitespace; hash preservado|
 
@@ -133,7 +133,7 @@ Los tests del verificador usan catálogos sintéticos y no son evidencia de una 
 
 ## 17. Pruebas no ejecutadas
 
-Aplicación de SQL, baseline, migrate resolve/deploy, DDL/DML remoto y POST externos excluidos por instrucciones. GET G1 pendiente por falta de credencial legítimamente configurada. Health HTTP de producción pendiente de despliegue autorizado. No se hizo validación funcional completa entre los cuatro grupos ni prueba de datos/backfills reales de la reconciliación. No se auditó todo el historial Git ni se comprobó vigencia de posibles secretos.
+Aplicación de SQL, baseline, migrate resolve/deploy y DDL/DML remoto permanecen excluidos. Los GET G1 principales y el POST autorizado fueron ejecutados manualmente por el operador; Codex no hizo llamadas externas. La asociación sigue esperando cierre G3. No se hizo validación funcional completa entre los cuatro grupos ni prueba de datos/backfills reales de la reconciliación. No se auditó todo el historial Git ni se comprobó vigencia de posibles secretos.
 
 ## 18. Riesgos y dependencias
 
@@ -158,7 +158,7 @@ Plan de baseline: [documento detallado](i3-prisma-global-baseline-plan.md). Las 
 3. Operador autorizado aplica la reconciliación revisada; luego verificador READ ONLY debe demostrar igualdad o reportar diferencias pendientes. No saltar errores.
 4. Acordar baseline conjunto e historias futuras; registrar solo después de demostrar la igualdad, conservando trazabilidad.
 5. Decidir la extensión snapshot, versionar contrato y aplicar cambio aprobado antes del backend que lo requiere. Resolver casos históricos sin inventar información.
-6. G1 entrega/configura la key por canal seguro y confirma empresa/series/servicio y versión de API. Ejecutar primero smoke GET; ante 401 detener y revisar configuración. No probar variaciones.
+6. Completar el cierre G3 coordinado y verificar después la asociación G1. No ejecutar más POST reales en esta etapa ni cambiar el payload del evento ya aceptado.
 7. Coordinar con G1/G3 una prueba de activación real solo con autorización explícita; comprobar recepción, duplicado idéntico y cierre/asignación, sin declarar completos los CU bloqueados.
 8. Despliegue/flags solo después de las dependencias y aprobación operativa. Verificar entonces health HTTP y flujos autorizados. No hay push/merge pendiente ejecutado automáticamente por este informe.
 
@@ -187,7 +187,7 @@ Una nueva introspección Railway `READ ONLY` capturada el `2026-09-29T21:49:15.7
 
 Validación acumulada posterior a Billing: `npm.cmd test` aprobó 450 tests backend y 10 tests Node; 5 suites/8 tests permanecen omitidos. Build backend/frontend aprobado. Lint aprobado con cero errores y las mismas 79 advertencias preexistentes. Prisma válido. La validación visual quedó pendiente porque el navegador integrado no estaba disponible.
 
-Los bloqueos externos se mantienen: CU-61 **PENDIENTE_G1 / BLOQUEADO_CONTRATO**; proveedor de notificaciones o portal acordado **PENDIENTE_G2**; corte/reactivación técnica, CU-18 y CU-84 **PENDIENTE_G3 / BLOQUEADO_CONTRATO**; WiFi/SmartOLT **BLOQUEADO_CONTRATO**. `G1_INTEGRATION_ENABLED` no se activó y no se ejecutaron POST G1.
+Los bloqueos externos se mantienen: CU-61 **PENDIENTE_G1 / BLOQUEADO_CONTRATO**; proveedor de notificaciones o portal acordado **PENDIENTE_G2**; corte/reactivación técnica, CU-18 y CU-84 **PENDIENTE_G3 / BLOQUEADO_CONTRATO**; WiFi/SmartOLT **BLOQUEADO_CONTRATO**. `G1_INTEGRATION_ENABLED` no se activó. El POST autorizado confirmó transporte e idempotencia; no ejecutar más POST en esta etapa.
 
 ## 22. POST-RECONCILIATION STATE
 
@@ -197,17 +197,17 @@ El contrato canónico se versionó lógicamente con trazabilidad explícita: se 
 
 La nueva lectura Railway `READ ONLY` del `2026-09-29T22:48:09.805Z` obtuvo **PASS**: 1.495 coincidencias, cero objetos contractuales ausentes o diferentes y `_prisma_migrations` como único extra permitido. Las 3 diferencias de defaults eran casts textuales equivalentes; las 2 nulabilidades eran un error del parser ante PK compuesta; los 31 checks conservaban el mismo árbol semántico. La clasificación objeto por objeto está en [i3-global-verification-final.md](i3-global-verification-final.md).
 
-Se preparó autenticación S2S entrante G8 independiente de JWT, con SHA-256, `timingSafeEqual`, rotación, grupo y scope de empresa. No se creó endpoint de negocio porque no existe contrato G1 → G8 suficiente: **BLOQUEADO_CONTRATO_G1_INBOUND**. El código G1 observado confirma solo `X-API-KEY` para G8 → G1; no hay evidencia de una segunda credencial HTTP. Ver [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
+Se preparó autenticación S2S entrante G8 independiente de JWT, con SHA-256, `timingSafeEqual`, rotación, grupo y scope de empresa. No se creó endpoint de negocio porque G1 confirmó que no requiere operaciones G1 → G8 bajo el contrato actual: **NOT_REQUIRED_CURRENT_CONTRACT**. El código G1 observado confirma solo `X-API-KEY` para G8 → G1; no hay evidencia de una segunda credencial HTTP. Ver [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
 
 También quedaron listos el [validador de entorno y checklist de despliegue](i3-production-deployment-readiness.md) y el smoke Billing reversible con gate. Ninguno fue usado para desplegar, cambiar Railway ni ejecutar escrituras.
 
-Validación final: 55 suites y 455 tests backend aprobados, 5 suites/8 tests omitidos; 19 tests Node aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias frontend preexistentes; Prisma válido; auditor Prisma/global aprobado; `git diff --check` aprobado. El verificador Railway final fue exclusivamente `READ ONLY`. No se ejecutaron GET G1 reales, POST externos ni el smoke Billing de escritura.
+La validación histórica de esa fase aprobó 55 suites/455 tests backend y 19 tests Node. Después, el operador confirmó dos GET G1 reales (tipos y unidad); no se ejecutó el GET por servicio ni ningún POST externo. Las validaciones vigentes del cierre G1 se registran en [i3-g1-real-integration-closure.md](i3-g1-real-integration-closure.md).
 
 ## 23. RELEASE CANDIDATE, RAILWAY Y FACTURACION.CL
 
 Se preparó el manifiesto exhaustivo de variables productivas, el checklist operativo Railway y el plan de PR/merge. Railway no fue modificado. `G1_INTEGRATION_ENABLED`, `G3_INTEGRATION_ENABLED` y `FACTURACION_CL_INTEGRATION_ENABLED` permanecen en `false`; Billing debe desplegarse con notificaciones `disabled` mientras no exista proveedor.
 
-La autenticación real observada G8 → G1 continúa siendo `X-API-KEY`. No existe evidencia suficiente para asignar una función a la contraseña/hash adicional: estado **PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA**. La infraestructura G1 → G8 sigue **S2S_INFRA_READY / BLOQUEADO_CONTRATO_G1_INBOUND**, sin endpoint de negocio.
+La autenticación real G8 → G1 usa exclusivamente la key literal en `X-API-KEY`; G1 confirmó que no existe una segunda credencial por request. G1 puede consultar el health G8, pero no requiere operaciones inbound bajo el contrato actual: no hay endpoint de negocio y `G8_INTEGRATION_API_KEYS=[]`.
 
 La documentación pública oficial de Facturacion.cl fue auditada. Aunque describe login, token, procesamiento de archivo TXT/XML y recuperación de artefactos, faltan onboarding, ambientes/credenciales por empresa, módulos/tipos DTE, mapeo CRM, errores e idempotencia/reconciliación específicos. Se incorporó solo una frontera `TaxDocumentIssuer` multiempresa que falla cerrada, sin HTTP, rutas o UI de emisión: **ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL**. El runtime y el validador rechazan activar el flag hasta una futura implementación revisada; CU-86 permanece como metadata externa manual y `Factura`/`Pago` permanecen en Billing.
 
@@ -232,3 +232,25 @@ El resultado actual es **RAILWAY_READ_CONNECTED / GLOBAL_SCHEMA_EXTRA_OBJECTS / 
 Validación RC acumulada: 56 suites/459 tests backend aprobados, 5 suites/8 tests optativos omitidos; 21/21 tests Node globales y 3/3 tests de runtime frontend aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias preexistentes; Prisma generate/validate aprobado; auditor Prisma/global ejecutado. G1, G3 y Facturacion.cl continúan deshabilitados. No hubo commit, push, merge, deploy, DDL/DML ni modificaciones de Railway.
 
 Entregables nuevos: [despliegue frontend Railway](i3-railway-frontend-deployment.md), [verificación Railway READ ONLY](i3-railway-readonly-verification.md) y [readiness frontend](i3-frontend-production-readiness.md).
+
+## 25. RESOLUCIÓN DE EXTRAS DEL ESQUEMA GLOBAL
+
+La definición física completa de `solicitud_instalacion_integracion`, owner G3, fue confirmada e incorporada al canónico sin ejecutarla sobre Railway. El contrato queda en 91 tablas, 897 columnas, 91 PK, 211 FK, 33 checks y 109 índices, con hash `bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1`. No se reutilizó la forma de `integracion_instalacion_g3`, que es otra tabla.
+
+La búsqueda en todas las ramas disponibles encontró los cinco nombres inicialmente investigados por primera vez en `e46bb972`, únicamente como documentación de la lectura READ ONLY. No existe DDL, migración o código que atribuya su creación física. `lista_negra.nivel`, `log_notificacion.id_ot`, su FK y el índice compuesto no tienen referencia funcional actual y permanecen `UNOWNED_EXTRA`. Aunque las tablas tienen cero registros, solo son candidatos de revisión coordinada; no se autorizó su eliminación.
+
+Una repetición READ ONLY durante esta etapa observó 93 tablas y reveló un quinto `UNOWNED_EXTRA`: `solicitud_clave_wifi`. Ese nombre no existe en ninguna rama o commit disponible y su estructura no coincide con la tabla canónica `solicitud_contrasena_wifi`; no se atribuyó owner ni se consultaron datos de negocio.
+
+La verificación Railway posterior obtuvo 1.522 coincidencias, cero faltantes y confirmó toda la tabla G3 en `MATCH`. Permanecen cinco `UNOWNED_EXTRA`; únicamente `_prisma_migrations` es no bloqueante. El detalle y las próximas acciones están en [i3-global-extra-object-resolution.md](i3-global-extra-object-resolution.md).
+
+## 26. CIERRE REAL G8 → G1 Y CONCILIACIÓN SIMULADA
+
+G1 aceptó el evento de smoke autorizado y su repetición exacta con el mismo `event_id` y payload. La primera respuesta informó `duplicado=false`; la segunda, `duplicado=true`; ambas devolvieron `equipos_asociados=0`. Ese resultado fue correcto para el estado intermedio `PENDIENTE_CIERRE`, por lo que permanecen aprobadas la semántica de espera y la idempotencia.
+
+G1 simuló después el cierre técnico de la misma OT mediante su webhook. El GET posterior por servicio devolvió `QA-ONT-F-0001` como `Instalado en cliente`, con OT 900001 y fecha de instalación; el GET posterior por serie devolvió la asignación activa a cliente 1, servicio 900001, contrato 900001 y OT 900001.
+
+Estados finales: `G8_TO_G1_REAL_RAILWAY=PASS`, `G1_RECONCILIATION_LOGIC=PASS`, `G1_ACTIVATION_CLOSURE_RECONCILIATION=PASS` y `G1_ACTIVE_ASSIGNMENT=PASS`. El cierre fue simulado por G1, por lo que `FULL_REAL_G3_TO_G1_CROSS_GROUP_E2E=PENDING`. No se atribuye el segundo evento a G3 real.
+
+El tracking G8 conserva la regla segura: un 2xx con `equipos_asociados=0` queda `PENDIENTE_SINCRONIZACION_G1`, no `ERROR_G1` ni `COMPLETADA`. La asociación final del smoke se acreditó mediante lecturas posteriores. No se debe reutilizar el evento con otro payload ni ejecutar más POST reales en esta etapa.
+
+Validación local vigente: 3 suites/64 tests G1 y 56 suites/476 tests backend aprobados; 5 suites/8 tests opcionales omitidos; 22/22 tests de herramientas globales y 3/3 tests de runtime frontend aprobados; build backend/frontend y Prisma generate/validate aprobados; lint con cero errores y 78 advertencias frontend preexistentes; `git diff --check` aprobado.

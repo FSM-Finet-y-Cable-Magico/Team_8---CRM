@@ -1,5 +1,7 @@
 # Verificación global final posterior a reconciliación
 
+> **SNAPSHOT HISTÓRICO 2026-09-29.** El contrato vigente fue reemplazado por el cambio G3 del 30-09-2026. El hash y los conteos de este documento se conservan como evidencia de la verificación anterior; el estado actual está en [i3-global-database-contract.md](i3-global-database-contract.md) y [i3-global-extra-object-resolution.md](i3-global-extra-object-resolution.md).
+
 ## Resultado
 
 Lectura real de Railway capturada el `2026-09-29T22:48:09.805Z` mediante `scripts/verify-global-db.mjs`, dentro de una transacción PostgreSQL `READ ONLY`.

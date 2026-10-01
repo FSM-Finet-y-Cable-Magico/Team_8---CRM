@@ -1,4 +1,4 @@
-﻿import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { IntegracionInstalacionG3, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -116,6 +116,30 @@ export class G1ActivationService {
 
     try {
       const result = await this.client.sendActivation(payload);
+      const responseIssue = this.activationResponseIssue(result.data, payload);
+      if (responseIssue) {
+        const state = ['G1_EQUIPMENT_ASSOCIATION_PENDING', 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED'].includes(responseIssue)
+          ? 'PENDIENTE_SINCRONIZACION_G1'
+          : 'ERROR_G1';
+        const updated = await this.prisma.integracionActivacionG1.update({
+          where: { idIntegracion },
+          data: {
+            estadoIntegracion: state,
+            respuestaEstadoG1: result.data as Prisma.InputJsonValue,
+            fechaCompletado: null,
+            ultimoErrorSanitizado: responseIssue,
+          },
+        });
+        console.warn('Integración G1 aceptada sin asociación funcional confirmada',
+          this.logContext(record, result.status, result.durationMs, state));
+        await this.audit.record({
+          accion: retry ? 'REINTENTAR_ACTIVACION_G1' : 'ACTIVACION_G1_PENDIENTE',
+          entidadAfectada: 'integracion_activacion_g1',
+          idEntidadAfectada: idIntegracion,
+          valorNuevo: { ...this.auditContext(record), statusHttp: result.status, resultado: state, codigo: responseIssue },
+        });
+        return updated;
+      }
       const updated = await this.prisma.integracionActivacionG1.update({
         where: { idIntegracion },
         data: {
@@ -157,6 +181,20 @@ export class G1ActivationService {
       });
       return updated;
     }
+  }
+
+  private activationResponseIssue(data: Record<string, unknown>, payload: G1ActivationPayload) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return 'G1_ACTIVATION_RESPONSE_INVALID';
+    if (data.event_id !== undefined && data.event_id !== payload.event_id) return 'G1_EVENT_ID_MISMATCH';
+    if (data.id_servicio !== undefined && data.id_servicio !== payload.id_servicio) return 'G1_SERVICE_ID_MISMATCH';
+    if (data.equipos_asociados === undefined) return 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED';
+    if (!Number.isSafeInteger(data.equipos_asociados) || Number(data.equipos_asociados) < 0) {
+      return 'G1_EQUIPMENT_ASSOCIATION_RESPONSE_INVALID';
+    }
+    // G1 can accept the activation before technical closure; zero remains pending, never a definitive failure.
+    if (data.equipos_asociados === 0 && payload.equipos.length > 0) return 'G1_EQUIPMENT_ASSOCIATION_PENDING';
+    if (data.equipos_asociados !== payload.equipos.length) return 'G1_EQUIPMENT_ASSOCIATION_INCOMPLETE';
+    return null;
   }
 
   private extractSeries(closure: Record<string, unknown>) {

@@ -1,6 +1,10 @@
 # Contrato global y proyección G8
 
-Estado al 29-09-2026: **CONTRATO ACTUALIZADO / RAILWAY READ ONLY PASS**. La fuente física prioritaria es [init-global.sql](../db/global/init-global.sql), SHA-256 `e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c`. Contiene 90 tablas, 877 columnas, 90 PK, 210 FK, 33 checks y 106 índices explícitos; no incluye seeds.
+Estado al 30-09-2026: **CONTRATO G3 ACTUALIZADO / RAILWAY READ ONLY CON EXTRAS SIN DUEÑO**. La fuente física prioritaria es [init-global.sql](../db/global/init-global.sql), SHA-256 `bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1`. Contiene 91 tablas, 897 columnas, 91 PK, 211 FK, 33 checks y 109 índices explícitos; no incluye seeds.
+
+## CONTRACT_CHANGE 2026-09-30
+
+`solicitud_instalacion_integracion` pasa a `PHYSICAL_DEFINITION_CONFIRMED`, owner G3. Se incorporaron sus 20 columnas físicas, PK, FK `id_ot` con `ON UPDATE CASCADE / ON DELETE SET NULL`, uniques de `request_id` e `id_ot`, e índice de `id_empresa`. No tiene CHECK constraints. Railway ya contenía la tabla; no se ejecutó ni se debe ejecutar este init sobre la base existente para aplicar el cambio.
 
 ## CONTRACT_CHANGE 2026-09-29
 
@@ -30,7 +34,7 @@ El contrato anterior y los reportes que mostraban `PENDIENTE_RECONCILIACION_GLOB
 
 ## Proyección Prisma
 
-Se mantienen 58 modelos para las partes que usa G8, sin duplicar las 90 tablas globales. `npm.cmd run db:audit:prisma-global` produce [el reporte completo](i3-prisma-vs-global-schema.md) y JSON. Resultado vigente: 799 coincidencias, 36 columnas globales no modeladas, 304 objetos externos, 47 índices físicos no modelados y 65 FK físicas no modeladas. No hay objetos `PRISMA_ONLY`.
+Se mantienen 58 modelos para las partes que usa G8, sin duplicar las 91 tablas globales. `npm.cmd run db:audit:prisma-global` produce [el reporte completo](i3-prisma-vs-global-schema.md) y JSON. Resultado vigente: 799 coincidencias, 36 columnas globales no modeladas, 325 objetos externos, 50 índices físicos no modelados y 65 FK físicas no modeladas. No hay objetos `PRISMA_ONLY`.
 
 Los índices y FK con Prisma `null` se conservan en PostgreSQL. No se usa `db push` para eliminarlos. El auditor de Prisma no intenta deducir defaults ni checks SQL; esos objetos los valida el comparador físico.
 
@@ -45,4 +49,4 @@ La normalización ahora reconoce de forma conservadora:
 - paréntesis redundantes alrededor de átomos casteados y arrays usados por `ANY`, preservando el resto de la expresión y el árbol `AND`/`OR`;
 - casts textuales equivalentes en checks.
 
-Las pruebas negativas demuestran que no se igualan expresiones con distinta precedencia ni literales diferentes. La lectura Railway del `2026-09-29T22:48:09.805Z` obtuvo `PASS`, con 1.495 coincidencias y solo `_prisma_migrations` como extra permitido. Ver [clasificación final](i3-global-verification-final.md).
+Las pruebas negativas demuestran que no se igualan expresiones con distinta precedencia ni literales diferentes. La lectura Railway posterior al cambio obtuvo 1.522 coincidencias, cero faltantes, `_prisma_migrations` permitido y cinco `UNOWNED_EXTRA`. La tabla G3 y todos sus objetos están en `MATCH`; el `FAIL` residual no corresponde a ella. Ver [resolución de extras](i3-global-extra-object-resolution.md).

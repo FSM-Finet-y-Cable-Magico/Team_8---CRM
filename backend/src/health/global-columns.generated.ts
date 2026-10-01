@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 e3f43ed3e58fba9a73e8a3dd566e2ab245061bcdb6bfb60ac69c6be21692834c; no seeds or credentials.
+// Generated from init-global.sql SHA256 bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -5260,6 +5260,126 @@ export const GLOBAL_COLUMNS = [
     "table": "integracion_instalacion_g3",
     "name": "updated_at",
     "type": "timestamp",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_solicitud",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "request_id",
+    "type": "varchar(100)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "trace_id",
+    "type": "varchar(100)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "hash_payload",
+    "type": "varchar(64)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_prospecto_externo",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_contrato_externo",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_plan_externo",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "rut",
+    "type": "varchar(12)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "nombre_completo",
+    "type": "varchar(120)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "telefono",
+    "type": "varchar(21)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "direccion_completa",
+    "type": "varchar(200)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "comuna",
+    "type": "varchar(80)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "ciudad",
+    "type": "varchar(80)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "observaciones",
+    "type": "text",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "requisitos_equipamiento",
+    "type": "jsonb",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "id_ot",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "fecha_creacion",
+    "type": "timestamptz",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_instalacion_integracion",
+    "name": "fecha_actualizacion",
+    "type": "timestamptz",
     "nullable": false
   }
 ];

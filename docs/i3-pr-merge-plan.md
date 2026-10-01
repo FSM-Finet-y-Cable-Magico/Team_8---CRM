@@ -8,7 +8,7 @@ Entregar el Incremento 3 completo sobre el esquema global reconciliado: control 
 
 ### Base de datos y Prisma
 
-- Proyección Prisma alineada con el contrato global final de 90 tablas y 877 columnas descrito en los informes del incremento.
+- Proyección Prisma alineada con el contrato canónico vigente de 91 tablas y 897 columnas. La extensión G3 `solicitud_instalacion_integracion` ya tiene definición física confirmada e incorporada.
 - `integracion_activacion_g1.payload_snapshot` nullable y tracking para activación/integraciones.
 - Modelos Billing y relaciones multiempresa.
 - `DocumentoTributarioExterno` aditivo, con identidad única por empresa/tipo/emisor/folio y estados `REGISTRADO`/`ANULADO`.
@@ -76,7 +76,7 @@ git diff --check
 Además:
 
 - Ejecutar `npm.cmd run env:validate:production` con un entorno seguro y valores reales, sin registrar salida sensible.
-- Ejecutar `npm.cmd run db:verify:global:railway`. El resultado actual conecta y encuentra cinco objetos inesperados además de `_prisma_migrations`; deben clasificarse globalmente y obtener `PASS` antes del deploy.
+- Ejecutar `npm.cmd run db:verify:global:railway`. El resultado actual confirma la tabla G3 en `MATCH`, cinco extras sin dueño y `_prisma_migrations` como único extra técnico permitido; debe obtenerse `PASS` antes del deploy.
 - Construir y ejecutar la imagen frontend con Docker en CI o en un equipo con daemon activo; esta sesión solo pudo hacer build y tests estáticos.
 - No ejecutar suites DB/write opt-in sin entorno y autorización explícitos.
 - Verificar `GET /api/health` y `GET /api/ready` después del deploy, no antes mediante un cambio de Railway no autorizado.
@@ -104,6 +104,6 @@ Además:
 
 - Aplicación: restaurar el deployment anterior conocido como sano.
 - Variables: revertir únicamente el cambio documentado en la ventana; no eliminar secretos compartidos.
-- DB: este bloque final no agrega DDL. Para cualquier DDL incluido por otras partes del incremento se debe usar el respaldo y rollback del plan global, nunca `prisma migrate reset`.
+- DB: el init canónico incorpora la tabla G3 ya existente para representar Railway; no es una migración que deba ejecutarse sobre Railway. Para cualquier DDL futuro se debe usar respaldo y rollback coordinados, nunca `prisma migrate reset`.
 - Integraciones: volver flags a `false`; conservar estados de tracking para reconciliación y no reintentar automáticamente resultados indeterminados.
 - Si una emisión tributaria futura queda en timeout, usar estado `RESULTADO_INDETERMINADO` y conciliación del proveedor; nunca repetir ciegamente.

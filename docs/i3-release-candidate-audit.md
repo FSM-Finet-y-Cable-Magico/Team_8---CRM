@@ -1,6 +1,6 @@
 # Auditoría Release Candidate — Incremento 3
 
-Fecha: 2026-09-29 a 2026-09-30. Rama auditada: `feature/incremento3`, base observada al iniciar: `8c110a43`. La etapa no ejecutó commit, push, deploy, migraciones, writes Railway ni llamadas externas reales.
+Fecha: 2026-09-29 a 2026-09-30. Rama auditada: `feature/incremento3`, base observada al iniciar: `8c110a43`. Codex no ejecutó commit, push, deploy, migraciones, writes Railway ni llamadas externas reales. Este informe incorpora la evidencia comunicada de los smokes G1 manuales y autorizados, incluidos el POST inicial y su repetición idéntica.
 
 ## Resultado
 
@@ -17,14 +17,14 @@ Ninguno identificado después de las correcciones y validaciones de esta etapa.
 1. **Variables críticas no verificadas en Railway.** `FRONTEND_URL`, `NODE_ENV`, proxy y modos deshabilitados deben confirmarse con el manifiesto. El código ahora aborta en producción si `JWT_SECRET` es inseguro o `FRONTEND_URL` no es HTTPS válido.
 2. **El commit final aún no existe.** Esta sesión tiene prohibido hacer commit/push; el humano debe revisar y versionar el diff aprobado.
 3. **Facturacion.cl no puede habilitarse.** Falta el contrato técnico específico del proyecto; el runtime y el validador abortan si el flag está en `true`.
-4. **Railway tiene cinco objetos globales inesperados.** La lectura actual llegó correctamente por TCP Proxy y confirmó 1.495 coincidencias, cero faltantes y `payload_snapshot` en `MATCH`, pero además de `_prisma_migrations` encontró una tabla, dos columnas, una FK y un índice fuera del contrato. Los responsables globales deben clasificarlos antes del deploy; no se modificó la base.
+4. **Railway mantiene cinco objetos sin dueño.** La lectura actual llegó correctamente por TCP Proxy y confirmó 1.522 coincidencias y cero faltantes. `solicitud_instalacion_integracion` ya forma parte del contrato y está en `MATCH`. Dos columnas, una FK, un índice y `solicitud_clave_wifi` permanecen `UNOWNED_EXTRA`; no se modificó la base.
 
 Los contratos G1/G3/G2 bloquean sus capacidades, pero no el deploy base porque sus flags permanecen deshabilitados.
 
 ## HIGH
 
 - **Prueba Docker runtime pendiente.** El stage productivo Nginx, health y fallback SPA están implementados y probados estáticamente, pero el daemon Docker local no estaba activo. CI o un equipo con Docker debe ejecutar la imagen antes del deploy.
-- **G1 outbound pendiente de prueba real.** Existe URL/key declarada por el usuario, pero no se ejecutó GET ni POST; el flag debe seguir en `false` hasta confirmar auth y smoke.
+- **G1 outbound y conciliación G1 probados en Railway real.** URL, `X-API-KEY`, scope, lecturas, activación, retry idempotente, semántica `PENDIENTE_CIERRE` y asignación activa están confirmados. G1 simuló el cierre técnico; el E2E con G3 real continúa pendiente y el flag sigue en `false`.
 - **S2S inbound sin ruta de negocio.** El guard es robusto, pero no hay contrato de operación G1 → G8; configurar hashes no publica una capacidad funcional.
 
 ## MEDIUM
@@ -73,11 +73,11 @@ Los contratos G1/G3/G2 bloquean sus capacidades, pero no el deploy base porque s
 
 |Área|Estado RC|Condición|
 |---|---|---|
-|DB global/Prisma|CONTRACT_MATCH + UNEXPECTED_EXTRAS|90 tablas contractuales y 1.495 checks coinciden; revisar cinco objetos globales adicionales|
+|DB global/Prisma|CONTRACT_MATCH + UNOWNED_EXTRAS|91 tablas contractuales y 1.522 verificaciones coinciden; resolver cinco objetos sin dueño|
 |Billing|READY con proveedor de avisos deshabilitado|No ejecutar smoke write sin autorización|
 |CU-86 DocumentoTributarioExterno|READY|Sigue como metadata externa manual, separado de Factura/Pago|
-|G8 → G1|CODE_READY / OPERATIONS_BLOCKED|Confirmar key, credencial secundaria y smoke; flag false|
-|G1 → G8|S2S_INFRA_READY / BLOQUEADO_CONTRATO_G1_INBOUND|Falta endpoint/operación contractual|
+|G8 → G1|REAL_RAILWAY_PASS / G1_RECONCILIATION_PASS|Cierre simulado por G1; E2E con G3 real pendiente; no más POST; flag false|
+|G1 → G8|NOT_REQUIRED_CURRENT_CONTRACT|No existen operaciones inbound acordadas; `G8_INTEGRATION_API_KEYS=[]` permanece vacío|
 |G3|BLOQUEADO_CONTRATO|Flag false|
 |G2/notificaciones|PENDIENTE_G2|Modo Billing disabled|
 |Facturacion.cl|ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL|Flag false; sin HTTP ni emisión|
@@ -88,8 +88,8 @@ El RC puede avanzar a PR cuando todos los tests/build/lint/Prisma/diff y el audi
 
 ## Validación ejecutada en esta etapa
 
-- Backend: 56 suites/459 tests aprobados; 5 suites/8 tests optativos omitidos.
-- Herramientas Node globales: 21/21 aprobados; runtime frontend: 3/3 aprobados.
+- Backend: 56 suites/476 tests aprobados; 5 suites/8 tests optativos omitidos.
+- Herramientas Node globales: 22/22 aprobados; runtime frontend: 3/3 aprobados.
 - Build backend y frontend: aprobado; Vite conserva advertencia de bundle >500 kB.
 - Lint: 0 errores y 78 advertencias frontend preexistentes.
 - Prisma generate/validate: aprobado.
@@ -97,4 +97,4 @@ El RC puede avanzar a PR cuando todos los tests/build/lint/Prisma/diff y el audi
 - Validador de producción con configuración sintética segura: `PASS`.
 - Scan heurístico redacted: ejecutado; conserva hallazgos G1 anteriores cuando el snapshot no está montado. Las coincidencias requieren clasificación humana y no contienen el valor en el reporte.
 - Frontend runtime: 3/3 tests estáticos PASS; build general y build con URL API pública PASS; prueba de contenedor omitida por daemon Docker no disponible.
-- Verificador Railway READ ONLY: conexión por TCP Proxy exitosa; `FAIL` por cinco objetos inesperados, con 1.495 coincidencias y cero faltantes. No hubo escrituras.
+- Verificador Railway READ ONLY: conexión por TCP Proxy exitosa; `FAIL` por cinco `UNOWNED_EXTRA`, con 1.522 coincidencias y cero faltantes. La extensión G3 está en `MATCH` y `_prisma_migrations` es el único extra permitido. No hubo escrituras.

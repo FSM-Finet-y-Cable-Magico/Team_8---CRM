@@ -36,7 +36,7 @@ export class G1InventoryService {
         entidadAfectada: 'integracion_g1',
         valorNuevo: { idEmpresa, statusHttp: result.status, duracionMs: result.durationMs, cantidad: result.data.length },
       });
-      return { fuente: 'G1', estadoContrato: 'PENDIENTE_DESPLIEGUE_G1', data: result.data };
+      return { fuente: 'G1', estadoContrato: 'G1_REAL_SMOKE_PASS', data: result.data };
     } catch (error) {
       throw this.httpError(error);
     }
@@ -59,6 +59,7 @@ export class G1InventoryService {
       });
       return {
         fuente: 'G1',
+        estadoContrato: 'G1_REAL_SMOKE_PASS',
         data: { ...result.data, estadoFisicoOficial: isOfficialG1PhysicalState(result.data.estado) },
       };
     } catch (error) {
@@ -85,7 +86,7 @@ export class G1InventoryService {
       });
       return {
         fuente: 'G1',
-        estadoContrato: 'PENDIENTE_DESPLIEGUE_G1',
+        estadoContrato: 'G1_REAL_SMOKE_PASS',
         data: result.data.map((unit) => ({ ...unit, estadoFisicoOficial: isOfficialG1PhysicalState(unit.estado) })),
       };
     } catch (error) {

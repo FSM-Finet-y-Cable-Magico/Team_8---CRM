@@ -86,8 +86,6 @@ export function validateProductionEnv(env) {
   const g1KeyValid = !g1KeySet || (env.G1_API_KEY === env.G1_API_KEY.trim() && !/[\r\n]/.test(env.G1_API_KEY));
   add('G1_API_URL', g1UrlSet ? (g1UrlValid ? 'configured' : 'invalid') : 'not configured (integration disabled)', g1UrlValid && (!g1Enabled || g1UrlSet));
   add('G1_API_KEY', g1KeySet ? (g1KeyValid ? 'configured' : 'invalid') : 'not configured (integration disabled)', g1KeyValid && (!g1Enabled || g1KeySet));
-  add('G1_SECOND_CREDENTIAL', 'not used by observed X-API-KEY contract; pending G1 confirmation');
-
   const timeout = Number(env.G1_REQUEST_TIMEOUT_MS ?? 8000);
   add('G1_REQUEST_TIMEOUT_MS', Number.isInteger(timeout) && timeout >= 1 && timeout <= 60000 ? 'configured' : 'invalid', Number.isInteger(timeout) && timeout >= 1 && timeout <= 60000);
 

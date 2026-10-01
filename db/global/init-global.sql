@@ -1,6 +1,8 @@
 -- CONTRACT_CHANGE 2026-09-29:
 -- - REMOVE invalid unique prospecto_id_cliente_key (un cliente puede relacionarse con varios prospectos).
 -- - ADD integracion_activacion_g1.payload_snapshot JSONB NULL.
+-- CONTRACT_CHANGE 2026-09-30:
+-- - ADD solicitud_instalacion_integracion from confirmed G8-G3 physical contract.
 -- ============================================================================
 --  init-global.sql · Esquema consolidado de la base de datos compartida
 --  Grupos integrados:
@@ -11,7 +13,7 @@
 --  Generado: 2026-09-28 · Validado con PostgreSQL
 --
 --  Cómo se construyó:
---    · Unión de las 90 tablas de los 4 esquemas (no se descarta ninguna).
+--    · Contrato vigente de 91 tablas funcionales (no se descarta ninguna).
 --    · Unión de columnas: si una tabla existe en varios grupos, conserva
 --      las columnas de todos.
 --    · Tipos ensanchados al mayor dominio compatible (VARCHAR de mayor
@@ -1250,6 +1252,29 @@ CREATE TABLE IF NOT EXISTS integracion_instalacion_g3 (
     CONSTRAINT integracion_instalacion_g3_intentos_check CHECK ((intentos >= 0))
 );
 
+CREATE TABLE IF NOT EXISTS solicitud_instalacion_integracion (
+    id_solicitud                 SERIAL PRIMARY KEY,
+    request_id                   VARCHAR(100) NOT NULL,
+    trace_id                     VARCHAR(100) NOT NULL,
+    hash_payload                 VARCHAR(64) NOT NULL,
+    id_empresa                   INTEGER NOT NULL,
+    id_prospecto_externo         INTEGER NOT NULL,
+    id_contrato_externo          INTEGER NOT NULL,
+    id_plan_externo              INTEGER,
+    rut                          VARCHAR(12) NOT NULL,
+    nombre_completo              VARCHAR(120) NOT NULL,
+    telefono                     VARCHAR(21) NOT NULL,
+    direccion_completa           VARCHAR(200) NOT NULL,
+    comuna                       VARCHAR(80) NOT NULL,
+    ciudad                       VARCHAR(80),
+    observaciones                TEXT,
+    requisitos_equipamiento      JSONB,
+    id_ot                        INTEGER,
+    estado                       VARCHAR(30) NOT NULL,
+    fecha_creacion               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 
 -- ============================================================================
 -- ÍNDICES Y RESTRICCIONES DE UNICIDAD
@@ -1272,6 +1297,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS integracion_activacion_g1_event_id_key ON inte
 CREATE UNIQUE INDEX IF NOT EXISTS integracion_cierre_clave_idempotencia_key ON integracion_cierre (clave_idempotencia);
 CREATE UNIQUE INDEX IF NOT EXISTS integracion_evento_entrante_id_integracion_event_type_key ON integracion_evento_entrante (id_integracion, event_type);
 CREATE UNIQUE INDEX IF NOT EXISTS integracion_instalacion_g3_request_id_key ON integracion_instalacion_g3 (request_id);
+CREATE UNIQUE INDEX IF NOT EXISTS solicitud_instalacion_integracion_request_id_key ON solicitud_instalacion_integracion (request_id);
+CREATE UNIQUE INDEX IF NOT EXISTS solicitud_instalacion_integracion_id_ot_key ON solicitud_instalacion_integracion (id_ot);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inventario_tecnico_tipo ON inventario_personal_tecnico (id_tecnico, id_tipo_equipo);
 CREATE UNIQUE INDEX IF NOT EXISTS llamada_cortes_id_ot_key ON llamada_cortes (id_ot);
 CREATE UNIQUE INDEX IF NOT EXISTS orden_ingreso_correlativo_key ON orden_ingreso (correlativo);
@@ -1330,6 +1357,7 @@ CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_contrato_fecha_solicitu
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_codigo_ot_g3_idx ON integracion_instalacion_g3 (id_empresa, codigo_ot_g3);
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_estado_integracion_fecha_ ON integracion_instalacion_g3 (id_empresa, estado_integracion, fecha_solicitud);
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_id_ot_g3_idx ON integracion_instalacion_g3 (id_empresa, id_ot_g3);
+CREATE INDEX IF NOT EXISTS solicitud_instalacion_integracion_id_empresa_idx ON solicitud_instalacion_integracion (id_empresa);
 CREATE INDEX IF NOT EXISTS intento_fallido_rut_intentado_bloqueado_hasta_idx ON intento_fallido (rut_intentado, bloqueado_hasta);
 CREATE INDEX IF NOT EXISTS log_notificacion_id_alerta_idx ON log_notificacion (id_alerta);
 CREATE INDEX IF NOT EXISTS log_notificacion_id_cliente_idx ON log_notificacion (id_cliente);
@@ -1825,6 +1853,11 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
     ALTER TABLE integracion_instalacion_g3 ADD CONSTRAINT integracion_instalacion_g3_id_servicio_fkey
         FOREIGN KEY (id_servicio) REFERENCES servicio_contratado (id_servicio) ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE solicitud_instalacion_integracion ADD CONSTRAINT solicitud_instalacion_integracion_id_ot_fkey
+        FOREIGN KEY (id_ot) REFERENCES orden_trabajo (id_ot) ON DELETE SET NULL ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN

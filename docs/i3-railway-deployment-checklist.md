@@ -23,9 +23,10 @@ En Railway: proyecto → servicio backend → **Variables**.
 - [ ] Configurar `TRUST_PROXY_HOPS=1` y `REQUEST_TIMEOUT_MS=30000`.
 - [ ] Configurar `BILLING_NOTIFICATION_MODE=disabled` hasta existir proveedor autorizado.
 - [ ] Configurar `FACTURACION_CL_INTEGRATION_ENABLED=false` y `FACTURACION_CL_COMPANIES=[]`.
-- [ ] Mantener `G8_INTEGRATION_API_KEYS=[]` hasta acordar la ruta inbound, sus operaciones y scopes. Luego cargar solo hashes SHA-256, nunca keys literales.
+- [ ] Mantener `G8_INTEGRATION_API_KEYS=[]`: G1 no consume operaciones G8 bajo el contrato actual.
+- [ ] Verificar `G1_API_URL=https://backend-production-6ada.up.railway.app`, sin `/api` final, y conservar `G1_INTEGRATION_ENABLED=false`.
 - [ ] Si SMTP no está contratado, mantener `SMTP_HOST` vacío. Si se configura, exigir TLS/certificado válido y cargar usuario/password por el gestor de secretos.
-- [ ] No crear una variable para la credencial secundaria G1 hasta que G1 entregue nombre, transporte y validación exactos.
+- [ ] No crear una credencial secundaria: G1 confirmó que cada request usa solamente la key literal en `X-API-KEY`.
 - [ ] Usar **Raw Editor** solo para nombres/valores ya aprobados; revisar dos veces antes de guardar. No pegar el contenido en tickets o PR.
 
 Ejecutar fuera de Railway, con un entorno seguro que contenga los valores reales:
@@ -91,11 +92,12 @@ La imagen genera Prisma y compila en build. No ejecuta `prisma migrate`, seed ni
 
 ### G1
 
-- [ ] Obtener confirmación escrita del contrato `X-API-KEY` y de la credencial secundaria.
-- [ ] Validar primero el smoke GET autorizado con IDs de prueba.
+- [x] Confirmar URL pública, HTTPS, `X-API-KEY`, scope empresa 1, tipos de equipo y unidad por serie.
+- [x] Validar `GET /api/integraciones/equipos` antes y después del cierre simulado por G1: lista vacía en `PENDIENTE_CIERRE` y equipo instalado tras la conciliación.
 - [ ] Ante 401/403, detenerse: no probar encabezados, hashes o claves alternativos.
-- [ ] Un POST de activación requiere autorización explícita, datos coordinados e idempotencia observable.
-- [ ] Solo después de aprobar la prueba, cambiar `G1_INTEGRATION_ENABLED` en una ventana controlada.
+- [x] Confirmar HTTP e idempotencia del POST autorizado: mismo evento/payload devolvió `duplicado=true` sin duplicar.
+- [ ] No ejecutar más POST reales en esta etapa; coordinar posteriormente el E2E con un cierre originado por G3 real.
+- [ ] Solo después de aprobar el E2E G3 real y la revisión operativa, cambiar `G1_INTEGRATION_ENABLED` en una ventana controlada.
 
 ### Facturacion.cl
 

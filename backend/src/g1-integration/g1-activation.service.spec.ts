@@ -24,7 +24,19 @@ function setup() {
     integracionActivacionG1: activations,
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const client = { configured: jest.fn().mockReturnValue(true), sendActivation: jest.fn().mockResolvedValue({ status: 200, durationMs: 8, data: { event_id: 'ok', duplicado: false } }) };
+  const client = {
+    configured: jest.fn().mockReturnValue(true),
+    sendActivation: jest.fn().mockImplementation((payload) => Promise.resolve({
+      status: 200,
+      durationMs: 8,
+      data: {
+        event_id: payload.event_id,
+        id_servicio: payload.id_servicio,
+        equipos_asociados: payload.equipos.length,
+        duplicado: false,
+      },
+    })),
+  };
   const service = new G1ActivationService(prisma as never, audit as never, client as never);
   const tracking: any = {
     idIntegracion: 8, idEmpresa: 1, idCliente: 30, idContrato: 20, idPlan: 7, idServicio: 50,
@@ -59,11 +71,107 @@ describe('Etapa 4 - activación G1 post G3', () => {
 
   it('acepta una respuesta 200 duplicada sin crear otro tracking ni reenviar', async () => {
     const { service, client, tracking, closure, getStored } = setup();
-    client.sendActivation.mockResolvedValueOnce({ status: 200, durationMs: 5, data: { event_id: 'ok', duplicado: true } });
+    client.sendActivation.mockResolvedValueOnce({
+      status: 200,
+      durationMs: 5,
+      data: {
+        event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111',
+        id_servicio: 50,
+        equipos_asociados: 1,
+        duplicado: true,
+      },
+    });
     await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
     await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
     expect(getStored()).toMatchObject({ estadoIntegracion: 'COMPLETADA', respuestaEstadoG1: { duplicado: true } });
     expect(client.sendActivation).toHaveBeenCalledTimes(1);
+  });
+
+  it('mantiene PENDIENTE_SINCRONIZACION_G1 cuando cero equipos representa PENDIENTE_CIERRE', async () => {
+    const { service, client, tracking, closure, audit, getStored } = setup();
+    const accepted = {
+      status: 200,
+      durationMs: 5,
+      data: {
+        event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111',
+        id_servicio: 50,
+        equipos_asociados: 0,
+        duplicado: false,
+      },
+    };
+    client.sendActivation
+      .mockResolvedValueOnce(accepted)
+      .mockResolvedValueOnce({ ...accepted, data: { ...accepted.data, duplicado: true } });
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    expect(getStored()).toMatchObject({
+      estadoIntegracion: 'PENDIENTE_SINCRONIZACION_G1',
+      fechaCompletado: null,
+      ultimoErrorSanitizado: 'G1_EQUIPMENT_ASSOCIATION_PENDING',
+      respuestaEstadoG1: { equipos_asociados: 0, duplicado: false },
+    });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'ACTIVACION_G1_PENDIENTE',
+      valorNuevo: expect.objectContaining({
+        resultado: 'PENDIENTE_SINCRONIZACION_G1',
+        codigo: 'G1_EQUIPMENT_ASSOCIATION_PENDING',
+      }),
+    }));
+    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTIVACION_G1_COMPLETADA' }));
+    const firstPayload = structuredClone(client.sendActivation.mock.calls[0][0]);
+    await service.retry(getStored().idIntegracion, user);
+    expect(client.sendActivation.mock.calls[1][0]).toEqual(firstPayload);
+    expect(getStored()).toMatchObject({
+      estadoIntegracion: 'PENDIENTE_SINCRONIZACION_G1',
+      ultimoErrorSanitizado: 'G1_EQUIPMENT_ASSOCIATION_PENDING',
+      respuestaEstadoG1: { equipos_asociados: 0, duplicado: true },
+    });
+  });
+
+  it('marca COMPLETADA cuando G1 confirma todas las asociaciones solicitadas', async () => {
+    const { service, client, tracking, closure, getStored } = setup();
+    closure.resultado_tecnico.equipos_instalados.push({ numero_serie: 'ONT-002' });
+    client.sendActivation.mockResolvedValueOnce({
+      status: 200,
+      durationMs: 5,
+      data: {
+        event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111',
+        id_servicio: 50,
+        equipos_asociados: 2,
+        duplicado: false,
+      },
+    });
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    expect(getStored()).toMatchObject({ estadoIntegracion: 'COMPLETADA', respuestaEstadoG1: { equipos_asociados: 2 } });
+  });
+
+  it('mantiene pendiente una respuesta 2xx que no confirma equipos asociados', async () => {
+    const { service, client, tracking, closure, getStored } = setup();
+    client.sendActivation.mockResolvedValueOnce({
+      status: 200,
+      durationMs: 5,
+      data: {
+        event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111',
+        id_servicio: 50,
+        duplicado: false,
+      },
+    });
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    expect(getStored()).toMatchObject({
+      estadoIntegracion: 'PENDIENTE_SINCRONIZACION_G1',
+      fechaCompletado: null,
+      ultimoErrorSanitizado: 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED',
+    });
+  });
+
+  it.each([
+    [{ event_id: 'otro-evento', id_servicio: 50, equipos_asociados: 1 }, 'G1_EVENT_ID_MISMATCH'],
+    [{ event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111', id_servicio: 99, equipos_asociados: 1 }, 'G1_SERVICE_ID_MISMATCH'],
+    [{ event_id: 'g8-g1-activation-11111111-1111-4111-8111-111111111111', id_servicio: 50, equipos_asociados: '1' }, 'G1_EQUIPMENT_ASSOCIATION_RESPONSE_INVALID'],
+  ])('rechaza correlación o conteo inválido en respuesta G1 %#', async (data, code) => {
+    const { service, client, tracking, closure, getStored } = setup();
+    client.sendActivation.mockResolvedValueOnce({ status: 200, durationMs: 5, data });
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    expect(getStored()).toMatchObject({ estadoIntegracion: 'ERROR_G1', ultimoErrorSanitizado: code });
   });
 
   it.each([

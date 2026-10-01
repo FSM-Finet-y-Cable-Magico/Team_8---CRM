@@ -39,21 +39,25 @@ La primera ejecución contra el proxy dentro del sandbox falló por restricción
 ```json
 {
   "status": "FAIL",
-  "counts": { "tables": 90, "columns": 877, "pk": 90, "fk": 210, "checks": 33, "indexes": 106 },
-  "summary": { "MATCH": 1495, "EXTRA_LEGACY": 6 },
+  "counts": { "tables": 91, "columns": 897, "pk": 91, "fk": 211, "checks": 33, "indexes": 109 },
+  "summary": { "MATCH": 1522, "EXTRA_LEGACY": 6 },
+  "classifications": {
+    "TECHNICAL_ALLOWED_EXTRA": 1,
+    "UNOWNED_EXTRA": 5
+  },
   "allowedExtras": 1,
   "missing": 0,
   "different": 5
 }
 ```
 
-Los 90 objetos de tabla contractuales están presentes y sus 1.495 verificaciones coinciden. `integracion_activacion_g1.payload_snapshot` está en `MATCH` y el contrato no espera `prospecto_id_cliente_key`.
+Las 91 tablas contractuales están presentes y sus 1.522 verificaciones coinciden. `solicitud_instalacion_integracion`, `integracion_activacion_g1.payload_snapshot` y todos sus objetos esperados están en `MATCH`; el contrato no espera `prospecto_id_cliente_key`.
 
-La lectura encontró 92 tablas públicas:
+La primera lectura encontró 92 tablas públicas. La repetición READ ONLY de esta etapa encontró 93:
 
-- 90 tablas funcionales esperadas;
+- 91 tablas funcionales esperadas, incluida `solicitud_instalacion_integracion`;
 - `_prisma_migrations`, única tabla técnica permitida;
-- `solicitud_instalacion_integracion`, tabla adicional no incluida en el contrato canónico.
+- `solicitud_clave_wifi`, tabla adicional sin owner ni referencia Git identificados; no equivale automáticamente a `solicitud_contrasena_wifi`.
 
 Además existen cuatro objetos adicionales:
 
@@ -62,14 +66,13 @@ Además existen cuatro objetos adicionales:
 - FK `log_notificacion_id_ot_fkey`;
 - índice `log_notificacion_estado_envio_fecha_envio_idx`.
 
-No se eliminaron ni modificaron. El verificador falla correctamente porque solo `_prisma_migrations` está exceptuada. La confirmación humana previa de 91 tablas quedó desactualizada frente al catálogo actual observado de 92.
+No se eliminaron ni modificaron. El verificador clasifica `_prisma_migrations` como `TECHNICAL_ALLOWED_EXTRA` y los otros cinco objetos como `UNOWNED_EXTRA`. La tabla G3 ya pertenece al contrato y no requiere excepción. Solo el extra técnico está exceptuado, por lo que el resultado continúa en `FAIL`.
 
 ## Siguiente decisión de esquema
 
-Los responsables de los grupos deben clasificar los cinco objetos inesperados:
-
-1. Si son cambios globales legítimos, incorporarlos al contrato canónico mediante el procedimiento conjunto y actualizar hash/verificadores.
-2. Si son residuos no autorizados, definir un plan de corrección con respaldo y revisión; esta etapa no autoriza eliminarlos.
-3. Volver a ejecutar el comando hasta obtener `PASS`, sin relajar el verificador ni permitir extras desconocidos.
+1. Resolver owner y decisión de `lista_negra.nivel`, `log_notificacion.id_ot`, su FK, su índice y la nueva tabla `solicitud_clave_wifi`. Los cuatro objetos de las tablas vacías no tienen referencias actuales; no se evaluaron datos de la tabla nueva y esta etapa no autoriza eliminar nada.
+2. Volver a ejecutar el comando hasta obtener `PASS`, sin relajar el verificador ni permitir extras desconocidos.
 
 El estado actual es `RAILWAY_READ_CONNECTED / GLOBAL_SCHEMA_EXTRA_OBJECTS / FAIL`.
+
+La trazabilidad completa está en [i3-global-extra-object-resolution.md](i3-global-extra-object-resolution.md).

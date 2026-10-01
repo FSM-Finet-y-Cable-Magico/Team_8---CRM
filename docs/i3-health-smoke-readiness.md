@@ -2,6 +2,8 @@
 
 Estado: IMPLEMENTADO_LOCAL. Estos endpoints nuevos no fueron desplegados ni verificados mediante HTTP productivo.
 
+> Actualización G1 2026-10-01: `G8_TO_G1_REAL_RAILWAY=PASS` y `G1_RECONCILIATION_LOGIC=PASS`. Tras el estado válido `PENDIENTE_CIERRE`, G1 simuló el cierre técnico y los GET posteriores confirmaron equipo instalado y asignación activa. `FULL_REAL_G3_TO_G1_CROSS_GROUP_E2E=PENDING` porque el cierre no provino de G3 real.
+
 |Ruta|Comprobación|Respuesta|
 |---|---|---|
 |GET `/api/health`|Proceso disponible|200, `application: UP`|
@@ -25,4 +27,4 @@ Resultado: `application=UP`, `database=UP`, `global_schema=DEGRADED`, 429 column
 
 La introspección física independiente de las 14:31:10 UTC detectó 33 tablas faltantes, 23 diferencias de tipo, 3 de nulabilidad y 15 de default (algunas en las mismas filas). La diferencia entre conteos obedece al alcance de cada herramienta. Las evidencias son snapshots fechados y deben renovarse antes de ejecutar SQL.
 
-UNIT_TEST valida estados, saneamiento de errores y comportamiento sin BD. RAILWAY_READ_TEST valida la conexión y catálogo reales. G1_REAL_GET_TEST está pendiente por key ausente. G1_REAL_WRITE_TEST no se ejecutó por requerir autorización y datos coordinados. Ninguno se presenta como validación funcional completa del despliegue.
+UNIT_TEST valida estados, saneamiento de errores y comportamiento sin BD. RAILWAY_READ_TEST valida la conexión y catálogo reales. Los GET G1, activación, retry idempotente, semántica `PENDIENTE_CIERRE`, conciliación posterior y asignación activa aprobaron en Railway real. El cierre técnico fue simulado por G1; el E2E completo con G3 real continúa pendiente. Readiness no ejecuta peticiones externas ni presenta esa simulación como cierre G3.
