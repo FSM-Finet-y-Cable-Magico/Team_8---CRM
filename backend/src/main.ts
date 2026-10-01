@@ -8,10 +8,20 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
   const production = (config.get<string>('NODE_ENV') ?? 'development') === 'production';
-  const frontendUrls = (config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173')
+  const configuredFrontendUrl = config.get<string>('FRONTEND_URL');
+  const frontendUrls = (configuredFrontendUrl ?? 'http://localhost:5173')
     .split(',')
     .map((url) => url.trim())
     .filter(Boolean);
+  if (production && (!configuredFrontendUrl || frontendUrls.length === 0 || frontendUrls.some((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol !== 'https:' || Boolean(url.username || url.password || url.search || url.hash)
+        || (url.pathname !== '' && url.pathname !== '/');
+    } catch {
+      return true;
+    }
+  }))) throw new Error('FRONTEND_URL_INVALID');
   const devTunnelOrigin = /^https:\/\/[\w.-]+\.devtunnels\.ms$/i;
 
   app.setGlobalPrefix('api');

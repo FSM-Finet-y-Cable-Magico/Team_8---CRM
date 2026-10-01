@@ -40,6 +40,8 @@ export async function readCatalog(prisma) {
 }
 const actions = { a:'NO ACTION', r:'RESTRICT', c:'CASCADE', n:'SET NULL', d:'SET DEFAULT' };
 const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
+export const isAllowedDifference = row => row.status==='EXTRA_LEGACY'
+  && row.kind==='TABLE' && row.table==='_prisma_migrations';
 function sameDefault(expected, observed, columnType) {
   const clean = value => {
     let result = normalizeExpression(value);
@@ -97,7 +99,7 @@ export function compareCatalog(global, actual) {
   }
   for(const i of actual.indexes) if(!i.primary&&globalNames.has(i.table)&&!global.indexes.some(x=>x.table===i.table&&x.name===i.name)) add('INDEX',i.table,i.name,'EXTRA_LEGACY',null,i.definition,'Revisar índice adicional; no eliminar');
   const summary=rows.reduce((r,x)=>{r[x.status]=(r[x.status]??0)+1;return r;},{});
-  const differences=rows.filter(r=>r.status!=='MATCH'&&!(r.table==='_prisma_migrations'&&r.kind==='TABLE'));
+  const differences=rows.filter(r=>r.status!=='MATCH'&&!isAllowedDifference(r));
   return { contractHash:global.hash, capturedAt:actual.capturedAt, status:differences.length?'FAIL':'PASS', counts:global.counts, summary, rows };
 }
 export async function verifyMain() {
@@ -109,9 +111,11 @@ export async function verifyMain() {
     const actual=await readCatalog(prisma); const report=compareCatalog(global,actual);
     if(process.env.GLOBAL_DB_REPORT_PATH) writeFileSync(process.env.GLOBAL_DB_REPORT_PATH,JSON.stringify(report,null,2)+'\n');
     if(process.env.GLOBAL_DB_CATALOG_PATH) writeFileSync(process.env.GLOBAL_DB_CATALOG_PATH,JSON.stringify(actual,null,2)+'\n');
+    const blockingRows=report.rows.filter(r=>r.status!=='MATCH'&&!isAllowedDifference(r));
     console.log(JSON.stringify({status:report.status,counts:report.counts,summary:report.summary,
-      missing:report.rows.filter(r=>r.status.includes('MISSING')).length,
-      different:report.rows.filter(r=>r.status!=='MATCH'&&!r.status.includes('MISSING')).length}));
+      allowedExtras:report.rows.filter(isAllowedDifference).length,
+      missing:blockingRows.filter(r=>r.status.includes('MISSING')).length,
+      different:blockingRows.filter(r=>!r.status.includes('MISSING')).length}));
     return report.status==='PASS'?0:1;
   } catch { console.log(JSON.stringify({status:'FAIL',reason:'GLOBAL_DB_READ_FAILED',detail:'Revisar conectividad, permisos de lectura y hash del contrato; error original omitido para proteger credenciales.'})); return 2; }
   finally { if(prisma) await prisma.$disconnect(); }

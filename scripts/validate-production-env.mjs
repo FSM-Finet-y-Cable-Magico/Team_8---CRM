@@ -29,6 +29,26 @@ export function validateIntegrationKeys(raw) {
   } catch { return { configured: true, valid: false }; }
 }
 
+export function validateFacturacionClCompanies(raw) {
+  if (!configured(raw)) return { configured: false, valid: true, count: 0 };
+  try {
+    const rows = JSON.parse(raw);
+    if (!Array.isArray(rows)) return { configured: true, valid: false, count: 0 };
+    const ids = new Set(), aliases = new Set();
+    const expectedKeys = ['alias', 'enabled', 'environment', 'idEmpresa'];
+    const valid = rows.every(row => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)
+        || JSON.stringify(Object.keys(row).sort()) !== JSON.stringify(expectedKeys)
+        || !Number.isSafeInteger(row.idEmpresa) || row.idEmpresa < 1
+        || !/^[A-Z0-9_]{1,40}$/.test(row.alias ?? '')
+        || !['sandbox', 'production'].includes(row.environment)
+        || typeof row.enabled !== 'boolean' || ids.has(row.idEmpresa) || aliases.has(row.alias)) return false;
+      ids.add(row.idEmpresa); aliases.add(row.alias); return true;
+    });
+    return { configured: true, valid, count: valid ? rows.length : 0 };
+  } catch { return { configured: true, valid: false, count: 0 }; }
+}
+
 export function validateProductionEnv(env) {
   const rows = [], errors = [];
   const add = (name, status, valid = true, reason = '') => {
@@ -66,7 +86,7 @@ export function validateProductionEnv(env) {
   const g1KeyValid = !g1KeySet || (env.G1_API_KEY === env.G1_API_KEY.trim() && !/[\r\n]/.test(env.G1_API_KEY));
   add('G1_API_URL', g1UrlSet ? (g1UrlValid ? 'configured' : 'invalid') : 'not configured (integration disabled)', g1UrlValid && (!g1Enabled || g1UrlSet));
   add('G1_API_KEY', g1KeySet ? (g1KeyValid ? 'configured' : 'invalid') : 'not configured (integration disabled)', g1KeyValid && (!g1Enabled || g1KeySet));
-  add('G1_SECOND_CREDENTIAL', 'not required by observed X-API-KEY contract');
+  add('G1_SECOND_CREDENTIAL', 'not used by observed X-API-KEY contract; pending G1 confirmation');
 
   const timeout = Number(env.G1_REQUEST_TIMEOUT_MS ?? 8000);
   add('G1_REQUEST_TIMEOUT_MS', Number.isInteger(timeout) && timeout >= 1 && timeout <= 60000 ? 'configured' : 'invalid', Number.isInteger(timeout) && timeout >= 1 && timeout <= 60000);
@@ -77,6 +97,16 @@ export function validateProductionEnv(env) {
 
   const s2s = validateIntegrationKeys(env.G8_INTEGRATION_API_KEYS);
   add('G8_S2S_AUTH', s2s.configured ? (s2s.valid ? 'configured' : 'invalid') : 'not configured', s2s.valid);
+
+  const facturacionFlag = String(env.FACTURACION_CL_INTEGRATION_ENABLED ?? 'false').trim().toLowerCase();
+  const facturacionFlagValid = facturacionFlag === 'true' || facturacionFlag === 'false';
+  add('FACTURACION_CL_INTEGRATION_ENABLED', facturacionFlagValid
+    ? (facturacionFlag === 'true' ? 'blocked: pending contract' : 'disabled') : 'invalid',
+  facturacionFlagValid && facturacionFlag === 'false', facturacionFlag === 'true' ? 'PENDING_CONTRACT' : 'INVALID');
+  const facturacionCompanies = validateFacturacionClCompanies(env.FACTURACION_CL_COMPANIES);
+  add('FACTURACION_CL_COMPANIES', facturacionCompanies.configured
+    ? (facturacionCompanies.valid ? `configured (${facturacionCompanies.count})` : 'invalid') : 'not configured (defaults to empty)',
+  facturacionCompanies.valid);
   return { ok: errors.length === 0, rows, errors };
 }
 

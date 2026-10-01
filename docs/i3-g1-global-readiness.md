@@ -52,7 +52,7 @@ Requeridas: `G1_API_URL`, `G1_API_KEY`, `G1_SMOKE_COMPANY_ID` autorizada por G1.
 
 Intento realizado: abortó con `G1_API_KEY_NOT_CONFIGURED` antes de fetch. No es una prueba real de autenticación, conectividad ni respuesta G1.
 
-La revisión adicional del guard G1 confirmó que este flujo HTTP solo consume `X-API-KEY`. No se observó segundo header ni validación de password/hash, por lo que no se inventó ni configuró una segunda credencial. La key entrante que G8 emitirá para G1 es independiente y se documenta en [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
+La revisión adicional del guard G1 confirmó que este flujo HTTP observado solo consume `X-API-KEY`. No se observó segundo header ni validación de password/hash, por lo que no se inventó ni configuró otra variable. Su función queda `PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA`: G1 debe confirmar si participa en cada request y, si participa, entregar nombre exacto de header/esquema, valor literal o hash, encoding, ejemplo saneado y código/versión de validación. La key entrante que G8 emitirá para G1 es independiente y se documenta en [i3-s2s-auth-g1-g8.md](i3-s2s-auth-g1-g8.md).
 
 `scripts/smoke-g1-activation.mjs` está separado y requiere `ALLOW_G1_ACTIVATION_WRITE=1` antes de cualquier fetch, además del payload explícito `G1_ACTIVATION_PAYLOAD_JSON` y configuración. No se ejecutó POST real. La variable técnica no sustituye aprobación operativa ni coordinación de IDs/series con G1/G3.
 

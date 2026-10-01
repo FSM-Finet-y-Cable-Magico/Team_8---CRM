@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { main, validateProductionEnv } from './validate-production-env.mjs';
+import { main, validateFacturacionClCompanies, validateProductionEnv } from './validate-production-env.mjs';
 
 const base = {
   DATABASE_URL: 'postgresql://app:private-value@db.internal:5432/crm',
@@ -14,8 +14,20 @@ const base = {
 test('variables G1 opcionales no bloquean módulos independientes', () => {
   const result = validateProductionEnv(base);
   assert.equal(result.ok, true);
-  assert.ok(result.rows.includes('G1_SECOND_CREDENTIAL: not required by observed X-API-KEY contract'));
+  assert.ok(result.rows.includes('G1_SECOND_CREDENTIAL: not used by observed X-API-KEY contract; pending G1 confirmation'));
   assert.ok(result.rows.includes('G8_S2S_AUTH: not configured'));
+});
+
+test('Facturacion.cl queda bloqueado mientras falta contrato y valida separacion por empresa', () => {
+  const companies = JSON.stringify([
+    { idEmpresa: 1, alias: 'FINET', environment: 'sandbox', enabled: true },
+    { idEmpresa: 2, alias: 'CABLE_MAGICO', environment: 'production', enabled: false },
+  ]);
+  assert.equal(validateProductionEnv({ ...base, FACTURACION_CL_COMPANIES: companies }).ok, true);
+  const enabled = validateProductionEnv({ ...base, FACTURACION_CL_INTEGRATION_ENABLED: 'true', FACTURACION_CL_COMPANIES: companies });
+  assert.equal(enabled.ok, false);
+  assert.ok(enabled.errors.includes('FACTURACION_CL_INTEGRATION_ENABLED_PENDING_CONTRACT'));
+  assert.equal(validateFacturacionClCompanies('[{"idEmpresa":1,"alias":"FINET","environment":"sandbox","enabled":true,"password":"x"}]').valid, false);
 });
 
 test('G1 habilitado requiere URL y key sin inventar segunda credencial', () => {

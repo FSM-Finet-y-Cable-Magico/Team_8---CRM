@@ -146,11 +146,10 @@ export class G3ClosureProcessor {
           { idCliente: activationResult.idCliente, idServicio: activationResult.idServicio },
           record,
         );
-      } catch (error) {
+      } catch {
         console.error('No se pudo registrar el tracking de activación G1 después del commit G8', {
           idIntegracionG3: tracking.idIntegracion,
           idEmpresa: tracking.idEmpresa,
-          error: error instanceof Error ? error.message : 'Error desconocido',
         });
       }
     }

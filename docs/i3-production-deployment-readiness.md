@@ -37,7 +37,7 @@ Ejecutar en el entorno preparado, sin pasar secretos como argumentos:
 npm.cmd run env:validate:production
 ```
 
-`scripts/validate-production-env.mjs` informa solamente `configured`, `invalid`, `not configured` y códigos de error; no imprime valores. Verifica formatos, dependencias condicionales de G1 y la configuración multikey S2S. El contrato G1 observado no requiere una segunda credencial HTTP y el validador lo reporta como `not required`.
+`scripts/validate-production-env.mjs` informa solamente estados y códigos de error; no imprime valores. Verifica formatos, dependencias condicionales de G1, configuración multikey S2S y el bloqueo Facturacion.cl. El contrato G1 observado solo usa `X-API-KEY`; la función de una segunda credencial permanece `PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA` hasta recibir confirmación explícita.
 
 ## Health y verificaciones
 
@@ -64,3 +64,9 @@ Orden recomendado para el operador:
 - POST G1, migraciones, reconcile y cambios de variables Railway: no ejecutados.
 
 La advertencia Vite por un chunk cercano a 590 kB no impide el build, pero conviene planificar code splitting. La validación visual Billing sigue pendiente porque esta sesión no dispone del navegador integrado y el frontend no tiene framework de tests de componentes.
+
+## Continuación frontend y Railway del 2026-09-30
+
+El frontend ya tiene runtime productivo Nginx, `PORT` dinámico, `/health` y fallback SPA. Sus tests de configuración están en `npm.cmd run test:frontend-runtime`; el daemon Docker local no estaba activo, por lo que falta una prueba HTTP real de la imagen antes del deploy. Ver [readiness frontend](i3-frontend-production-readiness.md) y [configuración del servicio Railway](i3-railway-frontend-deployment.md).
+
+La lectura Railway mediante `.env.railway` y TCP Proxy funciona. El contrato esperado coincide por completo, pero el verificador retorna `FAIL` por cinco objetos adicionales no aprobados, aparte de `_prisma_migrations`. Ejecutar `npm.cmd run db:verify:global:railway` y resolverlos mediante acuerdo global antes del deploy. Ver [verificación READ ONLY](i3-railway-readonly-verification.md).

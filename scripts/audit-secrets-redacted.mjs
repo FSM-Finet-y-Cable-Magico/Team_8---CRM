@@ -2,6 +2,13 @@ import {execFileSync} from 'node:child_process';
 import {readFileSync,writeFileSync,readdirSync,existsSync,statSync} from 'node:fs';
 import {join,relative} from 'node:path';
 const findings=[];
+const reportPath='docs/i3-security-redacted.json';
+let previousExternalFindings=[];
+try {
+ const previous=JSON.parse(readFileSync(reportPath,'utf8'));
+ previousExternalFindings=Array.isArray(previous.findings)
+  ? previous.findings.filter(f=>f?.source==='G1_SNAPSHOT'&&f?.value==='[REDACTED]') : [];
+} catch {}
 const rules=[
  ['DATABASE_URI',/postgres(?:ql)?:\/\/[^\s"'<>:]+:[^\s"'<>@]+@/i],
  ['PRIVATE_KEY',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
@@ -24,5 +31,6 @@ if(external&&existsSync(external)){
  const walk=dir=>{for(const item of readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','dist','build'].includes(item.name))continue;const p=join(dir,item.name);if(item.isDirectory())walk(p);else if(statSync(p).size<2000000)scan(external,relative(external,p),true);}};
  walk(external);
 }
-writeFileSync('docs/i3-security-redacted.json',JSON.stringify({scope:'Working tree trackeado y nuevos; snapshot G1 provisto. Heuristico sin validador remoto; no certifica ausencia de secretos ni escanea todo el historial Git.',findings},null,2)+'\n');
+if(!external) findings.push(...previousExternalFindings);
+writeFileSync(reportPath,JSON.stringify({scope:'Working tree trackeado y nuevos; hallazgos G1 previos se conservan cuando el snapshot no esta disponible. Heuristico sin validador remoto; no certifica ausencia de secretos ni escanea todo el historial Git.',findings},null,2)+'\n');
 console.log(JSON.stringify({scan:'LOCAL_REDACTED_HEURISTIC',findings:findings.length,g1:findings.filter(f=>f.source==='G1_SNAPSHOT').length}));

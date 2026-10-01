@@ -29,6 +29,7 @@ import { G3IntegrationModule } from './g3-integration/g3-integration.module';
 import { G1IntegrationModule } from './g1-integration/g1-integration.module';
 import { ExternalTaxDocumentsModule } from './external-tax-documents/external-tax-documents.module';
 import { IntegrationAuthModule } from './integration-auth/integration-auth.module';
+import { TaxDocumentIssuanceModule } from './tax-document-issuance/tax-document-issuance.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { IntegrationAuthModule } from './integration-auth/integration-auth.modul
     G1IntegrationModule,
     ExternalTaxDocumentsModule,
     IntegrationAuthModule,
+    TaxDocumentIssuanceModule,
     UsersModule,
     CompaniesModule,
     CommercialModule,

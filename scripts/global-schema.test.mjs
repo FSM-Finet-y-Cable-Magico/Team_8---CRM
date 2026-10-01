@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {parseGlobalSchema,splitSql,normalizeExpression,normalizeCheckExpression} from './global-schema.mjs';
-import {compareCatalog,readCatalog} from './verify-global-db.mjs';
+import {compareCatalog,isAllowedDifference,readCatalog} from './verify-global-db.mjs';
 const global=parseGlobalSchema();
 function fixture(){
  const actions={'NO ACTION':'a',CASCADE:'c',RESTRICT:'r','SET NULL':'n','SET DEFAULT':'d'};
@@ -36,6 +36,14 @@ test('las columnas de PK compuesta son no nulas aunque el SQL no repita NOT NULL
 });
 test('exact synthetic catalog passes; this is not Railway evidence',()=>{
  assert.equal(compareCatalog(global,fixture()).status,'PASS');
+});
+test('_prisma_migrations es el unico extra tecnico permitido',()=>{
+ const withPrisma=fixture();withPrisma.tables.push({name:'_prisma_migrations'});
+ const allowed=compareCatalog(global,withPrisma);
+ assert.equal(allowed.status,'PASS');
+ assert.equal(allowed.rows.filter(isAllowedDifference).length,1);
+ const unexpected=fixture();unexpected.tables.push({name:'unexpected_business_table'});
+ assert.equal(compareCatalog(global,unexpected).status,'FAIL');
 });
 test('missing critical table fails, unrelated schemas cannot satisfy FK',()=>{
  const a=fixture();a.tables=a.tables.filter(t=>t.name!=='historial_cambio_plan');

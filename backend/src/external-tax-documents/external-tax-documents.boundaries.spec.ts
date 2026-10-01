@@ -11,6 +11,7 @@ describe('Etapa 5 - fronteras de CU-86', () => {
   const schema = source('prisma/schema.prisma');
   const migration = source('prisma/migrations/20260927120000_i3_external_tax_documents/migration.sql');
   const frontend = source('../frontend/src/features/billing/ExternalTaxDocumentsPanel.tsx');
+  const pendingIssuer = source('src/tax-document-issuance/pending-facturacion-cl.issuer.ts');
 
   it('no contiene cliente HTTP, fetch ni descarga de URL', () => {
     expect(service).not.toMatch(/\bfetch\s*\(|HttpService|axios|download|request\s*\(/i);
@@ -20,8 +21,10 @@ describe('Etapa 5 - fronteras de CU-86', () => {
     expect(service + controller + frontend).not.toMatch(/emitir boleta|emitir factura|enviar al SII|timbrar|firmarDte|SII.*request/i);
   });
 
-  it('no inventa adapter ni configuración de Facturación.cl', () => {
+  it('mantiene el adapter pendiente aislado de CU-86 y sin cliente HTTP', () => {
     expect(service + controller).not.toMatch(/FacturacionCl|FACTURACION_CL_|BillingDocumentProvider|TaxDocumentProvider/);
+    expect(pendingIssuer).toContain('PENDIENTE_CONTRATO_FACTURACION_CL');
+    expect(pendingIssuer).not.toMatch(/\bfetch\s*\(|HttpService|axios|Authorization|https?:\/\//i);
   });
 
   it('no expone operación DELETE', () => {

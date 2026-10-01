@@ -1,31 +1,13 @@
 {
-  "scope": "Working tree trackeado y nuevos; snapshot G1 provisto. Heuristico sin validador remoto; no certifica ausencia de secretos ni escanea todo el historial Git.",
+  "scope": "Working tree trackeado y nuevos; hallazgos G1 previos se conservan cuando el snapshot no esta disponible. Heuristico sin validador remoto; no certifica ausencia de secretos ni escanea todo el historial Git.",
   "findings": [
     {
       "source": "G8_WORKTREE",
-      "file": "docs/i3-g1-global-readiness.md",
-      "line": 22,
+      "file": "docs/i3-release-candidate-audit.md",
+      "line": 49,
       "type": "DOCUMENTED_INTEGRATION_KEY",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",
-      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
-    },
-    {
-      "source": "G8_WORKTREE",
-      "file": "docs/i3-g1-global-readiness.md",
-      "line": 24,
-      "type": "DOCUMENTED_INTEGRATION_KEY",
-      "value": "[REDACTED]",
-      "status": "POTENTIAL_COMMITTED_SECRET",
-      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
-    },
-    {
-      "source": "G8_WORKTREE",
-      "file": "scripts/g1-smoke.test.mjs",
-      "line": 16,
-      "type": "CREDENTIAL_LITERAL",
-      "value": "[REDACTED]",
-      "status": "TEST_OR_EXAMPLE_REVIEW",
       "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
     },
     {
@@ -273,6 +255,33 @@
     },
     {
       "source": "G8_WORKTREE",
+      "file": "docs/i3-g1-global-readiness.md",
+      "line": 22,
+      "type": "DOCUMENTED_INTEGRATION_KEY",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "docs/i3-g1-global-readiness.md",
+      "line": 24,
+      "type": "DOCUMENTED_INTEGRATION_KEY",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "docs/i3-g1-global-readiness.md",
+      "line": 55,
+      "type": "DOCUMENTED_INTEGRATION_KEY",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
       "file": "docs/i3-g1-inventory-integration.md",
       "line": 27,
       "type": "DOCUMENTED_INTEGRATION_KEY",
@@ -303,6 +312,24 @@
       "file": "docs/i3-local-db-bootstrap.md",
       "line": 80,
       "type": "DATABASE_URI",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "docs/i3-production-deployment-readiness.md",
+      "line": 40,
+      "type": "DOCUMENTED_INTEGRATION_KEY",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "docs/i3-s2s-auth-g1-g8.md",
+      "line": 14,
+      "type": "DOCUMENTED_INTEGRATION_KEY",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",
       "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
@@ -377,6 +404,51 @@
       "type": "CREDENTIAL_LITERAL",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/g1-smoke.test.mjs",
+      "line": 16,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/smoke-billing-write.test.mjs",
+      "line": 17,
+      "type": "DATABASE_URI",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/validate-production-env.test.mjs",
+      "line": 7,
+      "type": "DATABASE_URI",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/validate-production-env.test.mjs",
+      "line": 8,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/validate-production-env.test.mjs",
+      "line": 52,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
       "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
     },
     {

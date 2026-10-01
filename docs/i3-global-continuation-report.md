@@ -202,3 +202,33 @@ Se preparó autenticación S2S entrante G8 independiente de JWT, con SHA-256, `t
 También quedaron listos el [validador de entorno y checklist de despliegue](i3-production-deployment-readiness.md) y el smoke Billing reversible con gate. Ninguno fue usado para desplegar, cambiar Railway ni ejecutar escrituras.
 
 Validación final: 55 suites y 455 tests backend aprobados, 5 suites/8 tests omitidos; 19 tests Node aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias frontend preexistentes; Prisma válido; auditor Prisma/global aprobado; `git diff --check` aprobado. El verificador Railway final fue exclusivamente `READ ONLY`. No se ejecutaron GET G1 reales, POST externos ni el smoke Billing de escritura.
+
+## 23. RELEASE CANDIDATE, RAILWAY Y FACTURACION.CL
+
+Se preparó el manifiesto exhaustivo de variables productivas, el checklist operativo Railway y el plan de PR/merge. Railway no fue modificado. `G1_INTEGRATION_ENABLED`, `G3_INTEGRATION_ENABLED` y `FACTURACION_CL_INTEGRATION_ENABLED` permanecen en `false`; Billing debe desplegarse con notificaciones `disabled` mientras no exista proveedor.
+
+La autenticación real observada G8 → G1 continúa siendo `X-API-KEY`. No existe evidencia suficiente para asignar una función a la contraseña/hash adicional: estado **PENDIENTE_CONFIRMACION_G1_CREDENCIAL_SECUNDARIA**. La infraestructura G1 → G8 sigue **S2S_INFRA_READY / BLOQUEADO_CONTRATO_G1_INBOUND**, sin endpoint de negocio.
+
+La documentación pública oficial de Facturacion.cl fue auditada. Aunque describe login, token, procesamiento de archivo TXT/XML y recuperación de artefactos, faltan onboarding, ambientes/credenciales por empresa, módulos/tipos DTE, mapeo CRM, errores e idempotencia/reconciliación específicos. Se incorporó solo una frontera `TaxDocumentIssuer` multiempresa que falla cerrada, sin HTTP, rutas o UI de emisión: **ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL**. El runtime y el validador rechazan activar el flag hasta una futura implementación revisada; CU-86 permanece como metadata externa manual y `Factura`/`Pago` permanecen en Billing.
+
+La auditoría RC corrigió dos exposiciones potenciales de mensajes de error crudos, hizo obligatorio un JWT seguro y un `FRONTEND_URL` HTTPS válido en producción, y completó los ejemplos SMTP. El backend Docker conserva build multi-stage, escucha `0.0.0.0:$PORT`, shutdown hooks y readiness READ ONLY; no ejecuta migraciones ni seed al arrancar. El frontend aún requiere confirmar su estrategia de serving productivo porque su Dockerfile termina en el stage de build.
+
+Entregables: [manifiesto Railway](i3-railway-production-env-manifest.md), [checklist de despliegue](i3-railway-deployment-checklist.md), [auditoría RC](i3-release-candidate-audit.md), [plan PR/merge](i3-pr-merge-plan.md) e [integración Facturacion.cl](i3-facturacion-cl-integration.md).
+
+Validación de esta etapa: 56 suites y 459 tests backend aprobados, 5 suites/8 tests optativos omitidos; 20 tests Node aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias frontend preexistentes; Prisma generate/validate aprobado; auditor Prisma/global estático y scan redacted ejecutados; validador productivo sintético en PASS; `git diff --check` aprobado. El intento de refrescar Railway mediante el verificador transaccional READ ONLY terminó `GLOBAL_DB_READ_FAILED` tanto dentro como fuera del sandbox, sin revelar el error original ni escribir datos. Por ello el PASS Railway del apartado 22 sigue siendo la última evidencia exitosa, pero debe renovarse antes del deploy.
+
+## 24. FRONTEND PRODUCTIVO Y READINESS RAILWAY FINAL
+
+Este apartado reemplaza los pendientes tecnicos de frontend y conectividad descritos al final del apartado 23.
+
+El frontend ya dispone de un stage productivo real: Node 22 compila con `VITE_API_URL` como argumento público de build y Nginx 1.30 Alpine sirve únicamente `dist`. La configuración escucha el `PORT` inyectado por Railway, expone `/health`, aplica fallback `index.html` para rutas SPA y responde 404 para assets inexistentes. La imagen no copia código fuente, `.env`, `node_modules` ni devDependencies. Se documentó el servicio Railway separado con root `/frontend`, Dockerfile relativo `Dockerfile` y build variable `VITE_API_URL=https://team8-crm-production-3be0.up.railway.app/api`. El dominio frontend real todavía no existe; cuando Railway lo genere, su origen HTTPS exacto debe configurarse como `FRONTEND_URL` del backend.
+
+El build con la URL pública de API fue exitoso y confirmó el valor en un único asset compilado. Los 3 tests del runtime aprobaron. Docker CLI 29.4.1 estaba instalado, pero el daemon no estaba activo; estado **DOCKER_RUNTIME_TEST_NOT_EXECUTED**. La imagen debe arrancarse en CI o en un equipo con Docker antes del deploy para comprobar `/health`, `/`, assets y fallback SPA.
+
+La causa de `GLOBAL_DB_READ_FAILED` de la etapa anterior fue identificada: se había cargado `backend/.env`, que apunta a loopback. El wrapper `scripts/verify-global-db-readonly.ps1` ahora carga exclusivamente `DATABASE_URL` desde `.env.railway` sin imprimirla. Usando el TCP Proxy público y acceso fuera del sandbox, Railway respondió en transacción READ ONLY.
+
+El resultado actual es **RAILWAY_READ_CONNECTED / GLOBAL_SCHEMA_EXTRA_OBJECTS / FAIL**: 1.495 coincidencias, cero faltantes, una diferencia permitida (`_prisma_migrations`) y cinco diferencias inesperadas. Las 90 tablas funcionales, 877 columnas, 90 PK, 210 FK, 33 checks y 106 índices contractuales están presentes. `integracion_activacion_g1.payload_snapshot` está en `MATCH` y `prospecto_id_cliente_key` no forma parte de la expectativa. El catálogo contiene 92 tablas públicas: además de las 90 contractuales y `_prisma_migrations`, aparece `solicitud_instalacion_integracion`. También son extras `lista_negra.nivel`, `log_notificacion.id_ot`, su FK y un índice de notificaciones. No se modificó ni eliminó ningún objeto; los responsables globales deben clasificarlos y actualizar el contrato o definir una corrección coordinada antes del deploy.
+
+Validación RC acumulada: 56 suites/459 tests backend aprobados, 5 suites/8 tests optativos omitidos; 21/21 tests Node globales y 3/3 tests de runtime frontend aprobados; build backend/frontend aprobado; lint con cero errores y 78 advertencias preexistentes; Prisma generate/validate aprobado; auditor Prisma/global ejecutado. G1, G3 y Facturacion.cl continúan deshabilitados. No hubo commit, push, merge, deploy, DDL/DML ni modificaciones de Railway.
+
+Entregables nuevos: [despliegue frontend Railway](i3-railway-frontend-deployment.md), [verificación Railway READ ONLY](i3-railway-readonly-verification.md) y [readiness frontend](i3-frontend-production-readiness.md).
