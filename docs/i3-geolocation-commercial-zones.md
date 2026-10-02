@@ -104,7 +104,9 @@ La eliminacion fisica no forma parte del flujo geografico. Las zonas se desactiv
 
 ## Frontend
 
-La vista Cobertura permite crear cobertura general o microzona, agregar vertices con clic, moverlos, eliminar el ultimo o vaciar el borrador, ingresar coordenadas manuales, definir vigencia, guardar al confirmar, cancelar y desactivar. El mapa distingue cobertura general, microzona, zona inactiva y borrador mediante nombres, tooltips, bordes y patrones, ademas de color.
+La vista Cobertura reúne cobertura general y microzona en **Crear zona**, con un mapa y un listado separados por un divisor, sin tarjetas de fondo anidadas. La leyenda está integrada en el mapa y los nombres aparecen como etiquetas permanentes, con un control para ocultarlos. Las zonas pueden buscarse y filtrarse por tipo; seleccionar su nombre centra el mapa. El listado conserva un único contador. Como en Planes, el interruptor de estado y el icono de edición están a la derecha; las zonas inactivas aparecen atenuadas, sin etiquetas de estado ni puntos de color junto al nombre. Los avisos de guardado, activación y desactivación desaparecen a los cinco segundos.
+
+La edición ofrece **Añadir puntos**, **Ajustar límite**, deshacer y reiniciar sobre el mapa. El formulario muestra las fechas opcionales, los puntos y las coordenadas manuales completamente desplegados, tanto al crear como al editar. La relación de la microzona se presenta como **Cobertura asociada**, conservando `idZonaPadre` en la API. El estado activo existente se mantiene al guardar y se cambia desde el listado. El zoom con la rueda del mouse está habilitado, junto con los controles de zoom y el arrastre. Se conservan validaciones de geometría, pertenencia, vigencia y permisos en backend.
 
 El selector de Prospectos permite geocodificacion opcional, pin manual y coordenadas manuales. Muestra zona, microzona, estado combinado, proveedor tecnico y planes con precio aplicable. La ubicacion guardada vuelve a cargarse al gestionar el Prospecto.
 
