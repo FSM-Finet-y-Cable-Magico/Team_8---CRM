@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { BuiltTaxDocument } from './facturacion-cl-document-builder';
+import { BuiltTaxDocument, matchesIssuedFolio } from './facturacion-cl-document-builder';
 
 export type TaxIntentState = 'PENDIENTE' | 'EN_PROCESO' | 'GENERADO' | 'FALLIDO' | 'RESULTADO_INDETERMINADO';
 export type TaxIntentCompletion = { estado: 'GENERADO' | 'FALLIDO' | 'RESULTADO_INDETERMINADO'; folio?: string; ultimoError?: string };
@@ -23,7 +23,7 @@ export interface TaxIntentStore {
 }
 export type TaxDispatchResult = { state: 'GENERADO'; folio: string; tipoDte: number } |
   { state: 'FALLIDO'; code: 'CONFIRMED_NOT_SENT' } | { state: 'RESULTADO_INDETERMINADO' };
-/** Not bound to a real emitter while payment policy and provider reconciliation are pending. */
+/** Processing port; uncertainty never permits another processing request. */
 export interface TaxEmissionDispatchPort {
   canIssue(idEmpresa: number): boolean;
   dispatch(input: { intentId: string; claimId: string; idEmpresa: number; document: BuiltTaxDocument }): Promise<TaxDispatchResult>;
@@ -34,10 +34,11 @@ export function taxIntentFingerprint(input: TaxIntentInput) {
     idEmpresa: input.idEmpresa, idFactura: input.idFactura, idPago: input.idPago ?? null,
     businessKey: input.businessKey, policyVersion: input.policyVersion, ambiente: input.ambiente,
     tipoDte: input.document.tipoDte, formato: input.document.formato, folio: input.document.folio,
+    folioMode: input.document.folioMode ?? 'explicit',
   })).update(input.document.bytes).digest('hex');
 }
 
-/** No Billing transaction, HTTP route, retry or SMTP is introduced by this service. */
+/** Durable intent lifecycle, invoked only after the financial commit. */
 export class TaxEmissionIntentService {
   constructor(private readonly store: TaxIntentStore, private readonly dispatcher: TaxEmissionDispatchPort) {}
 
@@ -46,7 +47,8 @@ export class TaxEmissionIntentService {
         (input.idPago !== undefined && (!Number.isSafeInteger(input.idPago) || input.idPago < 1)) || input.ambiente !== 'sandbox' ||
         typeof input.businessKey !== 'string' || typeof input.policyVersion !== 'string' ||
         !/^[A-Za-z0-9:_-]{1,120}$/.test(input.businessKey) || !/^[A-Za-z0-9:_-]{1,64}$/.test(input.policyVersion) ||
-        !Buffer.isBuffer(input.document.bytes) || !input.document.bytes.length || !/^[1-9]\d{0,9}$/.test(input.document.folio) ||
+        !Buffer.isBuffer(input.document.bytes) || !input.document.bytes.length ||
+        !(input.document.folioMode === 'provider_auto' ? input.document.folio === '0' && [39, 41].includes(input.document.tipoDte) : /^[1-9]\d{0,9}$/.test(input.document.folio)) ||
         !([33, 34].includes(input.document.tipoDte) && input.document.formato === 2 || [39, 41].includes(input.document.tipoDte) && input.document.formato === 1)) {
       throw new Error('TAX_INTENT_INPUT_INVALID');
     }
@@ -64,14 +66,15 @@ export class TaxEmissionIntentService {
     // Snapshot bytes before awaits: mutation by another caller must not change the send.
     const snapshot: TaxIntentInput = { ...input, document: { ...input.document, bytes: Buffer.from(input.document.bytes) } };
     const record = await this.prepare(snapshot);
-    if (record.estado !== 'PENDIENTE' || !this.dispatcher.canIssue(input.idEmpresa)) return record;
+    const eligible = record.estado === 'PENDIENTE' || record.estado === 'FALLIDO' && record.ultimoError === 'CONFIRMED_NOT_SENT';
+    if (!eligible || !this.dispatcher.canIssue(input.idEmpresa)) return record;
     const claimId = randomUUID();
     // Durable atomic claim is committed before a dispatcher can send anything.
     if (!await this.store.claim(record, claimId)) return this.store.find(input.idEmpresa, record.idIntencion);
     let result: TaxDispatchResult;
     try { result = await this.dispatcher.dispatch({ intentId: record.idIntencion, claimId, idEmpresa: input.idEmpresa, document: snapshot.document }); }
     catch { result = { state: 'RESULTADO_INDETERMINADO' }; }
-    if (result?.state === 'GENERADO' && result.folio === record.folioEsperado && result.tipoDte === record.tipoDte) {
+    if (result?.state === 'GENERADO' && matchesIssuedFolio(record.folioEsperado, result.folio, record.tipoDte) && result.tipoDte === record.tipoDte) {
       await this.store.finish(record, claimId, { estado: 'GENERADO', folio: result.folio });
     } else if (result?.state === 'FALLIDO' && result.code === 'CONFIRMED_NOT_SENT') {
       await this.store.finish(record, claimId, { estado: 'FALLIDO', ultimoError: 'CONFIRMED_NOT_SENT' });

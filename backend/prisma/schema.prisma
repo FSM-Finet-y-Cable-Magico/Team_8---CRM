@@ -31,6 +31,7 @@ model Empresa {
   plantillasNotificacion     PlantillaNotificacion[]
   documentosTributarios      DocumentoTributarioExterno[]
   intencionesTributarias     TaxEmissionIntent[]
+  trabajosTributarios        TaxPaymentJob[]
   resultadosWifiG2           IntegracionResultadoWifiG2[]
 
   @@map("empresa")
@@ -285,6 +286,7 @@ model Factura {
   cambiosCondicionPago    CambioCondicionPago[]
   documentosTributarios   DocumentoTributarioExterno[]
   intencionesTributarias  TaxEmissionIntent[]
+  trabajosTributarios     TaxPaymentJob[]
 
   @@index([folioExterno])
   @@map("factura")
@@ -304,6 +306,7 @@ model Pago {
   comprobanteEstado  String   @default("PENDIENTE") @map("comprobante_estado") @db.VarChar(20)
   factura            Factura? @relation(fields: [idFactura], references: [idFactura], onDelete: NoAction, onUpdate: NoAction)
   intencionesTributarias TaxEmissionIntent[]
+  trabajosTributarios TaxPaymentJob[]
 
   @@map("pago")
 }
@@ -326,6 +329,10 @@ model TaxEmissionIntent {
   claimId          String?  @map("claim_id") @db.Uuid
   folio            String?  @db.VarChar(10)
   ultimoError      String?  @map("ultimo_error") @db.VarChar(64)
+  artefactoUrl     String?  @map("artefacto_url")
+  artefactoEstado  String   @default("PENDIENTE") @map("artefacto_estado") @db.VarChar(30)
+  emailEstado     String   @default("PENDIENTE") @map("email_estado") @db.VarChar(30)
+  fechaEmailInicio DateTime? @map("fecha_email_inicio") @db.Timestamptz(3)
   fechaCreacion    DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
   fechaInicio      DateTime? @map("fecha_inicio") @db.Timestamptz(3)
   fechaEnvio       DateTime? @map("fecha_envio") @db.Timestamptz(3)
@@ -337,6 +344,34 @@ model TaxEmissionIntent {
   @@unique([idEmpresa, ambiente, businessKey])
   @@index([idEmpresa, estado, fechaActualizacion])
   @@map("tax_emission_intent")
+}
+
+// Immutable local payment outbox. Contains no API credentials or provider responses.
+model TaxPaymentJob {
+  idTrabajo       String   @id @default(uuid()) @map("id_trabajo") @db.Uuid
+  idEmpresa       Int      @map("id_empresa")
+  idFactura       Int      @map("id_factura")
+  idPago          Int      @unique @map("id_pago")
+  idCliente       Int      @map("id_cliente")
+  monto           Decimal  @db.Decimal(10, 2)
+  ambiente        String   @default("sandbox") @db.VarChar(20)
+  policyVersion   String   @map("policy_version") @db.VarChar(64)
+  profileHash     String   @map("profile_hash") @db.Char(64)
+  documento       Bytes?
+  tipoDte         Int?     @map("tipo_dte")
+  formato         Int?
+  folioEsperado   String?  @map("folio_esperado") @db.VarChar(10)
+  email           String?  @db.VarChar(120)
+  nombreCliente   String   @map("nombre_cliente") @db.VarChar(120)
+  estado          String   @default("PENDIENTE") @db.VarChar(30)
+  ultimoError     String?  @map("ultimo_error") @db.VarChar(64)
+  fechaCreacion   DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict)
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict)
+  pago            Pago     @relation(fields: [idPago], references: [idPago], onDelete: Restrict)
+
+  @@index([estado, fechaCreacion])
+  @@map("tax_payment_job")
 }
 
 model DocumentoTributarioExterno {

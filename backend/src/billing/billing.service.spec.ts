@@ -72,6 +72,30 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
 }
 
 describe('BillingService lifecycle de pago', () => {
+  it('persists tax work inside the transaction, then dispatches after commit; provider failure preserves payment', async()=>{
+    const {prisma,tx,audit}=harness(invoice());const events:string[]=[];
+    prisma.$transaction.mockImplementation(async callback=>{events.push('BEGIN');const result=await callback(tx);events.push('COMMIT');return result;});
+    const issuer={getReadiness:jest.fn(),enqueuePayment:jest.fn(async()=>{events.push('OUTBOX');}),processPayment:jest.fn(async()=>{events.push('PROVIDER');throw new Error('FAKE_PROVIDER_FAILURE');})};
+    const service=new BillingService(prisma as unknown as PrismaService,audit as unknown as AuditService,{} as ConfigService,issuer);
+    const result=await service.registerPayment({...paymentDto,monto:5000},commercial);
+    expect(events).toEqual(['BEGIN','OUTBOX','COMMIT','PROVIDER']);expect(result).toMatchObject({payment:{idPago:101},saldoPendiente:15000,taxDocument:{state:'PENDIENTE'}});
+    expect(issuer.enqueuePayment).toHaveBeenCalledWith(tx,expect.objectContaining({idPago:101,monto:'5000.00',idEmpresa:1}));
+  });
+  it('does not dispatch after financial rollback',async()=>{
+    const {prisma,tx,audit}=harness(invoice());audit.record.mockRejectedValue(new Error('FAKE_ROLLBACK'));
+    const issuer={getReadiness:jest.fn(),enqueuePayment:jest.fn(),processPayment:jest.fn()};
+    const service=new BillingService(prisma as unknown as PrismaService,audit as unknown as AuditService,{} as ConfigService,issuer);
+    await expect(service.registerPayment({...paymentDto,monto:5000},commercial)).rejects.toThrow('FAKE_ROLLBACK');
+    expect(tx.pago.create).toHaveBeenCalled();expect(issuer.processPayment).not.toHaveBeenCalled();
+  });
+  it('G2 duplicate confirmation does not enqueue another fiscal job',async()=>{
+    const {prisma,tx,audit}=harness(invoice());const date=new Date('2026-10-01T10:00:00Z');
+    tx.pago.findUnique.mockResolvedValue({idPago:101,idFactura:80,idCliente:10,monto:new Prisma.Decimal(5000),fechaPago:date,pasarela:'QA',codigoAutorizacion:'QA-AUTH',codigoTransaccion:'QA-TX'} as never);
+    const issuer={getReadiness:jest.fn(),enqueuePayment:jest.fn(),processPayment:jest.fn().mockResolvedValue({state:'GENERADO'})};
+    const service=new BillingService(prisma as unknown as PrismaService,audit as unknown as AuditService,{} as ConfigService,issuer);
+    expect(await service.registerIntegrationPayment({idFactura:80,monto:5000,pasarela:'QA',fechaPago:date.toISOString(),codigoTransaccion:'QA-TX',codigoAutorizacion:'QA-AUTH'},1)).toMatchObject({duplicate:true});
+    expect(tx.pago.create).not.toHaveBeenCalled();expect(issuer.enqueuePayment).not.toHaveBeenCalled();expect(issuer.processPayment).toHaveBeenCalledWith(101);
+  });
   it('registra pago parcial sin cerrar ni reactivar', async () => {
     const { service, tx, audit } = harness(invoice());
     const result = await service.registerPayment({ ...paymentDto, monto: 5_000 }, commercial);

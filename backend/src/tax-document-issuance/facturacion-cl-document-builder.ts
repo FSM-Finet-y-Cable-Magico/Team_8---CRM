@@ -6,9 +6,14 @@ export type InvoiceDocumentInput = CommonDocument & {
 };
 export type ReceiptDocumentInput = CommonDocument & {
   tipoDte: 39 | 41; encoding: 'latin1' | 'utf8'; serviceIndicator: 1 | 2 | 3;
+  folioMode?: 'explicit' | 'provider_auto';
   periodFrom?: string; periodTo?: string; dueDate?: string;
 };
-export type BuiltTaxDocument = { bytes: Buffer; formato: 1 | 2; tipoDte: 33 | 34 | 39 | 41; folio: string };
+export type BuiltTaxDocument = { bytes: Buffer; formato: 1 | 2; tipoDte: 33 | 34 | 39 | 41; folio: string; folioMode?: 'explicit' | 'provider_auto' };
+
+export function matchesIssuedFolio(expected: string, actual: string, tipoDte: number) {
+  return /^[1-9]\d{0,9}$/.test(actual) && (actual === expected || expected === '0' && [39, 41].includes(tipoDte));
+}
 
 function fail(): never { throw new Error('DTE_INPUT_INVALID_OR_UNSUPPORTED'); }
 function text(value: string, max: number, txt = false): string {
@@ -36,10 +41,11 @@ function rut(value: string): string {
   // Structural check only; no inferred or substituted tax identity.
   return value;
 }
-function common(input: CommonDocument, txt: boolean) {
-  if (typeof input.folio !== 'string' || !/^[1-9]\d{0,9}$/.test(input.folio)) fail();
+function common(input: CommonDocument, txt: boolean, autoFolio = false) {
+  if (typeof input.folio !== 'string' || !(autoFolio ? input.folio === '0' : /^[1-9]\d{0,9}$/.test(input.folio))) fail();
   date(input.issueDate); rut(input.receiver.rut);
-  text(input.receiver.name, txt ? 40 : 100, txt); text(input.receiver.giro, 40, txt);
+  text(input.receiver.name, txt ? 40 : 100, txt);
+  if (!txt || input.receiver.giro) text(input.receiver.giro, 40, txt);
   text(input.receiver.address, 60, txt); text(input.receiver.comuna, 20, txt); text(input.receiver.city, 20, txt);
   if (!Array.isArray(input.items) || !input.items.length || input.items.length > (txt ? 1000 : 60) || amount(input.total) <= 0n) fail();
   let sum = 0n;
@@ -88,7 +94,8 @@ export function buildInvoiceDocument(input: InvoiceDocumentInput): BuiltTaxDocum
 
 export function buildReceiptDocument(input: ReceiptDocumentInput): BuiltTaxDocument {
   if (![39, 41].includes(input.tipoDte) || !['latin1', 'utf8'].includes(input.encoding) || ![1, 2, 3].includes(input.serviceIndicator)) fail();
-  if (common(input, true) !== amount(input.total)) fail();
+  if (input.folioMode !== undefined && !['explicit', 'provider_auto'].includes(input.folioMode)) fail();
+  if (common(input, true, input.folioMode === 'provider_auto') !== amount(input.total)) fail();
   if (input.serviceIndicator === 1 || input.serviceIndicator === 2) {
     date(input.periodFrom!); date(input.periodTo!);
     if (input.periodFrom! > input.periodTo!) fail();
@@ -104,5 +111,5 @@ export function buildReceiptDocument(input: ReceiptDocumentInput): BuiltTaxDocum
   const detail = input.items.map((item, index) => [index + 1, '', item.description, input.tipoDte === 41 ? 1 : 0,
     item.quantity, item.unitPrice, input.tipoDte === 41 ? item.amount : '0', item.amount, '', '', '', '0', '0'].join(';') + ';');
   const content = `->Boleta<-\r\n${header.join(';')};\r\n->BoletaTotales<-\r\n${totals.join(';')};\r\n->BoletaDetalle<-\r\n${detail.join('\r\n')}\r\n`;
-  return { bytes: encode(content, input.encoding), formato: 1, tipoDte: input.tipoDte, folio: input.folio };
+  return { bytes: encode(content, input.encoding), formato: 1, tipoDte: input.tipoDte, folio: input.folio, ...(input.folioMode ? { folioMode: input.folioMode } : {}) };
 }

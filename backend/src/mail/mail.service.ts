@@ -18,6 +18,9 @@ export type QuoteEmail = {
   filename: string;
 };
 
+export type TaxDocumentEmail = { to: string; customerName: string; tipoDte: number; folio: string; idPago: number; pdf: Buffer; filename: string };
+type PdfEmail = { to: string; subject: string; text: string; pdf: Buffer; filename: string };
+
 export type MailDeliveryResult = {
   status: 'sent' | 'not_configured';
 };
@@ -109,6 +112,21 @@ export class MailService {
   constructor(private readonly config: ConfigService) {}
 
   async sendQuote(message: QuoteEmail): Promise<MailDeliveryResult> {
+    return this.sendPdf({ ...message, subject: `Cotizacion de servicio - ${message.companyName}`,
+      text: `Hola ${message.prospectName},\n\nAdjuntamos la cotizacion solicitada para ${message.companyName}.\n\nSaludos,\nCRM FiNet` });
+  }
+
+  isConfigured() { return Boolean(this.value('SMTP_HOST') && (this.value('SMTP_FROM') ?? this.value('SMTP_USER'))); }
+
+  async sendTaxDocument(message: TaxDocumentEmail): Promise<MailDeliveryResult> {
+    if (![33,34,39,41].includes(message.tipoDte) || !/^[1-9]\d{0,9}$/.test(message.folio) ||
+        message.pdf.length > 5 * 1024 * 1024 || message.pdf.subarray(0,5).toString('ascii') !== '%PDF-') throw new Error('TAX_EMAIL_DOCUMENT_INVALID');
+    const name = [39,41].includes(message.tipoDte) ? 'Boleta' : 'Factura';
+    return this.sendPdf({ ...message, subject: `${name} electronica ${message.folio}`,
+      text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.\n\nSaludos,\nCRM FiNet` });
+  }
+
+  private async sendPdf(message: PdfEmail): Promise<MailDeliveryResult> {
     const host = this.value('SMTP_HOST');
     const from = this.value('SMTP_FROM') ?? this.value('SMTP_USER');
 
@@ -178,6 +196,7 @@ export class MailService {
   private openPlain(host: string, port: number) {
     return new Promise<Socket>((resolve, reject) => {
       const socket = createConnection({ host, port });
+      socket.setTimeout(15000, () => socket.destroy(new Error('SMTP_TIMEOUT')));
       socket.once('connect', () => resolve(socket));
       socket.once('error', reject);
     });
@@ -186,6 +205,7 @@ export class MailService {
   private openTls(host: string, port: number, rejectUnauthorized: boolean) {
     return new Promise<TLSSocket>((resolve, reject) => {
       const socket = connectTls({ host, port, servername: host, rejectUnauthorized });
+      socket.setTimeout(15000, () => socket.destroy(new Error('SMTP_TIMEOUT')));
       socket.once('secureConnect', () => resolve(socket));
       socket.once('error', reject);
     });
@@ -194,18 +214,19 @@ export class MailService {
   private upgradeTls(socket: Socket, host: string, rejectUnauthorized: boolean) {
     return new Promise<TLSSocket>((resolve, reject) => {
       const secureSocket = connectTls({ socket, servername: host, rejectUnauthorized });
+      secureSocket.setTimeout(15000, () => secureSocket.destroy(new Error('SMTP_TIMEOUT')));
       secureSocket.once('secureConnect', () => resolve(secureSocket));
       secureSocket.once('error', reject);
     });
   }
 
-  private buildMessage(message: QuoteEmail, from: string) {
+  private buildMessage(message: PdfEmail, from: string) {
     const boundary = `finet-${Date.now().toString(36)}`;
     const attachment = message.pdf
       .toString('base64')
       .match(/.{1,76}/g)
       ?.join('\r\n') ?? '';
-    const subject = this.encodedHeader(`Cotizacion de servicio - ${message.companyName}`);
+    const subject = this.encodedHeader(message.subject);
     const fromName = this.encodedHeader(this.value('SMTP_FROM_NAME') ?? 'CRM FiNet');
     const lines = [
       `From: ${fromName} <${this.headerValue(from)}>`,
@@ -219,7 +240,7 @@ export class MailService {
       'Content-Transfer-Encoding: base64',
       '',
       Buffer.from(
-        `Hola ${message.prospectName},\n\nAdjuntamos la cotizacion solicitada para ${message.companyName}.\n\nSaludos,\nCRM FiNet`,
+        message.text,
         'utf8',
       ).toString('base64'),
       `--${boundary}`,

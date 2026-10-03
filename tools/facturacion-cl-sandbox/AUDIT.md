@@ -137,3 +137,7 @@ no está conectado al runtime del CRM.
 
 El bloqueo de emisión del CRM permanece intacto. No se cambiaron datos fiscales,
 folios, documentos, contraseñas, configuración, base de datos ni despliegue.
+
+## Actualización 2026-10-03: emisión autorizada en API PRUEBAS
+
+El alcance anterior de solo login/versión es histórico. El usuario aprobó boleta por cada pago y el ensayo en sandbox. Desde Docker localhost se generó una única boleta tipo 39, folio 9234371045, pago ficticio 1 por 100 pesos. Se recuperó PDF por HTTPS y se recibió correo con adjunto en Mailpit local. El identificador corto 1-9 y la ruta /plano del sandbox fueron observados, sin usar credenciales productivas ni cambiar la contraseña del portal. No se repitió /procesar. La recepción de G3 quedó sin verificar por falta de configuración. Véase docs/i3-facturacion-cl-checkpoint.md y evidencias/facturacion-cl/2026-10-03.

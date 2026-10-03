@@ -1,7 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { matchesIssuedFolio } from './facturacion-cl-document-builder';
 import { NewTaxIntent, TaxIntentCompletion, TaxIntentRecord, TaxIntentStore } from './tax-emission-intent.service';
 
-/** Future durable store. It is not registered or queried by the current runtime. */
+/** Durable, company-scoped persistence for the post-commit payment pipeline. */
 export class PrismaTaxIntentStore implements TaxIntentStore {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -41,7 +42,10 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
   async claim(record: TaxIntentRecord, claimId: string) {
     const result = await this.prisma.taxEmissionIntent.updateMany({
       where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, fingerprint: record.fingerprint,
-        ambiente: 'sandbox', estado: 'PENDIENTE', intentos: 0 },
+        ambiente: 'sandbox', fechaEnvio: null, OR: [
+          { estado: 'PENDIENTE', intentos: 0 },
+          { estado: 'FALLIDO', ultimoError: 'CONFIRMED_NOT_SENT' },
+        ] },
       data: { estado: 'EN_PROCESO', claimId, fechaInicio: new Date(), intentos: { increment: 1 } },
     });
     return result.count === 1;
@@ -50,7 +54,7 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
   async beginDispatch(record: TaxIntentRecord, claimId: string) {
     const updated = await this.prisma.taxEmissionIntent.updateMany({
       where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, fingerprint: record.fingerprint,
-        ambiente: 'sandbox', estado: 'EN_PROCESO', intentos: 1, claimId, fechaEnvio: null },
+        ambiente: 'sandbox', estado: 'EN_PROCESO', intentos: { gte: 1 }, claimId, fechaEnvio: null },
       data: { fechaEnvio: new Date() },
     });
     return updated.count === 1;
@@ -58,7 +62,7 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
 
   async finish(record: TaxIntentRecord, claimId: string, result: TaxIntentCompletion) {
     if (!['GENERADO', 'FALLIDO', 'RESULTADO_INDETERMINADO'].includes(result.estado) ||
-        (result.estado === 'GENERADO' && result.folio !== record.folioEsperado) ||
+        (result.estado === 'GENERADO' && (!result.folio || !matchesIssuedFolio(record.folioEsperado, result.folio, record.tipoDte))) ||
         (result.ultimoError !== undefined && !['CONFIRMED_NOT_SENT', 'RECONCILIATION_REQUIRED'].includes(result.ultimoError))) {
       throw new Error('TAX_INTENT_COMPLETION_INPUT_INVALID');
     }

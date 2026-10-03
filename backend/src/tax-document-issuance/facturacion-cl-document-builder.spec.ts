@@ -13,6 +13,11 @@ const receipt: ReceiptDocumentInput = {
 };
 
 describe('FacturacionCl document builders (offline, unapproved for emission)', () => {
+  it('permits provider automatic folio only for an explicitly selected receipt mode',()=>{
+    expect(buildReceiptDocument({...receipt,folio:'0',folioMode:'provider_auto'})).toMatchObject({folio:'0',folioMode:'provider_auto',tipoDte:39});
+    expect(()=>buildReceiptDocument({...receipt,folio:'0'})).toThrow();
+    expect(()=>buildInvoiceDocument({...invoice,folio:'0'})).toThrow();
+  });
   it('builds invoice XML with the documented root and Latin1 encoding', () => {
     const document = buildInvoiceDocument({ ...invoice, receiver: { ...receiver, name: 'PRUEBA & "Peña" <FICTICIA>' } });
     const xml = document.bytes.toString('latin1');

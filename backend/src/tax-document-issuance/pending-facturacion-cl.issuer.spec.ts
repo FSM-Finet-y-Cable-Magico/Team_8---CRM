@@ -36,11 +36,13 @@ describe('PendingFacturacionClIssuer', () => {
     expect(issuer({ FACTURACION_CL_COMPANIES: duplicate }).getReadiness(1).state).toBe('CONFIGURATION_INVALID');
   });
 
-  it('impide iniciar el modulo con configuracion invalida o habilitacion prematura', () => {
+  it('impide configuracion invalida o produccion sin certificar; permite configurar sandbox', () => {
     expect(() => new FacturacionClConfigService(new ConfigService({ FACTURACION_CL_COMPANIES: '{' })).onModuleInit())
       .toThrow('FACTURACION_CL_CONFIGURATION_INVALID');
     expect(() => new FacturacionClConfigService(new ConfigService({ FACTURACION_CL_INTEGRATION_ENABLED: 'true' })).onModuleInit())
-      .toThrow('FACTURACION_CL_PENDING_CONTRACT');
+      .not.toThrow();
+    expect(() => new FacturacionClConfigService(new ConfigService({ FACTURACION_CL_INTEGRATION_ENABLED:'true', FACTURACION_CL_COMPANIES:JSON.stringify([{idEmpresa:1,alias:'FINET',environment:'production',enabled:true}]) })).onModuleInit())
+      .toThrow('FACTURACION_CL_PRODUCTION_NOT_CERTIFIED');
     expect(() => new FacturacionClConfigService(new ConfigService({ FACTURACION_CL_INTEGRATION_ENABLED: 'false' })).onModuleInit())
       .not.toThrow();
   });

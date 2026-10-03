@@ -82,6 +82,10 @@ describe('MailService', () => {
       expect(receivedMessage).toContain('To: cliente@example.com');
       expect(receivedMessage).toContain('Content-Type: application/pdf');
       expect(receivedMessage).toContain('filename="cotizacion-10.pdf"');
+      receivedMessage='';
+      await expect(service.sendTaxDocument({to:'qa@example.invalid',customerName:'QA',tipoDte:39,folio:'20',idPago:7,pdf:Buffer.from('%PDF-demo'),filename:'boleta-20.pdf'})).resolves.toEqual({status:'sent'});
+      expect(receivedMessage).toContain('To: qa@example.invalid');expect(receivedMessage).toContain('filename="boleta-20.pdf"');
+      expect(receivedMessage).toContain(Buffer.from('Boleta electronica 20').toString('base64'));
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }

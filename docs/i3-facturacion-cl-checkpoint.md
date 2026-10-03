@@ -1,206 +1,46 @@
-# Facturación.cl: preparación técnica y pendientes de activación
+# Checkpoint: boleta por pago y solicitud G3
 
-Fecha: 2026-10-03. Rama: `feat/i3-facturacion-cl`.
-Base remota incorporada: `1af19cc96e78ad1f4c3b12dc339f2d9332a82784` de
-`origin/feature/incremento3`. Preparación: `d99046f929b5c8b0bf64bf23a19e1c7456a48d32`;
-merge con I3: `9f5eb4e06c35a8b9c21959c3cf158edc6dc641c9`.
-No se creó PR ni se desplegó en Railway. El arranque local está documentado en
-[CRM con Docker](facturacion-cl-local-docker.md).
+2026-10-03. Rama feat/i3-facturacion-cl, base de continuación e2a7bbb54064e14c6d3c49cc264784b544a66a99. Se mantiene el merge de I3 1af19cc96e78ad1f4c3b12dc339f2d9332a82784. Sin PR, despliegue, Railway ni emisión productiva.
 
-## Resultado y alcance real
+## Resultado comprobado
 
-**PREPARACION_TECNICA_IMPLEMENTADA / EMISION_BLOQUEADA_POR_CONTRATO_FISCAL**.
-Este checkpoint no satisface todavía la Definition of Done de emisión del handoff.
-El usuario confirmó posteriormente **un documento por cada pago**, incluidos los
-abonos, y **boleta** para la primera prueba. El importe será el pago individual,
-sin repetir el total de la factura por cada abono. La confirmación de esta regla
-no certifica por sí sola los datos fiscales, tipos habilitados ni folios del proveedor.
+**Cable Mágico sandbox: PASS**, desde un pago del CRM hasta boleta, PDF y correo local. Política del usuario: por cada pago, incluidos abonos; primera prueba Boleta. El emisor real quedó registrado detrás de TaxDocumentIssuer y conectado a Billing después del commit. Este checkpoint sustituye el anterior de preparación sin conexión.
 
-El runtime mantiene `PendingFacturacionClIssuer`, `canIssue=false`, `canRetry=false`
-y el bloqueo de habilitación de `FACTURACION_CL_INTEGRATION_ENABLED=true`.
-Los componentes nuevos no están registrados en Nest, no se exportan desde la
-frontera activa y no se conectan a Billing ni a una ruta HTTP.
+| Paso real | Resultado |
+|---|---|
+| Factura de QA local 4 / contrato 5 | Monto 200, cliente ficticio QA BOLETA SANDBOX - NO COBRAR |
+| Abono por interfaz del CRM | Pago 1, 100 pesos, referencia QA-FACTCL-20261003-ONCE-100 |
+| Proveedor API PRUEBAS | GENERADO, tipo 39, folio 9234371045, intentos 1 |
+| Saldo después de emitir | 100 pendientes; cobro permanece parcial |
+| Recuperación del PDF | HTTPS, una página, 4729 bytes; contenido confirma folio, pago 1, cobro 4 y total 100 |
+| Correo | ENVIADO y recibido en Mailpit local con dte-39-9234371045.pdf adjunto; no prueba entrega a una casilla externa |
+| Referencia de pago duplicada | HTTP 409, sin segundo pago/boleta |
+| Recuperación repetida | Misma boleta, intentos 1, sin otro correo |
 
-Se implementó código de preparación dentro del backend, sin dependencias nuevas:
+La recuperación inicial del PDF rechazó el enlace http /plano del sandbox. Se añadió la ruta exacta observada, convirtiéndola a HTTPS y conservando host fijo, límite, firma y prohibición de redirects. Se recuperó la boleta existente mediante /artifacts; no se repitió /procesar. El PDF descargado se inspeccionó visualmente y como texto; los datos son de prueba.
 
-- `FacturacionClReadClient`: login y consulta de versión reales, solo para
-  compañías declaradas de pruebas; secretos mediante proveedor server-side,
-  tokens por empresa, renovación previa a las 24 horas y errores saneados.
-  Sus métodos públicos solo autentican y consultan versión; no siguen redirects
-  ni hacen retry automático. El transporte protegido se usa por el dispatcher separado.
-- Constructores offline de factura XML (33/34) y boleta TXT (39/41), con datos
-  explícitos. Cubren un subconjunto mínimo de detalle sin descuentos, mezcla de
-  tratamientos, impuestos adicionales, envío de correo ni autoasignación de folio.
-- `TaxEmissionIntentService`: fingerprint del contenido/contexto, preparación
-  local, una toma atómica del trabajo antes de despachar y estados independientes
-  del pago. Se verifica con un dispatcher ficticio y con transporte HTTP simulado.
-- `FacturacionClSandboxDispatcher`: envío GET documentado, deshabilitado por defecto,
-  contrato de pruebas explícito por empresa y prueba de identidad persistida antes
-  del envío. Ninguna empresa real tiene ese contrato aprobado en el código/runtime.
-  Respuestas discordantes, errores HTTP y timeouts quedan indeterminados, sin retry.
-- `PrismaTaxIntentStore`: persistencia propuesta separada de CU-86; comprobación
-  de empresa/cliente/factura/pago, preparación Serializable, replay inmutable,
-  actualización condicionada por propietario y cuarentena de trabajos antiguos.
-- Esquema y migración nueva `20261003010000_i3_tax_emission_intents`, **no aplicada**.
+Durante este ensayo: una solicitud /wsds/procesar, cuatro /login y tres /obtenerlink (incluida una lectura diagnóstica), una descarga PDF por el backend. El adjunto se leyó posteriormente desde Mailpit local para QA. Cero llamadas productivas; ninguna contraseña se cambió. Las comprobaciones anteriores de login/versión del 2026-10-02 siguen como historial en tools/facturacion-cl-sandbox/AUDIT.md.
 
-El cliente generado de Prisma y los paquetes locales son archivos de desarrollo
-ignorados por Git. No se cambiaron versiones, package.json ni package-lock.json.
+## Solicitud de instalación G3
 
-## Evidencia externa del checkpoint anterior
+Caso ficticio QA G8 G3 LOCAL 20261003 - NO INSTALAR, prospecto 4, contrato 6 (Firmado), empresa 2, plan 3. Ubicación y cobertura comercial sintéticas se prepararon exclusivamente en la base local; revisión técnica manual de QA, sin prueba técnica de G3.
 
-El 2026-10-02 se verificó acceso web de Cable Mágico y las secciones separadas de
-credenciales. Con las de Ambiente Prueba se obtuvo HTTP 200 y token en `/login`.
-`/wsds/version` respondió HTTP 200 con `version` de tipo array, mientras el manual
-publica una cadena. Se conserva esa diferencia; no se declara una versión válida
-sin conocer la estructura de sus elementos.
+La cotización se guardó y su correo fue recibido localmente. El navegador bloqueó su apertura de PDF por su política de seguridad; no se intentó eludirla ni repetir la generación. El selector del contrato quedó sin planes en esta versión de la UI. Se completó únicamente el contrato ficticio y su firma mediante endpoints locales existentes, sin modificar ese formulario.
 
-El acceso web de pruebas aceptó login pero mostró clave caducada; no se modificó
-la contraseña. El detalle saneado está en `tools/facturacion-cl-sandbox/AUDIT.md`.
-Este checkpoint del 2026-10-03 no hizo llamadas al proveedor.
+POST /api/integrations/g3/installations respondió HTTP 201 por la creación del seguimiento **local**: integración 1, FALLIDA_REINTENTABLE, intentos 1, idOtG3=null. Mensaje exacto: “La integracion tecnica con G3 no esta configurada.” requestId fb2f4cd0-f6e6-4f21-934a-bb06d1b6813d, traceId 45434620-dec8-4403-b306-85f0981d604c.
 
-## Datos y límites de los constructores
+**RECEPCION_G3_NO_VERIFICADA**: no hubo POST externo, despacho ni orden creada en G3. Faltan G3_API_URL y G3_API_KEY de pruebas, y habilitar ese ambiente. Una recepción válida requiere la referencia externa del POST a /api/integraciones/instalaciones y lectura posterior de /api/integraciones/ordenes/{id}?id_empresa=2, cotejando empresa/contrato/requestId. No se usan mocks como prueba de recepción. El código G3 no se modificó.
 
-Los importes aprobados se reciben como cadenas, sin cálculos en coma flotante.
-Se comprueba consistencia de líneas/totales y se rechazan resultados que requieran
-redondeo de pesos no definido. No se infiere IVA, exención, tipo DTE, identidad
-del emisor/receptor ni política de pago. El RUT solo tiene validación estructural;
-el flujo futuro debe validar identidad/dígito y pertenencia autoritativa.
+## Validación del código
 
-Factura: XML con raíz DTE/Documento y bytes ISO-8859-1; máximo 60 detalles, sin
-conversión silenciosa de caracteres fuera de Latin1. El emisor usa el RUT explícito
-y los datos que el proveedor mantiene según el manual. No se afirma que el
-subconjunto cubra todavía las reglas de servicios periódicos de Cable Mágico.
+- Jest: 24 suites / 264 tests PASS (tax, Billing, Mail, límites CU-86, G2 y G3). Los proveedores en Jest son ficticios.
+- PostgreSQL real local: un dispatcher concurrente, replay después de reinicio, conflicto de fingerprint, constraint de GENERADO sin folio, reintento confirmado previo al envío y bloqueo de reenvío incierto PASS. Cero HTTP/SMTP en ese script.
+- Compilación TypeScript backend/frontend y ESLint de archivos afectados PASS.
+- Prisma validate/generate PASS; las dos migraciones se aplicaron solo a fsm_facturacion_local.
+- git diff --check PASS.
 
-Boleta: TXT con posiciones y separadores completos, máximo 1000 detalles,
-descripción sin separadores/saltos que puedan inyectar registros, montos brutos o
-exentos y fechas explícitas para servicios periódicos. El charset debe ser elegido
-por contrato, no se deduce del manual XML. El correo queda vacío, porque el manual
-describe envío automático si se informa ese campo; SMTP debe ser otra etapa.
+[Capturas y salida saneada de pruebas](evidencias/facturacion-cl/2026-10-03/README.md). Los informes previos 234 tests corresponden a la preparación anterior; no son evidencia de esta emisión.
 
-Ambos requieren folio positivo explícito. Aunque el manual de boleta describe
-folio cero para autoasignación, no se habilita esa modalidad antes de definir
-cómo conciliar una emisión incierta sin conocer su folio.
+## Límites para operar
 
-## Identidad e idempotencia: garantía y límite
-
-La unicidad propuesta es `(idEmpresa, ambiente, businessKey)`. `businessKey` debe
-ser una identidad estable de G8 definida por la futura regla aprobada; no puede
-tomarse del body de G2 ni cambiar al renovar política, folio o tipo. `policyVersion`
-documenta esa regla y forma parte del fingerprint, no crea otra emisión.
-
-La regla por pago ya fue confirmada, pero todavía no hay generador de businessKey
-ni intención automática tras Pago en el runtime. La identidad deberá conservar
-el mismo `idPago` para un replay de G2. Los ejemplos `FAKE_*` solo son fixtures.
-
-Solo `PENDIENTE` con cero intentos puede reclamarse. Además, una actualización
-atómica de `fechaEnvio` antes de autenticar/despachar impide reenviar directamente
-el mismo trabajo reclamado, también al reconstruir el dispatcher tras reinicio.
-La marca describe autorización local de despacho, no prueba recepción remota.
-Una vez iniciado, un fallo
-incierto, resultado remoto discordante o caída antes de guardar éxito bloquea
-otro envío. El trabajo antiguo puede pasar a `RESULTADO_INDETERMINADO`; no se
-devuelve automáticamente a pendiente. Esto prioriza evitar duplicados y puede
-dejar un trabajo sin emisión si el proceso cae antes de despachar: necesita revisión.
-
-El store no persiste payload, receptor, clave ni token. Al ejecutar se debe
-reconstruir el mismo snapshot aprobado; cualquier cambio de datos genera conflicto
-de fingerprint. No hay todavía política de cifrado/retención de snapshots fiscales
-ni reconstrucción histórica completa de conceptos del CRM.
-
-**No existe reconciliación automática con Facturación.cl ni una garantía de
-idempotencia remota validada.** La cuarentena no equivale a conciliación. No se
-usa `getticket` como seguimiento: el manual lo describe para impresión térmica.
-No hay acción pública de reintento, autorización manual ni resolución de
-indeterminados implementada en este checkpoint.
-
-## Base de datos e integración futura
-
-La migración es aditiva: crea una tabla de intenciones con foreign keys, unicidad y
-restricciones; no modifica datos de Factura/Pago/CU-86. Prisma validate y el diff
-offline del esquema verifican la estructura, sin ejecutarla en PostgreSQL.
-Las restricciones SQL y la concurrencia del motor aún requieren prueba en una
-base aislada, autorizada. Las pruebas actuales del store usan mocks.
-
-No se editaron migraciones existentes, init-global.sql, dumps, Railway, G1, G3,
-endpoints G2, JWT ni frontend. La migración G2 mencionada por el handoff ya aparece
-en la base remota incorporada (`20261001120000_i3_g2_intergroup_contract`).
-El carril principal deberá revisar e incorporar
-el nuevo modelo/DDL a su estrategia de esquema antes de activar el store.
-
-La integración posterior no debe emitir dentro de la transacción financiera. Una
-vez confirmada la regla, falta conservar durablemente el trabajo asociado al
-pago sin una ventana de pérdida tras commit (p. ej. outbox local). La emisión y
-SMTP ocurren después del commit; un fallo tributario no revierte el pago. Este
-checkpoint no implementa ese hook/outbox ni modifica el comportamiento de pagos.
-
-## Validación local
-
-Ejecutado sobre el código de este checkpoint:
-
-- Prisma validate y generación local del cliente, sin conexión a base.
-- Diff offline base → esquema nuevo: solo tabla, índices y foreign keys nuevos.
-- TypeScript `tsc --noEmit`, sin errores.
-- ESLint del módulo tax-document-issuance, sin errores.
-- Jest inicial del módulo nuevo y regresión de Billing/CU-86: 8 suites, 96 pruebas PASS.
-- Después del merge: tax-document-issuance, Billing, G2, G3 y frontera CU-86:
-  **20 suites, 234 pruebas PASS** sobre `9f5eb4e`.
-- [Resultados y capturas](evidencias/facturacion-cl/2026-10-03/README.md), con
-  transporte de proveedor simulado y alcance explicitado.
-
-Comandos desde backend:
-
-```powershell
-node ../node_modules/jest/bin/jest.js --runInBand src/tax-document-issuance src/external-tax-documents/external-tax-documents.boundaries.spec.ts src/billing/billing.service.spec.ts
-node ../node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.build.json
-node ../node_modules/eslint/bin/eslint.js src/tax-document-issuance
-```
-
-Estas pruebas no certifican emisión, recepción SII, artefactos, correo ni concurrencia
-real de PostgreSQL. La cuenta FiNet no fue probada; no se reutilizan sus credenciales
-ni se presupone que la configuración de Cable Mágico sirve para ambas empresas.
-
-## Pendientes para completar la integración
-
-1. Regla por pago y primera boleta confirmadas; falta la política para documentos
-   tributarios previamente emitidos y los tipos habilitados por empresa.
-2. Datos fiscales y conceptos históricos autoritativos, indicadores de servicio,
-   charset TXT, tratamiento/validación de impuestos y política de redondeos.
-3. Folios de pruebas y procedimiento del proveedor para identificar/reconciliar
-   un envío incierto; respuestas y artefactos verificables. No basta un login exitoso.
-4. Certificar el dispatcher preparado y sus formatos con el contrato confirmado;
-   implementar recuperación segura de artefactos y conciliación. La emisión HTTP
-   actual solo fue probada con transporte simulado; ninguna emisión productiva.
-5. Validar migración/concurrencia en PostgreSQL aislado y coordinar la base G2.
-6. Integrar hook/outbox con identidad estable del pago, sin enviar dentro de la
-   transacción de Pago; conectar el issuer y efectuar una emisión sandbox autorizada.
-
-## Reporte de entrega
-
-```text
-BASE_SHA=1af19cc96e78ad1f4c3b12dc339f2d9332a82784
-PAYMENT_RULE=PER_PAYMENT_CONFIRMED
-FIRST_SANDBOX_DOCUMENT=BOLETA_CONFIRMED
-NEW_DEPENDENCIES=[]
-NEW_ENV_VARS=[]
-DB_CHANGE_REQUIRED=YES_FOR_FUTURE_STORE
-MIGRATION_PROPOSED=20261003010000_i3_tax_emission_intents
-MIGRATION_APPLIED=false
-READ_CLIENT_IMPLEMENTED=true
-DOCUMENT_BUILDERS_OFFLINE=true
-DISPATCHER_HTTP_IMPLEMENTED=true_UNREGISTERED_UNCERTIFIED
-DEFAULT_DISABLED=true
-PAYMENT_HOOK_IMPLEMENTED=false
-TIMEOUT_QUARANTINE_TESTS=PASS
-PROVIDER_RECONCILIATION_IMPLEMENTED=false
-SANDBOX_EMISSION_VERIFIED=false
-READY_FOR_CHERRY_PICK=false
-REAL_PROVIDER_CALLS_THIS_CHECKPOINT=0
-REAL_EMISSION_CALLS_TOTAL=0
-PRODUCTION_EMISSION_CALLS_TOTAL=0
-```
-
-Fuentes oficiales revisadas el 2026-10-03:
-[REST](https://www.facturacion.cl/manualintegracion/apirestintegracion.php),
-[factura XML](https://www.facturacion.cl/manualintegracion/archivofacturaelectronica.php),
-[boleta TXT](https://www.facturacion.cl/manualintegracion/archivoboletaelectronica.php),
-[credenciales](https://www.facturacion.cl/manualintegracion/credencialesacceso.php).
+Producción sigue bloqueada, FiNet todavía sin credenciales/prueba propia, factura 33/34 sin ensayo real ni política de redondeo asumida. El subconjunto fiscal exige datos/folios explícitos y deja casos no soportados para revisión. Conciliación incierta es manual auditada; no se afirma una consulta automática por idempotencia del proveedor. Las migraciones del esquema compartido requieren revisión de su responsable. SMTP externo no se configuró. Ver [contrato y configuración](i3-facturacion-cl-integration.md).

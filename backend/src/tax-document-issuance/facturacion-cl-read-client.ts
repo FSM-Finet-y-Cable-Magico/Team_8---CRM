@@ -91,7 +91,7 @@ export class FacturacionClReadClient {
 
   /** For the gated subclass only; fixed origin/paths, no token in return values. */
   protected async authorizedRequest(idEmpresa: number, url: URL) {
-    if (url.origin !== 'https://rest.facturacion.cl' || !['/wsds/version', '/wsds/procesar'].includes(url.pathname) || url.username || url.password || url.hash) {
+    if (url.origin !== 'https://rest.facturacion.cl' || !['/wsds/version', '/wsds/procesar', '/wsds/obtenerlink'].includes(url.pathname) || url.username || url.password || url.hash) {
       throw new FacturacionClReadError('REQUEST_DESTINATION_INVALID');
     }
     const token = await this.token(idEmpresa);

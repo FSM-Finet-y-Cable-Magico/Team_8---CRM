@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -7,6 +7,7 @@ import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { canActivateService } from '../services/service-activation.policy';
+import { TAX_DOCUMENT_ISSUER, TaxDocumentIssuer } from '../tax-document-issuance/tax-document-issuer.types';
 import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
 import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -22,6 +23,7 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    @Optional() @Inject(TAX_DOCUMENT_ISSUER) private readonly taxIssuer?: TaxDocumentIssuer,
   ) {}
 
   async overview(currentUser: AuthUser, scope = 'consolidado') {
@@ -183,7 +185,7 @@ export class BillingService {
     if (!dto.pasarela.trim()) throw new BadRequestException('Debe indicar el medio de pago');
     const paymentDate = dto.fechaPago ? new Date(dto.fechaPago) : new Date();
     if (Number.isNaN(paymentDate.getTime())) throw new BadRequestException('Fecha de pago invalida');
-    return this.billingTransaction(async tx => {
+    const result = await this.billingTransaction(async tx => {
       // Read inside Serializable: concurrent partial payments cannot reuse a stale balance.
       const invoice = await tx.factura.findUnique({ where: { idFactura: dto.idFactura }, include: {
         pagos: true, prorrogasPago: APPROVED_EXTENSIONS,
@@ -282,8 +284,23 @@ export class BillingService {
         idUsuario: integration ? null : currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
         valorAnterior: { estadoContrato: contract.estado }, valorNuevo: { estadoContrato: 'Activo', serviciosReactivados: reactivatedServiceIds },
       }, tx);
+      if (this.taxIssuer?.enqueuePayment) {
+        const technical = customer.datosTecnicos;
+        const giro = technical && typeof technical === 'object' && !Array.isArray(technical) && typeof technical.giroTributario === 'string' ? technical.giroTributario : '';
+        await this.taxIssuer.enqueuePayment(tx, { idEmpresa:contract.idEmpresa, idFactura:invoice.idFactura,idPago:payment.idPago,
+          idCliente:customer.idCliente,monto:new Prisma.Decimal(dto.monto).toFixed(2),periodoMes:invoice.periodoMes,periodoAnio:invoice.periodoAnio,
+          fechaLimitePago:invoice.fechaLimitePago,tipoDocumento:invoice.tipoDocumento,folioExterno:invoice.folioExterno,
+          receiver:{rut:customer.rut ?? '',name:customer.nombreCompleto,giro,address:contract.direccionInstalacion ?? '',
+            comuna:contract.comunaInstalacion ?? '',city:contract.ciudadInstalacion ?? '',email:customer.email} });
+      }
       return { payment, paidInFull, saldoPendiente: remaining.toNumber(), reactivatedServiceIds, duplicate: false };
     });
+    // Transaction has committed. Provider/SMTP failure must never undo or mask the payment.
+    if (!this.taxIssuer?.processPayment) return result;
+    let taxDocument: unknown;
+    try { taxDocument = await this.taxIssuer.processPayment(result.payment.idPago); }
+    catch { taxDocument = { state:'PENDIENTE', code:'TAX_POST_COMMIT_PROCESSING_PENDING' }; }
+    return { ...result, taxDocument };
   }
 
   private async billingTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

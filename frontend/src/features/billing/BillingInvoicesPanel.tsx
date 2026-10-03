@@ -3,6 +3,7 @@ import { api, apiErrorMessage, BillingInvoice, BillingInvoiceDetail, BillingInvo
 import { formatDateOnly } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
+import { PaymentTaxDocument } from './PaymentTaxDocument';
 
 const money = (value: number | string | null) => value === null ? 'Sin monto' : Number(value).toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 2 });
 type Action = 'payment' | 'agreement' | 'extension' | 'condition' | 'charge' | 'event';
@@ -113,7 +114,7 @@ export function BillingInvoicesPanel({ scope, permissions, onChanged, revision }
           {['extension', 'condition', 'charge', 'event'].includes(action) && <label>Motivo / observación<textarea required minLength={3} maxLength={1000} value={form.observacion} onChange={e => setForm({ ...form, observacion: e.target.value })} /></label>}
           <div className="table-actions"><button disabled={saving} type="submit">{saving ? 'Guardando…' : 'Guardar'}</button><button disabled={saving} className="secondary" type="button" onClick={() => setAction(null)}>Cancelar</button></div>
         </form>}
-        <details open><summary>Pagos ({selected.pagos.length})</summary>{selected.pagos.map(p => <p key={p.idPago}>{formatDateOnly(p.fechaPago)} · {money(p.monto)} · {p.pasarela} · {p.codigoTransaccion ?? 'Sin referencia'}</p>)}</details>
+        <details open><summary>Pagos ({selected.pagos.length})</summary>{selected.pagos.map(p => <section key={p.idPago}><p>{formatDateOnly(p.fechaPago)} · {money(p.monto)} · {p.pasarela} · {p.codigoTransaccion ?? 'Sin referencia'}</p><PaymentTaxDocument idPago={p.idPago} canManage={permissions.manageBilling} /></section>)}</details>
         <details><summary>Convenios y cuotas ({selected.convenios.length})</summary>{selected.convenios.map(c => <section className="stack" key={c.idConvenio}><h3>Convenio {c.idConvenio}: {c.estado}</h3><p>{money(c.montoComprometido)} · {c.condiciones}</p>{c.cuotas.map(q => <p key={q.idCuota}>Cuota {q.numero}: {money(q.monto)} · {formatDateOnly(q.fechaVencimiento)} · {q.estado}</p>)}{permissions.approveAgreements && c.estado === 'PENDIENTE' && <button disabled={saving} onClick={() => void approve(c.idConvenio)}>Aprobar convenio {c.idConvenio}</button>}</section>)}</details>
         <details><summary>Prórrogas ({selected.prorrogas.length})</summary>{selected.prorrogas.map(p => <p key={p.idProrroga}>{formatDateOnly(p.fechaOriginal)} → {formatDateOnly(p.nuevaFecha)} · {p.estado} · {p.motivo}</p>)}</details>
         <details><summary>Cargos del contrato ({selected.cargos.length})</summary>{selected.cargos.map(c => <p key={c.idCargo}>{c.tipo} · {money(c.monto)} · {c.estado} · {c.observacion}</p>)}</details>

@@ -43,8 +43,12 @@ services:
       G3_INTEGRATION_ENABLED: ${G3_INTEGRATION_ENABLED:-false}
       G3_REQUEST_TIMEOUT_MS: 8000
       G8_INTEGRATION_API_KEYS: ${G8_INTEGRATION_API_KEYS:-[]}
-      FACTURACION_CL_INTEGRATION_ENABLED: "false"
-      FACTURACION_CL_COMPANIES: "[]"
+      FACTURACION_CL_INTEGRATION_ENABLED: ${FACTURACION_CL_INTEGRATION_ENABLED:-false}
+      FACTURACION_CL_COMPANIES: ${FACTURACION_CL_COMPANIES:-[]}
+      FACTURACION_CL_PROFILES: ${FACTURACION_CL_PROFILES:-[]}
+      FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS: ${FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS:-}
+      FACTURACION_CL_FINET_SANDBOX_CREDENTIALS: ${FACTURACION_CL_FINET_SANDBOX_CREDENTIALS:-}
+      FACTURACION_CL_DELIVERY_ENABLED: ${FACTURACION_CL_DELIVERY_ENABLED:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USER: ${SMTP_USER:-}
@@ -77,6 +81,13 @@ services:
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0
+
+  # Optional local inbox. SMTP is internal to this Docker network; no external relay.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: [mail-qa]
+    ports:
+      - "127.0.0.1:8025:8025"
 
 volumes:
   facturacion_data:

@@ -44,7 +44,7 @@ describe('FacturacionClSandboxDispatcher (fake transport only, no provider calls
     expect(request).not.toHaveBeenCalled();
   });
   it.each([
-    { estado: 'PENDIENTE' }, { claimId: 'OTHER_OWNER' }, { intentos: 2 }, { ambiente: 'production' },
+    { estado: 'PENDIENTE' }, { claimId: 'OTHER_OWNER' }, { intentos: 0 }, { ambiente: 'production' },
     { policyVersion: 'OTHER_RULE' }, { fingerprint: '0'.repeat(64) }, { folioEsperado: '127' }, { idEmpresa: 2 },
   ])('requires persisted company, owner, policy, content and folio proof: %j', async changed => {
     const { dispatcher, record, request } = setup();
@@ -70,7 +70,7 @@ describe('FacturacionClSandboxDispatcher (fake transport only, no provider calls
     expect(results.filter(result => result.state === 'GENERADO')).toHaveLength(1);
     expect(results.filter(result => result.state === 'RESULTADO_INDETERMINADO')).toHaveLength(1);
     expect(await create().dispatch(requestInput)).toEqual({ state: 'RESULTADO_INDETERMINADO' });
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.filter(([url])=>new URL(url).pathname==='/wsds/procesar')).toHaveLength(1);
   });
   it.each([
     {}, null, { WSPLANO: { Resultado: 'False' } },
@@ -105,6 +105,6 @@ describe('FacturacionClSandboxDispatcher (fake transport only, no provider calls
     const next = setup();
     jest.spyOn(next.store, 'beginDispatch').mockRejectedValue(new Error('FAKE_DB_FAILURE'));
     expect(await next.dispatcher.dispatch(requestInput)).toEqual({ state: 'RESULTADO_INDETERMINADO' });
-    expect(next.request).not.toHaveBeenCalled();
+    expect(next.request.mock.calls.map(([url])=>new URL(url).pathname)).toEqual(['/login']);
   });
 });

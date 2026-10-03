@@ -1,133 +1,54 @@
-# Integración Facturacion.cl — estado y arquitectura segura
+# Facturación.cl: emisión por pago en sandbox
 
-## Estado
+Estado al 2026-10-03, rama feat/i3-facturacion-cl: **SANDBOX_BOLETA_VERIFICADA / PRODUCCION_NO_CERTIFICADA**. La API de pruebas de Cable Mágico generó una boleta desde un abono confirmado, se recuperó su PDF y se recibió el correo en una bandeja SMTP local. No acredita entrega a una casilla externa ni certificación SII/producción. FiNet requiere sus propias credenciales/perfil y prueba independiente.
 
-Actualización de preparación local (2026-10-03): ver
-[checkpoint de Facturación.cl](i3-facturacion-cl-checkpoint.md). Incorpora componentes
-backend y una migración propuesta sin activar emisión ni cambiar el issuer vigente.
-La descripción de runtime y su bloqueo que sigue debajo permanece válida.
+## Flujo implementado
 
-**ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL**.
+La regla aprobada por el usuario es un documento por cada pago, incluso parcial (PER_PAYMENT_V1). Billing conserva Pago y saldo; dentro de su transacción Serializable escribe un TaxPaymentJob con la identidad y bytes del documento. Ese paso solo utiliza PostgreSQL. Después del commit llama al TaxDocumentIssuer real, FacturacionClIssuer. Un fallo HTTP/SMTP nunca revierte ni convierte en fallido el pago confirmado. Si la persistencia local falla antes del commit, se aborta la transacción, sin llamadas externas.
 
-CU-86 ya está implementado como `DocumentoTributarioExterno`: registro, consulta, corrección y anulación lógica de metadata emitida fuera del CRM. `Factura` y `Pago` siguen perteneciendo al dominio Billing. Esta etapa no duplica CU-86 ni convierte metadata externa en una emisión tributaria.
+El trabajador recupera trabajos persistidos cada 15 segundos. La intención identifica empresa + sandbox + PAYMENT:idPago, y conserva fingerprint de contexto y bytes. Claim y marcador de envío se escriben antes de procesar en el proveedor. La autenticación precede al marcador: un fallo confirmado anterior a procesar admite reintento explícito; nunca hay reintento automático de /wsds/procesar.
 
-El runtime no invoca Facturacion.cl ni expone una ruta de emisión o botones UI. Los constructores TXT/XML, cliente y dispatcher preparados en el checkpoint actual siguen aislados y sin registrar; no habilitan emisión desde el CRM. El manual público no determina el contrato contratado y certificado para Finet/Cable Mágico ni una estrategia segura de reconciliación.
+Estados: PENDIENTE → EN_PROCESO → GENERADO, FALLIDO o RESULTADO_INDETERMINADO. Una respuesta incompatible, timeout o caída tras el envío queda por conciliar. Trabajos EN_PROCESO antiguos se ponen en cuarentena. Un cambio de perfil detiene el trabajo para revisión, sin reconstruirlo silenciosamente. El marcador de envío impide otra emisión desde procesos/reinicios concurrentes.
 
-## Evidencia oficial revisada
+El PDF y el correo tienen estados separados. Se obtiene el enlace del folio generado; se exige HTTPS, host fijo www.facturacion.cl, rutas /sistema/descargar.php o /plano/descargar.php, sin redirects, máximo 5 MB y firma PDF. El enlace HTTP observado en el sandbox para /plano se convierte a HTTPS ANTES de la solicitud; no se realiza una descarga HTTP. Antes de SMTP se toma un claim persistido; una entrega incierta queda bloqueada para evitar reenvíos automáticos. Un fallo de PDF/SMTP conserva GENERADO y el pago.
 
-- Manual general de integración: <https://www.facturacion.cl/manualintegracion/>
-- API REST de integración: <https://www.facturacion.cl/manualintegracion/apirestintegracion.php>
-- Ficha técnica del servicio: <https://www.facturacion.cl/manualintegracion/fichatecnicaserviciointegracion.php>
-- Formato de archivo factura electrónica: <https://www.facturacion.cl/manualintegracion/archivofacturaelectronica.php>
+## Datos fiscales y límites
 
-El material oficial observado documenta:
+La empresa, cliente, factura y pago proceden de las relaciones de G8; G2 no determina el tipo tributario. Se usa el tipo BOLETA/FACTURA guardado en Factura o el valor por defecto explícito del perfil. El total es el pago individual, no el total de cobro original. Cada detalle referencia el idPago y el idFactura. El RUT del cliente se valida con dígito verificador y nunca se reemplaza por un RUT auxiliar.
 
-- base pública `https://rest.facturacion.cl`;
-- autenticación mediante `POST /login` con `usuario`, `rut` y `clave`, que entrega un token temporal;
-- envío general mediante `/wsds/procesar` usando un archivo de integración codificado y selección de formato TXT/XML;
-- operaciones para obtener link/PDF, versión y ticket;
-- onboarding, credenciales, certificación y habilitación de módulos/ambientes con el proveedor.
+Nombre, email y RUT: Cliente. Dirección/comuna/ciudad: campos de instalación del Contrato. Giro para factura: Cliente.datosTecnicos.giroTributario, dato explícito de G8; su ausencia bloquea factura. Revisar esos datos para un despliegue fiscal, pues dirección de instalación no certifica por sí sola domicilio tributario.
 
-Estos datos son evidencia del producto, no autorización para usar una cuenta ni confirmación del contrato de este proyecto.
+El perfil fija tipo 39/41, charset y servicio 1/2/3 para boleta. Períodos/día límite provienen del cobro cuando corresponden. Boleta usa folio 0 únicamente en modo provider_auto explícito; el proveedor devuelve un folio positivo. Su campo Email queda vacío para evitar entrega adicional del proveedor: el correo es una etapa propia.
 
-## Información que falta
+La identidad de acceso 1-9 se observó en Credenciales API de PRUEBAS y se permite solamente para el perfil sandbox de boleta; no es una identidad de cliente ni un emisor habilitado para factura. No se modificó el validador común de RUT.
 
-1. Modalidad y módulos contratados para Finet y Cable Mágico.
-2. Ambiente sandbox/certificación y ambiente productivo por empresa.
-3. RUT emisor, usuario y secreto entregados por canal seguro para cada empresa.
-4. Tipos DTE autorizados y formato elegido: TXT o XML.
-5. Mapeo de datos CRM → campos obligatorios del archivo: emisor, receptor, dirección, giro, ítems, impuestos, referencias y totales.
-6. Respuestas exactas de éxito/error y forma estable de recuperar un resultado después de timeout.
-7. Garantía de idempotencia del proveedor o clave externa admitida; el manual revisado no basta para asumirla.
-8. Rate limits, SLA, expiración/renovación de token y política de reintentos.
-9. Reglas de folio, anulaciones/notas de crédito, PDF/XML y conciliación con SII.
-10. Confirmación de si el envío documentado por query string es el mecanismo exigido para esta cuenta y cómo evita exposición en logs/proxies.
+Factura XML 33/34 conserva un rango positivo de folios exclusivo, configurado explícitamente. Se reserva con lock transaccional y restricción única. IVA debe ser explícito y exacto, sin redondeo inventado. Pesos fraccionarios, datos insuficientes, tratamientos mixtos, descuentos o falta de folios dejan DATOS_REQUERIDOS. No se certificó una factura real en el proveedor; solo se probó la boleta autorizada. CU-86 conserva su registro manual independiente; un folio externo o CU-86 ya registrado para la factura impide emitir automáticamente hasta revisión.
 
-## Arquitectura incorporada
+## Configuración del servidor
 
-El módulo `tax-document-issuance` define una frontera `TaxDocumentIssuer` independiente de Billing y CU-86. Su implementación actual `PendingFacturacionClIssuer` solo entrega estado técnico por `idEmpresa`.
+Defaults: FACTURACION_CL_INTEGRATION_ENABLED=false; FACTURACION_CL_COMPANIES=[]; FACTURACION_CL_PROFILES=[]; FACTURACION_CL_DELIVERY_ENABLED=false. Ninguna credencial se expone en VITE, logs o Git.
 
-Estados posibles:
+Mapa de empresas sin secretos: [{idEmpresa,alias,environment:"sandbox",enabled:true}]. Aliases previstos FINET y CABLE_MAGICO; nunca compartir credenciales entre empresas.
 
-- `DISABLED`
-- `CONFIGURATION_INVALID`
-- `COMPANY_NOT_CONFIGURED`
-- `COMPANY_DISABLED`
-- `PENDIENTE_CONTRATO_FACTURACION_CL`
+Perfil aprobado: [{idEmpresa,approved:true,issuerRut,defaultDocumentType:"BOLETA",receipt:{tipoDte:39,encoding:"utf8",serviceIndicator:3}}]. La aprobación documenta la configuración del ensayo; no certifica el perfil comercial productivo. Una factura requiere además invoice:{tipoDte:33,vatRate:"19",folioFrom:"…",folioTo:"…"}, o tipo 34 sin vatRate; confirmar rango exclusivo y política fiscal antes de habilitarlo.
 
-En todos los casos actuales `canIssue=false` y `canRetry=false`. No existe método de emisión, por lo que otro módulo no puede saltarse el bloqueo accidentalmente.
+Secretos por empresa: FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS y FACTURACION_CL_FINET_SANDBOX_CREDENTIALS, JSON {usuario,rut,clave} de API PRUEBAS. La empresa/RUT debe coincidir con el perfil. Producción permanece bloqueada por el servicio y por el validador productivo existente. No reutilizar las credenciales reales en estas variables: ambas credenciales usan el mismo origen REST y el ambiente efectivo depende de su procedencia.
 
-Variables:
+SMTP_HOST/FROM y configuración SMTP existente; FACTURACION_CL_DELIVERY_ENABLED=true activa entrega. En el ensayo se usó únicamente Mailpit local, sin relay ni entrega externa.
 
-```dotenv
-FACTURACION_CL_INTEGRATION_ENABLED=false
-FACTURACION_CL_COMPANIES=[]
-```
+## Persistencia y operaciones
 
-Formato no secreto previsto:
+Migraciones aditivas independientes: 20261003010000_i3_tax_emission_intents y 20261003020000_i3_tax_payment_pipeline. Se aplicaron únicamente a fsm_facturacion_local, contenedor/volumen propio; no a Railway ni a una base compartida. No se modificaron la migración G2 ni init-global.sql. El responsable del esquema compartido debe revisar/incorporar ambas antes de un despliegue. Con flag true y tablas faltantes, el módulo rechaza iniciar.
 
-```json
-[
-  { "idEmpresa": 1, "alias": "FINET", "environment": "sandbox", "enabled": false },
-  { "idEmpresa": 2, "alias": "CABLE_MAGICO", "environment": "sandbox", "enabled": false }
-]
-```
+GET /api/tax-documents/payments/:id: estado, folio, enlace, fingerprint y estado PDF/correo, con JWT/rol de cobranza y pertenencia de empresa/cliente.
+POST :id/retry: solo FALLIDO + CONFIRMED_NOT_SENT, sin marcador de envío previo.
+POST :id/artifacts: recupera PDF/correo pendiente de una intención GENERADO, sin volver a emitir.
+POST :id/reconcile: Administrador, fingerprint, folio positivo, confirmSameDocument=true y observación; registra auditoría. El operador debe contrastar en el proveedor tipo, empresa, receptor, importe y referencia del pago. Que exista un PDF con un folio no prueba automáticamente que sea el mismo pago. Con folio automático y resultado incierto, no hay conciliación automática ni reemisión a ciegas.
 
-El parser exige exactamente esos cuatro campos, IDs y alias únicos. Rechaza campos como `clave`, `password`, `token` o cualquier extra. Las credenciales futuras deberán ser variables secretas por empresa, con nombres definidos recién cuando exista el contrato real.
+La pantalla Cobranza → factura → pago permite consultar documento, comprobante, correo y acciones seguras de recuperación. No se añadieron datos del emisor fiscal al formulario de pago.
 
-El runtime aborta si la configuración es inválida o si se intenta poner el flag en `true`. El validador de producción aplica el mismo bloqueo. Para habilitar la integración será necesaria una nueva modificación revisada, no solo un cambio de variable.
+## Verificación y evidencia
 
-## Contrato futuro mínimo
+Ver [checkpoint con resultados y G3](i3-facturacion-cl-checkpoint.md), [Docker local](facturacion-cl-local-docker.md) y [capturas](evidencias/facturacion-cl/2026-10-03/README.md). 264 tests / 24 suites PASS; comprobación adicional con PostgreSQL real y dispatcher ficticio de concurrencia/reinicio/cuarentena. TypeScript, ESLint, Prisma y diff-check aprobados según el checkpoint.
 
-Cuando la información faltante esté disponible, ampliar la frontera con operaciones explícitas:
-
-- `issue(intent)` con identidad estable local y fingerprint del contenido;
-- `getStatus(providerReference)` para reconciliar solo mediante una operación confirmada por el proveedor; `getticket` del manual sirve para impresión térmica;
-- `getArtifacts(reference)` solo si el proveedor permite PDF/XML de forma segura;
-- `cancel` o documentos correctivos únicamente bajo reglas contractuales y tributarias confirmadas.
-
-La persistencia futura debe separar, como mínimo:
-
-- intento local único por empresa y documento Billing;
-- fingerprint inmutable del payload;
-- ambiente y proveedor;
-- estado local y referencia/ticket remoto;
-- timestamps, número de intentos y último error saneado;
-- resultado tributario y artefactos sin guardar credenciales.
-
-## Idempotencia y timeouts
-
-Reglas no negociables para la implementación futura:
-
-1. Una misma intención lógica no puede crear dos emisiones.
-2. Antes del envío se persiste una identidad/fingerprint único en una transacción local.
-3. Si el proveedor confirma recepción, se conserva su referencia antes de permitir otra acción.
-4. Ante timeout después de enviar, el estado debe pasar a `RESULTADO_INDETERMINADO`.
-5. `RESULTADO_INDETERMINADO` no se reintenta ciegamente. Primero se consulta/reconcilia por una referencia estable acordada con Facturacion.cl.
-6. Solo errores demostrablemente previos al envío o explícitamente reintentables pueden usar retry con backoff y límite.
-7. Un operador no puede forzar retry sin ver la conciliación y el riesgo de duplicado.
-8. Logs y auditoría guardan IDs, estados y códigos saneados; nunca token, clave o archivo tributario completo.
-
-Si Facturacion.cl no ofrece una búsqueda estable por identidad del cliente/ticket, el equipo debe obtener una garantía contractual de idempotencia o diseñar un proceso operativo de conciliación antes de habilitar emisión.
-
-## UI
-
-No se modificó la UI. Agregar acciones “Emitir”, “Reintentar” o “Enviar al SII” antes del contrato sería engañoso y permitiría expectativas que el backend no puede garantizar. CU-86 continúa mostrando solo registro/corrección/anulación de metadata externa.
-
-Cuando el contrato esté listo, la UI deberá mostrar estado, ambiente, referencia externa, resultado indeterminado y acción de conciliación; nunca secretos ni payloads tributarios completos.
-
-## Pruebas incorporadas
-
-- flag ausente/deshabilitado;
-- configuración multiempresa y ambientes separados;
-- empresa deshabilitada o no configurada;
-- JSON/flag/duplicados inválidos fallan cerrado;
-- campos extra, incluidos nombres de credenciales, se rechazan;
-- arquitectura sin `fetch`, Axios, URL, header Authorization o emisión;
-- validador productivo bloquea `FACTURACION_CL_INTEGRATION_ENABLED=true`.
-
-Estas pruebas de la frontera activa son locales con configuración ficticia. La comprobación externa posterior de login/versión de pruebas está en `tools/facturacion-cl-sandbox/AUDIT.md`; no se efectuó emisión. Los tests de preparación actuales están descritos en el checkpoint enlazado al inicio.
-
-## Próximo hito
-
-El usuario confirmó una boleta por cada pago, incluidos los abonos, y boleta para la primera prueba. Falta confirmar los datos/folios fiscales y la política para documentos ya emitidos. Con una ficha contractual versionada se podrá certificar el adapter y la persistencia preparados, implementar conciliación y artefactos, y conectar la emisión posterior al cobro. Los pendientes y evidencias vigentes están en el checkpoint actual. Producción permanece fuera de alcance. El CRM ya puede ejecutarse en el [stack Docker local](facturacion-cl-local-docker.md).
+Fuentes primarias consultadas: [API REST](https://www.facturacion.cl/manualintegracion/apirestintegracion.php), [boleta TXT](https://www.facturacion.cl/manualintegracion/archivoboletaelectronica.php), [factura XML](https://www.facturacion.cl/manualintegracion/archivofacturaelectronica.php). Diferencias observadas del sandbox (RUT corto, link /plano) están descritas aquí, sin alterar ni atribuirlas al ejemplo del manual.

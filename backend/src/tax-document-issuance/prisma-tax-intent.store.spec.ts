@@ -55,7 +55,7 @@ describe('PrismaTaxIntentStore (mock queries, no database migration applied)', (
   it('claims work atomically for the company and refuses a lost claim', async () => {
     const { store, mock } = setup();
     expect(await store.claim(record, 'FAKE_CLAIM')).toBe(true);
-    expect(mock.taxEmissionIntent.updateMany.mock.calls[0][0]).toMatchObject({ where: { idEmpresa: 1, ambiente: 'sandbox', estado: 'PENDIENTE', intentos: 0 }, data: { estado: 'EN_PROCESO', intentos: { increment: 1 } } });
+    expect(mock.taxEmissionIntent.updateMany.mock.calls[0][0]).toMatchObject({ where: { idEmpresa:1,ambiente:'sandbox',fechaEnvio:null,OR:[{estado:'PENDIENTE',intentos:0},{estado:'FALLIDO',ultimoError:'CONFIRMED_NOT_SENT'}] },data:{estado:'EN_PROCESO',intentos:{increment:1}} });
     mock.taxEmissionIntent.updateMany.mockResolvedValue({ count: 0 });
     expect(await store.claim(record, 'FAKE_OTHER_CLAIM')).toBe(false);
   });
@@ -70,7 +70,7 @@ describe('PrismaTaxIntentStore (mock queries, no database migration applied)', (
     expect(await store.beginDispatch(record, 'FAKE_CLAIM')).toBe(true);
     expect(mock.taxEmissionIntent.updateMany.mock.calls[0][0]).toMatchObject({
       where: { idEmpresa: 1, idIntencion: record.idIntencion, fingerprint: data.fingerprint, ambiente: 'sandbox',
-        estado: 'EN_PROCESO', intentos: 1, claimId: 'FAKE_CLAIM', fechaEnvio: null },
+        estado: 'EN_PROCESO', intentos: {gte:1}, claimId: 'FAKE_CLAIM', fechaEnvio: null },
       data: { fechaEnvio: expect.any(Date) },
     });
     mock.taxEmissionIntent.updateMany.mockResolvedValue({ count: 0 });

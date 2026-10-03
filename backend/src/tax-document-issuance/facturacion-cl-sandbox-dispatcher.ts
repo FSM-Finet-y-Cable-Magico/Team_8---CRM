@@ -1,4 +1,4 @@
-import { BuiltTaxDocument } from './facturacion-cl-document-builder';
+import { BuiltTaxDocument, matchesIssuedFolio } from './facturacion-cl-document-builder';
 import { FacturacionClReadClient, FacturacionClReadError, FacturacionClReadOptions, FacturacionClRequest } from './facturacion-cl-read-client';
 import { TaxDispatchResult, TaxEmissionDispatchPort, TaxIntentStore, taxIntentFingerprint } from './tax-emission-intent.service';
 
@@ -7,7 +7,7 @@ export type FacturacionClApprovedTestContract = {
   allowedDteTypes: Array<33 | 34 | 39 | 41>;
 };
 
-/** Prepared but UNREGISTERED. No real company has an approved emission contract. */
+/** Sandbox-only dispatcher with durable claim and one-way processing marker. */
 export class FacturacionClSandboxDispatcher extends FacturacionClReadClient implements TaxEmissionDispatchPort {
   private readonly contracts = new Map<number, FacturacionClApprovedTestContract>();
   private readonly emissionEnabled: boolean;
@@ -42,7 +42,7 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
     const document = { ...input.document, bytes: Buffer.from(input.document.bytes) };
     const contract = this.contracts.get(input.idEmpresa)!;
     const record = await this.store.find(input.idEmpresa, input.intentId);
-    if (record.idEmpresa !== input.idEmpresa || record.ambiente !== 'sandbox' || record.estado !== 'EN_PROCESO' || record.intentos !== 1 ||
+    if (record.idEmpresa !== input.idEmpresa || record.ambiente !== 'sandbox' || record.estado !== 'EN_PROCESO' || record.intentos < 1 ||
         record.claimId !== input.claimId || !input.claimId || record.policyVersion !== contract.policyVersion ||
         !contract.allowedDteTypes.includes(document.tipoDte) || record.tipoDte !== document.tipoDte ||
         record.formato !== document.formato || record.folioEsperado !== document.folio ||
@@ -50,16 +50,16 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
           idPago: record.idPago ?? undefined, businessKey: record.businessKey, policyVersion: record.policyVersion, ambiente: 'sandbox', document })) {
       return { state: 'FALLIDO', code: 'CONFIRMED_NOT_SENT' };
     }
-    // One-way durable marker also protects direct replays of this claimed job.
-    try {
-      if (!await this.store.beginDispatch(record, input.claimId)) return { state: 'RESULTADO_INDETERMINADO' };
-    } catch { return { state: 'RESULTADO_INDETERMINADO' }; }
-    // Resolve authentication before handing the emission request to the transport.
+    // Authentication cannot issue a DTE. A failure here is provably before processing.
     try { await this.authenticate(input.idEmpresa); }
     catch (error) {
       if (error instanceof FacturacionClReadError) return { state: 'FALLIDO', code: 'CONFIRMED_NOT_SENT' };
       throw error;
     }
+    // One-way durable marker also protects direct replays of this claimed job.
+    try {
+      if (!await this.store.beginDispatch(record, input.claimId)) return { state: 'RESULTADO_INDETERMINADO' };
+    } catch { return { state: 'RESULTADO_INDETERMINADO' }; }
     const url = new URL('https://rest.facturacion.cl/wsds/procesar');
     url.searchParams.set('file', document.bytes.toString('base64'));
     url.searchParams.set('formato', String(document.formato));
@@ -71,11 +71,11 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
       const documents = Array.isArray(raw) ? raw : [raw];
       if (documents.length !== 1) return { state: 'RESULTADO_INDETERMINADO' };
       const issued = documents[0] as { Resultado?: unknown; Folio?: unknown; TipoDte?: unknown } | null;
-      if (body?.WSPLANO?.Resultado !== 'True' || issued?.Resultado !== 'True' ||
-          issued.Folio !== record.folioEsperado || String(issued.TipoDte) !== String(record.tipoDte)) {
+      if (body?.WSPLANO?.Resultado !== 'True' || issued?.Resultado !== 'True' || typeof issued.Folio !== 'string' ||
+          !matchesIssuedFolio(record.folioEsperado, issued.Folio, record.tipoDte) || String(issued.TipoDte) !== String(record.tipoDte)) {
         return { state: 'RESULTADO_INDETERMINADO' };
       }
-      return { state: 'GENERADO', folio: record.folioEsperado, tipoDte: record.tipoDte };
+      return { state: 'GENERADO', folio: issued.Folio, tipoDte: record.tipoDte };
     } catch {
       // Any failure after handing off a processing request remains uncertain.
       return { state: 'RESULTADO_INDETERMINADO' };

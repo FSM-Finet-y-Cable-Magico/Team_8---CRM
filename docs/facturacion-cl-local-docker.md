@@ -65,16 +65,34 @@ El flujo objetivo registra el pago, emite la boleta, conserva folio y comprobant
 y envía el correo después de confirmar la generación. El comprobante de pago G2
 y el documento tributario son registros diferentes.
 
-El código actual todavía **no conecta Billing con el emisor automático**.
-Facturación.cl continúa deshabilitada; el login/versión de pruebas y los tests
-locales no acreditan una boleta emitida. La migración de intenciones tributarias
-no se aplicó a esta base ni a Railway. No se habilitó SMTP.
+El emisor real está conectado después del commit de Billing. Las migraciones nuevas se aplicaron únicamente a fsm_facturacion_local. En esta PC la configuración privada habilita solo Cable Mágico sandbox; FiNet no está habilitada. Mailpit recibe el correo local en http://localhost:8025, sin relay externo. Se generó una boleta desde un abono, se verificó su PDF y su correo local. Ver el checkpoint para la evidencia y límites.
 
-G3 está sin configurar. Para una recepción real faltan `G3_API_URL`, `G3_API_KEY`
-y habilitación explícita para su ambiente de pruebas. No se envió ninguna orden
-desde este stack. No usar una respuesta simulada para afirmar que G3 recibió la OT.
+G3 sigue sin configurar. Se registró un intento local del contrato QA 6 con estado FALLIDA_REINTENTABLE, sin idOtG3 y sin POST externo. Faltan G3_API_URL, G3_API_KEY de pruebas y habilitación. Un HTTP 201 del CRM solo acredita el seguimiento local cuando la integración está deshabilitada.
 
 Antes de corregir la URL de trabajo, se creó en el CRM remoto un caso QA con
 contrato #22, nombre `QA G8 G3 20261003 - NO INSTALAR` y observación de no despacho
 ni cobro. No se remitió una orden G3. Ese registro remoto no está en esta base
 local y no es evidencia del flujo local.
+
+## Preparación de las tablas en una base QA nueva
+
+Mantener Facturación.cl deshabilitada durante la primera inicialización. Desde la raíz del repositorio, solo para el contenedor db de este compose y una base fsm_facturacion_local nueva:
+
+```powershell
+Get-Content -Raw backend/prisma/migrations/20261003010000_i3_tax_emission_intents/migration.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
+Get-Content -Raw backend/prisma/migrations/20261003020000_i3_tax_payment_pipeline/migration.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
+Get-Content -Raw tools/facturacion-cl-sandbox/create-local-fixtures.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
+```
+
+No repetir las migraciones sobre esta PC: ya fueron aplicadas. No ejecutar migrate deploy contra el DDL global o una base compartida. Las migraciones aditivas requieren coordinación del dueño del esquema antes de un despliegue compartido.
+
+Configurar solo credenciales API de PRUEBAS y el perfil correspondiente en .env.facturacion-local según i3-facturacion-cl-integration.md. Los defaults del compose siguen deshabilitados. No copiar valores privados a .env.example ni a capturas. Para la bandeja de correo local configurar SMTP_HOST=mailpit, SMTP_PORT=1025, SMTP_STARTTLS=false, SMTP_FROM=qa@finet.local; FACTURACION_CL_DELIVERY_ENABLED controla esa etapa.
+
+```powershell
+docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml --profile mail-qa up -d backend frontend mailpit
+node tools/facturacion-cl-sandbox/verify-local-persistence.cjs
+```
+
+El último script usa PostgreSQL real y dispatcher ficticio: cero llamadas al proveedor. Comprueba la base exclusiva y elimina solo sus propios registros temporales. No genera boletas; la primera emisión sandbox debe partir del pago de QA con una referencia única, tras verificar empresa/perfil/credenciales. No repetir pagos de la evidencia para obtener nuevas capturas.
+
+Mailpit se agregó conforme a su [documentación oficial Docker](https://mailpit.axllent.org/docs/install/docker/); SMTP no se publica al host y su interfaz web queda en loopback. Tras cambios del código montado, reiniciar backend/frontend si Docker Windows no detecta los cambios.
