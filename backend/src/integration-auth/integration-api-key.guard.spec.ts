@@ -6,13 +6,17 @@ import { INTEGRATION_GROUPS } from './integration-auth.types';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
-function setup(input: { key?: string; groups?: string[]; company?: number; entries?: unknown[] } = {}) {
+function setup(input: { key?: string; groups?: string[]; company?: number; entries?: unknown[]; source?: 'body' | 'query' } = {}) {
   const entries = input.entries ?? [{ keyId: 'g1-current', group: 'G1', sha256: hash('g1-test-key'), companies: [1, 2], active: true }];
   const config = new ConfigService({ G8_INTEGRATION_API_KEYS: JSON.stringify(entries) });
   const reflector = { getAllAndOverride: jest.fn((metadata: string) => metadata === INTEGRATION_GROUPS
     ? input.groups ?? ['G1']
-    : input.company === undefined ? undefined : { source: 'body', field: 'id_empresa' }) };
-  const request: Record<string, unknown> = { headers: input.key === undefined ? {} : { 'x-api-key': input.key }, body: { id_empresa: input.company } };
+    : input.company === undefined ? undefined : { source: input.source ?? 'body', field: 'id_empresa' }) };
+  const request: Record<string, unknown> = {
+    headers: input.key === undefined ? {} : { 'x-api-key': input.key },
+    body: { id_empresa: input.company },
+    query: { id_empresa: input.company?.toString() },
+  };
   const context = { switchToHttp: () => ({ getRequest: () => request }), getHandler: () => setup, getClass: () => IntegrationApiKeyGuard };
   return { guard: new IntegrationApiKeyGuard(config, reflector as never), context: context as never, request };
 }
@@ -53,6 +57,44 @@ describe('IntegrationApiKeyGuard', () => {
     expect(active.guard.canActivate(active.context)).toBe(true);
     const inactive = setup({ key: 'old-key', company: 1, entries });
     expect(() => inactive.guard.canActivate(inactive.context)).toThrow(UnauthorizedException);
+  });
+
+  it.each([1, 2])('autoriza una key G2 para empresa %s dentro de companies=[1,2]', (company) => {
+    const entries = [{ keyId: 'g2-current', group: 'G2', sha256: hash('g2-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g2-test-key', groups: ['G2'], company, entries, source: 'query' });
+    expect(test.guard.canActivate(test.context)).toBe(true);
+    expect(test.request.integration).toEqual({ keyId: 'g2-current', group: 'G2', companies: [1, 2] });
+  });
+
+  it('rechaza una empresa fuera del scope de la key G2', () => {
+    const entries = [{ keyId: 'g2-current', group: 'G2', sha256: hash('g2-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g2-test-key', groups: ['G2'], company: 3, entries, source: 'query' });
+    expect(() => test.guard.canActivate(test.context)).toThrow(ForbiddenException);
+  });
+
+  it('impide que una key G3 consuma endpoints exclusivos de G2', () => {
+    const entries = [{ keyId: 'g3-current', group: 'G3', sha256: hash('g3-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g3-test-key', groups: ['G2'], company: 1, entries });
+    expect(() => test.guard.canActivate(test.context)).toThrow(ForbiddenException);
+  });
+
+  it.each([1, 2])('autoriza una key G3 para empresa %s dentro de companies=[1,2]', (company) => {
+    const entries = [{ keyId: 'g3-current', group: 'G3', sha256: hash('g3-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g3-test-key', groups: ['G3'], company, entries });
+    expect(test.guard.canActivate(test.context)).toBe(true);
+    expect(test.request.integration).toEqual({ keyId: 'g3-current', group: 'G3', companies: [1, 2] });
+  });
+
+  it('rechaza una empresa fuera del scope de la key G3', () => {
+    const entries = [{ keyId: 'g3-current', group: 'G3', sha256: hash('g3-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g3-test-key', groups: ['G3'], company: 3, entries });
+    expect(() => test.guard.canActivate(test.context)).toThrow(ForbiddenException);
+  });
+
+  it('impide que una key G2 consuma el cierre exclusivo de G3', () => {
+    const entries = [{ keyId: 'g2-current', group: 'G2', sha256: hash('g2-test-key'), companies: [1, 2], active: true }];
+    const test = setup({ key: 'g2-test-key', groups: ['G3'], company: 1, entries });
+    expect(() => test.guard.canActivate(test.context)).toThrow(ForbiddenException);
   });
 });
 

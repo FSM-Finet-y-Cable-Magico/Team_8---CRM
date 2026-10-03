@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1; no seeds or credentials.
+// Generated from init-global.sql SHA256 6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -2690,6 +2690,12 @@ export const GLOBAL_COLUMNS = [
   },
   {
     "table": "pago",
+    "name": "codigo_autorizacion",
+    "type": "varchar(100)",
+    "nullable": true
+  },
+  {
+    "table": "pago",
     "name": "pasarela",
     "type": "varchar(30)",
     "nullable": false
@@ -2705,6 +2711,12 @@ export const GLOBAL_COLUMNS = [
     "name": "comprobante_pdf_url",
     "type": "text",
     "nullable": true
+  },
+  {
+    "table": "pago",
+    "name": "comprobante_estado",
+    "type": "varchar(20)",
+    "nullable": false
   },
   {
     "table": "plan",
@@ -3009,6 +3021,12 @@ export const GLOBAL_COLUMNS = [
   {
     "table": "prospecto",
     "name": "id_zona_pago",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "prospecto",
+    "name": "id_plan_interes",
     "type": "integer",
     "nullable": true
   },
@@ -5069,6 +5087,66 @@ export const GLOBAL_COLUMNS = [
     "name": "materiales_aplicados",
     "type": "jsonb",
     "nullable": true
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "id_resultado",
+    "type": "bigint",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "request_id",
+    "type": "varchar(100)",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "trace_id",
+    "type": "varchar(100)",
+    "nullable": true
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "id_ticket",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "payload_hash",
+    "type": "varchar(64)",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "exito",
+    "type": "boolean",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "resultado_tecnico",
+    "type": "text",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "estado_ticket_resultante",
+    "type": "varchar(20)",
+    "nullable": false
+  },
+  {
+    "table": "integracion_resultado_wifi_g2",
+    "name": "fecha_recepcion",
+    "type": "timestamptz",
+    "nullable": false
   },
   {
     "table": "integracion_evento_entrante",

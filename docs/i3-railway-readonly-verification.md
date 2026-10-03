@@ -34,7 +34,7 @@ La primera ejecución contra el proxy dentro del sandbox falló por restricción
 - la ausencia de `sslmode` no impidió la conexión observada;
 - el fallo actual no es `RAILWAY_READ_EXTERNAL_NETWORK_BLOCKED`.
 
-## Resultado observado el 2026-09-30
+## Resultado observado y revalidado al 2026-10-01
 
 ```json
 {
@@ -68,11 +68,54 @@ Además existen cuatro objetos adicionales:
 
 No se eliminaron ni modificaron. El verificador clasifica `_prisma_migrations` como `TECHNICAL_ALLOWED_EXTRA` y los otros cinco objetos como `UNOWNED_EXTRA`. La tabla G3 ya pertenece al contrato y no requiere excepción. Solo el extra técnico está exceptuado, por lo que el resultado continúa en `FAIL`.
 
+## Investigación de cierre
+
+Una introspección adicional, también dentro de una transacción READ ONLY, confirmó sin leer valores de negocio:
+
+- `solicitud_clave_wifi`: 1 fila; 11 columnas; PK; `request_id` único; índice `(id_empresa, estado)`; sin FK, CHECK, trigger, vista o función consumidora detectada.
+- `solicitud_contrasena_wifi`: 3 filas y estructura diferente; no es un alias demostrable de la tabla extra.
+- `lista_negra`: 3 filas; `nivel varchar(10) NULL` tiene 0 valores no nulos.
+- `log_notificacion`: 0 filas; `id_ot integer NULL` tiene 0 valores no nulos. Su FK apunta a `orden_trabajo(id_ot)` con `ON UPDATE CASCADE / ON DELETE SET NULL`.
+- `log_notificacion_estado_envio_fecha_envio_idx`: índice B-tree no único y válido sobre `(estado_envio, fecha_envio)`.
+
+Las búsquedas en runtime, Prisma, SQL, migraciones y todas las refs Git accesibles no identificaron DDL de origen ni owner funcional. El rol técnico `postgres` observado en el catálogo no permite atribuir ownership. Por eso los cinco objetos reciben exactamente **C. MANTENER_BLOQUEADO_PENDIENTE_OWNER**. No se eliminan, incorporan ni exceptúan.
+
 ## Siguiente decisión de esquema
 
-1. Resolver owner y decisión de `lista_negra.nivel`, `log_notificacion.id_ot`, su FK, su índice y la nueva tabla `solicitud_clave_wifi`. Los cuatro objetos de las tablas vacías no tienen referencias actuales; no se evaluaron datos de la tabla nueva y esta etapa no autoriza eliminar nada.
-2. Volver a ejecutar el comando hasta obtener `PASS`, sin relajar el verificador ni permitir extras desconocidos.
+1. Obtener confirmación escrita del owner y migración/DDL de origen para los cinco `UNOWNED_EXTRA`.
+2. Si se propone retiro, inventariar consumidores externos, respaldar y coordinar una ventana; esta etapa no autoriza borrado.
+3. Volver a ejecutar el comando después de la decisión contractual, sin relajar el verificador ni permitir extras desconocidos.
 
 El estado actual es `RAILWAY_READ_CONNECTED / GLOBAL_SCHEMA_EXTRA_OBJECTS / FAIL`.
+
+## Verificación posterior al contrato propuesto G2/G3 — 2026-10-01
+
+Se repitió el verificador mediante el mismo wrapper y transacción `READ ONLY`, después de actualizar localmente el contrato a 92 tablas. Railway no fue modificado.
+
+```json
+{
+  "status": "FAIL",
+  "counts": { "tables": 92, "columns": 910, "pk": 92, "fk": 214, "checks": 35, "indexes": 114 },
+  "summary": {
+    "MATCH": 1522,
+    "MISSING_COLUMN": 13,
+    "REQUIRES_REVIEW": 4,
+    "MISSING_TABLE": 1,
+    "MISSING_FK": 3,
+    "MISSING_INDEX": 5,
+    "EXTRA_LEGACY": 6
+  },
+  "classifications": {
+    "CONTRACT_DIFFERENCE": 26,
+    "TECHNICAL_ALLOWED_EXTRA": 1,
+    "UNOWNED_EXTRA": 5
+  },
+  "allowedExtras": 1,
+  "missing": 22,
+  "different": 9
+}
+```
+
+Los 26 `CONTRACT_DIFFERENCE` son el delta deliberado y todavía no aplicado del cierre G2: una tabla y sus diez columnas, tres columnas en tablas existentes, una PK, una secuencia, dos checks, tres FK y cinco índices. Los cinco `UNOWNED_EXTRA` permanecen separados y sin reclasificar. El resultado esperado antes de cualquier DDL coordinado es `FAIL`; obtener `PASS` forzando excepciones sería incorrecto.
 
 La trazabilidad completa está en [i3-global-extra-object-resolution.md](i3-global-extra-object-resolution.md).

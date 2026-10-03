@@ -1,13 +1,14 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
+import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
+import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
 import { CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
-import { G3WebhookGuard } from './g3-webhook.guard';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 
@@ -61,9 +62,30 @@ export class G3IntegrationController {
   }
 
   @Post('events/work-order-closed')
-  @UseGuards(G3WebhookGuard)
+  @UseGuards(IntegrationApiKeyGuard)
+  @IntegrationGroups('G3')
+  @IntegrationCompanyScope('body')
   receiveClosure(@Body() dto: G3ClosureDto) {
     return this.closureProcessor.process(dto, 'WEBHOOK');
+  }
+}
+
+@Controller('integraciones/fsm')
+export class G3CanonicalWebhookController {
+  constructor(private readonly closureProcessor: G3ClosureProcessor) {}
+
+  @Post('ordenes/:idOt/cierre')
+  @UseGuards(IntegrationApiKeyGuard)
+  @IntegrationGroups('G3')
+  @IntegrationCompanyScope('body')
+  receiveClosure(
+    @Param('idOt', ParseIntPipe) idOt: number,
+    @Body() dto: G3ClosureDto,
+  ) {
+    if (dto.id_ot !== undefined && dto.id_ot !== idOt) {
+      throw new BadRequestException('El id_ot de la ruta no coincide con el payload');
+    }
+    return this.closureProcessor.process({ ...dto, id_ot: idOt }, 'WEBHOOK');
   }
 }
 

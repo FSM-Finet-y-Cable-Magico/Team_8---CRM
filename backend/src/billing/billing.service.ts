@@ -156,10 +156,33 @@ export class BillingService {
     });
   }
 
-  async registerPayment(dto: RegisterPaymentDto, currentUser: AuthUser) {
-    this.assertBillingWriter(currentUser);
+  async registerIntegrationPayment(dto: RegisterPaymentDto, idEmpresa: number) {
+    if (!dto.fechaPago || !dto.codigoAutorizacion?.trim() || !dto.codigoTransaccion?.trim()) {
+      throw new BadRequestException('El pago confirmado requiere fecha, codigo de autorizacion y codigo de transaccion');
+    }
+    const principal: AuthUser = {
+      idUsuario: 0,
+      idEmpresa,
+      email: null,
+      nombreCompleto: 'Integracion G2',
+      roles: [],
+    };
+    try {
+      return await this.registerPayment(dto, principal, { idEmpresa });
+    } catch (error) {
+      if (error instanceof ConflictException && error.message === 'La referencia de pago ya está registrada') {
+        return this.registerPayment(dto, principal, { idEmpresa });
+      }
+      throw error;
+    }
+  }
+
+  async registerPayment(dto: RegisterPaymentDto, currentUser: AuthUser, integration?: { idEmpresa: number }) {
+    if (!integration) this.assertBillingWriter(currentUser);
     if (!Number.isFinite(dto.monto) || dto.monto <= 0 || dto.monto > 99999999.99 || new Prisma.Decimal(dto.monto).decimalPlaces() > 2) throw new BadRequestException('Monto inválido: positivo y máximo dos decimales');
     if (!dto.pasarela.trim()) throw new BadRequestException('Debe indicar el medio de pago');
+    const paymentDate = dto.fechaPago ? new Date(dto.fechaPago) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) throw new BadRequestException('Fecha de pago invalida');
     return this.billingTransaction(async tx => {
       // Read inside Serializable: concurrent partial payments cannot reuse a stale balance.
       const invoice = await tx.factura.findUnique({ where: { idFactura: dto.idFactura }, include: {
@@ -171,16 +194,53 @@ export class BillingService {
       } });
       if (!invoice?.contrato?.cliente) throw new NotFoundException('Factura no encontrada');
       const contract = invoice.contrato, customer = contract.cliente!;
-      this.assertCompanyAccess(contract.idEmpresa, currentUser);
+      if (integration) {
+        if (contract.idEmpresa !== integration.idEmpresa) throw new BadRequestException('La factura no pertenece a la empresa autorizada');
+      } else {
+        this.assertCompanyAccess(contract.idEmpresa, currentUser);
+      }
       if (!contract.idEmpresa || customer.idEmpresa !== contract.idEmpresa) throw new BadRequestException('Cliente y contrato deben pertenecer a la misma empresa');
+      if (integration && dto.codigoTransaccion) {
+        const existing = await tx.pago.findUnique({
+          where: { codigoTransaccion: dto.codigoTransaccion.trim() },
+          select: {
+            idPago: true, idFactura: true, idCliente: true, monto: true, fechaPago: true,
+            pasarela: true, codigoTransaccion: true, codigoAutorizacion: true,
+            comprobantePdfUrl: true, comprobanteEstado: true,
+          },
+        });
+        if (existing) {
+          const same = existing.idFactura === invoice.idFactura
+            && existing.idCliente === customer.idCliente
+            && new Prisma.Decimal(existing.monto).eq(dto.monto)
+            && existing.fechaPago.getTime() === paymentDate.getTime()
+            && existing.pasarela === dto.pasarela.trim()
+            && existing.codigoAutorizacion === dto.codigoAutorizacion?.trim();
+          if (!same) throw new ConflictException('El codigo de transaccion ya existe con datos diferentes');
+          const currentBalance = invoiceBalance(invoice);
+          return {
+            payment: existing,
+            paidInFull: currentBalance.saldo === 0,
+            saldoPendiente: currentBalance.saldo,
+            reactivatedServiceIds: [],
+            duplicate: true,
+          };
+        }
+      }
       const balance = invoiceBalance(invoice);
       if (!balance.aceptaPagos) throw new BadRequestException('La factura está cerrada o no tiene saldo cobrable');
       if (new Prisma.Decimal(dto.monto).gt(balance.saldo!)) throw new BadRequestException('El pago supera el saldo pendiente');
       const payment = await tx.pago.create({ data: {
-        idFactura: invoice.idFactura, idCliente: customer.idCliente, monto: dto.monto, fechaPago: new Date(),
+        idFactura: invoice.idFactura, idCliente: customer.idCliente, monto: dto.monto, fechaPago: paymentDate,
         codigoTransaccion: dto.codigoTransaccion?.trim() || undefined, pasarela: dto.pasarela.trim(),
+        codigoAutorizacion: dto.codigoAutorizacion?.trim() || undefined,
         comprobantePdfUrl: dto.comprobantePdfUrl?.trim() || undefined,
-      }, select: { idPago: true, idFactura: true, monto: true, fechaPago: true, pasarela: true, codigoTransaccion: true } });
+        comprobanteEstado: dto.comprobantePdfUrl?.trim() ? 'GENERADO' : 'PENDIENTE',
+      }, select: {
+        idPago: true, idFactura: true, idCliente: true, monto: true, fechaPago: true,
+        pasarela: true, codigoTransaccion: true, codigoAutorizacion: true,
+        comprobantePdfUrl: true, comprobanteEstado: true,
+      } });
       const remaining = new Prisma.Decimal(balance.saldo!).minus(dto.monto);
       const paidInFull = remaining.isZero();
       let reactivatedServiceIds: number[] = [];
@@ -213,15 +273,16 @@ export class BillingService {
         }
       }
       await this.auditService.record({
-        idUsuario: currentUser.idUsuario, accion: 'REGISTRAR_PAGO', entidadAfectada: 'pago', idEntidadAfectada: payment.idPago,
+        idUsuario: integration ? null : currentUser.idUsuario,
+        accion: integration ? 'REGISTRAR_PAGO_G2' : 'REGISTRAR_PAGO', entidadAfectada: 'pago', idEntidadAfectada: payment.idPago,
         valorNuevo: { idEmpresa: contract.idEmpresa, idFactura: invoice.idFactura, idCliente: customer.idCliente,
           monto: dto.monto, saldoAnterior: balance.saldo, saldoNuevo: remaining.toNumber(), pagadaCompleta: paidInFull, serviciosReactivados: reactivatedServiceIds },
       }, tx);
       if (reactivatedServiceIds.length) await this.auditService.record({
-        idUsuario: currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
+        idUsuario: integration ? null : currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
         valorAnterior: { estadoContrato: contract.estado }, valorNuevo: { estadoContrato: 'Activo', serviciosReactivados: reactivatedServiceIds },
       }, tx);
-      return { payment, paidInFull, saldoPendiente: remaining.toNumber(), reactivatedServiceIds };
+      return { payment, paidInFull, saldoPendiente: remaining.toNumber(), reactivatedServiceIds, duplicate: false };
     });
   }
 

@@ -1,6 +1,12 @@
 # Contrato global y proyección G8
 
-Estado al 30-09-2026: **CONTRATO G3 ACTUALIZADO / RAILWAY READ ONLY CON EXTRAS SIN DUEÑO**. La fuente física prioritaria es [init-global.sql](../db/global/init-global.sql), SHA-256 `bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1`. Contiene 91 tablas, 897 columnas, 91 PK, 211 FK, 33 checks y 109 índices explícitos; no incluye seeds.
+Estado al 01-10-2026: **CONTRATO INTERGRUPOS G2/G3 PROPUESTO / DDL PENDIENTE DE APROBACIÓN**. La fuente física prioritaria es [init-global.sql](../db/global/init-global.sql), SHA-256 `6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e`. Contiene 92 tablas, 910 columnas, 92 PK, 214 FK, 35 checks y 114 índices explícitos; no incluye seeds.
+
+## CONTRACT_CHANGE 2026-10-01
+
+El cierre técnico G8↔G2 agrega al contrato propuesto `prospecto.id_plan_interes`, `pago.codigo_autorizacion`, `pago.comprobante_estado`, unicidad de nombres de `categoria_falla` y la tabla idempotente `integracion_resultado_wifi_g2`. El modelo Prisma incorpora además `cliente.password_portal_hash`, columna que ya existía en el canónico y pertenece a G2 para autenticación Portal. La migración incremental está preparada en `20261001120000_i3_g2_intergroup_contract`, pero requiere aprobación coordinada y **no fue aplicada en Railway**.
+
+La tabla G3 `solicitud_instalacion_integracion` no cambió. La definición física previamente confirmada continúa resuelta.
 
 ## CONTRACT_CHANGE 2026-09-30
 
@@ -34,7 +40,7 @@ El contrato anterior y los reportes que mostraban `PENDIENTE_RECONCILIACION_GLOB
 
 ## Proyección Prisma
 
-Se mantienen 58 modelos para las partes que usa G8, sin duplicar las 91 tablas globales. `npm.cmd run db:audit:prisma-global` produce [el reporte completo](i3-prisma-vs-global-schema.md) y JSON. Resultado vigente: 799 coincidencias, 36 columnas globales no modeladas, 325 objetos externos, 50 índices físicos no modelados y 65 FK físicas no modeladas. No hay objetos `PRISMA_ONLY`.
+Prisma sigue siendo una proyección de las partes usadas por G8 y sus fronteras intergrupo, sin duplicar todas las tablas globales. `npm.cmd run db:audit:prisma-global` produce [el reporte completo](i3-prisma-vs-global-schema.md) y JSON; sus conteos se regeneran después de cada cambio canónico. No se usa `db push` para eliminar objetos externos.
 
 Los índices y FK con Prisma `null` se conservan en PostgreSQL. No se usa `db push` para eliminarlos. El auditor de Prisma no intenta deducir defaults ni checks SQL; esos objetos los valida el comparador físico.
 
@@ -49,4 +55,4 @@ La normalización ahora reconoce de forma conservadora:
 - paréntesis redundantes alrededor de átomos casteados y arrays usados por `ANY`, preservando el resto de la expresión y el árbol `AND`/`OR`;
 - casts textuales equivalentes en checks.
 
-Las pruebas negativas demuestran que no se igualan expresiones con distinta precedencia ni literales diferentes. La lectura Railway posterior al cambio obtuvo 1.522 coincidencias, cero faltantes, `_prisma_migrations` permitido y cinco `UNOWNED_EXTRA`. La tabla G3 y todos sus objetos están en `MATCH`; el `FAIL` residual no corresponde a ella. Ver [resolución de extras](i3-global-extra-object-resolution.md).
+Las pruebas negativas demuestran que no se igualan expresiones con distinta precedencia ni literales diferentes. La última lectura Railway anterior a esta propuesta obtuvo 1.522 coincidencias, cero faltantes, `_prisma_migrations` permitido y cinco `UNOWNED_EXTRA`. El nuevo contrato G2 introduce diferencias esperadas adicionales hasta que la migración sea aprobada y aplicada; no deben clasificarse como extras sin dueño ni ocultarse con excepciones. Ver [cierre intergrupos](i3-intergroup-g2-g3-closure.md) y [resolución de extras](i3-global-extra-object-resolution.md).

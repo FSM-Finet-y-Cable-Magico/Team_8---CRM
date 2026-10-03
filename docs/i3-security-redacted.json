@@ -292,7 +292,7 @@
     {
       "source": "G8_WORKTREE",
       "file": "docs/i3-release-candidate-audit.md",
-      "line": 49,
+      "line": 56,
       "type": "DOCUMENTED_INTEGRATION_KEY",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",

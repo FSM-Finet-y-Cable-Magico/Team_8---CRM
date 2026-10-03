@@ -3,7 +3,6 @@ export const G3_INTEGRATION_CLIENT = Symbol('G3_INTEGRATION_CLIENT');
 export const G3_WORK_ORDER_STATES = [
   'PENDIENTE',
   'ASIGNADA',
-  'EN_CURSO',
   'COMPLETADA',
   'CANCELADA',
   'PENDIENTE_CLIENTE_AUSENTE',
@@ -19,10 +18,11 @@ export type G3InstallationPayload = {
   id_prospecto?: number;
   id_contrato: number;
   id_plan: number;
-  rut: string;
   persona: {
+    rut: string;
     nombre_completo: string;
     telefono: string;
+    email?: string;
   };
   direccion: {
     direccion_completa: string;
@@ -49,6 +49,8 @@ export type G3WorkOrderResponse = {
   id_prospecto?: number;
   id_contrato?: number;
   id_plan?: number;
+  equipos_instalados?: unknown[];
+  equipos_retirados?: unknown[];
 };
 
 export type G3ClientResult<T> = {
@@ -77,6 +79,14 @@ export class G3IntegrationError extends Error {
 
 export type G3ClosureSource = 'WEBHOOK' | 'RECONCILIACION';
 
-export type G3ClosurePayload = G3WorkOrderResponse & {
-  estado: string;
+export type G3ClosurePayload = {
+  id_ot: number;
+  request_id: string;
+  trace_id: string;
+  id_empresa: number;
+  id_prospecto: number;
+  id_contrato: number;
+  id_plan: number;
+  equipos_instalados: unknown[];
+  equipos_retirados: unknown[];
 };

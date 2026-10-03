@@ -27,6 +27,7 @@ import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
 import { G3IntegrationModule } from './g3-integration/g3-integration.module';
 import { G1IntegrationModule } from './g1-integration/g1-integration.module';
+import { G2IntegrationModule } from './g2-integration/g2-integration.module';
 import { ExternalTaxDocumentsModule } from './external-tax-documents/external-tax-documents.module';
 import { IntegrationAuthModule } from './integration-auth/integration-auth.module';
 import { TaxDocumentIssuanceModule } from './tax-document-issuance/tax-document-issuance.module';
@@ -43,6 +44,7 @@ import { TaxDocumentIssuanceModule } from './tax-document-issuance/tax-document-
     MonitoringModule,
     G3IntegrationModule,
     G1IntegrationModule,
+    G2IntegrationModule,
     ExternalTaxDocumentsModule,
     IntegrationAuthModule,
     TaxDocumentIssuanceModule,

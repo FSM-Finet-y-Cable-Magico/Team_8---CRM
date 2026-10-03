@@ -15,6 +15,12 @@ const INVOICE_INCLUDE = {
     plan: { select: { nombreComercial: true } } } },
 } satisfies Prisma.FacturaInclude;
 
+type IntegrationInvoiceQuery = Pick<InvoiceQueryDto, 'search' | 'estado' | 'page' | 'pageSize'> & {
+  rut?: string;
+  idCliente?: number;
+  idContrato?: number;
+};
+
 @Injectable()
 export class BillingReadService {
   constructor(private readonly prisma: PrismaService) {}
@@ -36,9 +42,35 @@ export class BillingReadService {
 
   async invoices(query: InvoiceQueryDto, user: AuthUser) {
     const idEmpresa = this.company(user, query.scope);
+    return this.queryInvoices(query, idEmpresa);
+  }
+
+  invoicesForCompany(query: IntegrationInvoiceQuery, idEmpresa: number) {
+    if (!Number.isSafeInteger(idEmpresa) || idEmpresa < 1) throw new BadRequestException('Empresa de integracion invalida');
+    return this.queryInvoices(query, idEmpresa, {
+      rut: query.rut,
+      idCliente: query.idCliente,
+      idContrato: query.idContrato,
+    });
+  }
+
+  private async queryInvoices(
+    query: Pick<InvoiceQueryDto, 'search' | 'estado' | 'page' | 'pageSize'>,
+    idEmpresa?: number,
+    identity?: Pick<IntegrationInvoiceQuery, 'rut' | 'idCliente' | 'idContrato'>,
+  ) {
     const search = query.search?.trim();
+    const contractScope: Prisma.ContratoWhereInput | undefined = idEmpresa ? {
+      idEmpresa,
+      ...(identity?.idContrato ? { idContrato: identity.idContrato } : {}),
+      cliente: { is: {
+        idEmpresa,
+        ...(identity?.idCliente ? { idCliente: identity.idCliente } : {}),
+        ...(identity?.rut ? { rut: identity.rut } : {}),
+      } },
+    } : undefined;
     const where: Prisma.FacturaWhereInput = {
-      ...(idEmpresa ? { contrato: { is: { idEmpresa, cliente: { is: { idEmpresa } } } } } : {}),
+      ...(contractScope ? { contrato: { is: contractScope } } : {}),
       ...(query.estado ? { estado: query.estado } : {}),
       ...(search ? { OR: [
         { folioExterno: { contains: search, mode: 'insensitive' } },
@@ -59,6 +91,15 @@ export class BillingReadService {
 
   async detail(idFactura: number, user: AuthUser, scope = 'consolidado') {
     const idEmpresa = this.company(user, scope);
+    return this.detailForScope(idFactura, idEmpresa);
+  }
+
+  detailForCompany(idFactura: number, idEmpresa: number) {
+    if (!Number.isSafeInteger(idEmpresa) || idEmpresa < 1) throw new BadRequestException('Empresa de integracion invalida');
+    return this.detailForScope(idFactura, idEmpresa);
+  }
+
+  private async detailForScope(idFactura: number, idEmpresa?: number) {
     const row = await this.prisma.factura.findFirst({
       where: { idFactura, ...(idEmpresa ? { contrato: { is: { idEmpresa, cliente: { is: { idEmpresa } } } } } : {}) },
       include: INVOICE_INCLUDE,

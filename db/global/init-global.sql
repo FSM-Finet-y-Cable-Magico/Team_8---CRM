@@ -654,9 +654,12 @@ CREATE TABLE IF NOT EXISTS pago (
     monto                        NUMERIC(10,2) NOT NULL,
     fecha_pago                   TIMESTAMP NOT NULL,
     codigo_transaccion           VARCHAR(100),
+    codigo_autorizacion          VARCHAR(100),
     pasarela                     VARCHAR(30) NOT NULL,
     token_transaccional          VARCHAR(200),
-    comprobante_pdf_url          TEXT
+    comprobante_pdf_url          TEXT,
+    comprobante_estado           VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE'::character varying,
+    CONSTRAINT pago_comprobante_estado_check CHECK (((comprobante_estado)::text = ANY ((ARRAY['PENDIENTE'::character varying, 'GENERADO'::character varying, 'FALLIDO'::character varying])::text[])))
 );
 
 CREATE TABLE IF NOT EXISTS plan (
@@ -723,6 +726,7 @@ CREATE TABLE IF NOT EXISTS prospecto (
     latitud                      DOUBLE PRECISION,
     longitud                     DOUBLE PRECISION,
     id_zona_pago                 INTEGER,
+    id_plan_interes              INTEGER,
     clasificacion_comercial      VARCHAR(40) DEFAULT 'PROSPECTO'::character varying,
     disponible_remarketing       BOOLEAN DEFAULT false,
     CONSTRAINT prospecto_latitud_check CHECK (((latitud IS NULL) OR ((latitud >= ('-90'::integer)::double precision) AND (latitud <= (90)::double precision)))),
@@ -1212,6 +1216,20 @@ CREATE TABLE IF NOT EXISTS integracion_cierre (
     materiales_aplicados         JSONB
 );
 
+CREATE TABLE IF NOT EXISTS integracion_resultado_wifi_g2 (
+    id_resultado                 BIGSERIAL PRIMARY KEY,
+    request_id                   VARCHAR(100) NOT NULL,
+    trace_id                     VARCHAR(100),
+    id_empresa                   INTEGER NOT NULL,
+    id_ticket                    INTEGER NOT NULL,
+    payload_hash                 VARCHAR(64) NOT NULL,
+    exito                        BOOLEAN NOT NULL,
+    resultado_tecnico            TEXT NOT NULL,
+    estado_ticket_resultante     VARCHAR(20) NOT NULL,
+    fecha_recepcion              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT integracion_resultado_wifi_g2_estado_check CHECK (((estado_ticket_resultante)::text = ANY ((ARRAY['Resuelto'::character varying, 'Escalado'::character varying])::text[])))
+);
+
 CREATE TABLE IF NOT EXISTS integracion_evento_entrante (
     id_evento                    SERIAL PRIMARY KEY,
     id_integracion               INTEGER NOT NULL,
@@ -1305,6 +1323,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS orden_ingreso_correlativo_key ON orden_ingreso
 CREATE UNIQUE INDEX IF NOT EXISTS orden_trabajo_codigo_seguimiento_key ON orden_trabajo (codigo_seguimiento);
 CREATE UNIQUE INDEX IF NOT EXISTS orden_trabajo_id_ticket_key ON orden_trabajo (id_ticket);
 CREATE UNIQUE INDEX IF NOT EXISTS pago_codigo_transaccion_key ON pago (codigo_transaccion);
+CREATE UNIQUE INDEX IF NOT EXISTS categoria_falla_nombre_key ON categoria_falla (nombre);
+CREATE UNIQUE INDEX IF NOT EXISTS integracion_resultado_wifi_g2_request_id_key ON integracion_resultado_wifi_g2 (request_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_zona_precio_activo ON plan_zona_precio (id_plan, id_zona_pago) WHERE (activo = true);
 CREATE UNIQUE INDEX IF NOT EXISTS prestamo_externo_correlativo_key ON prestamo_externo (correlativo);
 CREATE UNIQUE INDEX IF NOT EXISTS proveedor_rut_key ON proveedor (rut);
@@ -1357,6 +1377,8 @@ CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_contrato_fecha_solicitu
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_codigo_ot_g3_idx ON integracion_instalacion_g3 (id_empresa, codigo_ot_g3);
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_estado_integracion_fecha_ ON integracion_instalacion_g3 (id_empresa, estado_integracion, fecha_solicitud);
 CREATE INDEX IF NOT EXISTS integracion_instalacion_g3_id_empresa_id_ot_g3_idx ON integracion_instalacion_g3 (id_empresa, id_ot_g3);
+CREATE INDEX IF NOT EXISTS integracion_resultado_wifi_g2_empresa_fecha_idx ON integracion_resultado_wifi_g2 (id_empresa, fecha_recepcion);
+CREATE INDEX IF NOT EXISTS integracion_resultado_wifi_g2_ticket_fecha_idx ON integracion_resultado_wifi_g2 (id_ticket, fecha_recepcion);
 CREATE INDEX IF NOT EXISTS solicitud_instalacion_integracion_id_empresa_idx ON solicitud_instalacion_integracion (id_empresa);
 CREATE INDEX IF NOT EXISTS intento_fallido_rut_intentado_bloqueado_hasta_idx ON intento_fallido (rut_intentado, bloqueado_hasta);
 CREATE INDEX IF NOT EXISTS log_notificacion_id_alerta_idx ON log_notificacion (id_alerta);
@@ -1378,6 +1400,7 @@ CREATE INDEX IF NOT EXISTS prorroga_pago_id_empresa_estado_nueva_fecha_idx ON pr
 CREATE INDEX IF NOT EXISTS prorroga_pago_id_factura_fecha_registro_idx ON prorroga_pago (id_factura, fecha_registro);
 CREATE INDEX IF NOT EXISTS prospecto_id_empresa_clasificacion_comercial_idx ON prospecto (id_empresa, clasificacion_comercial);
 CREATE INDEX IF NOT EXISTS prospecto_id_empresa_id_zona_pago_idx ON prospecto (id_empresa, id_zona_pago);
+CREATE INDEX IF NOT EXISTS prospecto_id_empresa_id_plan_interes_idx ON prospecto (id_empresa, id_plan_interes);
 CREATE INDEX IF NOT EXISTS registro_ont_id_empresa_idx ON registro_ont (id_empresa);
 CREATE INDEX IF NOT EXISTS idx_solicitud_cliente_cliente ON solicitud_cliente (id_cliente);
 CREATE INDEX IF NOT EXISTS idx_solicitud_cliente_servicio ON solicitud_cliente (id_servicio);
@@ -2438,6 +2461,21 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
     ALTER TABLE usuario_rol ADD CONSTRAINT fk_usuario_rol_id_usuario
         FOREIGN KEY (id_usuario) REFERENCES usuario (id_usuario);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE prospecto ADD CONSTRAINT prospecto_id_plan_interes_fkey
+        FOREIGN KEY (id_plan_interes) REFERENCES plan (id_plan) ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE integracion_resultado_wifi_g2 ADD CONSTRAINT integracion_resultado_wifi_g2_id_empresa_fkey
+        FOREIGN KEY (id_empresa) REFERENCES empresa (id_empresa) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE integracion_resultado_wifi_g2 ADD CONSTRAINT integracion_resultado_wifi_g2_id_ticket_fkey
+        FOREIGN KEY (id_ticket) REFERENCES ticket (id_ticket) ON DELETE RESTRICT ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN

@@ -14,7 +14,7 @@ function fixture(){
  sequences:global.tables.flatMap(t=>t.columns.filter(c=>c.serial).map(c=>({name:t.name+'_'+c.name+'_seq',type:c.type,increment:'1',cycle:false}))),migrations:[]};
 }
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:91,columns:897,pk:91,fk:211,checks:33,indexes:109});
+ assert.deepEqual(global.counts,{tables:92,columns:910,pk:92,fk:214,checks:35,indexes:114});
  const g3Request=global.tables.find(table=>table.name==='solicitud_instalacion_integracion');
  assert.equal(g3Request.owner,'G3');
  assert.deepEqual(g3Request.columns.map(({name,type,nullable,default:defaultValue})=>({name,type,nullable,default:defaultValue})),[

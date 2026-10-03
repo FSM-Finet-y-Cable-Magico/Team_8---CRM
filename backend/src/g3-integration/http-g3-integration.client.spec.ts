@@ -16,8 +16,10 @@ describe('Etapa 3 - adaptador HTTP G3', () => {
   afterEach(() => jest.restoreAllMocks());
   it('envia X-API-KEY solo desde backend y conserva snake_case', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(201, { id_ot: 1, estado: 'PENDIENTE' }));
-    const client = setup(); await client.createInstallation({ request_id: 'r', trace_id: 't', id_empresa: 1, id_contrato: 2, id_plan: 3, rut: '12345678-5', persona: { nombre_completo: 'Demo', telefono: '+56912345678' }, direccion: { direccion_completa: 'Calle 1', comuna: 'Valparaiso' } });
+    const client = setup(); await client.createInstallation({ request_id: 'r', trace_id: 't', id_empresa: 1, id_contrato: 2, id_plan: 3, persona: { rut: '12345678-5', nombre_completo: 'Demo', telefono: '+56912345678' }, direccion: { direccion_completa: 'Calle 1', comuna: 'Valparaiso' } });
     expect(fetchMock).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ headers: expect.objectContaining({ 'X-API-KEY': 'secret-test' }), body: expect.stringContaining('"request_id":"r"') }));
+    expect(fetchMock.mock.calls[0][1]?.body).toContain('"persona":{"rut":"12345678-5"');
+    expect(fetchMock.mock.calls[0][1]?.body).not.toContain('"rut":"12345678-5","persona"');
   });
   it('acepta HTTP 201 de creacion', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(response(201, { id_ot: 1 })); await expect(setup().createInstallation({} as never)).resolves.toMatchObject({ status: 201 });
