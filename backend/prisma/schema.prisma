@@ -30,6 +30,7 @@ model Empresa {
   garantiasComerciales       GarantiaComercial[]
   plantillasNotificacion     PlantillaNotificacion[]
   documentosTributarios      DocumentoTributarioExterno[]
+  intencionesTributarias     TaxEmissionIntent[]
 
   @@map("empresa")
 }
@@ -277,6 +278,7 @@ model Factura {
   prorrogasPago           ProrrogaPago[]
   cambiosCondicionPago    CambioCondicionPago[]
   documentosTributarios   DocumentoTributarioExterno[]
+  intencionesTributarias  TaxEmissionIntent[]
 
   @@index([folioExterno])
   @@map("factura")
@@ -293,8 +295,40 @@ model Pago {
   tokenTransaccional String?  @map("token_transaccional") @db.VarChar(200)
   comprobantePdfUrl  String?  @map("comprobante_pdf_url")
   factura            Factura? @relation(fields: [idFactura], references: [idFactura], onDelete: NoAction, onUpdate: NoAction)
+  intencionesTributarias TaxEmissionIntent[]
 
   @@map("pago")
+}
+
+model TaxEmissionIntent {
+  idIntencion      String   @id @default(uuid()) @map("id_intencion") @db.Uuid
+  idEmpresa        Int      @map("id_empresa")
+  idFactura        Int      @map("id_factura")
+  idPago           Int?     @map("id_pago")
+  businessKey      String   @map("business_key") @db.VarChar(120)
+  policyVersion    String   @map("policy_version") @db.VarChar(64)
+  ambiente         String   @db.VarChar(20)
+  proveedor        String   @default("FACTURACION_CL") @db.VarChar(30)
+  tipoDte          Int      @map("tipo_dte")
+  formato          Int
+  fingerprint      String   @db.Char(64)
+  folioEsperado    String   @map("folio_esperado") @db.VarChar(10)
+  estado           String   @default("PENDIENTE") @db.VarChar(30)
+  intentos         Int      @default(0)
+  claimId          String?  @map("claim_id") @db.Uuid
+  folio            String?  @db.VarChar(10)
+  ultimoError      String?  @map("ultimo_error") @db.VarChar(64)
+  fechaCreacion    DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  fechaInicio      DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  fechaEnvio       DateTime? @map("fecha_envio") @db.Timestamptz(3)
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, map: "tax_intent_company_fk")
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, map: "tax_intent_invoice_fk")
+  pago            Pago?    @relation(fields: [idPago], references: [idPago], onDelete: Restrict, map: "tax_intent_payment_fk")
+
+  @@unique([idEmpresa, ambiente, businessKey])
+  @@index([idEmpresa, estado, fechaActualizacion])
+  @@map("tax_emission_intent")
 }
 
 model DocumentoTributarioExterno {

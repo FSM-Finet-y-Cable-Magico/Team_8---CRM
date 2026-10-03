@@ -2,11 +2,16 @@
 
 ## Estado
 
+Actualización de preparación local (2026-10-03): ver
+[checkpoint de Facturación.cl](i3-facturacion-cl-checkpoint.md). Incorpora componentes
+backend y una migración propuesta sin activar emisión ni cambiar el issuer vigente.
+La descripción de runtime y su bloqueo que sigue debajo permanece válida.
+
 **ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL**.
 
 CU-86 ya está implementado como `DocumentoTributarioExterno`: registro, consulta, corrección y anulación lógica de metadata emitida fuera del CRM. `Factura` y `Pago` siguen perteneciendo al dominio Billing. Esta etapa no duplica CU-86 ni convierte metadata externa en una emisión tributaria.
 
-No se implementó una llamada real a Facturacion.cl, una ruta de emisión, botones UI, credenciales, payload TXT/XML ni reintentos. La razón es técnica: el manual público describe la plataforma general, pero no determina el contrato contratado y certificado para Finet/Cable Mágico ni una estrategia segura de idempotencia/reconciliación.
+El runtime no invoca Facturacion.cl ni expone una ruta de emisión o botones UI. Los constructores TXT/XML, cliente y dispatcher preparados en el checkpoint actual siguen aislados y sin registrar; no habilitan emisión desde el CRM. El manual público no determina el contrato contratado y certificado para Finet/Cable Mágico ni una estrategia segura de reconciliación.
 
 ## Evidencia oficial revisada
 
@@ -77,7 +82,7 @@ El runtime aborta si la configuración es inválida o si se intenta poner el fla
 Cuando la información faltante esté disponible, ampliar la frontera con operaciones explícitas:
 
 - `issue(intent)` con identidad estable local y fingerprint del contenido;
-- `getStatus(providerReference | ticket)` para reconciliar;
+- `getStatus(providerReference)` para reconciliar solo mediante una operación confirmada por el proveedor; `getticket` del manual sirve para impresión térmica;
 - `getArtifacts(reference)` solo si el proveedor permite PDF/XML de forma segura;
 - `cancel` o documentos correctivos únicamente bajo reglas contractuales y tributarias confirmadas.
 
@@ -121,8 +126,8 @@ Cuando el contrato esté listo, la UI deberá mostrar estado, ambiente, referenc
 - arquitectura sin `fetch`, Axios, URL, header Authorization o emisión;
 - validador productivo bloquea `FACTURACION_CL_INTEGRATION_ENABLED=true`.
 
-Todas son pruebas locales con configuración ficticia. No se usaron cuentas, sandbox ni producción del proveedor.
+Estas pruebas de la frontera activa son locales con configuración ficticia. La comprobación externa posterior de login/versión de pruebas está en `tools/facturacion-cl-sandbox/AUDIT.md`; no se efectuó emisión. Los tests de preparación actuales están descritos en el checkpoint enlazado al inicio.
 
 ## Próximo hito
 
-Reunión técnica con Facturacion.cl y responsables Finet/Cable Mágico para responder los diez puntos pendientes. Con una ficha contractual versionada se podrá implementar primero un adapter sandbox, persistencia idempotente y conciliación; después pruebas fake, pruebas sandbox autorizadas y revisión de seguridad. Producción permanece fuera de alcance hasta completar esa secuencia.
+Confirmar con el responsable la regla G8, el tipo de primera prueba y los datos/folios fiscales. Con una ficha contractual versionada se podrá certificar el adapter y la persistencia preparados, implementar conciliación y artefactos, y conectar la emisión posterior al cobro. Los pendientes y evidencias vigentes están en el checkpoint actual. Producción permanece fuera de alcance.
