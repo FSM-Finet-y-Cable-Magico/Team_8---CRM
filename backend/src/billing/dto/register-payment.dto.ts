@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Matches, Min } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Matches, Min } from 'class-validator';
 
 export class RegisterPaymentDto {
   @IsInt()
@@ -19,6 +19,15 @@ export class RegisterPaymentDto {
   @IsString()
   @MaxLength(100)
   codigoTransaccion?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  codigoAutorizacion?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fechaPago?: string;
 
   @IsOptional()
   @IsString()

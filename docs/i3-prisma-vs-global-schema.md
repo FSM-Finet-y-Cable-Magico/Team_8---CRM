@@ -1,10 +1,10 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1. Modelos G8: 58.
+Hash canónico: 6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e. Modelos G8: 59.
 
-Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot nullable, elimina la unicidad inválida prospecto_id_cliente_key e incorpora solicitud_instalacion_integracion con owner G3 y definición física confirmada. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
+Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
-Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":799,"COLUMN_GLOBAL_ONLY":36,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":50,"FK_MISMATCH":65}.
+Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":822,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":50,"FK_MISMATCH":65}.
 
 |Tabla|Objeto|Owner|Estado|Prisma|Global|
 |---|---|---|---|---|---|
@@ -59,6 +59,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |cliente|nombre_completo|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(120)","nullable":false}|{"type":"varchar(120)","nullable":false}|
 |cliente|email|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(120)","nullable":true}|{"type":"varchar(120)","nullable":true}|
 |cliente|telefono|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(20)","nullable":true}|{"type":"varchar(20)","nullable":true}|
+|cliente|password_portal_hash|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(72)","nullable":true}|{"type":"varchar(72)","nullable":true}|
 |cliente|estado|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(40)","nullable":false}|{"type":"varchar(40)","nullable":false}|
 |cliente|es_conflictivo|G8 (coordinar columnas compartidas)|MATCH|{"type":"boolean","nullable":true}|{"type":"boolean","nullable":true}|
 |cliente|importado_masivo|G8 (coordinar columnas compartidas)|MATCH|{"type":"boolean","nullable":true}|{"type":"boolean","nullable":true}|
@@ -83,6 +84,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |prospecto|latitud|G8 (coordinar columnas compartidas)|MATCH|{"type":"double precision","nullable":true}|{"type":"double precision","nullable":true}|
 |prospecto|longitud|G8 (coordinar columnas compartidas)|MATCH|{"type":"double precision","nullable":true}|{"type":"double precision","nullable":true}|
 |prospecto|id_zona_pago|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
+|prospecto|id_plan_interes|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |prospecto|estado_pipeline|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(30)","nullable":true}|{"type":"varchar(30)","nullable":true}|
 |prospecto|motivo_perdida|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(30)","nullable":true}|{"type":"varchar(30)","nullable":true}|
 |prospecto|observacion_perdida|G8 (coordinar columnas compartidas)|MATCH|{"type":"text","nullable":true}|{"type":"text","nullable":true}|
@@ -99,7 +101,9 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |prospecto|FK:usuarioComercial|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |prospecto|FK:cliente|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |prospecto|FK:zonaPago|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|
+|prospecto|FK:planInteres|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|{"onDelete":"SET NULL","onUpdate":"CASCADE"}|
 |prospecto|INDEX:id_empresa,id_zona_pago|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa","id_zona_pago"],"unique":false}|null|
+|prospecto|INDEX:id_empresa,id_plan_interes|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa","id_plan_interes"],"unique":false}|null|
 |prospecto|INDEX:id_empresa,clasificacion_comercial|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa","clasificacion_comercial"],"unique":false}|null|
 |plan|id_plan|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |plan|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
@@ -168,9 +172,11 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |pago|monto|G8 (coordinar columnas compartidas)|MATCH|{"type":"numeric(10,2)","nullable":false}|{"type":"numeric(10,2)","nullable":false}|
 |pago|fecha_pago|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamp","nullable":false}|{"type":"timestamp","nullable":false}|
 |pago|codigo_transaccion|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(100)","nullable":true}|{"type":"varchar(100)","nullable":true}|
+|pago|codigo_autorizacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(100)","nullable":true}|{"type":"varchar(100)","nullable":true}|
 |pago|pasarela|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(30)","nullable":false}|{"type":"varchar(30)","nullable":false}|
 |pago|token_transaccional|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(200)","nullable":true}|{"type":"varchar(200)","nullable":true}|
 |pago|comprobante_pdf_url|G8 (coordinar columnas compartidas)|MATCH|{"type":"text","nullable":true}|{"type":"text","nullable":true}|
+|pago|comprobante_estado|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(20)","nullable":false}|{"type":"varchar(20)","nullable":false}|
 |pago|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_pago"]|["id_pago"]|
 |pago|FK:factura|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |pago|INDEX:codigo_transaccion|G8 (coordinar columnas compartidas)|MATCH|{"columns":["codigo_transaccion"],"unique":true}|null|
@@ -247,6 +253,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |categoria_falla|nombre|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(80)","nullable":false}|{"type":"varchar(80)","nullable":false}|
 |categoria_falla|sla_horas|G8 (coordinar columnas compartidas)|MATCH|{"type":"smallint","nullable":true}|{"type":"smallint","nullable":true}|
 |categoria_falla|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_categoria"]|["id_categoria"]|
+|categoria_falla|INDEX:nombre|G8 (coordinar columnas compartidas)|MATCH|{"columns":["nombre"],"unique":true}|null|
 |ticket|id_ticket|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |ticket|id_cliente|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |ticket|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
@@ -266,6 +273,22 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |ticket|FK:servicio|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |ticket|INDEX:id_conversacion_bot|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_conversacion_bot"],"unique":true}|null|
 |ticket|INDEX:codigo_seguimiento|G8 (coordinar columnas compartidas)|MATCH|{"columns":["codigo_seguimiento"],"unique":true}|null|
+|integracion_resultado_wifi_g2|id_resultado|G8/G2|MATCH|{"type":"bigint","nullable":false}|{"type":"bigint","nullable":false}|
+|integracion_resultado_wifi_g2|request_id|G8/G2|MATCH|{"type":"varchar(100)","nullable":false}|{"type":"varchar(100)","nullable":false}|
+|integracion_resultado_wifi_g2|trace_id|G8/G2|MATCH|{"type":"varchar(100)","nullable":true}|{"type":"varchar(100)","nullable":true}|
+|integracion_resultado_wifi_g2|id_empresa|G8/G2|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|integracion_resultado_wifi_g2|id_ticket|G8/G2|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|integracion_resultado_wifi_g2|payload_hash|G8/G2|MATCH|{"type":"varchar(64)","nullable":false}|{"type":"varchar(64)","nullable":false}|
+|integracion_resultado_wifi_g2|exito|G8/G2|MATCH|{"type":"boolean","nullable":false}|{"type":"boolean","nullable":false}|
+|integracion_resultado_wifi_g2|resultado_tecnico|G8/G2|MATCH|{"type":"text","nullable":false}|{"type":"text","nullable":false}|
+|integracion_resultado_wifi_g2|estado_ticket_resultante|G8/G2|MATCH|{"type":"varchar(20)","nullable":false}|{"type":"varchar(20)","nullable":false}|
+|integracion_resultado_wifi_g2|fecha_recepcion|G8/G2|MATCH|{"type":"timestamptz","nullable":false}|{"type":"timestamptz","nullable":false}|
+|integracion_resultado_wifi_g2|PRIMARY KEY|G8/G2|MATCH|["id_resultado"]|["id_resultado"]|
+|integracion_resultado_wifi_g2|FK:empresa|G8/G2|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|integracion_resultado_wifi_g2|FK:ticket|G8/G2|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|integracion_resultado_wifi_g2|INDEX:request_id|G8/G2|MATCH|{"columns":["request_id"],"unique":true}|null|
+|integracion_resultado_wifi_g2|INDEX:id_ticket,fecha_recepcion|G8/G2|MATCH|{"columns":["id_ticket","fecha_recepcion"],"unique":false}|null|
+|integracion_resultado_wifi_g2|INDEX:id_empresa,fecha_recepcion|G8/G2|MATCH|{"columns":["id_empresa","fecha_recepcion"],"unique":false}|null|
 |tipo_equipo|id_tipo_equipo|G1|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |tipo_equipo|id_empresa|G1|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |tipo_equipo|nombre|G1|MATCH|{"type":"varchar(100)","nullable":false}|{"type":"varchar(100)","nullable":false}|
@@ -955,7 +978,6 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |unidad_equipo|direccion_instalacion|G1|COLUMN_GLOBAL_ONLY|null|{"type":"varchar(300)","nullable":true}|
 |unidad_equipo|comuna_instalacion|G1|COLUMN_GLOBAL_ONLY|null|{"type":"varchar(100)","nullable":true}|
 |unidad_equipo|srv|G1|COLUMN_GLOBAL_ONLY|null|{"type":"varchar(20)","nullable":true}|
-|cliente|password_portal_hash|G8 (coordinar columnas compartidas)|COLUMN_GLOBAL_ONLY|null|{"type":"varchar(72)","nullable":true}|
 |alerta_monitoreo|id_alerta|G3/Ops|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |alerta_monitoreo|id_empresa|G3/Ops|OWNER_EXTERNAL|null|{"type":"integer","nullable":false}|
 |alerta_monitoreo|tipo|G3/Ops|OWNER_EXTERNAL|null|{"type":"varchar(30)","nullable":false}|

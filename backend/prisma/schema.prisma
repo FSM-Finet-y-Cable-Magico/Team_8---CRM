@@ -31,6 +31,7 @@ model Empresa {
   plantillasNotificacion     PlantillaNotificacion[]
   documentosTributarios      DocumentoTributarioExterno[]
   intencionesTributarias     TaxEmissionIntent[]
+  resultadosWifiG2           IntegracionResultadoWifiG2[]
 
   @@map("empresa")
 }
@@ -110,6 +111,7 @@ model Cliente {
   nombreCompleto             String                       @map("nombre_completo") @db.VarChar(120)
   email                      String?                      @db.VarChar(120)
   telefono                   String?                      @db.VarChar(20)
+  passwordPortalHash         String?                      @map("password_portal_hash") @db.VarChar(72)
   estado                     String                       @db.VarChar(40)
   esConflictivo              Boolean?                     @default(false) @map("es_conflictivo")
   importadoMasivo            Boolean?                     @default(false) @map("importado_masivo")
@@ -154,6 +156,7 @@ model Prospecto {
   latitud                    Float?                     @db.DoublePrecision
   longitud                   Float?                     @db.DoublePrecision
   idZonaPago                 Int?                       @map("id_zona_pago")
+  idPlanInteres              Int?                       @map("id_plan_interes")
   estadoPipeline             String?                    @map("estado_pipeline") @db.VarChar(30)
   motivoPerdida              String?                    @map("motivo_perdida") @db.VarChar(30)
   observacionPerdida         String?                    @map("observacion_perdida")
@@ -172,9 +175,11 @@ model Prospecto {
   contratos                  Contrato[]
   ordenesTrabajo             OrdenTrabajo[]
   zonaPago                   ZonaPago?                  @relation(fields: [idZonaPago], references: [idZonaPago], onDelete: SetNull, onUpdate: Cascade)
+  planInteres                Plan?                      @relation("ProspectoPlanInteres", fields: [idPlanInteres], references: [idPlan], onDelete: SetNull, onUpdate: Cascade)
   integracionesInstalacionG3 IntegracionInstalacionG3[]
 
   @@index([idEmpresa, idZonaPago])
+  @@index([idEmpresa, idPlanInteres])
   @@index([idEmpresa, clasificacionComercial])
   @@map("prospecto")
 }
@@ -196,6 +201,7 @@ model Plan {
   cambiosPlanAnteriores      HistorialCambioPlan[]      @relation("PlanAnterior")
   cambiosPlanNuevos          HistorialCambioPlan[]      @relation("PlanNuevo")
   integracionesInstalacionG3 IntegracionInstalacionG3[]
+  prospectosInteres          Prospecto[]                @relation("ProspectoPlanInteres")
 
   @@map("plan")
 }
@@ -291,9 +297,11 @@ model Pago {
   monto              Decimal  @db.Decimal(10, 2)
   fechaPago          DateTime @map("fecha_pago") @db.Timestamp(6)
   codigoTransaccion  String?  @unique @map("codigo_transaccion") @db.VarChar(100)
+  codigoAutorizacion String?  @map("codigo_autorizacion") @db.VarChar(100)
   pasarela           String   @db.VarChar(30)
   tokenTransaccional String?  @map("token_transaccional") @db.VarChar(200)
   comprobantePdfUrl  String?  @map("comprobante_pdf_url")
+  comprobanteEstado  String   @default("PENDIENTE") @map("comprobante_estado") @db.VarChar(20)
   factura            Factura? @relation(fields: [idFactura], references: [idFactura], onDelete: NoAction, onUpdate: NoAction)
   intencionesTributarias TaxEmissionIntent[]
 
@@ -414,31 +422,51 @@ model OrdenTrabajo {
 
 model CategoriaFalla {
   idCategoria Int    @id @default(autoincrement()) @map("id_categoria")
-  nombre      String @db.VarChar(80)
+  nombre      String @unique @db.VarChar(80)
   slaHoras    Int?   @map("sla_horas") @db.SmallInt
 
   @@map("categoria_falla")
 }
 
 model Ticket {
-  idTicket            Int                 @id @default(autoincrement()) @map("id_ticket")
-  idCliente           Int?                @map("id_cliente")
-  idEmpresa           Int?                @map("id_empresa")
-  idServicio          Int?                @map("id_servicio")
-  idUsuarioAsignado   Int?                @map("id_usuario_asignado")
-  idCategoria         Int                 @map("id_categoria")
-  idConversacionBot   Int?                @unique @map("id_conversacion_bot")
-  codigoSeguimiento   String?             @unique @map("codigo_seguimiento") @db.VarChar(20)
-  prioridad           String              @db.VarChar(10)
-  estado              String              @db.VarChar(20)
+  idTicket            Int                          @id @default(autoincrement()) @map("id_ticket")
+  idCliente           Int?                         @map("id_cliente")
+  idEmpresa           Int?                         @map("id_empresa")
+  idServicio          Int?                         @map("id_servicio")
+  idUsuarioAsignado   Int?                         @map("id_usuario_asignado")
+  idCategoria         Int                          @map("id_categoria")
+  idConversacionBot   Int?                         @unique @map("id_conversacion_bot")
+  codigoSeguimiento   String?                      @unique @map("codigo_seguimiento") @db.VarChar(20)
+  prioridad           String                       @db.VarChar(10)
+  estado              String                       @db.VarChar(20)
   descripcion         String?
-  fechaCreacion       DateTime?           @default(now()) @map("fecha_creacion") @db.Timestamp(6)
-  fechaCierre         DateTime?           @map("fecha_cierre") @db.Timestamp(6)
-  origen              String?             @db.VarChar(20)
-  resueltoRemotamente Boolean?            @default(false) @map("resuelto_remotamente")
-  servicio            ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
+  fechaCreacion       DateTime?                    @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  fechaCierre         DateTime?                    @map("fecha_cierre") @db.Timestamp(6)
+  origen              String?                      @db.VarChar(20)
+  resueltoRemotamente Boolean?                     @default(false) @map("resuelto_remotamente")
+  servicio            ServicioContratado?          @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
+  resultadosWifiG2    IntegracionResultadoWifiG2[]
 
   @@map("ticket")
+}
+
+model IntegracionResultadoWifiG2 {
+  idResultado            BigInt   @id @default(autoincrement()) @map("id_resultado")
+  requestId              String   @unique @map("request_id") @db.VarChar(100)
+  traceId                String?  @map("trace_id") @db.VarChar(100)
+  idEmpresa              Int      @map("id_empresa")
+  idTicket               Int      @map("id_ticket")
+  payloadHash            String   @map("payload_hash") @db.VarChar(64)
+  exito                  Boolean
+  resultadoTecnico       String   @map("resultado_tecnico")
+  estadoTicketResultante String   @map("estado_ticket_resultante") @db.VarChar(20)
+  fechaRecepcion         DateTime @default(now()) @map("fecha_recepcion") @db.Timestamptz(6)
+  empresa                Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  ticket                 Ticket   @relation(fields: [idTicket], references: [idTicket], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idTicket, fechaRecepcion], map: "integracion_resultado_wifi_g2_ticket_fecha_idx")
+  @@index([idEmpresa, fechaRecepcion], map: "integracion_resultado_wifi_g2_empresa_fecha_idx")
+  @@map("integracion_resultado_wifi_g2")
 }
 
 model TipoEquipo {

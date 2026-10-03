@@ -4,15 +4,15 @@
 
 G8 conserva Prospecto, Plan, factibilidad comercial, Contrato, Cliente, ServicioContratado, cobranza, solicitudes y lifecycle comercial. G3 conserva orden de trabajo, técnico, agenda, dirección operativa, ejecución en terreno, evidencias y cierre técnico. Una solicitud aceptada por G3 no crea un Cliente en G8: el Cliente, la dirección definitiva y el servicio activo aparecen únicamente al procesar un cierre `COMPLETADA` válido.
 
-No se implementaron G1, Facturación.cl, WhatsApp, SmartOLT escritura, comandos WiFi, TV IP, TOMODAT directo, import confirm ni cambios de Railway.
+Esta alineación es exclusivamente local. No se cambió Railway, no se ejecutó tráfico real y no se agregó schema para el contrato final G3.
 
 ## Contrato HTTP oficial utilizado
 
 | Operación | Endpoint G3 | Uso G8 |
 | --- | --- | --- |
 | Crear instalación | `POST /api/integraciones/instalaciones` | Solicitud y reintento idempotente |
-| Consultar OT | `GET /api/integraciones/ordenes/{id}` | Detalle y estado actual |
-| Consultar cierre | `GET /api/integraciones/ordenes/{id}/cierre` | Reconciliación manual |
+| Consultar OT | `GET /api/integraciones/ordenes/{id}?id_empresa={idEmpresa}` | Detalle y estado actual; `id_empresa` es obligatorio |
+| Consultar cierre | `GET /api/integraciones/ordenes/{id}/cierre` | Reconciliación manual; el query `id_empresa` no está ratificado |
 
 El adaptador `HttpG3IntegrationClient` es el único punto que usa HTTP. Envía `X-API-KEY`, aplica `G3_REQUEST_TIMEOUT_MS`, bloquea HTTP remoto sin TLS y nunca entrega la API key al frontend ni la registra. La integración se habilita explícitamente con `G3_INTEGRATION_ENABLED=true`; URL o key ausentes producen `INTEGRACION_G3_NO_CONFIGURADA` y jamás una OT local de fallback.
 
@@ -37,8 +37,7 @@ El casing HTTP permanece en `snake_case`:
   "id_prospecto": 10,
   "id_contrato": 20,
   "id_plan": 7,
-  "rut": "12345678-5",
-  "persona": { "nombre_completo": "Persona Demo", "telefono": "+56912345678" },
+  "persona": { "rut": "12345678-5", "nombre_completo": "Persona Demo", "telefono": "+56912345678", "email": "persona@example.invalid" },
   "direccion": { "direccion_completa": "Calle Demo 123", "comuna": "Valparaíso" }
 }
 ```
@@ -55,17 +54,27 @@ Estados de integración G8: `PENDIENTE_ENVIO`, `ENVIADA`, `EN_SEGUIMIENTO`, `COM
 
 `IntegracionEventoEntrante` funciona como inbox. Su unicidad por tracking y tipo de evento deduplica webhook y reconciliación; un hash diferente para el mismo evento terminal se rechaza como conflicto. No se inventó un `event_id` de G3.
 
-## Estados técnicos
+## Contrato de cierre approval-only
 
-| Estado G3 | Comportamiento G8 |
-| --- | --- |
-| `PENDIENTE` | Conserva lifecycle pendiente y permite consulta |
-| `ASIGNADA` | Conserva lifecycle pendiente; muestra asignación recibida en detalle |
-| `EN_CURSO` | Conserva lifecycle pendiente |
-| `COMPLETADA` | Solo con OT de instalación y resultado técnico válido ejecuta activación transaccional |
-| `CANCELADA` | No crea Cliente ni activa Servicio; mantiene Prospecto y Contrato para gestión comercial |
-| `PENDIENTE_CLIENTE_AUSENTE` | No activa ni cancela; muestra seguimiento. No existe endpoint ratificado de reprogramación |
-| Desconocido | Presenta `EN_SEGUIMIENTO`, conserva `estadoOriginalG3`, audita y no activa/cancela |
+G3 administra internamente los estados previos a la aprobación. El único evento de cierre productivo que envía a G8 ocurre después de que la OT queda `COMPLETADA`. El rechazo del jefe técnico devuelve la OT a ejecución dentro de G3 y no genera una notificación externa. Por eso el webhook G8 no modela ni espera estados intermedios.
+
+El payload real no incluye `estado`. La recepción válida en la ruta de cierre implica `COMPLETADA`:
+
+```json
+{
+  "id_ot": 901,
+  "request_id": "uuid-estable",
+  "trace_id": "uuid-estable",
+  "id_empresa": 1,
+  "id_prospecto": 10,
+  "id_contrato": 20,
+  "id_plan": 7,
+  "equipos_instalados": [{ "numero_serie": "QA-ONT-001" }],
+  "equipos_retirados": []
+}
+```
+
+Todos esos campos son obligatorios. `id_ot` y `request_id` identifican la misma solicitud; empresa, prospecto, contrato, plan y traza deben coincidir con el tracking. El segundo payload idéntico devuelve el evento ya procesado. Un contenido distinto para la misma identidad terminal produce conflicto. Un GET general de detalle puede presentarse defensivamente, pero ningún estado de detalle activa Cliente, Servicio o G1.
 
 ## API G8 y flujo
 
@@ -77,19 +86,31 @@ Estados de integración G8: `PENDIENTE_ENVIO`, `ENVIADA`, `EN_SEGUIMIENTO`, `COM
 | GET | `/api/integrations/g3/prospects/:id/installation` | Último tracking del prospecto |
 | GET | `/api/integrations/g3/contracts/:id/installation` | Último tracking del contrato |
 | POST | `/api/integrations/g3/installations/:id/reconcile` | GET de cierre y processor común |
-| POST | `/api/integrations/g3/events/work-order-closed` | Guard G3 cerrado por defecto |
+| POST | `/api/integraciones/fsm/ordenes/:id_ot/cierre` | Webhook canónico `X-API-KEY`, principal G3 y scope de empresa |
+| POST | `/api/integrations/g3/events/work-order-closed` | Alias compatible con la misma autenticación y processor |
 
 `InstallationIntegrationService` persiste primero, confirma la transacción, llama G3 y luego persiste el resultado. Los errores 400, 401, 403, 404 y 409 se clasifican; 429, 5xx y timeout son reintentables según la operación. Un timeout conserva la misma clave idempotente.
 
 El detalle devuelve solo campos opcionales conocidos: id/código, tipo, estado, fecha, técnico, dirección, persona, teléfono y resultado. No se transforma un campo inexistente en dato ficticio.
 
+El GET de detalle obtiene `id_empresa` desde el tracking persistido y lo envía como query, sin fijar una empresa concreta. El servicio preserva empresas 1 y 2 y rechaza respuestas que declaren una empresa distinta. Para `GET /cierre`, el adapter recibe y valida la empresa del tracking, pero no agrega `id_empresa` a la URL mientras G3 no ratifique ese query para dicho endpoint.
+
 ## Cierre, reconciliación y lifecycle
 
-Webhook y GET de cierre pasan por el mismo `G3ClosureProcessor`. La correlación prefiere `request_id`; si falta, usa id/código externo y rechaza ambigüedad. Las correlaciones opcionales recibidas se comparan con empresa, prospecto, contrato, plan y trace del tracking.
+Webhook y GET de cierre pasan por el mismo `G3ClosureProcessor`. Ambos exigen `request_id` e `id_ot`, validan todas las correlaciones y producen el único evento interno `WORK_ORDER_COMPLETADA`. El GET de reconciliación sirve únicamente para recuperar un cierre completado cuyo webhook faltó o tuvo una respuesta indeterminada. No descubre estados intermedios. Si un backend legacy expone un estado explícito distinto de `COMPLETADA`, G8 no lo procesa como cierre.
 
-La autenticación entrante todavía no fue ratificada. El endpoint usa `G3WebhookGuard` con un `G3WebhookAuthenticator` sustituible y su implementación productiva falla cerrada con `PENDIENTE_CONTRATO_AUTENTICACION_WEBHOOK`. Las pruebas inyectan autenticación simulada. No se creó un secreto o header entrante incompatible.
+La autenticación entrante usa `IntegrationApiKeyGuard` y la variable permanente `G8_INTEGRATION_API_KEYS`. La entrada correspondiente debe declarar `group=G3`, SHA-256 de la key literal, `companies=[1,2]` y `active=true`. Una key G2 o una empresa fuera del scope recibe rechazo. La key literal solo la conserva G3; no se registra en logs. Webhook y alias reutilizan esta misma infraestructura.
 
-Para `COMPLETADA`, una transacción local bloquea el tracking, deduplica el evento y llama `InstallationActivationService`. Este servicio consulta `service-activation.policy.ts` con intención `INSTALLATION_COMPLETION`, resuelve o crea una sola vez Cliente, DirecciónServicio y ServicioContratado, asocia Contrato, registra `fechaActivacion` y lleva el pipeline a `Servicio Activo`. No hay HTTP dentro de esa transacción.
+Una transacción local bloquea el tracking, deduplica el cierre implícitamente `COMPLETADA` y llama `InstallationActivationService`. Este servicio consulta `service-activation.policy.ts` con intención `INSTALLATION_COMPLETION`, resuelve o crea una sola vez Cliente, DirecciónServicio y ServicioContratado, asocia Contrato, registra `fechaActivacion` y lleva el pipeline a `Servicio Activo`. La activación G1 se solicita una vez después del commit; un retry no repite esos efectos.
+
+Configuración a entregar a G3 después del despliegue coordinado:
+
+```text
+CIERRE_WEBHOOK_G8_URL=https://team8-crm-production-3be0.up.railway.app/api/integraciones/fsm/ordenes/:id_ot/cierre
+CIERRE_WEBHOOK_G8_KEY=<intercambiar por canal privado>
+```
+
+La URL documentada prepara la coordinación; no afirma que esta versión del backend ya esté desplegada.
 
 ## WorkOrders legacy y matriz de migración
 
@@ -129,4 +150,14 @@ Propuesta para ratificación futura, sin implementación: acordar un endpoint S2
 
 ## Pruebas
 
-Las suites G3 usan fakes y mocks locales, nunca infraestructura real. Cubren payload/casing, UUID, idempotencia y retry, respuestas 200/201/400/401/403/404/409/429/5xx/timeout, seis estados y desconocidos, activación única, webhook/reconciliación cruzados, correlación multiempresa, seguridad cerrada, redirección legacy y CU-84. Las suites históricas de WorkOrders continúan validando lectura y cierres locales compatibles con Etapa 0B.
+Las suites G3 usan fakes y mocks locales, nunca infraestructura real. Cubren `persona.rut` sin duplicado raíz, request id estable, retry con payload idéntico, respuestas HTTP acordadas, cierre sin `estado`, correlaciones completas, empresas 1 y 2, rechazo de scope/grupo, activación única, idempotencia webhook/reconciliación, ruta canónica/alias y CU-84.
+
+```text
+G3_CLOSE_MODE=APPROVAL_ONLY
+G3_CLOSE_EXPECTED_STATE=COMPLETADA
+G3_RECHAZADA_EXTERNAL_STATE=false
+G3_EN_CURSO_EXTERNAL_NOTIFICATION=false
+G3_PENDING_APPROVAL_EXTERNAL_NOTIFICATION=false
+G3_EXPLICIT_STATE_FIELD_REQUIRED=false
+G3_COMPANY_SCOPE=[1,2]
+```

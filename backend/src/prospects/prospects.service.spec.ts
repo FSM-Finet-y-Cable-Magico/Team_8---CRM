@@ -79,6 +79,7 @@ describe('ProspectsService', () => {
           contratos: [{ idEmpresa: 1 }],
         }),
       },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 9, idEmpresa: 2, activo: true }) },
     };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const service = new ProspectsService(
@@ -96,6 +97,7 @@ describe('ProspectsService', () => {
         email: 'xiao@example.com',
         telefono: '+56940618332',
         direccion: 'Claudio Gay 2547, Santiago',
+        idPlanInteres: 9,
       },
       admin,
     );
@@ -105,6 +107,9 @@ describe('ProspectsService', () => {
       where: { rut: '21600781-6', idEmpresa: 2 },
     });
     expect(prisma.prospecto.create).toHaveBeenCalled();
+    expect(prisma.prospecto.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idPlanInteres: 9 }),
+    }));
   });
 
   it('lista solo prospectos activos no convertidos', async () => {
@@ -239,6 +244,7 @@ describe('ProspectsService', () => {
       motivoPerdida: null,
       fechaCreacion: new Date('2026-06-01T00:00:00.000Z'),
       origenContacto: 'Formulario web',
+      idPlanInteres: 9,
     };
     const createdContract = {
       idContrato: 30,
@@ -325,6 +331,7 @@ describe('ProspectsService', () => {
         }),
       }),
     );
+    expect(transaction.prospecto.update.mock.calls[0][0].data).not.toHaveProperty('idPlanInteres');
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'GENERAR_CONTRATO_PROSPECTO' }),
     );

@@ -1,9 +1,9 @@
 {
-  "contractHash": "bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1",
-  "modeledTables": 58,
+  "contractHash": "6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e",
+  "modeledTables": 59,
   "summary": {
-    "MATCH": 799,
-    "COLUMN_GLOBAL_ONLY": 36,
+    "MATCH": 822,
+    "COLUMN_GLOBAL_ONLY": 35,
     "OWNER_EXTERNAL": 325,
     "INDEX_MISMATCH": 50,
     "FK_MISMATCH": 65
@@ -711,6 +711,20 @@
     },
     {
       "table": "cliente",
+      "column": "password_portal_hash",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(72)",
+        "nullable": true
+      },
+      "global": {
+        "type": "varchar(72)",
+        "nullable": true
+      }
+    },
+    {
+      "table": "cliente",
       "column": "estado",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "MATCH",
@@ -1044,6 +1058,20 @@
     },
     {
       "table": "prospecto",
+      "column": "id_plan_interes",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": true
+      },
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "prospecto",
       "column": "estado_pipeline",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "MATCH",
@@ -1266,6 +1294,20 @@
     },
     {
       "table": "prospecto",
+      "column": "FK:planInteres",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "SET NULL",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "SET NULL",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "prospecto",
       "column": "INDEX:id_empresa,id_zona_pago",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "MATCH",
@@ -1273,6 +1315,20 @@
         "columns": [
           "id_empresa",
           "id_zona_pago"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "prospecto",
+      "column": "INDEX:id_empresa,id_plan_interes",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_empresa",
+          "id_plan_interes"
         ],
         "unique": false
       },
@@ -2223,6 +2279,20 @@
     },
     {
       "table": "pago",
+      "column": "codigo_autorizacion",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(100)",
+        "nullable": true
+      },
+      "global": {
+        "type": "varchar(100)",
+        "nullable": true
+      }
+    },
+    {
+      "table": "pago",
       "column": "pasarela",
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "MATCH",
@@ -2261,6 +2331,20 @@
       "global": {
         "type": "text",
         "nullable": true
+      }
+    },
+    {
+      "table": "pago",
+      "column": "comprobante_estado",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(20)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(20)",
+        "nullable": false
       }
     },
     {
@@ -3314,6 +3398,19 @@
       ]
     },
     {
+      "table": "categoria_falla",
+      "column": "INDEX:nombre",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "nombre"
+        ],
+        "unique": true
+      },
+      "global": null
+    },
+    {
       "table": "ticket",
       "column": "id_ticket",
       "owner": "G8 (coordinar columnas compartidas)",
@@ -3572,6 +3669,227 @@
           "codigo_seguimiento"
         ],
         "unique": true
+      },
+      "global": null
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "id_resultado",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "global": {
+        "type": "bigint",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "request_id",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(100)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(100)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "trace_id",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(100)",
+        "nullable": true
+      },
+      "global": {
+        "type": "varchar(100)",
+        "nullable": true
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "id_empresa",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "id_ticket",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "payload_hash",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(64)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(64)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "exito",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "boolean",
+        "nullable": false
+      },
+      "global": {
+        "type": "boolean",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "resultado_tecnico",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "text",
+        "nullable": false
+      },
+      "global": {
+        "type": "text",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "estado_ticket_resultante",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(20)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(20)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "fecha_recepcion",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "global": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "PRIMARY KEY",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": [
+        "id_resultado"
+      ],
+      "global": [
+        "id_resultado"
+      ]
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "FK:empresa",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "FK:ticket",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "INDEX:request_id",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "request_id"
+        ],
+        "unique": true
+      },
+      "global": null
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "INDEX:id_ticket,fecha_recepcion",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_ticket",
+          "fecha_recepcion"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "integracion_resultado_wifi_g2",
+      "column": "INDEX:id_empresa,fecha_recepcion",
+      "owner": "G8/G2",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_empresa",
+          "fecha_recepcion"
+        ],
+        "unique": false
       },
       "global": null
     },
@@ -12695,17 +13013,6 @@
       "prisma": null,
       "global": {
         "type": "varchar(20)",
-        "nullable": true
-      }
-    },
-    {
-      "table": "cliente",
-      "column": "password_portal_hash",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "COLUMN_GLOBAL_ONLY",
-      "prisma": null,
-      "global": {
-        "type": "varchar(72)",
         "nullable": true
       }
     },

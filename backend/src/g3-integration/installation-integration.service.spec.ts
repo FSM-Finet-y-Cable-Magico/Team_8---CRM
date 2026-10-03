@@ -64,7 +64,8 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   });
   it('2. el payload contiene RUT canonico', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
-    expect(client.createInstallation.mock.calls[0][0].rut).toBe('12345678-5');
+    expect(client.createInstallation.mock.calls[0][0].persona.rut).toBe('12345678-5');
+    expect(client.createInstallation.mock.calls[0][0]).not.toHaveProperty('rut');
   });
   it('3. el payload contiene nombre completo', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
@@ -92,8 +93,11 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   });
   it('9. retry reutiliza request_id y payload persistido', async () => {
     const { service, client } = setup(); const first: any = await service.requestInstallation({ idProspecto: 10 }, user);
+    const originalPayload = client.createInstallation.mock.calls[0][0];
     client.createInstallation.mockClear(); await service.retry(first.idIntegracion, user);
+    expect(client.createInstallation.mock.calls[0][0]).toEqual(originalPayload);
     expect(client.createInstallation.mock.calls[0][0].request_id).toBe(first.requestId);
+    expect(client.createInstallation.mock.calls[0][0].id_empresa).toBe(1);
   });
   it('10. HTTP 201 guarda referencia OT externa', async () => {
     const { service } = setup(); const result: any = await service.requestInstallation({ idProspecto: 10 }, user);
@@ -130,10 +134,43 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     const { service, contract } = setup(); contract.plan.idEmpresa = 2;
     await expect(service.requestInstallation({ idProspecto: 10 }, user)).rejects.toBeInstanceOf(BadRequestException);
   });
-  it('40. reconciliacion GET de cierre COMPLETADA usa el processor comun', async () => {
+  it('GET defensivo presenta un estado no contractual como seguimiento sin activar', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 1, estado: 'LEGACY_INTERMEDIATE' } });
+    await expect(context.service.detail(1, user)).resolves.toMatchObject({ estadoIntegracion: 'EN_SEGUIMIENTO', estadoOtG3: 'EN_SEGUIMIENTO' });
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
+  });
+  it('GET detalle usa la empresa 2 persistida y no una constante', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.setStored({ ...context.getStored(), idEmpresa: 2 });
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 2, estado: 'PENDIENTE' } });
+    const userEmpresa2 = { ...user, idEmpresa: 2 };
+    await context.service.detail(1, userEmpresa2);
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 2);
+  });
+  it('GET detalle no mezcla una respuesta de otra empresa', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 2, estado: 'COMPLETADA' } });
+    const result = await context.service.detail(1, user);
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
+    expect(result).toMatchObject({ detalle: null, ultimoErrorSanitizado: 'G3 respondio con una empresa diferente.' });
+    expect(context.getStored().estadoOtG3).toBe('PENDIENTE');
+  });
+  it('40. reconciliacion GET de cierre sin estado usa el processor común como COMPLETADA', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
-    context.client.getWorkOrderClosure.mockResolvedValue({ status: 200, durationMs: 4, data: { estado: 'COMPLETADA', resultado_tecnico: { ok: true }, id_empresa: 1 } });
-    await context.service.reconcile(1, user); expect(context.closure.process).toHaveBeenCalledWith(expect.any(Object), 'RECONCILIACION', 1);
+    const tracking = context.getStored();
+    const closure = {
+      id_ot: 901, request_id: tracking.requestId, trace_id: tracking.traceId,
+      id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7,
+      equipos_instalados: [], equipos_retirados: [],
+    };
+    context.client.getWorkOrderClosure.mockResolvedValue({ status: 200, durationMs: 4, data: closure });
+    await context.service.reconcile(1, user);
+    expect(context.client.getWorkOrderClosure).toHaveBeenCalledWith('901', 1);
+    expect(context.closure.process).toHaveBeenCalledWith(closure, 'RECONCILIACION', 1);
   });
   it('41. GET cierre aun no disponible no activa', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
@@ -149,5 +186,20 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
     context.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_TIMEOUT', null, true, 'Timeout'));
     await expect(context.service.reconcile(1, user)).rejects.toThrow('Timeout'); expect(context.closure.process).not.toHaveBeenCalled();
+  });
+  it('44. reconciliacion no procesa estados distintos de COMPLETADA si un backend legacy los expone', async () => {
+    const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
+    const tracking = context.getStored();
+    context.client.getWorkOrderClosure.mockResolvedValue({
+      status: 200,
+      durationMs: 4,
+      data: {
+        id_ot: 901, request_id: tracking.requestId, trace_id: tracking.traceId,
+        id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7,
+        equipos_instalados: [], equipos_retirados: [], estado: 'ASIGNADA',
+      },
+    });
+    await expect(context.service.reconcile(1, user)).resolves.toMatchObject({ available: false });
+    expect(context.closure.process).not.toHaveBeenCalled();
   });
 });

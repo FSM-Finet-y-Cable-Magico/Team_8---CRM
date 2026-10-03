@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -51,7 +51,10 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
       findMany: jest.fn().mockResolvedValue(otherInvoices),
       update: jest.fn().mockResolvedValue({ ...currentInvoice, estado: 'Pagada' }),
     },
-    pago: { create: jest.fn().mockResolvedValue({ idPago: 101, monto: new Prisma.Decimal(20_000) }) },
+    pago: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ idPago: 101, monto: new Prisma.Decimal(20_000) }),
+    },
     contrato: { update: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     cliente: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     servicioContratado: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -152,6 +155,84 @@ describe('BillingService lifecycle de pago', () => {
     const forbidden = harness(invoice());
     await expect(forbidden.service.registerPayment(paymentDto, support)).rejects.toBeInstanceOf(ForbiddenException);
     expect(forbidden.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...paymentDto, codigoAutorizacion: 'AUTH-1', codigoTransaccion: 'TX-1' },
+    { ...paymentDto, fechaPago: '2026-10-01T10:00:00.000Z', codigoTransaccion: 'TX-1' },
+    { ...paymentDto, fechaPago: '2026-10-01T10:00:00.000Z', codigoAutorizacion: 'AUTH-1' },
+    { ...paymentDto, fechaPago: '2026-10-01T10:00:00.000Z', codigoAutorizacion: '   ', codigoTransaccion: 'TX-1' },
+  ])('pago S2S G2 exige fecha, autorización y transacción', async (invalidPayment) => {
+    const { service } = harness(invoice());
+    await expect(service.registerIntegrationPayment(invalidPayment, 1)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('pago S2S G2 persiste metadatos obligatorios y la fecha informada', async () => {
+    const { service, tx, audit } = harness(invoice());
+    await service.registerIntegrationPayment({
+      ...paymentDto,
+      fechaPago: '2026-10-01T10:00:00.000Z',
+      codigoAutorizacion: 'AUTH-1',
+      codigoTransaccion: 'TX-1',
+    }, 1);
+    expect(tx.pago.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      fechaPago: new Date('2026-10-01T10:00:00.000Z'),
+      codigoAutorizacion: 'AUTH-1',
+      codigoTransaccion: 'TX-1',
+      comprobanteEstado: 'PENDIENTE',
+    }) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'REGISTRAR_PAGO_G2', idUsuario: null }), tx);
+  });
+
+  it('retry exacto de pago S2S devuelve duplicate sin insertar', async () => {
+    const { service, tx } = harness(invoice({ pagos: [{ monto: new Prisma.Decimal(20_000) }] }));
+    tx.pago.findUnique.mockResolvedValue({
+      idPago: 101, idFactura: 80, idCliente: 10, monto: new Prisma.Decimal(20_000),
+      fechaPago: new Date('2026-10-01T10:00:00.000Z'), pasarela: 'Caja local',
+      codigoTransaccion: 'TX-1', codigoAutorizacion: 'AUTH-1', comprobantePdfUrl: null, comprobanteEstado: 'PENDIENTE',
+    });
+    await expect(service.registerIntegrationPayment({
+      ...paymentDto,
+      fechaPago: '2026-10-01T10:00:00.000Z',
+      codigoAutorizacion: 'AUTH-1',
+      codigoTransaccion: 'TX-1',
+    }, 1)).resolves.toMatchObject({ duplicate: true });
+    expect(tx.pago.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza reutilizar codigo_transaccion con contenido incompatible', async () => {
+    const { service, tx } = harness(invoice({ pagos: [{ monto: new Prisma.Decimal(10_000) }] }));
+    tx.pago.findUnique.mockResolvedValue({
+      idPago: 101, idFactura: 80, idCliente: 10, monto: new Prisma.Decimal(10_000),
+      fechaPago: new Date('2026-10-01T10:00:00.000Z'), pasarela: 'Caja local',
+      codigoTransaccion: 'TX-1', codigoAutorizacion: 'AUTH-1', comprobantePdfUrl: null, comprobanteEstado: 'PENDIENTE',
+    });
+    await expect(service.registerIntegrationPayment({
+      ...paymentDto,
+      monto: 5_000,
+      fechaPago: '2026-10-01T10:00:00.000Z',
+      codigoAutorizacion: 'AUTH-1',
+      codigoTransaccion: 'TX-1',
+    }, 1)).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.pago.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['sobrepago', invoice(), 20_000.01, 1],
+    ['más de dos decimales', invoice(), 10.001, 1],
+    ['factura cerrada', invoice({ estado: 'Anulada' }), 5_000, 1],
+    ['factura de otra empresa', invoice({ contrato: { ...invoice().contrato, idEmpresa: 2,
+      cliente: { idCliente: 10, idEmpresa: 2, estado: 'Suspendido', importadoMasivo: false } } }), 5_000, 1],
+  ])('pago S2S rechaza %s', async (_caseName, currentInvoice, monto, idEmpresa) => {
+    const { service, tx } = harness(currentInvoice);
+    await expect(service.registerIntegrationPayment({
+      ...paymentDto,
+      monto,
+      fechaPago: '2026-10-01T10:00:00.000Z',
+      codigoAutorizacion: 'AUTH-1',
+      codigoTransaccion: 'TX-1',
+    }, idEmpresa)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.pago.create).not.toHaveBeenCalled();
   });
 });
 

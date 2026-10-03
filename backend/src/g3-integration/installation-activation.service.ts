@@ -41,7 +41,7 @@ export class InstallationActivationService {
           ? await tx.cliente.findUnique({ where: { idCliente: contract.prospecto.idCliente } })
           : null;
 
-    if (!customer) customer = await tx.cliente.findUnique({ where: { rut: payload.rut } });
+    if (!customer) customer = await tx.cliente.findUnique({ where: { rut: payload.persona.rut } });
     if (customer && customer.idEmpresa !== tracking.idEmpresa) {
       throw new ConflictException('El RUT ya pertenece a un cliente de otra empresa');
     }
@@ -49,7 +49,7 @@ export class InstallationActivationService {
       customer = await tx.cliente.create({
         data: {
           idEmpresa: tracking.idEmpresa,
-          rut: payload.rut,
+          rut: payload.persona.rut,
           nombreCompleto: payload.persona.nombre_completo,
           telefono: payload.persona.telefono,
           email: contract.prospecto?.email,

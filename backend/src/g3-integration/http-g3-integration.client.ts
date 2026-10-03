@@ -25,11 +25,19 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
     });
   }
 
-  getWorkOrder(id: string) {
-    return this.request<G3WorkOrderResponse>(`/api/integraciones/ordenes/${encodeURIComponent(id)}`);
+  async getWorkOrder(id: string, idEmpresa: number) {
+    this.assertCompanyId(idEmpresa);
+    return this.request<G3WorkOrderResponse>(
+      `/api/integraciones/ordenes/${encodeURIComponent(id)}`,
+      {},
+      { id_empresa: String(idEmpresa) },
+    );
   }
 
-  getWorkOrderClosure(id: string) {
+  async getWorkOrderClosure(id: string, idEmpresa: number) {
+    this.assertCompanyId(idEmpresa);
+    // El contrato vigente no demuestra que GET /cierre acepte id_empresa como query.
+    // El caller entrega la empresa persistida para validar el contexto sin inventar ese contrato.
     return this.request<G3WorkOrderResponse>(`/api/integraciones/ordenes/${encodeURIComponent(id)}/cierre`);
   }
 
@@ -37,7 +45,11 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
     return (this.config.get<string>('G3_INTEGRATION_ENABLED') ?? '').trim().toLowerCase() === 'true';
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<G3ClientResult<T>> {
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    query: Record<string, string> = {},
+  ): Promise<G3ClientResult<T>> {
     if (!this.configured()) {
       throw new G3IntegrationError(
         'INTEGRACION_G3_NO_CONFIGURADA',
@@ -51,7 +63,7 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
     const apiKey = this.config.get<string>('G3_API_KEY')?.trim() ?? '';
     const timeoutValue = Number(this.config.get<string>('G3_REQUEST_TIMEOUT_MS') ?? 8000);
     const timeoutMs = Number.isFinite(timeoutValue) && timeoutValue >= 1000 ? timeoutValue : 8000;
-    const url = this.buildUrl(baseUrl, path);
+    const url = this.buildUrl(baseUrl, path, query);
     const startedAt = Date.now();
 
     try {
@@ -78,7 +90,7 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
     }
   }
 
-  private buildUrl(baseUrl: string, path: string) {
+  private buildUrl(baseUrl: string, path: string, query: Record<string, string>) {
     let parsed: URL;
     try {
       parsed = new URL(baseUrl);
@@ -90,7 +102,19 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
       throw new G3IntegrationError('INTEGRACION_G3_NO_CONFIGURADA', null, true, 'La URL de G3 no es segura o valida.');
     }
     parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}${path}`;
+    for (const [name, value] of Object.entries(query)) parsed.searchParams.set(name, value);
     return parsed;
+  }
+
+  private assertCompanyId(idEmpresa: number) {
+    if (!Number.isSafeInteger(idEmpresa) || idEmpresa < 1) {
+      throw new G3IntegrationError(
+        'G3_SCOPE_EMPRESA_INVALIDO',
+        null,
+        false,
+        'La empresa para consultar G3 debe ser un entero positivo.',
+      );
+    }
   }
 
   private async parseBody(response: Response): Promise<unknown> {

@@ -115,6 +115,12 @@ export class ProspectsService {
     }
 
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
+    if (dto.idPlanInteres) {
+      const planInteres = await this.prisma.plan.findUnique({ where: { idPlan: dto.idPlanInteres } });
+      if (!planInteres || planInteres.activo === false || planInteres.idEmpresa !== idEmpresa) {
+        throw new BadRequestException('El plan de interes debe estar activo y pertenecer a la empresa del prospecto');
+      }
+    }
     const duplicateProspect = await this.prisma.prospecto.findFirst({
       where: { rut: rutResult.normalized, idEmpresa },
     });
@@ -151,6 +157,7 @@ export class ProspectsService {
         latitud: dto.ubicacion?.latitud ?? null,
         longitud: dto.ubicacion?.longitud ?? null,
         idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
+        idPlanInteres: dto.idPlanInteres ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
         estadoPipeline: cobertura?.estado === 'FACTIBLE'
           ? FEASIBLE_PIPELINE_STATUS
@@ -413,10 +420,15 @@ export class ProspectsService {
 
     const currentStatus = prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
 
-    if (this.statusIndex(currentStatus) < this.statusIndex(QUOTE_SENT_PIPELINE_STATUS)) {
+    if (this.statusIndex(currentStatus) < this.statusIndex(QUOTE_SENT_PIPELINE_STATUS) || !prospect.idPlanInteres) {
       await this.prisma.prospecto.update({
         where: { idProspecto },
-        data: { estadoPipeline: QUOTE_SENT_PIPELINE_STATUS },
+        data: {
+          ...(this.statusIndex(currentStatus) < this.statusIndex(QUOTE_SENT_PIPELINE_STATUS)
+            ? { estadoPipeline: QUOTE_SENT_PIPELINE_STATUS }
+            : {}),
+          ...(!prospect.idPlanInteres ? { idPlanInteres: dto.planId } : {}),
+        },
       });
     }
 
@@ -476,7 +488,7 @@ export class ProspectsService {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const plan = await this.prisma.plan.findUnique({ where: { idPlan: dto.planId } });
 
-    if (!plan || plan.activo === false) {
+    if (!plan || plan.activo === false || plan.idEmpresa !== prospect.idEmpresa) {
       throw new BadRequestException('Plan inexistente o inactivo');
     }
 
@@ -568,6 +580,7 @@ export class ProspectsService {
         where: { idProspecto },
         data: {
           estadoPipeline: PENDING_SIGNATURE_PIPELINE_STATUS,
+          ...(!prospect.idPlanInteres ? { idPlanInteres: dto.planId } : {}),
         },
         include: { empresa: true },
       });
