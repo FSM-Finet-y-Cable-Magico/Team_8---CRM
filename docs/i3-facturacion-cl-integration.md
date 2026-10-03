@@ -130,4 +130,4 @@ Estas pruebas de la frontera activa son locales con configuración ficticia. La 
 
 ## Próximo hito
 
-Confirmar con el responsable la regla G8, el tipo de primera prueba y los datos/folios fiscales. Con una ficha contractual versionada se podrá certificar el adapter y la persistencia preparados, implementar conciliación y artefactos, y conectar la emisión posterior al cobro. Los pendientes y evidencias vigentes están en el checkpoint actual. Producción permanece fuera de alcance.
+El usuario confirmó una boleta por cada pago, incluidos los abonos, y boleta para la primera prueba. Falta confirmar los datos/folios fiscales y la política para documentos ya emitidos. Con una ficha contractual versionada se podrá certificar el adapter y la persistencia preparados, implementar conciliación y artefactos, y conectar la emisión posterior al cobro. Los pendientes y evidencias vigentes están en el checkpoint actual. Producción permanece fuera de alcance. El CRM ya puede ejecutarse en el [stack Docker local](facturacion-cl-local-docker.md).

@@ -1,15 +1,20 @@
 # Facturación.cl: preparación técnica y pendientes de activación
 
 Fecha: 2026-10-03. Rama: `feat/i3-facturacion-cl`.
-Base remota verificada: `63404be3c12882c38cb73af2aa17d1ece1c9a1e2` de
-`origin/feature/incremento3`. No se publicó commit, push ni PR.
+Base remota incorporada: `1af19cc96e78ad1f4c3b12dc339f2d9332a82784` de
+`origin/feature/incremento3`. Preparación: `d99046f929b5c8b0bf64bf23a19e1c7456a48d32`;
+merge con I3: `9f5eb4e06c35a8b9c21959c3cf158edc6dc641c9`.
+No se creó PR ni se desplegó en Railway. El arranque local está documentado en
+[CRM con Docker](facturacion-cl-local-docker.md).
 
 ## Resultado y alcance real
 
-**PREPARACION_TECNICA_IMPLEMENTADA / EMISION_BLOQUEADA_POR_CONTRATO_Y_REGLA_G8**.
+**PREPARACION_TECNICA_IMPLEMENTADA / EMISION_BLOQUEADA_POR_CONTRATO_FISCAL**.
 Este checkpoint no satisface todavía la Definition of Done de emisión del handoff.
-El responsable debe confirmar la regla de emisión: fue expresamente dejada
-pendiente. No está definido el tipo de la primera prueba.
+El usuario confirmó posteriormente **un documento por cada pago**, incluidos los
+abonos, y **boleta** para la primera prueba. El importe será el pago individual,
+sin repetir el total de la factura por cada abono. La confirmación de esta regla
+no certifica por sí sola los datos fiscales, tipos habilitados ni folios del proveedor.
 
 El runtime mantiene `PendingFacturacionClIssuer`, `canIssue=false`, `canRetry=false`
 y el bloqueo de habilitación de `FACTURACION_CL_INTEGRATION_ENABLED=true`.
@@ -83,9 +88,9 @@ ser una identidad estable de G8 definida por la futura regla aprobada; no puede
 tomarse del body de G2 ni cambiar al renovar política, folio o tipo. `policyVersion`
 documenta esa regla y forma parte del fingerprint, no crea otra emisión.
 
-Mientras no exista la regla, no hay generador de businessKey ni intención automática
-tras Pago. La comprobación de pertenencia no demuestra por sí sola que un pago
-sea el evento tributario correcto. Los ejemplos `FAKE_*` solo son fixtures.
+La regla por pago ya fue confirmada, pero todavía no hay generador de businessKey
+ni intención automática tras Pago en el runtime. La identidad deberá conservar
+el mismo `idPago` para un replay de G2. Los ejemplos `FAKE_*` solo son fixtures.
 
 Solo `PENDIENTE` con cero intentos puede reclamarse. Además, una actualización
 atómica de `fechaEnvio` antes de autenticar/despachar impide reenviar directamente
@@ -117,12 +122,13 @@ Las restricciones SQL y la concurrencia del motor aún requieren prueba en una
 base aislada, autorizada. Las pruebas actuales del store usan mocks.
 
 No se editaron migraciones existentes, init-global.sql, dumps, Railway, G1, G3,
-endpoints G2, JWT ni frontend. La migración G2 mencionada por el handoff sigue sin
-aparecer en la base remota verificada. El carril principal deberá revisar e incorporar
+endpoints G2, JWT ni frontend. La migración G2 mencionada por el handoff ya aparece
+en la base remota incorporada (`20261001120000_i3_g2_intergroup_contract`).
+El carril principal deberá revisar e incorporar
 el nuevo modelo/DDL a su estrategia de esquema antes de activar el store.
 
 La integración posterior no debe emitir dentro de la transacción financiera. Una
-vez ratificada la regla, acordar cómo conservar durablemente el trabajo asociado al
+vez confirmada la regla, falta conservar durablemente el trabajo asociado al
 pago sin una ventana de pérdida tras commit (p. ej. outbox local). La emisión y
 SMTP ocurren después del commit; un fallo tributario no revierte el pago. Este
 checkpoint no implementa ese hook/outbox ni modifica el comportamiento de pagos.
@@ -135,7 +141,11 @@ Ejecutado sobre el código de este checkpoint:
 - Diff offline base → esquema nuevo: solo tabla, índices y foreign keys nuevos.
 - TypeScript `tsc --noEmit`, sin errores.
 - ESLint del módulo tax-document-issuance, sin errores.
-- Jest del módulo nuevo y regresión de Billing/CU-86: 8 suites, 96 pruebas PASS.
+- Jest inicial del módulo nuevo y regresión de Billing/CU-86: 8 suites, 96 pruebas PASS.
+- Después del merge: tax-document-issuance, Billing, G2, G3 y frontera CU-86:
+  **20 suites, 234 pruebas PASS** sobre `9f5eb4e`.
+- [Resultados y capturas](evidencias/facturacion-cl/2026-10-03/README.md), con
+  transporte de proveedor simulado y alcance explicitado.
 
 Comandos desde backend:
 
@@ -151,8 +161,8 @@ ni se presupone que la configuración de Cable Mágico sirve para ambas empresas
 
 ## Pendientes para completar la integración
 
-1. Regla G8 ratificada para pagos parciales, documentos existentes y monto a emitir;
-   tipo de primera prueba y tipos habilitados por empresa.
+1. Regla por pago y primera boleta confirmadas; falta la política para documentos
+   tributarios previamente emitidos y los tipos habilitados por empresa.
 2. Datos fiscales y conceptos históricos autoritativos, indicadores de servicio,
    charset TXT, tratamiento/validación de impuestos y política de redondeos.
 3. Folios de pruebas y procedimiento del proveedor para identificar/reconciliar
@@ -161,13 +171,15 @@ ni se presupone que la configuración de Cable Mágico sirve para ambas empresas
    implementar recuperación segura de artefactos y conciliación. La emisión HTTP
    actual solo fue probada con transporte simulado; ninguna emisión productiva.
 5. Validar migración/concurrencia en PostgreSQL aislado y coordinar la base G2.
-6. Integrar hook/outbox después de ratificar la identidad, sin enviar dentro de la
+6. Integrar hook/outbox con identidad estable del pago, sin enviar dentro de la
    transacción de Pago; conectar el issuer y efectuar una emisión sandbox autorizada.
 
 ## Reporte de entrega
 
 ```text
-BASE_SHA=63404be3c12882c38cb73af2aa17d1ece1c9a1e2
+BASE_SHA=1af19cc96e78ad1f4c3b12dc339f2d9332a82784
+PAYMENT_RULE=PER_PAYMENT_CONFIRMED
+FIRST_SANDBOX_DOCUMENT=BOLETA_CONFIRMED
 NEW_DEPENDENCIES=[]
 NEW_ENV_VARS=[]
 DB_CHANGE_REQUIRED=YES_FOR_FUTURE_STORE
