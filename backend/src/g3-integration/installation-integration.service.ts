@@ -113,7 +113,7 @@ export class InstallationIntegrationService {
     const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
     if (!externalId) return this.toView(tracking);
     try {
-      const response = await this.client.getWorkOrder(externalId);
+      const response = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
       const state = normalizeG3State(response.data.estado);
       const updated = await this.prisma.integracionInstalacionG3.update({
@@ -149,7 +149,7 @@ export class InstallationIntegrationService {
     const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
     if (!externalId) throw new BadRequestException('La solicitud aun no tiene una referencia de OT G3');
     try {
-      const response = await this.client.getWorkOrderClosure(externalId);
+      const response = await this.client.getWorkOrderClosure(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
       if (!response.data.id_ot || !response.data.request_id
         || (response.data.estado && response.data.estado.trim().toUpperCase() !== 'COMPLETADA')) {

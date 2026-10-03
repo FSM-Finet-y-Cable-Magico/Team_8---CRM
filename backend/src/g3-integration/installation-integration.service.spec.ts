@@ -97,6 +97,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     client.createInstallation.mockClear(); await service.retry(first.idIntegracion, user);
     expect(client.createInstallation.mock.calls[0][0]).toEqual(originalPayload);
     expect(client.createInstallation.mock.calls[0][0].request_id).toBe(first.requestId);
+    expect(client.createInstallation.mock.calls[0][0].id_empresa).toBe(1);
   });
   it('10. HTTP 201 guarda referencia OT externa', async () => {
     const { service } = setup(); const result: any = await service.requestInstallation({ idProspecto: 10 }, user);
@@ -138,6 +139,25 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     await context.service.requestInstallation({ idProspecto: 10 }, user);
     context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 1, estado: 'LEGACY_INTERMEDIATE' } });
     await expect(context.service.detail(1, user)).resolves.toMatchObject({ estadoIntegracion: 'EN_SEGUIMIENTO', estadoOtG3: 'EN_SEGUIMIENTO' });
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
+  });
+  it('GET detalle usa la empresa 2 persistida y no una constante', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.setStored({ ...context.getStored(), idEmpresa: 2 });
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 2, estado: 'PENDIENTE' } });
+    const userEmpresa2 = { ...user, idEmpresa: 2 };
+    await context.service.detail(1, userEmpresa2);
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 2);
+  });
+  it('GET detalle no mezcla una respuesta de otra empresa', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 2, estado: 'COMPLETADA' } });
+    const result = await context.service.detail(1, user);
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
+    expect(result).toMatchObject({ detalle: null, ultimoErrorSanitizado: 'G3 respondio con una empresa diferente.' });
+    expect(context.getStored().estadoOtG3).toBe('PENDIENTE');
   });
   it('40. reconciliacion GET de cierre sin estado usa el processor común como COMPLETADA', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
@@ -149,6 +169,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     };
     context.client.getWorkOrderClosure.mockResolvedValue({ status: 200, durationMs: 4, data: closure });
     await context.service.reconcile(1, user);
+    expect(context.client.getWorkOrderClosure).toHaveBeenCalledWith('901', 1);
     expect(context.closure.process).toHaveBeenCalledWith(closure, 'RECONCILIACION', 1);
   });
   it('41. GET cierre aun no disponible no activa', async () => {

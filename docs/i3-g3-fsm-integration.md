@@ -11,8 +11,8 @@ Esta alineación es exclusivamente local. No se cambió Railway, no se ejecutó 
 | Operación | Endpoint G3 | Uso G8 |
 | --- | --- | --- |
 | Crear instalación | `POST /api/integraciones/instalaciones` | Solicitud y reintento idempotente |
-| Consultar OT | `GET /api/integraciones/ordenes/{id}` | Detalle y estado actual |
-| Consultar cierre | `GET /api/integraciones/ordenes/{id}/cierre` | Reconciliación manual |
+| Consultar OT | `GET /api/integraciones/ordenes/{id}?id_empresa={idEmpresa}` | Detalle y estado actual; `id_empresa` es obligatorio |
+| Consultar cierre | `GET /api/integraciones/ordenes/{id}/cierre` | Reconciliación manual; el query `id_empresa` no está ratificado |
 
 El adaptador `HttpG3IntegrationClient` es el único punto que usa HTTP. Envía `X-API-KEY`, aplica `G3_REQUEST_TIMEOUT_MS`, bloquea HTTP remoto sin TLS y nunca entrega la API key al frontend ni la registra. La integración se habilita explícitamente con `G3_INTEGRATION_ENABLED=true`; URL o key ausentes producen `INTEGRACION_G3_NO_CONFIGURADA` y jamás una OT local de fallback.
 
@@ -92,6 +92,8 @@ Todos esos campos son obligatorios. `id_ot` y `request_id` identifican la misma 
 `InstallationIntegrationService` persiste primero, confirma la transacción, llama G3 y luego persiste el resultado. Los errores 400, 401, 403, 404 y 409 se clasifican; 429, 5xx y timeout son reintentables según la operación. Un timeout conserva la misma clave idempotente.
 
 El detalle devuelve solo campos opcionales conocidos: id/código, tipo, estado, fecha, técnico, dirección, persona, teléfono y resultado. No se transforma un campo inexistente en dato ficticio.
+
+El GET de detalle obtiene `id_empresa` desde el tracking persistido y lo envía como query, sin fijar una empresa concreta. El servicio preserva empresas 1 y 2 y rechaza respuestas que declaren una empresa distinta. Para `GET /cierre`, el adapter recibe y valida la empresa del tracking, pero no agrega `id_empresa` a la URL mientras G3 no ratifique ese query para dicho endpoint.
 
 ## Cierre, reconciliación y lifecycle
 

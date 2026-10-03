@@ -62,8 +62,8 @@ export type G3ClientResult<T> = {
 export interface G3IntegrationClient {
   configured(): boolean;
   createInstallation(payload: G3InstallationPayload): Promise<G3ClientResult<G3WorkOrderResponse>>;
-  getWorkOrder(id: string): Promise<G3ClientResult<G3WorkOrderResponse>>;
-  getWorkOrderClosure(id: string): Promise<G3ClientResult<G3WorkOrderResponse>>;
+  getWorkOrder(id: string, idEmpresa: number): Promise<G3ClientResult<G3WorkOrderResponse>>;
+  getWorkOrderClosure(id: string, idEmpresa: number): Promise<G3ClientResult<G3WorkOrderResponse>>;
 }
 
 export class G3IntegrationError extends Error {

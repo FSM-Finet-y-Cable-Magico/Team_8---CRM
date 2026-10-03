@@ -136,7 +136,7 @@ $numericWorkOrderId = 0
 if (-not [int]::TryParse($workOrderId, [ref]$numericWorkOrderId) -or $numericWorkOrderId -lt 1) {
   throw 'G3_NUMERIC_WORK_ORDER_ID_REQUIRED'
 }
-$workOrder = Invoke-JsonRequest -Method GET -Uri "$g3Base/api/integraciones/ordenes/$numericWorkOrderId" -Headers $g3OutboundHeaders
+$workOrder = Invoke-JsonRequest -Method GET -Uri "$g3Base/api/integraciones/ordenes/$numericWorkOrderId`?id_empresa=$companyId" -Headers $g3OutboundHeaders
 
 # Sin series de equipo: este smoke valida G3->G8 y evita disparar un POST G1 como efecto cascada.
 $closurePayload = [ordered]@{
