@@ -56,6 +56,13 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-CRM FiNet}
+      SMTP_HELO: ${SMTP_HELO:-crm-finet.local}
+      SMTP_TIMEOUT_MS: ${SMTP_TIMEOUT_MS:-15000}
+      SMTP_REJECT_UNAUTHORIZED: "true"
+      SMTP_ALLOW_INSECURE_LOCAL: ${SMTP_ALLOW_INSECURE_LOCAL:-false}
+      SMTP_TLS_SERVERNAME: ${SMTP_TLS_SERVERNAME:-}
+      SMTP_TLS_CA: ${SMTP_TLS_CA:-}
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

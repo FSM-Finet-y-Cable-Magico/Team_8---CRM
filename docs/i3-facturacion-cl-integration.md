@@ -34,11 +34,11 @@ Perfil aprobado: [{idEmpresa,approved:true,issuerRut,defaultDocumentType:"BOLETA
 
 Secretos por empresa: FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS y FACTURACION_CL_FINET_SANDBOX_CREDENTIALS, JSON {usuario,rut,clave} de API PRUEBAS. La empresa/RUT debe coincidir con el perfil. Producción permanece bloqueada por el servicio y por el validador productivo existente. No reutilizar las credenciales reales en estas variables: ambas credenciales usan el mismo origen REST y el ambiente efectivo depende de su procedencia.
 
-SMTP_HOST/FROM y configuración SMTP existente; FACTURACION_CL_DELIVERY_ENABLED=true activa entrega. En el ensayo se usó únicamente Mailpit local, sin relay ni entrega externa.
+SMTP_HOST/FROM y configuración SMTP; FACTURACION_CL_DELIVERY_ENABLED=true activa entrega. En el ensayo se usó únicamente Mailpit local, sin relay ni entrega externa. El cierre SMTP del 2026-10-04 incorpora TLS/STARTTLS obligatorios fuera de QA local, autenticación, recuperación de correos y conciliación manual auditada: ver [configuración y resultados actuales](i3-smtp-automatic-email.md).
 
 ## Persistencia y operaciones
 
-Migraciones aditivas independientes: 20261003010000_i3_tax_emission_intents y 20261003020000_i3_tax_payment_pipeline. Se aplicaron únicamente a fsm_facturacion_local, contenedor/volumen propio; no a Railway ni a una base compartida. No se modificaron la migración G2 ni init-global.sql. El responsable del esquema compartido debe revisar/incorporar ambas antes de un despliegue. Con flag true y tablas faltantes, el módulo rechaza iniciar.
+Migraciones aditivas independientes: 20261003010000_i3_tax_emission_intents, 20261003020000_i3_tax_payment_pipeline y 20261004010000_i3_tax_smtp_delivery. Se aplicaron únicamente a fsm_facturacion_local, contenedor/volumen propio; no a Railway ni a una base compartida. No se modificaron la migración G2 ni init-global.sql. El responsable del esquema compartido debe revisar/incorporar las tres antes de un despliegue. Con flag true y tablas faltantes, el módulo rechaza iniciar.
 
 GET /api/tax-documents/payments/:id: estado, folio, enlace, fingerprint y estado PDF/correo, con JWT/rol de cobranza y pertenencia de empresa/cliente.
 POST :id/retry: solo FALLIDO + CONFIRMED_NOT_SENT, sin marcador de envío previo.
@@ -49,6 +49,6 @@ La pantalla Cobranza → factura → pago permite consultar documento, comproban
 
 ## Verificación y evidencia
 
-Ver [checkpoint con resultados y G3](i3-facturacion-cl-checkpoint.md), [Docker local](facturacion-cl-local-docker.md) y [capturas](evidencias/facturacion-cl/2026-10-03/README.md). 264 tests / 24 suites PASS; comprobación adicional con PostgreSQL real y dispatcher ficticio de concurrencia/reinicio/cuarentena. TypeScript, ESLint, Prisma y diff-check aprobados según el checkpoint.
+Ver [checkpoint con resultados y G3](i3-facturacion-cl-checkpoint.md), [Docker local](facturacion-cl-local-docker.md) y [capturas](evidencias/facturacion-cl/2026-10-03/README.md). El ensayo del 2026-10-03 registra 264 tests / 24 suites PASS y PostgreSQL real con dispatcher ficticio. La actualización SMTP del 2026-10-04 registra sus pruebas y límites en [su informe](i3-smtp-automatic-email.md).
 
 Fuentes primarias consultadas: [API REST](https://www.facturacion.cl/manualintegracion/apirestintegracion.php), [boleta TXT](https://www.facturacion.cl/manualintegracion/archivoboletaelectronica.php), [factura XML](https://www.facturacion.cl/manualintegracion/archivofacturaelectronica.php). Diferencias observadas del sandbox (RUT corto, link /plano) están descritas aquí, sin alterar ni atribuirlas al ejemplo del manual.

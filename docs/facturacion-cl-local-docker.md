@@ -81,12 +81,13 @@ Mantener Facturación.cl deshabilitada durante la primera inicialización. Desde
 ```powershell
 Get-Content -Raw backend/prisma/migrations/20261003010000_i3_tax_emission_intents/migration.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
 Get-Content -Raw backend/prisma/migrations/20261003020000_i3_tax_payment_pipeline/migration.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
+Get-Content -Raw backend/prisma/migrations/20261004010000_i3_tax_smtp_delivery/migration.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
 Get-Content -Raw tools/facturacion-cl-sandbox/create-local-fixtures.sql | docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d fsm_facturacion_local
 ```
 
 No repetir las migraciones sobre esta PC: ya fueron aplicadas. No ejecutar migrate deploy contra el DDL global o una base compartida. Las migraciones aditivas requieren coordinación del dueño del esquema antes de un despliegue compartido.
 
-Configurar solo credenciales API de PRUEBAS y el perfil correspondiente en .env.facturacion-local según i3-facturacion-cl-integration.md. Los defaults del compose siguen deshabilitados. No copiar valores privados a .env.example ni a capturas. Para la bandeja de correo local configurar SMTP_HOST=mailpit, SMTP_PORT=1025, SMTP_STARTTLS=false, SMTP_FROM=qa@finet.local; FACTURACION_CL_DELIVERY_ENABLED controla esa etapa.
+Configurar solo credenciales API de PRUEBAS y el perfil correspondiente en .env.facturacion-local según i3-facturacion-cl-integration.md. Los defaults del compose siguen deshabilitados. No copiar valores privados a .env.example ni a capturas. Para la bandeja de correo local configurar SMTP_HOST=mailpit, SMTP_PORT=1025, SMTP_SECURE=false, SMTP_STARTTLS=false, SMTP_ALLOW_INSECURE_LOCAL=true, SMTP_FROM=qa@finet.local y sin usuario/contraseña SMTP; FACTURACION_CL_DELIVERY_ENABLED controla esa etapa. La tercera migración SMTP también está aplicada en esta PC. Consultar [TLS, recuperación y pruebas](i3-smtp-automatic-email.md) antes de conectar una cuenta externa.
 
 ```powershell
 docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml --profile mail-qa up -d backend frontend mailpit

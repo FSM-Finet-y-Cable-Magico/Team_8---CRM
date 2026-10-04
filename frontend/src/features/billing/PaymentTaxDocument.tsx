@@ -7,7 +7,7 @@ const labels:Record<string,string> = { DISABLED:'Emisión deshabilitada', COMPAN
   CREDENTIALS_MISSING:'Faltan credenciales de pruebas', MIGRATION_REQUIRED:'Falta preparar la base de datos', READY_SANDBOX:'Ambiente de pruebas',
   PENDIENTE_CONTRATO_FACTURACION_CL:'Falta configuración tributaria', PENDIENTE:'Pendiente', EN_PROCESO:'Procesando', GENERADO:'Generado',
   FALLIDO:'Falló', RESULTADO_INDETERMINADO:'Resultado por verificar', DATOS_REQUERIDOS:'Requiere revisión de datos',
-  NO_CONFIGURADO:'Correo sin configurar', SIN_DESTINATARIO:'Sin correo del cliente', ENVIADO:'Enviado', DISPONIBLE:'Disponible' };
+  NO_CONFIGURADO:'Correo sin configurar', SIN_DESTINATARIO:'Sin correo del cliente', ENVIADO:'Enviado', DISPONIBLE:'Disponible', REINTENTO_PENDIENTE:'Reintento programado' };
 
 export function PaymentTaxDocument({ idPago, canManage }: {idPago:number;canManage:boolean}) {
   const [status,setStatus]=useState<TaxStatus | null>(null), [busy,setBusy]=useState(false), [error,setError]=useState('');
@@ -26,10 +26,11 @@ export function PaymentTaxDocument({ idPago, canManage }: {idPago:number;canMana
     {doc && <>
       <p>{[39,41].includes(doc.tipoDte)?'Boleta':'Factura'} · Folio {doc.folio ?? 'pendiente'} · {doc.ambiente==='sandbox'?'Documento de pruebas':doc.ambiente}</p>
       <p>Comprobante: {labels[doc.artefactoEstado] ?? doc.artefactoEstado} · Correo: {labels[doc.emailEstado] ?? doc.emailEstado}</p>
+      {doc.emailEstado==='RESULTADO_INDETERMINADO' && <p>Debe verificarse si el correo llegó antes de volver a enviarlo.</p>}
       {link && <a href={link} target="_blank" rel="noreferrer">Abrir comprobante</a>}
       {doc.estado==='RESULTADO_INDETERMINADO' && <p>Un administrador debe verificar el documento en el proveedor antes de continuar.</p>}
       {canManage && doc.estado==='FALLIDO' && doc.ultimoError==='CONFIRMED_NOT_SENT' && <button disabled={busy} type="button" onClick={()=>void load('retry')}>Reintentar emisión sin envío previo</button>}
-      {canManage && doc.estado==='GENERADO' && (doc.artefactoEstado!=='DISPONIBLE' || ['PENDIENTE','NO_CONFIGURADO'].includes(doc.emailEstado)) && <button disabled={busy} type="button" onClick={()=>void load('artifacts')}>Recuperar comprobante y correo pendiente</button>}
+      {canManage && doc.estado==='GENERADO' && (doc.artefactoEstado!=='DISPONIBLE' || ['PENDIENTE','NO_CONFIGURADO','FALLIDO'].includes(doc.emailEstado)) && <button disabled={busy} type="button" onClick={()=>void load('artifacts')}>Recuperar comprobante y correo pendiente</button>}
     </>}
   </section>;
 }

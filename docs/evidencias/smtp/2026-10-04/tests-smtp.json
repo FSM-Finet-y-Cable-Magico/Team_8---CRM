@@ -1,0 +1,851 @@
+{
+  "date": "2026-10-04",
+  "baseCommit": "db5093ee7f2f268a183487b5b17794254c04ace5",
+  "suite": "mail, tax-document-issuance, billing, prospects",
+  "totalTests": 191,
+  "passedTests": 191,
+  "failedTests": 0,
+  "passedSuites": 15,
+  "rawSha256": "7033cc566d0a5754fd19f093d176b485d2070d03a9520914efe4fb60eb7696d4",
+  "tests": [
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl.issuer.spec.ts",
+      "tests": [
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) default disabled creates no work, and an enabled instance requires migration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) captures an immutable receipt for the partial payment, with explicit automatic folio",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) fiscal errors leave a reviewable job; database errors are not disguised",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) artifact failure keeps the generated document and never sends email",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) verifies the PDF even without SMTP and keeps email as not configured",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) an invalid PDF cannot become available or reach SMTP",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) SMTP failure leaves generation intact and blocks automatic email replay",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) concurrent replay sends one email through a database claim",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) does not retry a failed emission without explicit request, nor dispatch changed configuration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) enforces billing roles and company ownership before reading artifacts",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) manual reconciliation requires administrator and matching fingerprint before any provider read",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) retries only confirmed temporary SMTP failures, on schedule, at most three times, without reissuing",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) recovers a generated pending email after restart/configuration without any emission call",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) permits an explicit retry after a confirmed rejection while keeping the total attempt count",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) does not automatically retry a permanent rejection or an unknown sending failure",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) email recovery respects the original company and profile",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) audits manual email outcome accepted atomically and does not send or emit",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) audits manual email outcome not_accepted atomically and does not send or emit",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) requires administrator, explicit verification, matching fingerprint and uncertain email state for reconciliation",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/prospects/prospects.service.spec.ts",
+      "tests": [
+        {
+          "name": "ProspectsService reactiva un prospecto perdido y limpia el motivo de perdida",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService permite registrar el mismo RUT como prospecto de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService lista solo prospectos activos no convertidos",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService no permite cotizar un prospecto marcado como no factible",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService rechaza cotizar un plan activo de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService no permite cotizar un plan inactivo",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService registra el contrato pendiente sin crear cliente, servicio ni OT",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService rechaza confirmar contratacion si el prospecto no tiene cotizacion factible del plan",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService marca un prospecto como perdido con motivo, observacion y responsable",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService rechaza una orden de instalacion programada en una fecha historica",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService sugiere horarios alternativos cuando todos los tecnicos estan ocupados",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService crea la orden asignada y avanza el prospecto a Instalacion Programada",
+          "status": "passed"
+        },
+        {
+          "name": "ProspectsService agenda una instalación para un prospecto firmado sin crear antes el cliente",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/mail/mail.service.spec.ts",
+      "tests": [
+        {
+          "name": "SMTP protocol over isolated loopback sockets disabled SMTP makes no connection",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets verify authenticates without sending a message",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets sends an attached boleta with starttls and authenticates only after encryption",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets sends an attached boleta with tls and authenticates only after encryption",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets preserves quote attachments and generates a stable tax Message-ID",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets refuses an untrusted TLS certificate before sending credentials or DATA",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets refuses a certificate with the wrong hostname",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets requires STARTTLS and never falls back to plaintext AUTH",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets stops on rejected authentication without sending DATA",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets classifies recipient rejection 450 without exposing server responses",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets classifies recipient rejection 550 without exposing server responses",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets classifies an explicit DATA rejection as not accepted",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets a connection lost before the DATA acknowledgement is uncertain even when its error says CONN",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets does not turn SMTP acceptance into failure if QUIT loses its connection",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets bounds preflight waiting and confirms no DATA was sent",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets a timeout waiting for DATA acceptance remains uncertain",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets rejects envelope injection or multiple recipients before connecting",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP protocol over isolated loopback sockets rejects envelope injection or multiple recipients before connecting",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_REJECT_UNAUTHORIZED\":\"false\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_STARTTLS\":\"false\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_PORT\":\"not-a-port\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_USER\":\"qa\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_SECURE\":\"maybe\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates rejects unsafe/incomplete configuration {\"SMTP_FROM\":\"qa@example.invalid\\r\\nBCC: other@example.invalid\"}",
+          "status": "passed"
+        },
+        {
+          "name": "SMTP configuration gates permits plaintext only explicitly for unauthenticated local QA, never production",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/prospects/prospects-coverage.spec.ts",
+      "tests": [
+        {
+          "name": "Factibilidad geografica en prospectos reconsulta al crear, persiste coordenadas y conserva el resultado FACTIBLE",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos reconsulta al crear, persiste coordenadas y conserva el resultado NO_FACTIBLE",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos reconsulta al crear, persiste coordenadas y conserva el resultado PENDIENTE_VALIDACION_TECNICA",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos sin ubicación registra el prospecto pendiente sin consultar",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos un error del proveedor conserva el estado y no crea una verificación",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos la revisión negativa invalida las verificaciones anteriores dentro de una transacción",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos no retrocede procesos avanzados o cerrados (Cotizacion Enviada)",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos no retrocede procesos avanzados o cerrados (Pendiente firma)",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos no retrocede procesos avanzados o cerrados (Servicio Activo)",
+          "status": "passed"
+        },
+        {
+          "name": "Factibilidad geografica en prospectos no retrocede procesos avanzados o cerrados (Perdido)",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/billing/billing.service.spec.ts",
+      "tests": [
+        {
+          "name": "BillingService lifecycle de pago persists tax work inside the transaction, then dispatches after commit; provider failure preserves payment",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago does not dispatch after financial rollback",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago G2 duplicate confirmation does not enqueue another fiscal job",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago registra pago parcial sin cerrar ni reactivar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago no convierte un pago de contrato firmado en activación inicial",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago reactiva solo el servicio suspendido e instalado al pagar la última deuda vencida",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago no reactiva si queda otra factura vencida con saldo en la misma empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago ignora como deuda una factura antigua cuyo saldo ya está pagado",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago rechaza sobrepago, factura sin cliente, empresa ajena y rol sin permiso antes de insertar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 persiste metadatos obligatorios y la fecha informada",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago retry exacto de pago S2S devuelve duplicate sin insertar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago rechaza reutilizar codigo_transaccion con contenido incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza sobrepago",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza más de dos decimales",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza factura cerrada",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza factura de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión registra aviso simulado como notificación, evento funcional y auditoría atómica",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión impide último aviso antes del vencimiento efectivo de una prórroga",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión no suspende mientras una prórroga aprobada mantiene la factura vigente",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/pending-facturacion-cl.issuer.spec.ts",
+      "tests": [
+        {
+          "name": "PendingFacturacionClIssuer permanece deshabilitado por defecto y nunca permite emitir o reintentar",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer separa configuracion por empresa sin aceptar credenciales en el JSON no secreto",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer falla cerrado ante JSON, flag o duplicados invalidos",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer impide configuracion invalida o produccion sin certificar; permite configurar sandbox",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl-payment.config.spec.ts",
+      "tests": [
+        {
+          "name": "Payment tax profiles defaults to no profiles; requires explicit approval and valid tax identity",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles requires invoice folios and an explicit rate; rejects guessed zero folios",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles accepts the observed short sandbox access identity only for receipts, never for invoice or customer identity",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles isolates credentials by company and checks the issuer RUT without exposing secrets",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/billing/billing-read.service.spec.ts",
+      "tests": [
+        {
+          "name": "BillingReadService fuerza empresa y cliente de la misma empresa en el listado",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService filtra S2S por empresa y RUT exacto y conserva los conceptos de Billing",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService mantiene aislamiento por empresa con identificadores exactos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService mantiene aislamiento por empresa con identificadores exactos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService responde lista vacía para cliente inexistente o RUT perteneciente a otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService rechaza un scope explícito de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService oculta por existencia una factura de otra empresa y rechaza roles ajenos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService el detalle S2S usa el mismo balance y oculta facturas cross-company",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl-artifacts.client.spec.ts",
+      "tests": [
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination http://www.facturacion.cl/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://evil.example/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl@evil.example/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl/other",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://user:pass@www.facturacion.cl/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl/sistema/descargar.php#x",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) reads documented Base64 link with B movement for receipts, never calls processing",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) upgrades only the observed sandbox download path to HTTPS without allowing plaintext requests",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) downloads bounded PDF without Authorization and rejects HTML and oversized files",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/prisma-tax-intent.store.spec.ts",
+      "tests": [
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) checks financial ownership in a local Serializable transaction before preserving an intent",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects a payment attached to another invoice or customer",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) retrieves an immutable existing row after a uniqueness race",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) does not swallow database errors or turn them into an external retry",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) claims work atomically for the company and refuses a lost claim",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) requires the same claim owner when persisting completion",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) marks dispatch once using durable company, owner, fingerprint and null timestamp predicates",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects resetting an intent or storing arbitrary remote error text",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) quarantines stale work without releasing it for another dispatch",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) keeps reads scoped to a company and fails closed on missing records",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl-sandbox-dispatcher.spec.ts",
+      "tests": [
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) is disabled by default and requires both company and emission gates",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) rejects production or invalid contracts before a request",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"estado\":\"PENDIENTE\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"claimId\":\"OTHER_OWNER\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"intentos\":0}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"ambiente\":\"production\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"policyVersion\":\"OTHER_RULE\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"fingerprint\":\"0000000000000000000000000000000000000000000000000000000000000000\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"folioEsperado\":\"127\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"idEmpresa\":2}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) uses documented GET, raw Authorization, Base64 and both result levels",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) prevents concurrent and restarted direct dispatches with the same durable marker",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: null",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"False\"}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"False\",\"Folio\":\"126\",\"TipoDte\":\"33\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"True\",\"Folio\":\"127\",\"TipoDte\":\"33\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"True\",\"Folio\":\"126\",\"TipoDte\":\"39\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":[]}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) does not dispatch on failed authentication and exposes no provider message",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) never retries processing HTTP 401",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) never retries processing HTTP 500",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) preserves uncertainty after processing timeout or a failed durable marker",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl-document-builder.spec.ts",
+      "tests": [
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) permits provider automatic folio only for an explicitly selected receipt mode",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds invoice XML with the documented root and Latin1 encoding",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds exempt invoice separately without deriving tax treatment",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds the receipt with 16 header and 13 detail positions and an empty email",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds an exempt receipt with exempt amounts in their documented positions",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 2026-02-30",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 2026-13-01",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 03-10-2026",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects totals/line mismatch, fractional peso rounding, mixed and unapproved extensions",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects folio guessing, unsupported encoding and lossy Latin1 conversion",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects VAT inconsistent with the supplied rate even when net plus VAT equals total",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) requires dates for periodic receipts without selecting a service indicator by default",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) enforces the separate detail limits for invoice and receipt",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/tax-emission-intent.service.spec.ts",
+      "tests": [
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) persists and commits an atomic claim before dispatch",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not dispatch while readiness is blocked",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) allows one send for repeated and concurrent requests with the same identity",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) rejects changed content, document type, policy and payment without overwriting",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not store full payload or recipient data in the intent",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) isolates identical logical keys by company",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) quarantines timeouts and exceptions without any automatic resend",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not trust a different folio or type in an otherwise successful response",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) records a proven pre-send failure without automatically releasing it",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not resend after completion persistence fails",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) rejects unknown policy metadata and production before preparing work",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/tax-document-issuance/facturacion-cl-read-client.spec.ts",
+      "tests": [
+        {
+          "name": "FacturacionClReadClient authenticates and consults only version, without exposing the token",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient fails before connecting when disabled or the company is missing",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient refuses production and duplicate configuration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient does not permit later mutation of the original options to enable it",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient caches independently and shares concurrent logins only within a company",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes auth HTTP 401 and does not retry",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes auth HTTP 500 and does not retry",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes malformed auth and network failures",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient reports the observed array discrepancy without returning its contents",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient invalidates only the rejected token, without automatic login or version retry",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "backend/src/billing/invoice-balance.spec.ts",
+      "tests": [
+        {
+          "name": "invoiceBalance calcula saldo parcial con precisión decimal",
+          "status": "passed"
+        },
+        {
+          "name": "invoiceBalance usa la prórroga aprobada más tardía para morosidad",
+          "status": "passed"
+        },
+        {
+          "name": "invoiceBalance una factura anulada no tiene saldo exigible aunque conserve diferencia contable",
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}

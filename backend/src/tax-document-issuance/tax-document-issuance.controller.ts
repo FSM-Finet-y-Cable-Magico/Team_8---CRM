@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsString, Matches, MaxLength } from 'class-validator';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -15,6 +15,13 @@ export class ReconcilePaymentDteDto {
   @IsString() @MaxLength(1000) observation!: string;
 }
 
+export class ReconcileTaxEmailDto {
+  @Matches(/^[a-f0-9]{64}$/) fingerprint!: string;
+  @IsIn(['accepted','not_accepted']) outcome!: 'accepted' | 'not_accepted';
+  @IsBoolean() verified!: boolean;
+  @IsString() @MaxLength(1000) observation!: string;
+}
+
 @Controller('tax-documents/payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TaxDocumentIssuanceController {
@@ -27,4 +34,6 @@ export class TaxDocumentIssuanceController {
   artifacts(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.issuer.recoverArtifacts(id,user); }
   @Post(':id/reconcile') @Roles('Administrador')
   reconcile(@Param('id', ParseIntPipe) id: number, @Body() dto: ReconcilePaymentDteDto, @CurrentUser() user: AuthUser) { return this.issuer.reconcilePayment(id,dto,user); }
+  @Post(':id/reconcile-email') @Roles('Administrador')
+  reconcileEmail(@Param('id', ParseIntPipe) id: number, @Body() dto: ReconcileTaxEmailDto, @CurrentUser() user: AuthUser) { return this.issuer.reconcileEmail(id,dto,user); }
 }
