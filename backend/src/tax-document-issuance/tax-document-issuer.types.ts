@@ -31,6 +31,7 @@ export type TaxDocumentIssuerReadiness = {
 /** Local payment capture and independent processing after commit. */
 export interface TaxDocumentIssuer {
   getReadiness(idEmpresa: number): TaxDocumentIssuerReadiness;
+  readinessSummary?(): { enabled:boolean; ready:boolean; companies:Array<{idEmpresa:number;state:TaxDocumentIssuerState}> };
   enqueuePayment?(tx: Prisma.TransactionClient, input: PaymentTaxContext): Promise<void>;
   processPayment?(idPago: number): Promise<unknown>;
 }

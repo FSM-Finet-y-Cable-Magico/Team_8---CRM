@@ -1,4 +1,6 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Inject, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { TAX_DOCUMENT_ISSUER, TaxDocumentIssuer } from '../tax-document-issuance/tax-document-issuer.types';
+import { MessagingService } from '../messaging/messaging.service';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { HttpG1InventoryClient } from '../g1-integration/http-g1-inventory.client';
@@ -13,7 +15,9 @@ const normalize = (type: string) => type.toLowerCase().replace(/character varyin
 
 @Controller()
 export class HealthController {
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService,
+    @Optional() @Inject(TAX_DOCUMENT_ISSUER) private readonly taxIssuer?:TaxDocumentIssuer,
+    @Optional() private readonly messaging?:MessagingService) {}
 
   @Get('health')
   health() { return { application: 'UP' }; }
@@ -23,6 +27,8 @@ export class HealthController {
     const configured = {
       g1_configured: new HttpG1InventoryClient(this.config).configured(),
       g3_configured: new HttpG3IntegrationClient(this.config).configured(),
+      tax_document_issuance: this.taxIssuer?.readinessSummary?.() ?? {enabled:false,ready:false,companies:[]},
+      messaging: {provider:this.messaging?.config.mode ?? 'disabled'},
     };
     try {
       const rows = await this.prisma.$transaction(async tx => {

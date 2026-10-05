@@ -1080,7 +1080,18 @@ model LogNotificacion {
   idPlantilla    Int?      @map("id_plantilla")
   canal          String?   @db.VarChar(20)
   fechaEnvio     DateTime? @map("fecha_envio") @db.Timestamp(6)
-  estadoEnvio    String?   @map("estado_envio") @db.VarChar(20)
+  estadoEnvio    String?   @map("estado_envio") @db.VarChar(30)
+  idEmpresa      Int?      @map("id_empresa")
+  proveedor      String?   @db.VarChar(20)
+  correlationId  String?   @unique @map("correlation_id") @db.Uuid
+  payloadHash    String?   @map("payload_hash") @db.Char(64)
+  providerMessageId String? @unique @map("provider_message_id") @db.VarChar(512)
+  mensaje        Json?
+  intentos       Int       @default(0)
+  fechaInicio    DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  ultimoError    String?   @map("ultimo_error") @db.VarChar(64)
+
+  @@index([proveedor, estadoEnvio, fechaEnvio])
 
   @@map("log_notificacion")
 }

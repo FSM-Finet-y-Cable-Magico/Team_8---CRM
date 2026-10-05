@@ -21,6 +21,9 @@ export class ReconcileTaxEmailDto {
   @IsBoolean() verified!: boolean;
   @IsString() @MaxLength(1000) observation!: string;
 }
+export class CorrectTaxDataDto {
+  @IsString() @MaxLength(1000) observation!: string;
+}
 
 @Controller('tax-documents/payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +31,10 @@ export class TaxDocumentIssuanceController {
   constructor(private readonly issuer: FacturacionClIssuer) {}
   @Get(':id') @Roles(...ACCESS_ROLES.VIEW_BILLING)
   state(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.issuer.paymentState(id,user); }
+  @Post(':id/reprepare') @Roles(...ACCESS_ROLES.MANAGE_BILLING)
+  reprepare(@Param('id', ParseIntPipe) id: number, @Body() dto: CorrectTaxDataDto, @CurrentUser() user: AuthUser) { return this.issuer.repreparePayment(id,dto.observation,user); }
+  @Post(':id/recipient') @Roles(...ACCESS_ROLES.MANAGE_BILLING)
+  recipient(@Param('id', ParseIntPipe) id: number, @Body() dto: CorrectTaxDataDto, @CurrentUser() user: AuthUser) { return this.issuer.correctRecipient(id,dto.observation,user); }
   @Post(':id/retry') @Roles(...ACCESS_ROLES.MANAGE_BILLING)
   retry(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.issuer.retryPayment(id,user); }
   @Post(':id/artifacts') @Roles(...ACCESS_ROLES.MANAGE_BILLING)

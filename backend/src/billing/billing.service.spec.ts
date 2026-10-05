@@ -261,6 +261,19 @@ describe('BillingService lifecycle de pago', () => {
 });
 
 describe('BillingService avisos y suspensión', () => {
+  it('persists WhatsApp and commercial event before dispatch, and transport failure never undoes them',async()=>{
+    const events:string[]=[];
+    const tx={cliente:{findUnique:jest.fn().mockResolvedValue({idCliente:10,idEmpresa:1,telefono:'+56912345678',nombreCompleto:'QA'})},
+      plantillaNotificacion:{findFirst:jest.fn().mockResolvedValue({idPlantilla:1,canal:'WHATSAPP'})},
+      eventoGestionComercial:{create:jest.fn(async()=>{events.push('EVENT');return{idEvento:1};})}};
+    const prisma={$transaction:jest.fn(async(fn:(client:typeof tx)=>unknown)=>{events.push('BEGIN');const result=await fn(tx);events.push('COMMIT');return result;})};
+    const messaging={config:{company:()=>({templates:{AVISO_PREVENTIVO:{locale:'es_CL'}}})},
+      enqueue:jest.fn(async()=>{events.push('INTENT');return{notification:{idNotificacion:1n,estadoEnvio:'PENDIENTE'},duplicate:false};}),
+      dispatch:jest.fn(async()=>{events.push('HTTP');throw new Error('FAKE_TIMEOUT');})};
+    const service=new BillingService(prisma as never,{record:jest.fn()} as never,new ConfigService({BILLING_NOTIFICATION_MODE:'provider'}),undefined,messaging as never);
+    expect(await service.sendNotification({idCliente:10,tipo:'Preventiva'},commercial)).toMatchObject({idNotificacion:'1',estadoEnvio:'PENDIENTE'});
+    expect(events).toEqual(['BEGIN','INTENT','EVENT','COMMIT','HTTP']);
+  });
   it('registra aviso simulado como notificación, evento funcional y auditoría atómica', async () => {
     const current = invoice();
     const tx = {

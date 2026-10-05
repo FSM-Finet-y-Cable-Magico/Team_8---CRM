@@ -8,6 +8,17 @@ import { smtpSettings } from './smtp.config';
 
 const cert=readFileSync(join(__dirname,'fixtures/localhost-test-cert.pem'));
 const key=readFileSync(join(__dirname,'fixtures/localhost-test-key.pem'));
+
+it('explicit disabled/mock modes never use a configured external SMTP host',async()=>{
+  const base={SMTP_HOST:'smtp.example.invalid',SMTP_FROM:'qa@example.invalid',SMTP_USER:'QA',SMTP_PASSWORD:'FAKE'};
+  const message={to:'qa@example.invalid',customerName:'QA',tipoDte:39,folio:'1',idPago:1,pdf:Buffer.from('%PDF-QA'),filename:'qa.pdf'};
+  const disabled=new MailService(new ConfigService({...base,MAIL_PROVIDER:'disabled'}));
+  expect(await disabled.sendTaxDocument(message)).toEqual({status:'not_configured'});
+  const mock=new MailService(new ConfigService({...base,MAIL_PROVIDER:'mock'}));
+  expect(await mock.verifyConnection()).toEqual({status:'simulated'});
+  expect(await mock.sendTaxDocument(message)).toEqual({status:'simulated'});
+  await expect(mock.sendTaxDocument({...message,to:'invalid,qa@example.invalid'})).rejects.toThrow('SMTP_RECIPIENT_INVALID');
+});
 type FakeOptions={mode?:'plain'|'starttls'|'tls';auth?:boolean;rejectAuth?:boolean;noStartTls?:boolean;rejectRecipient?:number;rejectData?:number;dropBeforeAck?:boolean;dropAfterAck?:boolean;hangGreeting?:boolean;hangAfterData?:boolean};
 async function fakeSmtp(options:FakeOptions={}) {
   const messages:string[]=[],authEncrypted:boolean[]=[],commands:string[]=[],sockets=new Set<Socket>();

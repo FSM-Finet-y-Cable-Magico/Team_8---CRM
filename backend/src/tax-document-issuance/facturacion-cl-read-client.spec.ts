@@ -7,6 +7,15 @@ const client = (request: FacturacionClRequest, now?: () => number, enabled = tru
   new FacturacionClReadClient({ enabled, companies, credentials }, request, now);
 
 describe('FacturacionClReadClient', () => {
+  it('invalidates a 401 from processing without replaying that operation',async()=>{
+    class Probe extends FacturacionClReadClient {
+      process(){return this.authorizedRequest(1,new URL('https://rest.facturacion.cl/wsds/procesar'));}
+    }
+    const request=jest.fn().mockResolvedValueOnce(reply(200,{token:'FAKE_OLD'})).mockResolvedValueOnce(reply(401,{})).mockResolvedValueOnce(reply(200,{token:'FAKE_NEW'}));
+    const api=new Probe({enabled:true,companies,credentials},request);
+    expect((await api.process()).status).toBe(401);expect(request).toHaveBeenCalledTimes(2);
+    await api.authenticate(1);expect(request.mock.calls.map(call=>new URL(call[0]).pathname)).toEqual(['/login','/wsds/procesar','/login']);
+  });
   beforeEach(() => credentials.mockClear());
   it('authenticates and consults only version, without exposing the token', async () => {
     const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' })).mockResolvedValueOnce(reply(200, { version: '1.2.3' }));

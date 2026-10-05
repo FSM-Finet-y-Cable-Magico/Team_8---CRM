@@ -5,6 +5,7 @@ import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
 import { CoveragePicker, CoverageLocation } from '../coverage';
 import { BillingInvoicesPanel } from './BillingInvoicesPanel';
+import { useRef } from 'react';
 import { ExternalTaxDocumentsPanel } from './ExternalTaxDocumentsPanel';
 export function BillingPanel({
   overview,
@@ -25,6 +26,14 @@ export function BillingPanel({
 }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const notificationKeys=useRef(new Map<string,string>());
+  async function notify(idCliente:number,idFactura:number,tipo:'Preventiva'|'Ultimo aviso') {
+    const key=`${idCliente}:${idFactura}:${tipo}`;
+    let correlationId=notificationKeys.current.get(key);
+    if(!correlationId){correlationId=crypto.randomUUID();notificationKeys.current.set(key,correlationId);}
+    await api.post('/billing/notifications',{idCliente,idFactura,tipo,correlationId});
+    notificationKeys.current.delete(key);
+  }
   const [coverageAddress, setCoverageAddress] = useState('');
   const [coverageLocation, setCoverageLocation] = useState<CoverageLocation | null>(null);
   useEffect(() => { setCoverageLocation(null); }, [writeCompanyId, coverageAddress]);
@@ -229,7 +238,7 @@ export function BillingPanel({
                         <button
                           className="secondary compact"
                           type="button"
-                          onClick={() => void run(() => api.post('/billing/notifications', { idCliente: row.cliente.idCliente, idFactura: row.idFactura, tipo: 'Preventiva' }), 'Aviso preventivo registrado')}
+                          onClick={() => void run(() => notify(row.cliente.idCliente,row.idFactura,'Preventiva'), 'Aviso preventivo registrado')}
                         >
                           Aviso
                         </button>
@@ -277,7 +286,7 @@ export function BillingPanel({
                         <button
                           className="secondary compact"
                           type="button"
-                          onClick={() => void run(() => api.post('/billing/notifications', { idCliente: row.cliente.idCliente, idFactura: row.idFactura, tipo: 'Ultimo aviso' }), 'Ultimo aviso registrado')}
+                          onClick={() => void run(() => notify(row.cliente.idCliente,row.idFactura,'Ultimo aviso'), 'Ultimo aviso registrado')}
                         >
                           Ultimo aviso
                         </button>
@@ -306,7 +315,7 @@ export function BillingPanel({
         <section className="panel stack">
         <div className="section-heading">
           <h2>Notificaciones de cobranza</h2>
-          <p>Historial de avisos registrados en modo simulado o desactivado.</p>
+          <p>Historial de avisos y estados de entrega. Los avisos simulados no se envían al cliente.</p>
         </div>
         <div className="table-wrap">
           <table>

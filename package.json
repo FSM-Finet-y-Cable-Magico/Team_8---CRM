@@ -7,6 +7,8 @@
     "frontend"
   ],
   "scripts": {
+    "test:i3-release": "node scripts/i3-release-acceptance.mjs --run-local",
+    "schema:i3:proposal": "node scripts/i3-schema-proposal.mjs",
     "dev": "npm run dev --workspaces --if-present",
     "dev:backend": "npm run start:dev -w backend",
     "dev:frontend": "npm run dev -w frontend",

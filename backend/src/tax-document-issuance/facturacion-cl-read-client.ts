@@ -95,9 +95,12 @@ export class FacturacionClReadClient {
       throw new FacturacionClReadError('REQUEST_DESTINATION_INVALID');
     }
     const token = await this.token(idEmpresa);
-    return this.request(url.href, {
+    const response = await this.request(url.href, {
       method: 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000), headers: { Authorization: token },
     });
+    // Invalidate for the next explicit operation; never replay a processing request.
+    if (response.status === 401) this.tokens.delete(idEmpresa);
+    return response;
   }
 
   async version(idEmpresa: number) {

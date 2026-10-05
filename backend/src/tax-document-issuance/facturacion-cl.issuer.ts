@@ -1,10 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, TaxPaymentJob } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { todayDateOnly } from '../common/date-rules';
 import { hasRole, isAdministrator } from '../common/roles';
-import { MailDeliveryError, MailService } from '../mail/mail.service';
+import { MailDeliveryError, validSmtpAddress } from '../mail/smtp.config';
+import { TAX_DOCUMENT_DELIVERY, TaxDocumentDeliveryPort } from '../mail/tax-document-delivery.port';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { BuiltTaxDocument, buildInvoiceDocument, buildReceiptDocument, matchesIssuedFolio } from './facturacion-cl-document-builder';
@@ -27,7 +28,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
   readonly artifacts: FacturacionClArtifactsClient;
 
   constructor(private readonly prisma: PrismaService, private readonly config: FacturacionClPaymentConfig,
-    private readonly mail: MailService, private readonly audit: AuditService) {
+    @Inject(TAX_DOCUMENT_DELIVERY) private readonly mail: TaxDocumentDeliveryPort, private readonly audit: AuditService) {
     this.store = new PrismaTaxIntentStore(prisma);
     const snapshot = config.base.snapshot();
     const options = { enabled: snapshot.enabled, companies: snapshot.companies.filter(c => c.environment === 'sandbox')
@@ -56,7 +57,10 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
         ('tax_emission_intent','email_intentos'),('tax_emission_intent','fecha_proximo_email'),('tax_emission_intent','ultimo_error_email')
       ) AS required(table_name,column_name) LEFT JOIN information_schema.columns c
       ON c.table_schema='public' AND c.table_name=required.table_name AND c.column_name=required.column_name
-      WHERE c.column_name IS NULL) AS ready`;
+      WHERE c.column_name IS NULL)
+      AND EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
+        WHERE n.nspname='public' AND t.relname='tax_emission_intent' AND c.conname='tax_intent_email_check'
+          AND position('SIMULADO' in pg_get_constraintdef(c.oid)) > 0) AS ready`;
     this.databaseReady = rows[0]?.ready === true;
     if (!this.config.base.snapshot().enabled) return;
     if (!this.databaseReady) throw new Error('FACTURACION_CL_MIGRATION_REQUIRED');
@@ -65,6 +69,11 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     // No provider call during startup: recovery runs only from persisted pending work.
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+  readinessSummary() {
+    const snapshot=this.config.base.snapshot();
+    const companies=snapshot.companies.filter(c=>c.enabled).map(c=>({idEmpresa:c.idEmpresa,state:this.getReadiness(c.idEmpresa).state}));
+    return {enabled:snapshot.enabled,ready:!snapshot.enabled || companies.length>0 && companies.every(c=>c.state==='READY_SANDBOX'),companies};
+  }
 
   getReadiness(idEmpresa:number): TaxDocumentIssuerReadiness {
     const snapshot = this.config.base.snapshot(), company = snapshot.companies.find(c => c.idEmpresa === idEmpresa);
@@ -179,7 +188,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
         await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoUrl:link,artefactoEstado:'PENDIENTE'}});
       } catch { await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,artefactoUrl:null},data:{artefactoEstado:'FALLIDO'}}); return; }
     }
-    if (record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
+    if (record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','SIMULADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
     let pdf:Buffer;
     try { pdf=await this.artifacts.downloadPdf(link);
       await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoEstado:'DISPONIBLE'}});
@@ -200,7 +209,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     if (!claimed.count) return;
     try {
       const result=await this.mail.sendTaxDocument({to:job.email,customerName:job.nombreCliente,tipoDte:record.tipoDte,folio:record.folio,idPago:job.idPago,pdf,filename:`dte-${record.tipoDte}-${record.folio}.pdf`,deliveryKey:`tax:${record.idIntencion}`});
-      await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:'EN_PROCESO'},data:{emailEstado:result.status==='sent' ? 'ENVIADO' : 'NO_CONFIGURADO'}});
+      await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:'EN_PROCESO'},data:{emailEstado:result.status==='sent' ? 'ENVIADO' : result.status==='simulated' ? 'SIMULADO' : 'NO_CONFIGURADO'}});
     } catch (error) {
       const attempts = record.emailIntentos + 1;
       const safe = error instanceof MailDeliveryError && error.confirmedNotAccepted;
@@ -260,6 +269,75 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     const status=await this.paymentState(idPago,user);
     if (status.intention?.estado!=='FALLIDO' || status.intention.ultimoError!=='CONFIRMED_NOT_SENT') throw new BadRequestException('Solo se reintenta un fallo confirmado anterior al envio');
     return this.processPayment(idPago,true);
+  }
+  /** Rebuild only a blocked, never-dispatched job from authoritative current G8 data. */
+  async repreparePayment(idPago:number, observation:string, user:AuthUser) {
+    const idEmpresa = await this.assertPaymentAccess(idPago,user);
+    this.assertRecoveryWriter(user, observation);
+    const profile = this.config.profile(idEmpresa);
+    if (!profile || !this.getReadiness(idEmpresa).canIssue) throw new BadRequestException('Completa la configuracion tributaria antes de preparar el documento');
+    await this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(81003, ${idPago})`;
+      const job = await tx.taxPaymentJob.findUnique({where:{idPago}});
+      const intent = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
+      if (!job || job.idEmpresa !== idEmpresa || job.estado !== 'DATOS_REQUERIDOS' || intent) {
+        throw new BadRequestException('Solo se preparan trabajos bloqueados sin intencion de emision previa');
+      }
+      const payment = await tx.pago.findUnique({where:{idPago},include:{factura:{include:{contrato:{include:{cliente:true}}}}}});
+      const invoice = payment?.factura, contract = invoice?.contrato, customer = contract?.cliente;
+      if (!payment || !invoice || !contract || !customer || contract.idEmpresa !== idEmpresa || customer.idEmpresa !== idEmpresa ||
+          payment.idCliente !== customer.idCliente || job.idFactura !== invoice.idFactura || job.idCliente !== customer.idCliente || !payment.monto.eq(job.monto)) {
+        throw new BadRequestException('La identidad financiera cambio; requiere revision');
+      }
+      if (invoice.folioExterno || await tx.documentoTributarioExterno.count({where:{idEmpresa,idFactura:invoice.idFactura,estado:'REGISTRADO'}})) {
+        throw new BadRequestException('Existe un documento externo; requiere revision');
+      }
+      const technical = customer.datosTecnicos;
+      const giro = technical && typeof technical === 'object' && !Array.isArray(technical) && typeof technical.giroTributario === 'string' ? technical.giroTributario : '';
+      let document: BuiltTaxDocument;
+      try { document = await this.buildPaymentDocument(tx, {idEmpresa,idFactura:invoice.idFactura,idPago,idCliente:customer.idCliente,
+        monto:payment.monto.toFixed(2),periodoMes:invoice.periodoMes,periodoAnio:invoice.periodoAnio,fechaLimitePago:invoice.fechaLimitePago,
+        tipoDocumento:invoice.tipoDocumento,folioExterno:invoice.folioExterno,
+        receiver:{rut:customer.rut ?? '',name:customer.nombreCompleto,giro,address:contract.direccionInstalacion ?? '',
+          comuna:contract.comunaInstalacion ?? '',city:contract.ciudadInstalacion ?? '',email:customer.email}},profile);
+      } catch (error) {
+        if (/^(FISCAL_|DTE_INPUT_|DOCUMENT_TYPE_)/.test((error as Error)?.message ?? '')) throw new BadRequestException('Los datos fiscales siguen incompletos o no soportados');
+        throw error;
+      }
+      const changed = await tx.taxPaymentJob.updateMany({where:{idPago,idEmpresa,estado:'DATOS_REQUERIDOS',profileHash:job.profileHash},
+        data:{documento:document.bytes,tipoDte:document.tipoDte,formato:document.formato,folioEsperado:document.folio,
+          profileHash:this.config.profileHash(profile),policyVersion:PAYMENT_TAX_POLICY,email:customer.email,nombreCliente:customer.nombreCompleto,estado:'PENDIENTE',ultimoError:null}});
+      if (changed.count !== 1) throw new BadRequestException('El trabajo cambio; vuelve a consultar');
+      await this.audit.record({idUsuario:user.idUsuario,accion:'PREPARAR_DTE_DATOS_CORREGIDOS',entidadAfectada:'tax_payment_job',
+        valorNuevo:{idEmpresa,idPago,observation:observation.trim()}},tx);
+    }, {isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    // The normal worker owns dispatch after this transaction commits.
+    return this.paymentState(idPago,user);
+  }
+  private assertRecoveryWriter(user:AuthUser, observation:string) {
+    if (!isAdministrator(user.roles) && !hasRole(user.roles,'Comercial')) throw new ForbiddenException('Sin permiso de cobranza');
+    if (!observation?.trim() || observation.length > 1000) throw new BadRequestException('Informa el motivo de la correccion');
+  }
+  async correctRecipient(idPago:number, observation:string, user:AuthUser) {
+    const idEmpresa = await this.assertPaymentAccess(idPago,user);
+    this.assertRecoveryWriter(user,observation);
+    await this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(81003, ${idPago})`;
+      const job = await tx.taxPaymentJob.findUnique({where:{idPago}});
+      const record = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
+      if (!job || job.idEmpresa !== idEmpresa || record?.estado !== 'GENERADO' || record.emailEstado !== 'SIN_DESTINATARIO' || record.emailIntentos !== 0) {
+        throw new BadRequestException('Solo se corrige un destinatario faltante sin envios previos');
+      }
+      const customer = await tx.cliente.findUnique({where:{idCliente:job.idCliente}});
+      if (customer?.idEmpresa !== idEmpresa || !customer.email || !validSmtpAddress(customer.email)) throw new BadRequestException('Corrige primero el correo del cliente');
+      await tx.taxPaymentJob.update({where:{idPago},data:{email:customer.email}});
+      const changed = await tx.taxEmissionIntent.updateMany({where:{idIntencion:record.idIntencion,idEmpresa,emailEstado:'SIN_DESTINATARIO',emailIntentos:0},
+        data:{emailEstado:'PENDIENTE',ultimoErrorEmail:null,fechaProximoEmail:null}});
+      if (changed.count !== 1) throw new BadRequestException('El correo cambio; vuelve a consultar');
+      await this.audit.record({idUsuario:user.idUsuario,accion:'CORREGIR_DESTINATARIO_DTE',entidadAfectada:'tax_emission_intent',
+        valorNuevo:{idEmpresa,idPago,observation:observation.trim()}},tx);
+    }, {isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    return this.paymentState(idPago,user);
   }
   async recoverArtifacts(idPago:number,user:AuthUser) {
     const idEmpresa=await this.assertPaymentAccess(idPago,user);

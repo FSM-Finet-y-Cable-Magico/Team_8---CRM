@@ -24,8 +24,6 @@ services:
       context: ./frontend
       target: dev
     restart: unless-stopped
-    env_file:
-      - .env.railway
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
       API_PROXY_TARGET: http://backend:3000
