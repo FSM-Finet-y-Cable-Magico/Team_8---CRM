@@ -1,130 +1,189 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download, Filter, Columns3, RefreshCw, Search, Sheet, UserPlus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
 import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
-import { Modal, StatusBadge } from '../../shared/components';
+import { ControlBookDrawer } from './ControlBookDrawer';
+import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
+import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, WORK_VIEWS, WorkView, currency, dateLabel, exportColumns, readable } from './control-book-model';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './commercial-control-book.css';
 
-type ControlRow = {
-  rowId: string; idEmpresa: number | null; idCliente: number; rut: string | null; nombre: string; telefono: string | null; email: string | null; direccion: string | null;
-  idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number; numeroContrato: string; idPlan: number | null; plan: string | null;
-  idZona: number | null; zona: string | null; idFactura: number; tipoDocumento: string | null; numeroDocumento: string; fechaEmision: string | null; fechaVencimiento: string;
-  fechaVencimientoEfectiva: string; estadoDocumento: string; montoDocumento: number | null; totalPagado: number; saldoPendiente: number | null; saldoFavor: number | null;
-  diasAtraso: number | null; estadoComercial: string; ultimaGestion: string | null; fechaUltimaGestion: string | null; responsableUltimaGestion: string | null; accionSugerida: string;
-  convenioActivo: boolean; prorrogaActiva: boolean; diaPago: number; cambioFecha: string | null; fechaInstalacion: string | null; fechaCorte: string | null; estadoCorte: string | null;
-  avisoRetiro: boolean; retiroPendiente: boolean; observacionRelevante: string | null; ultimoPago: string | null; formaPago: string | null; codigoTransaccion: string | null;
-  valorRecibido: number | null; cargosPendientes: number;
-};
+export function CommercialStatus({ row }: { row: ControlRow }) {
+  return <span className={'control-status status-' + row.estadoComercial.toLowerCase()}>{readable(row.estadoComercial)}</span>;
+}
 
-type ControlResponse = {
-  items: ControlRow[];
-  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
-  summary: { totalRows: number; totalDebt: number; overdueCount: number; agreementsCount: number; extensionsCount: number };
-  filterOptions: { plans: Array<{ id: number; label: string }>; zones: Array<{ id: number; label: string }>; commercialStatuses: string[]; serviceStatuses: string[] };
-};
+function Cell({ column, row }: { column: string; row: ControlRow }) {
+  if (column === 'cliente') return <><strong>{row.nombre}</strong><small>{row.rut ?? 'Sin RUT'}</small><small className="control-row-context">Contrato {row.numeroContrato} · Doc. {row.numeroDocumento}</small></>;
+  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span><small>Contrato {row.numeroContrato} · {row.tipoDocumento ? readable(row.tipoDocumento) : 'Documento'} {row.numeroDocumento}</small></>;
+  if (column === 'deuda') return <strong>{row.saldoPendiente === null ? '—' : currency.format(row.saldoPendiente)}</strong>;
+  if (column === 'estado') return <><CommercialStatus row={row}/><small>{row.diasAtraso === null ? 'Atraso sin datos' : row.diasAtraso > 0 ? row.diasAtraso + ' días de atraso' : 'Sin atraso'}</small></>;
+  if (column === 'accion') return row.accionSugerida.toLocaleLowerCase('es-CL').includes('sin gestión pendiente') ? null : <span>{row.accionSugerida}</span>;
+  if (column === 'contacto') return <><span>{row.telefono ?? 'Sin teléfono'}</span><small>{row.email ?? 'Sin correo'}</small></>;
+  if (column === 'gestion') return <><span>{readable(row.ultimaGestion)}</span><small>{dateLabel(row.fechaUltimaGestion)}{row.responsableUltimaGestion ? ' · ' + row.responsableUltimaGestion : ''}</small></>;
+  const key = COLUMNS[column].fields[0];
+  const value = row[key];
+  if (['montoDocumento', 'totalPagado', 'cargosPendientes'].includes(key)) return <>{value === null ? '—' : currency.format(Number(value))}</>;
+  if (key.startsWith('fecha')) return <>{dateLabel(value as string | null)}</>;
+  if (typeof value === 'boolean') return <>{value ? 'Sí' : 'No'}</>;
+  return <>{value === null ? '—' : String(value)}</>;
+}
 
-type ActionName = 'detail' | 'event' | 'lastNotice' | 'agreement' | 'extension' | 'paymentDay' | 'charge' | 'withdrawal' | null;
-type Filters = {
-  search: string; estadoComercial: string; estadoServicio: string; idPlan: string; idZona: string;
-  conDeuda: string; vencido: string; conConvenio: string; conProrroga: string; conUltimoAviso: string;
-  retiroPendiente: string; diasAtrasoMin: string; diasAtrasoMax: string; fechaVencimientoDesde: string;
-  fechaVencimientoHasta: string; sort: string; order: string;
-};
-const EMPTY_FILTERS: Filters = {
-  search: '', estadoComercial: '', estadoServicio: '', idPlan: '', idZona: '', conDeuda: '', vencido: '',
-  conConvenio: '', conProrroga: '', conUltimoAviso: '', retiroPendiente: '', diasAtrasoMin: '', diasAtrasoMax: '',
-  fechaVencimientoDesde: '', fechaVencimientoHasta: '', sort: 'diasAtraso', order: 'desc',
-};
-
-const currency = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
-const ESSENTIAL = ['rut', 'nombre', 'plan', 'saldoPendiente', 'estadoComercial', 'diasAtraso', 'accionSugerida'];
-const OPERATIONAL = ['rut', 'nombre', 'direccion', 'telefono', 'email', 'plan', 'zona', 'estadoServicio', 'tipoDocumento', 'numeroDocumento', 'montoDocumento', 'fechaEmision', 'fechaVencimientoEfectiva', 'totalPagado', 'saldoPendiente', 'diasAtraso', 'diaPago', 'estadoComercial', 'ultimaGestion', 'accionSugerida', 'convenioActivo', 'prorrogaActiva', 'avisoRetiro', 'formaPago', 'codigoTransaccion', 'cargosPendientes'];
-const COLUMNS: Record<string, { label: string; render: (row: ControlRow) => string | number }> = {
-  rut: { label: 'RUT', render: (r) => r.rut ?? '-' }, nombre: { label: 'Nombre', render: (r) => r.nombre }, direccion: { label: 'Dirección', render: (r) => r.direccion ?? '-' },
-  telefono: { label: 'Teléfono', render: (r) => r.telefono ?? '-' }, email: { label: 'Correo', render: (r) => r.email ?? '-' }, plan: { label: 'Plan/Servicio', render: (r) => r.plan ?? '-' },
-  zona: { label: 'Zona', render: (r) => r.zona ?? '-' }, estadoServicio: { label: 'Estado servicio', render: (r) => r.estadoServicio ?? '-' }, tipoDocumento: { label: 'Documento', render: (r) => r.tipoDocumento ?? '-' },
-  numeroDocumento: { label: 'Folio', render: (r) => r.numeroDocumento }, montoDocumento: { label: 'Monto', render: (r) => r.montoDocumento === null ? '-' : currency.format(r.montoDocumento) },
-  fechaEmision: { label: 'Emisión', render: (r) => r.fechaEmision ?? '-' }, fechaVencimientoEfectiva: { label: 'Vencimiento', render: (r) => r.fechaVencimientoEfectiva },
-  totalPagado: { label: 'Pagado', render: (r) => currency.format(r.totalPagado) }, saldoPendiente: { label: 'Deuda', render: (r) => r.saldoPendiente === null ? '-' : currency.format(r.saldoPendiente) },
-  diasAtraso: { label: 'Días atraso', render: (r) => r.diasAtraso ?? '-' }, diaPago: { label: 'Día pago', render: (r) => r.diaPago }, estadoComercial: { label: 'Estado comercial', render: (r) => r.estadoComercial.replace(/_/g, ' ') },
-  ultimaGestion: { label: 'Última gestión', render: (r) => r.ultimaGestion?.replace(/_/g, ' ') ?? '-' }, accionSugerida: { label: 'Acción sugerida', render: (r) => r.accionSugerida },
-  convenioActivo: { label: 'Convenio', render: (r) => r.convenioActivo ? 'Sí' : 'No' }, prorrogaActiva: { label: 'Prórroga', render: (r) => r.prorrogaActiva ? 'Sí' : 'No' },
-  avisoRetiro: { label: 'Aviso retiro', render: (r) => r.avisoRetiro ? 'Registrado' : 'No' }, formaPago: { label: 'Último pago', render: (r) => r.formaPago ?? '-' },
-  codigoTransaccion: { label: 'Voucher/TX', render: (r) => r.codigoTransaccion ?? '-' }, cargosPendientes: { label: 'Cargos pendientes', render: (r) => currency.format(r.cargosPendientes) },
-};
-
-export function CommercialControlBookPanel({ scope, writeCompanyId, permissions, onOpenCustomers, onOpenBilling }: {
-  scope: string; writeCompanyId: number; permissions: DashboardPermissions; onOpenCustomers: () => void; onOpenBilling: () => void;
+export function CommercialControlBookPanel({ view = 'general', scope, writeCompanyId, permissions, onOpenCustomers, onOpenBilling }: {
+  view?: WorkView; scope: string; writeCompanyId: number; permissions: DashboardPermissions; onOpenCustomers: (row: ControlRow) => void; onOpenBilling: (row: ControlRow) => void;
 }) {
   const [data, setData] = useState<ControlResponse | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [page, setPage] = useState(1); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
-  const [view, setView] = useState<'essential' | 'operational'>('essential'); const [visible, setVisible] = useState<string[]>(ESSENTIAL); const [columnsOpen, setColumnsOpen] = useState(false);
-  const [selected, setSelected] = useState<ControlRow | null>(null); const [action, setAction] = useState<ActionName>(null); const [saving, setSaving] = useState(false); const [message, setMessage] = useState('');
-  const [form, setForm] = useState({ canal: 'TELEFONO', fecha: new Date().toISOString().slice(0, 10), observacion: '', monto: '', cuotas: '1', condiciones: '', nuevaFecha: '', diaPago: '', tipoCargo: 'REPOSICION' });
-  const [leadOpen, setLeadOpen] = useState(false); const [lead, setLead] = useState({ nombreCompleto: '', rut: '', email: '', telefono: '', direccion: '', comuna: '', region: '' });
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const { message, showMessage: setMessage, clearMessage } = useTransientMessage(5000);
+  const [refresh, setRefresh] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState('');
+  const [visible, setVisible] = useState<string[]>(() => [...WORK_VIEWS[view].columns]);
+  const [optionsPanel, setOptionsPanel] = useState<'filters' | 'columns' | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [selected, setSelected] = useState<ControlRow | null>(null);
+  const [drawerBusy, setDrawerBusy] = useState(false);
+  const [catalog, setCatalog] = useState<ControlResponse['filterOptions']>();
+  const exportRef = useRef<HTMLDivElement>(null);
+  const filtersButton = useRef<HTMLButtonElement>(null);
+  const columnsButton = useRef<HTMLButtonElement>(null);
+  const workspace = useRef<HTMLElement>(null);
+  const openerId = useRef<string | null>(null);
+  const returning = useRef(false);
+  const companyId = scope !== 'consolidado' ? scope : String(writeCompanyId);
+  const previousCompany = useRef(companyId);
+  const params = useMemo(() => ({ idEmpresa: companyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 30 }), [companyId, filters, page]);
 
-  const params = useMemo(() => ({ idEmpresa: scope !== 'consolidado' ? scope : writeCompanyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 30 }), [scope, writeCompanyId, filters, page]);
-  useEffect(() => { const controller = new AbortController(); setLoading(true); setError(''); void api.get<ControlResponse>('/commercial/control-book', { params, signal: controller.signal }).then(({ data: result }) => setData(result)).catch((err) => { if (!controller.signal.aborted) setError(apiErrorMessage(err)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [params, refresh]);
-  useEffect(() => setPage(1), [scope, filters]);
+  useEffect(() => { setVisible([...WORK_VIEWS[view].columns]); setSelected(null); setOptionsPanel(null); }, [view]);
 
-  function changeView(next: 'essential' | 'operational') { setView(next); setVisible(next === 'essential' ? ESSENTIAL : OPERATIONAL); }
-  function openAction(next: ActionName, row: ControlRow) { setSelected(row); setAction(next); setMessage(''); setForm({ canal: 'TELEFONO', fecha: new Date().toISOString().slice(0, 10), observacion: '', monto: String(row.saldoPendiente ?? ''), cuotas: '1', condiciones: '', nuevaFecha: '', diaPago: String(row.diaPago), tipoCargo: 'REPOSICION' }); }
-  async function exportFile(format: 'csv' | 'xlsx') { setError(''); try { const response = await api.get('/commercial/control-book/export', { params: { ...params, format, columns: visible.join(','), page: undefined, pageSize: undefined }, responseType: 'blob' }); const url = URL.createObjectURL(response.data); const link = document.createElement('a'); link.href = url; link.download = `libro-control.${format}`; link.click(); URL.revokeObjectURL(url); } catch (err) { setError(apiErrorMessage(err)); } }
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setFilters((current) => current.search === search ? current : { ...current, search }); setPage(1); }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
-  async function submitAction() {
-    if (!selected || !action) return; setSaving(true); setMessage('');
+  useEffect(() => {
+    if (previousCompany.current === companyId) return;
+    previousCompany.current = companyId;
+    setSelected(null); setDrawerBusy(false); setData(null); setCatalog(undefined); setPage(1); clearMessage(); setUpdatedAt('');
+    setOptionsPanel(null); setExportOpen(false); setSearch(''); setFilters(EMPTY_FILTERS);
+  }, [companyId, clearMessage]);
+
+  useEffect(() => {
+    if (selected || !returning.current) return;
+    returning.current = false;
+    workspace.current?.querySelector<HTMLTableRowElement>(`tr[data-row-id="${CSS.escape(openerId.current ?? '')}"]`)?.focus();
+  }, [selected]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError('');
+    void api.get<ControlResponse>('/commercial/control-book', { params, signal: controller.signal }).then(({ data: result }) => {
+      if (controller.signal.aborted) return;
+      if (page > result.pagination.totalPages) { setPage(result.pagination.totalPages); return; }
+      setData(result);
+      setUpdatedAt(new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
+      setSelected((current) => current ? result.items.find((row) => row.rowId === current.rowId) ?? null : null);
+      setCatalog((current) => ({
+        plans: [...new Map([...(current?.plans ?? []), ...result.filterOptions.plans].map((item) => [item.id, item])).values()],
+        zones: [...new Map([...(current?.zones ?? []), ...result.filterOptions.zones].map((item) => [item.id, item])).values()],
+        commercialStatuses: [...new Set([...(current?.commercialStatuses ?? []), ...result.filterOptions.commercialStatuses])],
+        serviceStatuses: [...new Set([...(current?.serviceStatuses ?? []), ...result.filterOptions.serviceStatuses])],
+      }));
+    }).catch((err) => { if (!controller.signal.aborted) { setError(apiErrorMessage(err)); setData(null); } })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [params, refresh, page]);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const outside = (event: PointerEvent) => { if (!exportRef.current?.contains(event.target as Node)) setExportOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setExportOpen(false); exportRef.current?.querySelector('button')?.focus(); } };
+    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [exportOpen]);
+
+  const activeFilters = (Object.keys(FILTER_LABELS) as (keyof Filters)[]).filter((key) => filters[key] !== '');
+  function applyFilters(next: Filters) { setFilters(next); setPage(1); setOptionsPanel(null); filtersButton.current?.focus(); }
+  function closeOptions() { (optionsPanel === 'filters' ? filtersButton : columnsButton).current?.focus(); setOptionsPanel(null); }
+  function sortBy(sort: string) { setFilters((current) => ({ ...current, sort, order: current.sort === sort && current.order === 'desc' ? 'asc' : 'desc' })); setPage(1); }
+  function closeDrawer() { returning.current = true; setSelected(null); }
+  function openRecord(row: ControlRow) {
+    if (drawerBusy) return;
+    openerId.current = row.rowId; setSelected(row); setOptionsPanel(null);
+  }
+  async function exportFile(format: 'csv' | 'xlsx') {
+    if (!permissions.exportControlBook || exporting) return;
+    setExporting(true); setExportOpen(false); setError('');
     try {
-      const base = { idCliente: selected.idCliente, idContrato: selected.idContrato, idServicio: selected.idServicio ?? undefined, idFactura: selected.idFactura };
-      if (action === 'event' || action === 'lastNotice' || action === 'withdrawal') await api.post(action === 'withdrawal' ? '/commercial/withdrawal-notices' : '/commercial/events', { ...base, tipo: action === 'lastNotice' ? 'ULTIMO_AVISO_CORTE' : action === 'withdrawal' ? 'AVISO_PREVIO_RETIRO' : 'CONTACTO_CLIENTE', canal: form.canal, fecha: `${form.fecha}T12:00:00.000Z`, observacion: form.observacion });
-      if (action === 'agreement') { const amount = Number(form.monto); const count = Number(form.cuotas); const start = form.fecha; const perInstallment = Math.floor((amount / count) * 100) / 100; const cuotas = Array.from({ length: count }, (_, index) => { const date = new Date(`${start}T00:00:00.000Z`); date.setUTCMonth(date.getUTCMonth() + index); return { numero: index + 1, monto: index === count - 1 ? Number((amount - perInstallment * (count - 1)).toFixed(2)) : perInstallment, fechaVencimiento: date.toISOString().slice(0, 10) }; }); await api.post('/commercial/agreements', { ...base, montoComprometido: amount, cantidadCuotas: count, condiciones: form.condiciones, fechaInicio: start, cuotas }); }
-      if (action === 'extension') await api.post('/commercial/extensions', { idFactura: selected.idFactura, nuevaFecha: form.nuevaFecha, motivo: form.observacion });
-      if (action === 'paymentDay') await api.post('/commercial/payment-condition-changes', { idCliente: selected.idCliente, idContrato: selected.idContrato, tipoCambio: 'DIA_PAGO', valorNuevo: form.diaPago, justificacion: form.observacion });
-      if (action === 'charge') await api.post('/commercial/additional-charges', { idCliente: selected.idCliente, idContrato: selected.idContrato, idServicio: selected.idServicio ?? undefined, tipo: form.tipoCargo, monto: Number(form.monto), fecha: form.fecha, observacion: form.observacion });
-      setAction(null); setRefresh((value) => value + 1); setMessage('Gestión registrada correctamente');
-    } catch (err) { setMessage(apiErrorMessage(err)); } finally { setSaving(false); }
+      const response = await api.get('/commercial/control-book/export', { params: { ...params, format, columns: exportColumns(visible).join(','), page: undefined, pageSize: undefined }, responseType: 'blob' });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a'); link.href = url; link.download = 'libro-control.' + format;
+      document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) { setError(apiErrorMessage(err)); } finally { setExporting(false); }
   }
 
-  async function createLead() { setSaving(true); setMessage(''); try { await api.post('/commercial/non-contracting-leads', { ...lead, idEmpresa: writeCompanyId }); setLeadOpen(false); setLead({ nombreCompleto: '', rut: '', email: '', telefono: '', direccion: '', comuna: '', region: '' }); setMessage('Interesado guardado para remarketing'); } catch (err) { setMessage(apiErrorMessage(err)); } finally { setSaving(false); } }
+  if (selected) return <section ref={workspace} className="control-book-workspace">
+    {message && <div className="control-feedback" role="status">{message}<button className="control-icon" aria-label="Cerrar mensaje" onClick={clearMessage}><X size={16}/></button></div>}
+    {error && <p className="control-feedback error" role="alert">{error}</p>}
+    <ControlBookDrawer key={companyId + '-' + selected.rowId} row={selected} view={view} canManage={permissions.manageCommercialCollections} canViewCustomers={permissions.viewCustomers} canViewBilling={permissions.viewBilling} onClose={closeDrawer} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh((value) => value + 1); }} onOpenCustomers={onOpenCustomers} onOpenBilling={onOpenBilling}/>
+  </section>;
 
-  return <section className="control-book-workspace">
-    <header className="control-book-header"><div><span className="eyebrow">Área comercial</span><h1>Libro Control Comercial</h1><p>Proyección normalizada por cliente, contrato y factura.</p></div><div className="control-book-header-actions"><button className="secondary" onClick={() => setRefresh((v) => v + 1)}><RefreshCw size={16}/>Actualizar</button>{permissions.manageCommercialCollections && <button onClick={() => setLeadOpen(true)}><UserPlus size={16}/>Interesado</button>}{permissions.exportControlBook && <><button className="secondary" onClick={() => void exportFile('csv')}><Download size={16}/>CSV</button><button className="secondary" onClick={() => void exportFile('xlsx')}><Sheet size={16}/>XLSX</button></>}</div></header>
-    {message && <p className="alert">{message}</p>}{error && <p className="alert error">{error}</p>}
-    <div className="control-book-summary">{[['Filas', data?.summary.totalRows ?? 0], ['Deuda', currency.format(data?.summary.totalDebt ?? 0)], ['Vencidas', data?.summary.overdueCount ?? 0], ['Convenios', data?.summary.agreementsCount ?? 0], ['Prórrogas', data?.summary.extensionsCount ?? 0]].map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
-    <section className="control-book-toolbar">
-      <label className="control-search"><Search size={16}/><input placeholder="RUT, nombre, teléfono, contrato o folio" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })}/></label>
-      <select aria-label="Estado comercial" value={filters.estadoComercial} onChange={(e) => setFilters({ ...filters, estadoComercial: e.target.value })}><option value="">Todos los estados comerciales</option>{data?.filterOptions.commercialStatuses.map((item) => <option key={item}>{item}</option>)}</select>
-      <select aria-label="Estado de servicio" value={filters.estadoServicio} onChange={(e) => setFilters({ ...filters, estadoServicio: e.target.value })}><option value="">Todos los servicios</option>{data?.filterOptions.serviceStatuses.map((item) => <option key={item}>{item}</option>)}</select>
-      <select aria-label="Plan" value={filters.idPlan} onChange={(e) => setFilters({ ...filters, idPlan: e.target.value })}><option value="">Todos los planes</option>{data?.filterOptions.plans.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-      <select aria-label="Zona" value={filters.idZona} onChange={(e) => setFilters({ ...filters, idZona: e.target.value })}><option value="">Todas las zonas</option>{data?.filterOptions.zones.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-      <select aria-label="Deuda" value={filters.conDeuda} onChange={(e) => setFilters({ ...filters, conDeuda: e.target.value })}><option value="">Con y sin deuda</option><option value="true">Con deuda</option><option value="false">Sin deuda</option></select>
-      <select aria-label="Vencimiento" value={filters.vencido} onChange={(e) => setFilters({ ...filters, vencido: e.target.value })}><option value="">Vencidas y no vencidas</option><option value="true">Solo vencidas</option><option value="false">No vencidas</option></select>
-      <select aria-label="Convenio" value={filters.conConvenio} onChange={(e) => setFilters({ ...filters, conConvenio: e.target.value })}><option value="">Con y sin convenio</option><option value="true">Con convenio</option><option value="false">Sin convenio</option></select>
-      <select aria-label="Prórroga" value={filters.conProrroga} onChange={(e) => setFilters({ ...filters, conProrroga: e.target.value })}><option value="">Con y sin prórroga</option><option value="true">Con prórroga</option><option value="false">Sin prórroga</option></select>
-      <select aria-label="Último aviso" value={filters.conUltimoAviso} onChange={(e) => setFilters({ ...filters, conUltimoAviso: e.target.value })}><option value="">Con y sin último aviso</option><option value="true">Con último aviso</option><option value="false">Sin último aviso</option></select>
-      <select aria-label="Retiro pendiente" value={filters.retiroPendiente} onChange={(e) => setFilters({ ...filters, retiroPendiente: e.target.value })}><option value="">Con y sin retiro</option><option value="true">Retiro pendiente</option><option value="false">Sin retiro pendiente</option></select>
-      <input aria-label="Días de atraso mínimos" title="Días de atraso mínimos" type="number" min="0" placeholder="Atraso mín." value={filters.diasAtrasoMin} onChange={(e) => setFilters({ ...filters, diasAtrasoMin: e.target.value })}/>
-      <input aria-label="Días de atraso máximos" title="Días de atraso máximos" type="number" min="0" placeholder="Atraso máx." value={filters.diasAtrasoMax} onChange={(e) => setFilters({ ...filters, diasAtrasoMax: e.target.value })}/>
-      <input aria-label="Vencimiento desde" title="Vencimiento desde" type="date" value={filters.fechaVencimientoDesde} onChange={(e) => setFilters({ ...filters, fechaVencimientoDesde: e.target.value })}/>
-      <input aria-label="Vencimiento hasta" title="Vencimiento hasta" type="date" value={filters.fechaVencimientoHasta} onChange={(e) => setFilters({ ...filters, fechaVencimientoHasta: e.target.value })}/>
-      <select aria-label="Ordenar por" value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value })}><option value="diasAtraso">Días de atraso</option><option value="saldo">Saldo</option><option value="fechaVencimiento">Vencimiento</option><option value="ultimaGestion">Última gestión</option><option value="nombre">Nombre</option></select>
-      <select aria-label="Dirección de orden" value={filters.order} onChange={(e) => setFilters({ ...filters, order: e.target.value })}><option value="desc">Descendente</option><option value="asc">Ascendente</option></select>
-      <button className="secondary" onClick={() => setColumnsOpen(!columnsOpen)}><Columns3 size={16}/>Columnas</button>
-      <button className="secondary" onClick={() => setFilters(EMPTY_FILTERS)}>Limpiar filtros</button>
-    </section>
-    <div className="control-view-switch"><button className={view === 'essential' ? 'active' : 'secondary'} onClick={() => changeView('essential')}>Vista esencial</button><button className={view === 'operational' ? 'active' : 'secondary'} onClick={() => changeView('operational')}>Vista operativa Finet</button><span><Filter size={14}/>{data?.pagination.totalRows ?? 0} resultados</span></div>
-    {columnsOpen && <div className="control-column-picker">{Object.entries(COLUMNS).map(([key, column]) => <label key={key}><input type="checkbox" checked={visible.includes(key)} onChange={() => setVisible((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])}/>{column.label}</label>)}</div>}
-    <div className="control-table-shell">{loading ? <div className="control-empty">Cargando Libro Control…</div> : !data?.items.length ? <div className="control-empty">No hay filas para los filtros seleccionados.</div> : <table className="control-table"><thead><tr>{visible.map((key, index) => <th key={key} className={index < 5 ? `sticky-control sticky-${index}` : ''}>{COLUMNS[key].label}</th>)}<th className="actions-column">Acciones</th></tr></thead><tbody>{data.items.map((row) => <tr key={row.rowId}>{visible.map((key, index) => <td key={key} className={`${index < 5 ? `sticky-control sticky-${index}` : ''} ${key === 'estadoComercial' ? 'commercial-status-cell' : ''}`} title={String(COLUMNS[key].render(row))}>{key === 'estadoComercial' ? <StatusBadge value={String(COLUMNS[key].render(row))}/> : COLUMNS[key].render(row)}</td>)}<td className="control-row-actions"><button className="secondary compact" onClick={() => openAction('detail', row)}>Detalle</button>{permissions.manageCommercialCollections && <><button className="secondary compact" onClick={() => openAction('event', row)}>Gestión</button><button className="secondary compact" disabled={!row.saldoPendiente} onClick={() => openAction('lastNotice', row)}>Último aviso</button><button className="secondary compact" disabled={!row.saldoPendiente} onClick={() => openAction('agreement', row)}>Convenio</button><button className="secondary compact" disabled={!row.saldoPendiente} onClick={() => openAction('extension', row)}>Prórroga</button><button className="secondary compact" onClick={() => openAction('paymentDay', row)}>Día pago</button><button className="secondary compact" onClick={() => openAction('charge', row)}>Cargo</button><button className="secondary compact" disabled={!row.idServicio} onClick={() => openAction('withdrawal', row)}>Aviso retiro</button></>}</td></tr>)}</tbody></table>}</div>
-    <footer className="control-pagination"><button className="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Anterior</button><span>Página {data?.pagination.page ?? page} de {data?.pagination.totalPages ?? 1}</span><button className="secondary" disabled={!data || page >= data.pagination.totalPages} onClick={() => setPage(page + 1)}>Siguiente</button></footer>
+  return <section ref={workspace} className="control-book-workspace" aria-label={'Libro de control: ' + WORK_VIEWS[view].label}>
+    <header className="control-book-header"><h1>Libro de control</h1><div className="control-book-header-actions">
+      <button className="control-refresh" aria-label="Actualizar libro de control" disabled={loading || drawerBusy} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} className={loading ? 'control-spinning' : ''}/><span>{loading ? 'Actualizando…' : updatedAt ? 'Actualizado ' + updatedAt : 'Actualizar'}</span></button>
+      {permissions.exportControlBook && <div className="control-export" ref={exportRef}>
+        <button className="control-outline" disabled={exporting || loading || !data?.items.length} aria-expanded={exportOpen} aria-controls="control-export-options" onClick={() => setExportOpen(!exportOpen)}><Download size={16}/>{exporting ? 'Exportando…' : 'Exportar'}<ChevronDown size={14}/></button>
+        {exportOpen && <div className="control-menu" id="control-export-options"><button onClick={() => void exportFile('xlsx')}>Excel (.xlsx)</button><button onClick={() => void exportFile('csv')}>CSV (.csv)</button><small>Con los filtros y columnas de esta vista.</small></div>}
+      </div>}
+    </div></header>
 
-    <Modal open={Boolean(action && selected)} title={action === 'detail' ? 'Detalle comercial' : 'Registrar gestión comercial'} onClose={() => setAction(null)}>{selected && action === 'detail' ? <div className="control-detail"><dl><div><dt>Cliente</dt><dd>{selected.nombre} · {selected.rut}</dd></div><div><dt>Contrato / factura</dt><dd>{selected.numeroContrato} · {selected.numeroDocumento}</dd></div><div><dt>Servicios</dt><dd>{selected.serviciosRelacionados.join(', ') || 'Sin servicio'}</dd></div><div><dt>Estado</dt><dd>{selected.estadoComercial.replace(/_/g, ' ')}</dd></div><div><dt>Acción sugerida</dt><dd>{selected.accionSugerida}</dd></div><div><dt>Observación</dt><dd>{selected.observacionRelevante ?? 'Sin observación'}</dd></div></dl><div className="control-detail-actions"><button onClick={onOpenCustomers}>Abrir ficha cliente/servicio</button><button className="secondary" onClick={onOpenBilling}>Abrir cobranza/factura</button></div></div> : selected && <form className="control-action-form" onSubmit={(event) => { event.preventDefault(); void submitAction(); }}>
-      {(['event','lastNotice','withdrawal'] as ActionName[]).includes(action) && <><label>Canal<select value={form.canal} onChange={(e) => setForm({ ...form, canal: e.target.value })}><option>TELEFONO</option><option>EMAIL</option><option>WHATSAPP</option><option>PRESENCIAL</option><option>OTRO</option></select></label><label>Fecha<input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })}/></label></>}
-      {action === 'agreement' && <><label>Monto comprometido<input type="number" min="1" required value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })}/></label><label>Cantidad cuotas<input type="number" min="1" max="60" required value={form.cuotas} onChange={(e) => setForm({ ...form, cuotas: e.target.value })}/></label><label>Fecha inicial<input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })}/></label><label>Condiciones<textarea required value={form.condiciones} onChange={(e) => setForm({ ...form, condiciones: e.target.value })}/></label></>}
-      {action === 'extension' && <label>Nueva fecha<input type="date" required value={form.nuevaFecha} onChange={(e) => setForm({ ...form, nuevaFecha: e.target.value })}/></label>}
-      {action === 'paymentDay' && <label>Nuevo día de pago<input type="number" min="1" max="28" required value={form.diaPago} onChange={(e) => setForm({ ...form, diaPago: e.target.value })}/></label>}
-      {action === 'charge' && <><label>Concepto<select value={form.tipoCargo} onChange={(e) => setForm({ ...form, tipoCargo: e.target.value })}><option>REPOSICION</option><option>RECONEXION</option><option>RETIRO</option><option>OTRO</option></select></label><label>Monto<input type="number" min="1" required value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })}/></label><label>Fecha<input type="date" required value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })}/></label></>}
-      {action !== 'agreement' && <label>Observación / justificación<textarea required={action !== 'charge'} value={form.observacion} onChange={(e) => setForm({ ...form, observacion: e.target.value })}/></label>}<button disabled={saving}>{saving ? 'Guardando…' : 'Confirmar registro'}</button>{message && <p className="alert">{message}</p>}
-    </form>}</Modal>
-    <Modal open={leadOpen} title="Interesado no contratante" onClose={() => setLeadOpen(false)}><form className="control-action-form" onSubmit={(event) => { event.preventDefault(); void createLead(); }}>{Object.entries({ nombreCompleto: 'Nombre completo', rut: 'RUT', email: 'Correo', telefono: 'Teléfono', direccion: 'Dirección', comuna: 'Comuna', region: 'Región' }).map(([key, label]) => <label key={key}>{label}<input required type={key === 'email' ? 'email' : 'text'} value={lead[key as keyof typeof lead]} onChange={(e) => setLead({ ...lead, [key]: e.target.value })}/></label>)}<button disabled={saving}>{saving ? 'Guardando…' : 'Guardar para remarketing'}</button></form></Modal>
+    {view === 'general' && <div className="control-book-summary" aria-label="Resumen de los resultados filtrados" aria-busy={loading}>
+      {[
+        ['Saldo pendiente', data ? currency.format(data.summary.totalDebt) : '—'],
+        ['Facturas vencidas', data?.summary.overdueCount ?? '—'],
+        ['Facturas con convenio', data?.summary.agreementsCount ?? '—'],
+        ['Facturas con prórroga', data?.summary.extensionsCount ?? '—'],
+      ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{label === 'Facturas con convenio' ? 'Convenios aprobados o activos' : label === 'Facturas con prórroga' ? 'Prórrogas aprobadas' : label === 'Saldo pendiente' ? 'Sin cargos por facturar' : 'Según vencimiento efectivo'}</small></div>)}
+    </div>}
+    {message && <div className="control-feedback" role="status">{message}<button className="control-icon" aria-label="Cerrar mensaje" onClick={clearMessage}><X size={16}/></button></div>}
+    {error && <p className="control-feedback error" role="alert">{error}</p>}
+
+    <div className="control-book-toolbar">
+      <label className="control-search"><Search size={18}/><input aria-label="Buscar en libro de control" placeholder="Buscar cliente, RUT, teléfono, contrato o folio" value={search} disabled={drawerBusy} onChange={(event) => setSearch(event.target.value)}/>{search && <button className="control-icon" aria-label="Limpiar búsqueda" disabled={drawerBusy} onClick={() => setSearch('')}><X size={16}/></button>}</label>
+      <button ref={filtersButton} className={'control-outline ' + (optionsPanel === 'filters' ? 'active' : '')} disabled={drawerBusy} aria-expanded={optionsPanel === 'filters'} aria-controls="control-filters" onClick={() => setOptionsPanel(optionsPanel === 'filters' ? null : 'filters')}><Filter size={16}/>Filtros{activeFilters.length > 0 && <span className="control-count">{activeFilters.length}</span>}</button>
+      <button ref={columnsButton} className={'control-outline ' + (optionsPanel === 'columns' ? 'active' : '')} aria-expanded={optionsPanel === 'columns'} aria-controls="control-columns" onClick={() => setOptionsPanel(optionsPanel === 'columns' ? null : 'columns')}><Columns3 size={16}/>Campos</button>
+    </div>
+    {activeFilters.length > 0 && <div className="control-filter-chips" aria-label="Filtros aplicados">
+      {activeFilters.map((key) => <button key={key} disabled={drawerBusy} onClick={() => applyFilters({ ...filters, [key]: '' })} aria-label={'Quitar filtro ' + filterDescription(key, filters[key], catalog)}>{filterDescription(key, filters[key], catalog)}<X size={13}/></button>)}
+      <button className="control-text-button" disabled={drawerBusy} onClick={() => applyFilters({ ...EMPTY_FILTERS, search: filters.search, sort: filters.sort, order: filters.order })}>Limpiar filtros</button>
+    </div>}
+    {optionsPanel && <div onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeOptions(); } }}>
+      {optionsPanel === 'filters' ? <ControlBookFilters filters={filters} options={catalog} onApply={applyFilters} onClose={closeOptions}/> : <section id="control-columns" className="control-options-panel" aria-label="Seleccionar columnas">
+        <header><h2>Campos de esta vista</h2><button className="control-icon" aria-label="Cerrar campos" onClick={closeOptions}><X size={18}/></button></header>
+        <div className="control-column-picker">{[...new Set(Object.values(COLUMNS).map((column) => column.group))].map((group) => <fieldset key={group}><legend>{group}</legend>{Object.entries(COLUMNS).filter(([, column]) => column.group === group).map(([key, column]) => <label key={key}><input type="checkbox" checked={visible.includes(key)} disabled={key === 'cliente' || !visible.includes(key) && visible.length >= 6} onChange={() => setVisible((current) => current.includes(key) ? current.filter((item) => item !== key) : current.length < 6 ? Object.keys(COLUMNS).filter((item) => [...current, key].includes(item)) : current)}/>{column.label}{key === 'cliente' && <small>Fijo</small>}</label>)}</fieldset>)}</div>
+        <footer><span>{visible.length} de 6 campos. Desmarca uno para sustituirlo. Selecciona una fila para ver su detalle.</span><button className="control-text-button" onClick={() => setVisible([...WORK_VIEWS[view].columns])}>Restablecer vista</button></footer>
+      </section>}
+    </div>}
+
+    <div className="control-view-switch"><div className="control-queue-filters" role="group" aria-label="Selección rápida de registros">{([['conDeuda', 'Con saldo pendiente'], ['vencido', 'Vencidas'], ['conConvenio', 'Con convenio'], ['conProrroga', 'Con prórroga']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={filters[key] === 'true'} className={filters[key] === 'true' ? 'active' : ''} onClick={() => applyFilters({ ...filters, [key]: filters[key] === 'true' ? '' : 'true' })}>{label}</button>)}</div><div className="control-sort"><label><span className="control-sr-only">Ordenar por</span><select aria-label="Ordenar por" disabled={drawerBusy} value={filters.sort} onChange={(event) => { setFilters({ ...filters, sort: event.target.value }); setPage(1); }}>
+      <option value="diasAtraso">Días de atraso</option><option value="saldo">Saldo pendiente</option><option value="fechaVencimiento">Vencimiento</option><option value="ultimaGestion">Última gestión</option><option value="nombre">Nombre</option>
+    </select></label><button className="control-icon" disabled={drawerBusy} aria-label={filters.order === 'desc' ? 'Orden descendente. Cambiar a ascendente' : 'Orden ascendente. Cambiar a descendente'} onClick={() => sortBy(filters.sort)}>{filters.order === 'desc' ? <ArrowDown size={15}/> : <ArrowUp size={15}/>}</button><span aria-live="polite">{data?.pagination.totalRows ?? 0} registros</span></div></div>
+
+    <div className="control-book-body">
+      <div className="control-list">
+        <div className="control-table-shell" aria-busy={loading}>
+          {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="control-empty"><Search size={24}/><strong>No hay resultados</strong><span>Prueba con otra búsqueda o ajusta los filtros.</span>{(activeFilters.length > 0 || search) && <button className="control-outline" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
+            <caption className="control-sr-only">Libro de control. Una fila por cliente, contrato y factura. Selecciona una fila o pulsa Enter para abrir su detalle.</caption>
+            <colgroup>{visible.map(key => <col key={key} style={{ width: `${(key === 'cliente' ? 1.45 : 1) / (visible.length + 0.45) * 100}%` }}/>)}</colgroup>
+            <thead><tr>{visible.map((key) => <th scope="col" key={key} className={'column-' + key} aria-sort={COLUMNS[key].sort === filters.sort ? filters.order === 'asc' ? 'ascending' : 'descending' : undefined}>{COLUMNS[key].sort ? <button disabled={drawerBusy} onClick={() => sortBy(COLUMNS[key].sort!)}>{COLUMNS[key].label}{COLUMNS[key].sort === filters.sort && (filters.order === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</button> : COLUMNS[key].label}</th>)}</tr></thead>
+            <tbody>{data.items.map((row) => <tr key={row.rowId} tabIndex={0} data-row-id={row.rowId} aria-label={'Ver ' + row.nombre + ', contrato ' + row.numeroContrato + ', documento ' + row.numeroDocumento} onClick={() => openRecord(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(row); } }}>{visible.map((key) => <td key={key} className={'column-' + key} data-label={COLUMNS[key].label}><Cell column={key} row={row}/></td>)}</tr>)}</tbody>
+          </table>}
+        </div>
+        <footer className="control-pagination"><span>{data?.items.length ? ((page - 1) * 30 + 1) + '–' + ((page - 1) * 30 + data.items.length) + ' de ' + data.pagination.totalRows : '0 registros'}</span><button className="control-icon" aria-label="Página anterior" disabled={page <= 1 || loading || drawerBusy} onClick={() => { setPage(page - 1); setSelected(null); }}><ChevronLeft size={18}/></button><span>Página {data?.pagination.page ?? page} de {data?.pagination.totalPages ?? 1}</span><button className="control-icon" aria-label="Página siguiente" disabled={!data || page >= data.pagination.totalPages || loading || drawerBusy} onClick={() => { setPage(page + 1); setSelected(null); }}><ChevronRight size={18}/></button></footer>
+      </div>
+    </div>
   </section>;
 }

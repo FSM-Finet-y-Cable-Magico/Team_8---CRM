@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "node --test tests/*.test.mjs runtime-config.test.mjs",
     "test:runtime": "node --test runtime-config.test.mjs"
   },
   "dependencies": {
