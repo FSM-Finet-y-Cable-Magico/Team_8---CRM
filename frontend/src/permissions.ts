@@ -25,6 +25,7 @@ export type DashboardPermissions = {
   manageServices: boolean;
   manageInventory: boolean;
   manageBilling: boolean;
+  reconcileTaxDocuments: boolean;
   managePaymentZones: boolean;
   manageTvip: boolean;
   viewMonitoring: boolean;
@@ -85,6 +86,7 @@ const PERMISSION_ROLES: Record<keyof DashboardPermissions, readonly RoleName[]> 
   manageServices: ['Administrador', 'Comercial', 'Soporte'],
   manageInventory: ['Administrador', 'Soporte'],
   manageBilling: ['Administrador', 'Comercial'],
+  reconcileTaxDocuments: ['Administrador'],
   managePaymentZones: ['Administrador', 'Comercial'],
   manageTvip: ['Administrador', 'Comercial', 'Soporte'],
   viewMonitoring: ['Administrador', 'Soporte', 'Terreno'],

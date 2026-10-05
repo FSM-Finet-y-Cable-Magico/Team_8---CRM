@@ -1,5 +1,8 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
+import { MessagingService } from '../messaging/messaging.service';
+import { TemplateKey } from '../messaging/outbound-messaging.port';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -7,6 +10,7 @@ import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { canActivateService } from '../services/service-activation.policy';
+import { TAX_DOCUMENT_ISSUER, TaxDocumentIssuer } from '../tax-document-issuance/tax-document-issuer.types';
 import { CreatePaymentZoneDto } from './dto/create-payment-zone.dto';
 import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -22,6 +26,8 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    @Optional() @Inject(TAX_DOCUMENT_ISSUER) private readonly taxIssuer?: TaxDocumentIssuer,
+    @Optional() private readonly messaging?: MessagingService,
   ) {}
 
   async overview(currentUser: AuthUser, scope = 'consolidado') {
@@ -38,6 +44,7 @@ export class BillingService {
         })
       : [];
     const notifications = await this.prisma.logNotificacion.findMany({
+      select: {idNotificacion:true,idCliente:true,idPlantilla:true,canal:true,fechaEnvio:true,estadoEnvio:true},
       where: companyFilter.idEmpresa
         ? { idCliente: { in: notificationCustomerIds.map((customer) => customer.idCliente) } }
         : {},
@@ -96,7 +103,8 @@ export class BillingService {
 
   async sendNotification(dto: SendBillingNotificationDto, currentUser: AuthUser) {
     this.assertBillingWriter(currentUser);
-    return this.billingTransaction(async tx => {
+    const correlationId=dto.correlationId ?? randomUUID();
+    const result = await this.billingTransaction(async tx => {
       const customer = await tx.cliente.findUnique({ where: { idCliente: dto.idCliente } });
       if (!customer) throw new NotFoundException('Cliente no encontrado');
       this.assertCompanyAccess(customer.idEmpresa, currentUser);
@@ -112,25 +120,36 @@ export class BillingService {
         throw new BadRequestException('El último aviso requiere una factura vencida con saldo');
       }
       const template = await this.notificationTemplate(dto.tipo, customer.idEmpresa, tx);
+      const type:TemplateKey=dto.tipo==='Preventiva'?'AVISO_PREVENTIVO':'ULTIMO_AVISO_CORTE';
+      const external=this.notificationMode()==='provider';
+      if(external && !this.messaging)throw new BadRequestException('El proveedor de notificaciones no esta disponible');
       const status = this.notificationMode() === 'disabled' ? 'Desactivado' : 'Simulado';
-      const notification = await tx.logNotificacion.create({ data: {
+      const prepared = external ? await this.messaging!.enqueue(tx,{idEmpresa:customer.idEmpresa,idCliente:customer.idCliente,
+        destinationPhone:customer.telefono ?? '',templateKey:type,locale:this.messaging!.config.company(customer.idEmpresa)?.templates[type]?.locale ?? '',
+        variables:{customer_name:customer.nombreCompleto,invoice_id:invoice ? String(invoice.idFactura) : '',balance:invoice ? String(invoiceBalance(invoice).saldo) : ''},correlationId},template.idPlantilla) : null;
+      const notification = prepared?.notification ?? await tx.logNotificacion.create({ select:{idNotificacion:true,estadoEnvio:true},data: {
         idCliente: customer.idCliente, idPlantilla: template.idPlantilla, canal: template.canal, fechaEnvio: new Date(), estadoEnvio: status,
       } });
+      if(prepared?.duplicate)return {idNotificacion:notification.idNotificacion.toString(),estadoEnvio:notification.estadoEnvio,plantilla:template};
       // Functional commercial event is distinct from the technical audit entry.
       const event = await tx.eventoGestionComercial.create({ data: {
         idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idContrato: invoice?.idContrato,
         idFactura: invoice?.idFactura, tipo: dto.tipo === 'Preventiva' ? 'AVISO_PREVENTIVO' : 'ULTIMO_AVISO_CORTE',
-        canal: 'OTRO', fecha: new Date(), estadoGestion: 'REGISTRADO',
-        observacion: `Aviso ${status.toLowerCase()}; no acredita entrega externa.`, idUsuarioResponsable: currentUser.idUsuario,
+        canal: external ? 'WHATSAPP' : 'OTRO', fecha: new Date(), estadoGestion: 'REGISTRADO',
+        observacion: `Aviso ${(notification.estadoEnvio ?? status).toLowerCase()}; no acredita entrega externa.`, idUsuarioResponsable: currentUser.idUsuario,
       } });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario, accion: dto.tipo === 'Preventiva' ? 'ENVIAR_AVISO_COBRO_PREVENTIVO' : 'ENVIAR_ULTIMO_AVISO_CORTE',
         entidadAfectada: 'evento_gestion_comercial', idEntidadAfectada: event.idEvento,
         valorNuevo: { idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idFactura: dto.idFactura ?? null,
-          idNotificacion: notification.idNotificacion.toString(), tipo: dto.tipo, modo: this.notificationMode(), estadoEnvio: status },
+          idNotificacion: notification.idNotificacion.toString(), tipo: dto.tipo, modo: this.notificationMode(), estadoEnvio: notification.estadoEnvio ?? status },
       }, tx);
-      return { ...notification, idNotificacion: notification.idNotificacion.toString(), plantilla: template };
+      return { idNotificacion: notification.idNotificacion.toString(), estadoEnvio:notification.estadoEnvio, plantilla: template };
     });
+    if(this.notificationMode()==='provider' && this.messaging) {
+      try {await this.messaging.dispatch(BigInt(result.idNotificacion));}catch{/* The persisted intent is recovered independently. */}
+    }
+    return result;
   }
 
   async suspendContract(idContrato: number, currentUser: AuthUser) {
@@ -183,7 +202,7 @@ export class BillingService {
     if (!dto.pasarela.trim()) throw new BadRequestException('Debe indicar el medio de pago');
     const paymentDate = dto.fechaPago ? new Date(dto.fechaPago) : new Date();
     if (Number.isNaN(paymentDate.getTime())) throw new BadRequestException('Fecha de pago invalida');
-    return this.billingTransaction(async tx => {
+    const result = await this.billingTransaction(async tx => {
       // Read inside Serializable: concurrent partial payments cannot reuse a stale balance.
       const invoice = await tx.factura.findUnique({ where: { idFactura: dto.idFactura }, include: {
         pagos: true, prorrogasPago: APPROVED_EXTENSIONS,
@@ -282,8 +301,23 @@ export class BillingService {
         idUsuario: integration ? null : currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
         valorAnterior: { estadoContrato: contract.estado }, valorNuevo: { estadoContrato: 'Activo', serviciosReactivados: reactivatedServiceIds },
       }, tx);
+      if (this.taxIssuer?.enqueuePayment) {
+        const technical = customer.datosTecnicos;
+        const giro = technical && typeof technical === 'object' && !Array.isArray(technical) && typeof technical.giroTributario === 'string' ? technical.giroTributario : '';
+        await this.taxIssuer.enqueuePayment(tx, { idEmpresa:contract.idEmpresa, idFactura:invoice.idFactura,idPago:payment.idPago,
+          idCliente:customer.idCliente,monto:new Prisma.Decimal(dto.monto).toFixed(2),periodoMes:invoice.periodoMes,periodoAnio:invoice.periodoAnio,
+          fechaLimitePago:invoice.fechaLimitePago,tipoDocumento:invoice.tipoDocumento,folioExterno:invoice.folioExterno,
+          receiver:{rut:customer.rut ?? '',name:customer.nombreCompleto,giro,address:contract.direccionInstalacion ?? '',
+            comuna:contract.comunaInstalacion ?? '',city:contract.ciudadInstalacion ?? '',email:customer.email} });
+      }
       return { payment, paidInFull, saldoPendiente: remaining.toNumber(), reactivatedServiceIds, duplicate: false };
     });
+    // Transaction has committed. Provider/SMTP failure must never undo or mask the payment.
+    if (!this.taxIssuer?.processPayment) return result;
+    let taxDocument: unknown;
+    try { taxDocument = await this.taxIssuer.processPayment(result.payment.idPago); }
+    catch { taxDocument = { state:'PENDIENTE', code:'TAX_POST_COMMIT_PROCESSING_PENDING' }; }
+    return { ...result, taxDocument };
   }
 
   private async billingTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

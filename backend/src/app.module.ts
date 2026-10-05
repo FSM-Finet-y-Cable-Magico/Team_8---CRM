@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller';
+import { MessagingModule } from './messaging/messaging.module';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -48,6 +49,7 @@ import { TaxDocumentIssuanceModule } from './tax-document-issuance/tax-document-
     ExternalTaxDocumentsModule,
     IntegrationAuthModule,
     TaxDocumentIssuanceModule,
+    MessagingModule,
     UsersModule,
     CompaniesModule,
     CommercialModule,

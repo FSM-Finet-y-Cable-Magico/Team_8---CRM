@@ -1,0 +1,32 @@
+{
+  "applied": false,
+  "requiresOwnerReview": true,
+  "baseline": "db/global/init-global.sql plus reconciled Prisma/G2 migration history",
+  "migrations": [
+    {
+      "name": "20261003010000_i3_tax_emission_intents",
+      "file": "backend/prisma/migrations/20261003010000_i3_tax_emission_intents/migration.sql",
+      "sha256LF": "8801ae316408ab19e28d96a4b4057a52f6b85e6bee42f65908765485e413935f"
+    },
+    {
+      "name": "20261003020000_i3_tax_payment_pipeline",
+      "file": "backend/prisma/migrations/20261003020000_i3_tax_payment_pipeline/migration.sql",
+      "sha256LF": "e22e56b7a5ec22cbbea3875383e279e0426e3d71cd54fa6c47d2beecc345e46a"
+    },
+    {
+      "name": "20261004010000_i3_tax_smtp_delivery",
+      "file": "backend/prisma/migrations/20261004010000_i3_tax_smtp_delivery/migration.sql",
+      "sha256LF": "795ed81c082689b9dd8100736232913b60bbf98dbf73244395a523dac4544be8"
+    },
+    {
+      "name": "20261004020000_i3_whatsapp_notifications",
+      "file": "backend/prisma/migrations/20261004020000_i3_whatsapp_notifications/migration.sql",
+      "sha256LF": "bc449f08c51fe23b4e0d0e3825d4d0293fdeb726917c6f37c6f7218d742b20a7"
+    },
+    {
+      "name": "20261004030000_i3_mail_simulated_delivery",
+      "file": "backend/prisma/migrations/20261004030000_i3_mail_simulated_delivery/migration.sql",
+      "sha256LF": "bd9f4e46130758548d1d35264e6a43e2b223b22fac1d3d58c88a1890f49c7b2c"
+    }
+  ]
+}

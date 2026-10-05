@@ -30,6 +30,8 @@ model Empresa {
   garantiasComerciales       GarantiaComercial[]
   plantillasNotificacion     PlantillaNotificacion[]
   documentosTributarios      DocumentoTributarioExterno[]
+  intencionesTributarias     TaxEmissionIntent[]
+  trabajosTributarios        TaxPaymentJob[]
   resultadosWifiG2           IntegracionResultadoWifiG2[]
 
   @@map("empresa")
@@ -283,6 +285,8 @@ model Factura {
   prorrogasPago           ProrrogaPago[]
   cambiosCondicionPago    CambioCondicionPago[]
   documentosTributarios   DocumentoTributarioExterno[]
+  intencionesTributarias  TaxEmissionIntent[]
+  trabajosTributarios     TaxPaymentJob[]
 
   @@index([folioExterno])
   @@map("factura")
@@ -301,8 +305,76 @@ model Pago {
   comprobantePdfUrl  String?  @map("comprobante_pdf_url")
   comprobanteEstado  String   @default("PENDIENTE") @map("comprobante_estado") @db.VarChar(20)
   factura            Factura? @relation(fields: [idFactura], references: [idFactura], onDelete: NoAction, onUpdate: NoAction)
+  intencionesTributarias TaxEmissionIntent[]
+  trabajosTributarios TaxPaymentJob[]
 
   @@map("pago")
+}
+
+model TaxEmissionIntent {
+  idIntencion      String   @id @default(uuid()) @map("id_intencion") @db.Uuid
+  idEmpresa        Int      @map("id_empresa")
+  idFactura        Int      @map("id_factura")
+  idPago           Int?     @map("id_pago")
+  businessKey      String   @map("business_key") @db.VarChar(120)
+  policyVersion    String   @map("policy_version") @db.VarChar(64)
+  ambiente         String   @db.VarChar(20)
+  proveedor        String   @default("FACTURACION_CL") @db.VarChar(30)
+  tipoDte          Int      @map("tipo_dte")
+  formato          Int
+  fingerprint      String   @db.Char(64)
+  folioEsperado    String   @map("folio_esperado") @db.VarChar(10)
+  estado           String   @default("PENDIENTE") @db.VarChar(30)
+  intentos         Int      @default(0)
+  claimId          String?  @map("claim_id") @db.Uuid
+  folio            String?  @db.VarChar(10)
+  ultimoError      String?  @map("ultimo_error") @db.VarChar(64)
+  artefactoUrl     String?  @map("artefacto_url")
+  artefactoEstado  String   @default("PENDIENTE") @map("artefacto_estado") @db.VarChar(30)
+  emailEstado     String   @default("PENDIENTE") @map("email_estado") @db.VarChar(30)
+  fechaEmailInicio DateTime? @map("fecha_email_inicio") @db.Timestamptz(3)
+  emailIntentos    Int      @default(0) @map("email_intentos")
+  fechaProximoEmail DateTime? @map("fecha_proximo_email") @db.Timestamptz(3)
+  ultimoErrorEmail String?  @map("ultimo_error_email") @db.VarChar(64)
+  fechaCreacion    DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  fechaInicio      DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  fechaEnvio       DateTime? @map("fecha_envio") @db.Timestamptz(3)
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, map: "tax_intent_company_fk")
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, map: "tax_intent_invoice_fk")
+  pago            Pago?    @relation(fields: [idPago], references: [idPago], onDelete: Restrict, map: "tax_intent_payment_fk")
+
+  @@unique([idEmpresa, ambiente, businessKey])
+  @@index([idEmpresa, estado, fechaActualizacion])
+  @@map("tax_emission_intent")
+}
+
+// Immutable local payment outbox. Contains no API credentials or provider responses.
+model TaxPaymentJob {
+  idTrabajo       String   @id @default(uuid()) @map("id_trabajo") @db.Uuid
+  idEmpresa       Int      @map("id_empresa")
+  idFactura       Int      @map("id_factura")
+  idPago          Int      @unique @map("id_pago")
+  idCliente       Int      @map("id_cliente")
+  monto           Decimal  @db.Decimal(10, 2)
+  ambiente        String   @default("sandbox") @db.VarChar(20)
+  policyVersion   String   @map("policy_version") @db.VarChar(64)
+  profileHash     String   @map("profile_hash") @db.Char(64)
+  documento       Bytes?
+  tipoDte         Int?     @map("tipo_dte")
+  formato         Int?
+  folioEsperado   String?  @map("folio_esperado") @db.VarChar(10)
+  email           String?  @db.VarChar(120)
+  nombreCliente   String   @map("nombre_cliente") @db.VarChar(120)
+  estado          String   @default("PENDIENTE") @db.VarChar(30)
+  ultimoError     String?  @map("ultimo_error") @db.VarChar(64)
+  fechaCreacion   DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict)
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict)
+  pago            Pago     @relation(fields: [idPago], references: [idPago], onDelete: Restrict)
+
+  @@index([estado, fechaCreacion])
+  @@map("tax_payment_job")
 }
 
 model DocumentoTributarioExterno {
@@ -1008,7 +1080,18 @@ model LogNotificacion {
   idPlantilla    Int?      @map("id_plantilla")
   canal          String?   @db.VarChar(20)
   fechaEnvio     DateTime? @map("fecha_envio") @db.Timestamp(6)
-  estadoEnvio    String?   @map("estado_envio") @db.VarChar(20)
+  estadoEnvio    String?   @map("estado_envio") @db.VarChar(30)
+  idEmpresa      Int?      @map("id_empresa")
+  proveedor      String?   @db.VarChar(20)
+  correlationId  String?   @unique @map("correlation_id") @db.Uuid
+  payloadHash    String?   @map("payload_hash") @db.Char(64)
+  providerMessageId String? @unique @map("provider_message_id") @db.VarChar(512)
+  mensaje        Json?
+  intentos       Int       @default(0)
+  fechaInicio    DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  ultimoError    String?   @map("ultimo_error") @db.VarChar(64)
+
+  @@index([proveedor, estadoEnvio, fechaEnvio])
 
   @@map("log_notificacion")
 }

@@ -8,12 +8,18 @@ import { CoveragePicker, CoverageLocation } from '../coverage';
 
 export function ProspectsPanel({
   prospects,
+  loading,
+  loadError,
+  onReload,
   plans,
   writeCompanyId,
   permissions,
   onCreated,
 }: {
   prospects: Prospect[];
+  loading: boolean;
+  loadError: string;
+  onReload: () => void;
   plans: Plan[];
   writeCompanyId: number;
   permissions: DashboardPermissions;
@@ -154,7 +160,13 @@ export function ProspectsPanel({
 
       <section className="prospects-list-section">
         <h2>Gestión de Prospectos</h2>
-        <div className="table-wrap">
+        {loadError && (
+          <div role="alert" className="inline-status">
+            <p>{loadError}</p>
+            <button type="button" className="secondary compact" onClick={onReload}>Reintentar</button>
+          </div>
+        )}
+        <div className="table-wrap" aria-busy={loading}>
           <table>
             <thead>
               <tr>
@@ -167,7 +179,11 @@ export function ProspectsPanel({
               </tr>
             </thead>
             <tbody>
-              {visibleProspects.map((prospect) => (
+              {loading && <tr><td colSpan={6} role="status">Cargando prospectos…</td></tr>}
+              {!loading && !loadError && prospects.length === 0 && (
+                <tr><td colSpan={6}>No hay prospectos pendientes de gestión para la empresa seleccionada.</td></tr>
+              )}
+              {!loading && !loadError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
                   <td>{prospect.rut}</td>
                   <td>{prospect.nombreCompleto}</td>

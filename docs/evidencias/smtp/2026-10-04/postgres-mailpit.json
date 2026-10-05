@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "date": "2026-10-04",
+  "database": "fsm_facturacion_local",
+  "provider": "SIMULATED_FOR_SMTP_QA",
+  "providerCalls": 0,
+  "emissions": 0,
+  "transientFailure": "INJECTED_NOT_ACCEPTED",
+  "restartRecovery": "PASS",
+  "concurrentClaim": "PASS",
+  "replay": "PASS",
+  "actualSmtpSends": 1,
+  "inbox": "LOCAL_MAILPIT",
+  "inboxMessages": 1,
+  "attachments": 1,
+  "mailpitMessageId": "5AQr5ryi7WA5zt0yha8u7P",
+  "emailAttempts": 2,
+  "existingDocumentsUnchanged": true,
+  "externalDeliveryVerified": false
+}

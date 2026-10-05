@@ -50,7 +50,9 @@ export class FacturacionClConfigService implements OnModuleInit {
   onModuleInit() {
     const current = this.snapshot();
     if (!current.valid) throw new Error('FACTURACION_CL_CONFIGURATION_INVALID');
-    if (current.enabled) throw new Error('FACTURACION_CL_PENDING_CONTRACT');
+    if (current.enabled && current.companies.some(company => company.enabled && company.environment === 'production')) {
+      throw new Error('FACTURACION_CL_PRODUCTION_NOT_CERTIFIED');
+    }
   }
 
   snapshot(): FacturacionClConfigSnapshot {
