@@ -18,3 +18,6 @@ uploads/
 docs/guia-estudio-codigo.md
 docs/guia-estudio-codigo.pdf
 db/*.dump
+output/backups/*.dump
+output/backups/*.backup
+
