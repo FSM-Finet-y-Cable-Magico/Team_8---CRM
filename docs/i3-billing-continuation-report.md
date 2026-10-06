@@ -1,8 +1,8 @@
 # Continuidad Incremento 3 — Facturación y cobranza
 
-Fecha de cierre local: 2026-09-29  
-Rama: `feature/incremento3`  
-HEAD preservado: `f400993a` (igual a `origin/feature/incremento3`)  
+Fecha de cierre local: 2026-09-29
+Rama: `feature/incremento3`
+HEAD preservado: `f400993a` (igual a `origin/feature/incremento3`)
 Estado general: **IMPLEMENTADO_LOCAL / UNIT_TESTED / READY_FOR_GLOBAL_SCHEMA / PROBADO_RAILWAY_READ / PENDIENTE_RAILWAY_WRITE_TEST / PENDIENTE_RECONCILIACION_GLOBAL**
 
 ## 1. Estado inicial y límites de la sesión

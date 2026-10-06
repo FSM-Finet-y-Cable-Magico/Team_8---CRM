@@ -117,4 +117,3 @@ export function main(env = process.env, output = console.log) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main();
-

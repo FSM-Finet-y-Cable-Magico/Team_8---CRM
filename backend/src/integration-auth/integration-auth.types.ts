@@ -19,4 +19,3 @@ export const IntegrationCompanyScope = (
   source: IntegrationCompanyRequirement['source'],
   field = 'id_empresa',
 ) => SetMetadata(INTEGRATION_COMPANY_SCOPE, { source, field } satisfies IntegrationCompanyRequirement);
-

@@ -97,4 +97,3 @@ describe('IntegrationApiKeyGuard', () => {
     expect(() => test.guard.canActivate(test.context)).toThrow(ForbiddenException);
   });
 });
-

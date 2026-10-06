@@ -18,4 +18,3 @@ test('solo acepta éxito con rollback confirmado y no imprime conexión', async 
   const code = await main({ ALLOW_RAILWAY_BILLING_WRITE_TEST: '1', DATABASE_URL: secretUrl }, async () => ({ status: 'PASS_ROLLED_BACK', persisted: false }), line => lines.push(line));
   assert.equal(code, 0); assert.doesNotMatch(lines.join('\n'), /secret|private/);
 });
-

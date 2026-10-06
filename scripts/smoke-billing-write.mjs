@@ -91,4 +91,3 @@ export async function main(env = process.env, execute = runScenario, output = co
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = await main();
-

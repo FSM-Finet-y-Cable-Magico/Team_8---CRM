@@ -90,7 +90,7 @@ docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-l
 docker compose --env-file .env.facturacion-local -f docker-compose.facturacion-local.yml up -d --no-deps backend
 ```
 
-El ensayo verifica destino Docker `db/fsm_facturacion_local`, SMTP `mailpit:1025` y ausencia de otro trabajo/correo pendiente. No debe ejecutarse mientras el backend habitual procesa su cola. El fallo temporal es simulado y no llama al proveedor fiscal. El certificado/clave de loopback publicado es una fixture de test; ninguna clave de operación forma parte del repositorio.
+El ensayo verifica destino Docker `db/fsm_facturacion_local`, SMTP `mailpit:1025` y ausencia de otro trabajo/correo pendiente. No debe ejecutarse mientras el backend habitual procesa su cola. El fallo temporal es simulado y no llama al proveedor fiscal. Desde la depuración del 2026-10-06, las pruebas de loopback generan certificado y clave temporales con OpenSSL y eliminan sus archivos inmediatamente después de cargarlos. Ninguna clave privada de test se publica en Git.
 
 ## Conciliación de correo incierto
 

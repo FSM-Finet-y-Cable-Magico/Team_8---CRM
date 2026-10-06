@@ -53,4 +53,3 @@ test('salida nunca imprime valores sensibles', () => {
   const output = lines.join('\n');
   assert.doesNotMatch(output, /secret-database-value|secret-jwt-value/);
 });
-
