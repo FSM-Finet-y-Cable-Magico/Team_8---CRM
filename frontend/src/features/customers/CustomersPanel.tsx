@@ -128,6 +128,8 @@ export function CustomersPanel({
   permissions,
   onManageInstallation,
   onChanged,
+  focusedCustomerId,
+  onFocusConsumed,
 }: {
   customers: Customer[];
   plans: Plan[];
@@ -135,6 +137,8 @@ export function CustomersPanel({
   permissions: DashboardPermissions;
   onManageInstallation: (idProspecto: number) => void;
   onChanged: () => void;
+  focusedCustomerId?: number | null;
+  onFocusConsumed?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusValue, setStatusValue] = useState('Activo');
@@ -335,6 +339,15 @@ export function CustomersPanel({
   }, [scope, customers]);
 
   useEffect(() => { setPage(1); }, [customers.length, searchTerm, customerStatusFilter]);
+
+  useEffect(() => {
+    if (!focusedCustomerId) return;
+    const customer = customers.find(value => value.idCliente === focusedCustomerId);
+    setSearchTerm(''); setCustomerStatusFilter('');
+    if (customer) { setSelectedId(customer.idCliente); setManagementOpen(true); setStatus(''); }
+    else { setManagementOpen(false); setStatus('No se encontró el cliente solicitado en este alcance.'); }
+    onFocusConsumed?.();
+  }, [focusedCustomerId, customers, onFocusConsumed]);
 
   function openCustomerManagement(customerId: number) {
     setSelectedId(customerId);

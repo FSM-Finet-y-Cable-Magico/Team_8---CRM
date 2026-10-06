@@ -7,6 +7,8 @@ import { CoveragePicker, CoverageLocation } from '../coverage';
 import { BillingInvoicesPanel } from './BillingInvoicesPanel';
 import { useRef } from 'react';
 import { ExternalTaxDocumentsPanel } from './ExternalTaxDocumentsPanel';
+import { type ControlRow, currency, dateLabel, readable } from '../commercial/control-book-model';
+import './billing-invoice-focus.css';
 export function BillingPanel({
   overview,
   plans,
@@ -15,6 +17,8 @@ export function BillingPanel({
   writeCompanyId,
   permissions,
   onChanged,
+  focusedInvoice,
+  onFocusConsumed,
 }: {
   overview: BillingOverview | null;
   plans: Plan[];
@@ -23,6 +27,8 @@ export function BillingPanel({
   writeCompanyId: number;
   permissions: DashboardPermissions;
   onChanged: () => void;
+  focusedInvoice?: ControlRow | null;
+  onFocusConsumed?: () => void;
 }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,6 +40,14 @@ export function BillingPanel({
     await api.post('/billing/notifications',{idCliente,idFactura,tipo,correlationId});
     notificationKeys.current.delete(key);
   }
+  const [invoiceFocus, setInvoiceFocus] = useState<ControlRow | null>(null);
+  useEffect(() => { setInvoiceFocus(null); }, [scope]);
+  useEffect(() => {
+    if (!focusedInvoice) return;
+    if (scope === 'consolidado' || String(focusedInvoice.idEmpresa) === scope) setInvoiceFocus(focusedInvoice);
+    else setStatus('El documento solicitado no pertenece al alcance seleccionado.');
+    onFocusConsumed?.();
+  }, [focusedInvoice, scope, onFocusConsumed]);
   const [coverageAddress, setCoverageAddress] = useState('');
   const [coverageLocation, setCoverageLocation] = useState<CoverageLocation | null>(null);
   useEffect(() => { setCoverageLocation(null); }, [writeCompanyId, coverageAddress]);
@@ -161,6 +175,7 @@ export function BillingPanel({
   const morosos = overview?.morosos ?? [];
   const cortes = overview?.cortesProgramados ?? [];
   const notifications = overview?.notificaciones ?? [];
+  const focusedBillingRow = invoiceFocus ? morosos.find(row => row.idFactura === invoiceFocus.idFactura && row.idContrato === invoiceFocus.idContrato && row.cliente.idCliente === invoiceFocus.idCliente) : undefined;
   const pageSize = 10;
   const visibleMorosos = morosos.slice((morososPage - 1) * pageSize, morososPage * pageSize);
   const visibleCortes = cortes.slice((cortesPage - 1) * pageSize, cortesPage * pageSize);
@@ -422,6 +437,30 @@ export function BillingPanel({
         </section>
       </details>
 
+      <Modal title={invoiceFocus ? 'Documento ' + invoiceFocus.numeroDocumento : 'Detalle de factura'} open={Boolean(invoiceFocus)} onClose={() => setInvoiceFocus(null)}>
+        {invoiceFocus && <div className="billing-invoice-focus">
+          <header><h3>{invoiceFocus.nombre}</h3><p>{invoiceFocus.rut ?? 'Sin RUT'} · Contrato {invoiceFocus.numeroContrato}</p></header>
+          <dl className="billing-invoice-totals">{[
+            ['Monto del documento', !focusedBillingRow && invoiceFocus.montoDocumento === null ? '—' : currency.format(focusedBillingRow?.monto ?? invoiceFocus.montoDocumento ?? 0)],
+            ['Pagado', currency.format(focusedBillingRow?.pagado ?? invoiceFocus.totalPagado)],
+            ['Saldo pendiente', invoiceFocus.saldoPendiente === null && !focusedBillingRow ? '—' : currency.format(focusedBillingRow?.saldo ?? invoiceFocus.saldoPendiente ?? 0)],
+            ['Días de atraso', focusedBillingRow?.diasAtraso ?? invoiceFocus.diasAtraso ?? '—'],
+          ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+          <table><caption>Información del documento seleccionado</caption><tbody>{[
+            ['Documento', (invoiceFocus.tipoDocumento ? readable(invoiceFocus.tipoDocumento) : 'Documento') + ' ' + invoiceFocus.numeroDocumento],
+            ['Estado', focusedBillingRow?.estadoFactura ?? readable(invoiceFocus.estadoDocumento)],
+            ['Plan', focusedBillingRow?.contrato.plan ?? invoiceFocus.plan ?? '—'],
+            ['Emisión', dateLabel(invoiceFocus.fechaEmision)],
+            ['Vencimiento original', dateLabel(invoiceFocus.fechaVencimiento)],
+            ['Vencimiento vigente', dateLabel(invoiceFocus.fechaVencimientoEfectiva)],
+            ['Último pago', dateLabel(invoiceFocus.ultimoPago)],
+            ['Voucher / transacción', invoiceFocus.codigoTransaccion ?? '—'],
+            ['Cargos por facturar', currency.format(invoiceFocus.cargosPendientes)],
+          ].map(([label, value]) => <tr key={label}><th scope="row">{label}</th><td>{value}</td></tr>)}</tbody></table>
+          {!focusedBillingRow && <p>Información consultada desde el Libro de control. Este documento no figura en el listado actual de facturas vencidas de Cobranza.</p>}
+          <footer><button type="button" className="secondary" onClick={() => setInvoiceFocus(null)}>Cerrar</button>{focusedBillingRow && permissions.manageBilling && <button type="button" onClick={() => { setPaymentTarget(focusedBillingRow); setInvoiceFocus(null); }}>Registrar pago de este documento</button>}</footer>
+        </div>}
+      </Modal>
       <Modal title="Registrar pago" open={Boolean(paymentTarget)} onClose={() => setPaymentTarget(null)}>
         {paymentTarget && (
           <form className="stack" onSubmit={registerPayment}>
