@@ -1,4 +1,4 @@
-﻿import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { IntegracionInstalacionG3, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -46,8 +46,8 @@ export class G1ActivationService {
       id_servicio: activation.idServicio,
       id_contrato: tracking.idContrato,
     };
-    const state = series.length === 0 ? 'PENDIENTE_DATOS_EQUIPO_G1' : 'PENDIENTE_ENVIO';
-    const payload: G1ActivationPayload = { ...basePayload, equipos: series.map((numero_serie) => ({ numero_serie })) };
+    const state = idOtG3 === null ? 'ERROR_G1' : series.length === 0 ? 'PENDIENTE_DATOS_EQUIPO_G1' : 'PENDIENTE_ENVIO';
+    const payload = { ...basePayload, equipos: series.map((numero_serie) => ({ numero_serie })) };
     const record = await this.prisma.integracionActivacionG1.upsert({
       where: { eventId },
       create: {
@@ -55,13 +55,15 @@ export class G1ActivationService {
         idCliente: activation.idCliente,
         idServicio: activation.idServicio,
         idContrato: tracking.idContrato,
-        idOtG3: String(idOtG3),
+        idOtG3: idOtG3 === null ? '' : String(idOtG3),
         numeroSerie: series[0] ?? null,
         numerosSerie: series,
         eventId,
         traceId: tracking.traceId,
         estadoIntegracion: state,
         payloadHash: sha256Payload(payload),
+        payloadSnapshot: payload as Prisma.InputJsonValue,
+        ultimoErrorSanitizado: idOtG3 === null ? 'G1_ID_OT_REQUIRED: pendiente identificador numerico positivo real de G3.' : null,
       },
       update: {},
     });
@@ -86,23 +88,26 @@ export class G1ActivationService {
   private async dispatch(idIntegracion: number, retry: boolean) {
     const record = await this.prisma.integracionActivacionG1.findUnique({
       where: { idIntegracion },
-      include: { cliente: { select: { rut: true } } },
     });
     if (!record) throw new NotFoundException('Tracking de activación G1 no encontrado.');
+    if (record.estadoIntegracion === 'COMPLETADA') return record;
+    const reject = (code: string) => this.prisma.integracionActivacionG1.update({
+      where: { idIntegracion }, data: { estadoIntegracion: 'ERROR_G1', ultimoErrorSanitizado: code },
+    });
+    if (this.positiveWorkOrderId(record.idOtG3) === null) return reject('G1_ID_OT_REQUIRED');
     const series = record.numerosSerie.length ? record.numerosSerie : record.numeroSerie ? [record.numeroSerie] : [];
     if (!series.length) return record;
 
-    const payload: G1ActivationPayload = {
-      event_id: record.eventId,
-      trace_id: record.traceId,
-      id_empresa: record.idEmpresa,
-      id_ot: record.idOtG3,
-      id_cliente: record.idCliente,
-      rut_cliente: record.cliente.rut ?? '',
-      id_servicio: record.idServicio,
-      id_contrato: record.idContrato,
-      equipos: series.map((numero_serie) => ({ numero_serie })),
-    };
+    // Retries use the persisted event, never mutable customer data.
+    if (!record.payloadSnapshot || typeof record.payloadSnapshot !== 'object' || Array.isArray(record.payloadSnapshot)) return reject('G1_PAYLOAD_SNAPSHOT_MISSING');
+    const payload = record.payloadSnapshot as unknown as G1ActivationPayload;
+    if (sha256Payload(payload) !== record.payloadHash || payload.event_id !== record.eventId
+      || payload.trace_id !== record.traceId || payload.id_empresa !== record.idEmpresa
+      || payload.id_cliente !== record.idCliente || payload.id_servicio !== record.idServicio
+      || payload.id_contrato !== record.idContrato || payload.id_ot !== this.positiveWorkOrderId(record.idOtG3)
+      || !Array.isArray(payload.equipos) || JSON.stringify(payload.equipos.map(e => e.numero_serie)) !== JSON.stringify(series)) {
+      return reject('G1_PAYLOAD_SNAPSHOT_INCONSISTENT');
+    }
     const now = new Date();
     await this.prisma.integracionActivacionG1.update({
       where: { idIntegracion },
@@ -111,6 +116,30 @@ export class G1ActivationService {
 
     try {
       const result = await this.client.sendActivation(payload);
+      const responseIssue = this.activationResponseIssue(result.data, payload);
+      if (responseIssue) {
+        const state = ['G1_EQUIPMENT_ASSOCIATION_PENDING', 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED'].includes(responseIssue)
+          ? 'PENDIENTE_SINCRONIZACION_G1'
+          : 'ERROR_G1';
+        const updated = await this.prisma.integracionActivacionG1.update({
+          where: { idIntegracion },
+          data: {
+            estadoIntegracion: state,
+            respuestaEstadoG1: result.data as Prisma.InputJsonValue,
+            fechaCompletado: null,
+            ultimoErrorSanitizado: responseIssue,
+          },
+        });
+        console.warn('Integración G1 aceptada sin asociación funcional confirmada',
+          this.logContext(record, result.status, result.durationMs, state));
+        await this.audit.record({
+          accion: retry ? 'REINTENTAR_ACTIVACION_G1' : 'ACTIVACION_G1_PENDIENTE',
+          entidadAfectada: 'integracion_activacion_g1',
+          idEntidadAfectada: idIntegracion,
+          valorNuevo: { ...this.auditContext(record), statusHttp: result.status, resultado: state, codigo: responseIssue },
+        });
+        return updated;
+      }
       const updated = await this.prisma.integracionActivacionG1.update({
         where: { idIntegracion },
         data: {
@@ -154,6 +183,20 @@ export class G1ActivationService {
     }
   }
 
+  private activationResponseIssue(data: Record<string, unknown>, payload: G1ActivationPayload) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return 'G1_ACTIVATION_RESPONSE_INVALID';
+    if (data.event_id !== undefined && data.event_id !== payload.event_id) return 'G1_EVENT_ID_MISMATCH';
+    if (data.id_servicio !== undefined && data.id_servicio !== payload.id_servicio) return 'G1_SERVICE_ID_MISMATCH';
+    if (data.equipos_asociados === undefined) return 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED';
+    if (!Number.isSafeInteger(data.equipos_asociados) || Number(data.equipos_asociados) < 0) {
+      return 'G1_EQUIPMENT_ASSOCIATION_RESPONSE_INVALID';
+    }
+    // G1 can accept the activation before technical closure; zero remains pending, never a definitive failure.
+    if (data.equipos_asociados === 0 && payload.equipos.length > 0) return 'G1_EQUIPMENT_ASSOCIATION_PENDING';
+    if (data.equipos_asociados !== payload.equipos.length) return 'G1_EQUIPMENT_ASSOCIATION_INCOMPLETE';
+    return null;
+  }
+
   private extractSeries(closure: Record<string, unknown>) {
     const result = closure.resultado_tecnico ?? closure.resultado;
     const resultRecord = result && typeof result === 'object' && !Array.isArray(result)
@@ -178,8 +221,13 @@ export class G1ActivationService {
   }
 
   private workOrderId(closure: Record<string, unknown>, tracking: IntegracionInstalacionG3) {
-    const raw = closure.id_ot ?? tracking.idOtG3 ?? tracking.codigoOtG3 ?? `tracking-${tracking.idIntegracion}`;
-    return typeof raw === 'number' || typeof raw === 'string' ? raw : String(raw);
+    return this.positiveWorkOrderId(closure.id_ot ?? tracking.idOtG3);
+  }
+
+  private positiveWorkOrderId(raw: unknown): number | null {
+    if (typeof raw !== 'number' && !(typeof raw === 'string' && /^[1-9]\d*$/.test(raw))) return null;
+    const id = Number(raw);
+    return Number.isSafeInteger(id) && id > 0 && id <= 2147483647 ? id : null;
   }
 
   private async scopedRecord(idIntegracion: number, currentUser: AuthUser) {
@@ -209,7 +257,7 @@ export class G1ActivationService {
     return { ...this.auditContext(record), statusHttp, durationMs, result };
   }
 
-  private auditPending(idIntegracion: number, state: string, payload: G1ActivationPayload) {
+  private auditPending(idIntegracion: number, state: string, payload: Omit<G1ActivationPayload, 'id_ot'> & { id_ot: number | null }) {
     return this.audit.record({
       accion: 'ACTIVACION_G1_PENDIENTE',
       entidadAfectada: 'integracion_activacion_g1',

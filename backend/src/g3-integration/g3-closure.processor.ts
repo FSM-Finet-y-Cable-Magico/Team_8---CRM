@@ -6,10 +6,7 @@ import { InstallationActivationService } from './installation-activation.service
 import { G1ActivationService } from '../g1-integration/g1-activation.service';
 import { G3ClosurePayload, G3ClosureSource } from './g3-integration.types';
 import {
-  externalWorkOrderCode,
   externalWorkOrderId,
-  hasTechnicalResult,
-  normalizeG3State,
   sha256Payload,
 } from './g3-integration.utils';
 
@@ -24,14 +21,14 @@ export class G3ClosureProcessor {
 
   async process(payload: G3ClosurePayload, source: G3ClosureSource, trackingHintId?: number) {
     const record = payload as Record<string, unknown>;
+    this.assertContractPayload(record);
     const tracking = trackingHintId
       ? await this.prisma.integracionInstalacionG3.findUnique({ where: { idIntegracion: trackingHintId } })
       : await this.resolveTracking(record);
     if (!tracking) throw new NotFoundException('Tracking de instalacion no encontrado');
     this.validateCorrelations(tracking, record);
 
-    const normalized = normalizeG3State(payload.estado);
-    const eventType = this.eventType(normalized.original, normalized.known);
+    const eventType = 'WORK_ORDER_COMPLETADA';
     const payloadHash = sha256Payload(record);
     const existing = await this.prisma.integracionEventoEntrante.findUnique({
       where: { idIntegracion_eventType: { idIntegracion: tracking.idIntegracion, eventType } },
@@ -41,15 +38,6 @@ export class G3ClosureProcessor {
         throw new ConflictException('El cierre G3 ya fue recibido con un payload diferente');
       }
       return { duplicate: true, result: existing.result, tracking };
-    }
-
-    if (normalized.state === 'COMPLETADA') {
-      if (typeof payload.tipo === 'string' && this.normalizeText(payload.tipo) !== 'INSTALACION') {
-        throw new BadRequestException('El cierre no corresponde a una orden de instalacion');
-      }
-      if (!hasTechnicalResult(record)) {
-        throw new BadRequestException('El cierre COMPLETADA no contiene un resultado tecnico valido');
-      }
     }
 
     const processed = await this.prisma.$transaction(async (tx) => {
@@ -67,14 +55,14 @@ export class G3ClosureProcessor {
       const current = await tx.integracionInstalacionG3.findUnique({ where: { idIntegracion: tracking.idIntegracion } });
       if (!current) throw new NotFoundException('Tracking de instalacion no encontrado');
 
-      let activation: Awaited<ReturnType<InstallationActivationService['activate']>> | null = null;
-      if (normalized.state === 'COMPLETADA') {
-        activation = await this.activationService.activate(
-          tx,
-          current,
-          record.resultado_tecnico ?? record.resultado,
-        );
-      }
+      const activation = await this.activationService.activate(
+        tx,
+        current,
+        {
+          equipos_instalados: record.equipos_instalados,
+          equipos_retirados: record.equipos_retirados,
+        },
+      );
 
       const now = new Date();
       const updated = await tx.integracionInstalacionG3.update({
@@ -83,18 +71,17 @@ export class G3ClosureProcessor {
           idCliente: activation?.idCliente ?? current.idCliente,
           idServicio: activation?.idServicio ?? current.idServicio,
           idOtG3: externalWorkOrderId(record) ?? current.idOtG3,
-          codigoOtG3: externalWorkOrderCode(record) ?? current.codigoOtG3,
-          estadoIntegracion: normalized.state === 'COMPLETADA' ? 'COMPLETADA' : 'EN_SEGUIMIENTO',
-          estadoOtG3: normalized.state,
-          estadoOriginalG3: normalized.known ? null : normalized.original,
+          estadoIntegracion: 'COMPLETADA',
+          estadoOtG3: 'COMPLETADA',
+          estadoOriginalG3: null,
           fechaUltimaSincronizacion: now,
-          ultimoErrorSanitizado: normalized.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
-          fechaCierreProcesado: normalized.state === 'COMPLETADA' ? now : current.fechaCierreProcesado,
+          ultimoErrorSanitizado: null,
+          fechaCierreProcesado: now,
         },
       });
       const eventResult = {
-        estado: normalized.state,
-        estadoOriginalG3: normalized.known ? null : normalized.original,
+        estado: 'COMPLETADA',
+        estadoOriginalG3: null,
         activated: Boolean(activation),
         idCliente: activation?.idCliente ?? null,
         idServicio: activation?.idServicio ?? null,
@@ -122,11 +109,11 @@ export class G3ClosureProcessor {
           traceId: tracking.traceId,
           idEmpresa: tracking.idEmpresa,
           idOtG3: externalWorkOrderId(record) ?? tracking.idOtG3,
-          estado: normalized.state,
-          estadoOriginalG3: normalized.known ? null : normalized.original,
+          estado: 'COMPLETADA',
+          estadoOriginalG3: null,
         },
       });
-      await this.auditStatus(tracking.idIntegracion, normalized.state, normalized.known, processed.result);
+      await this.auditStatus(tracking.idIntegracion, processed.result);
     }
 
     const activationResult = processed.result && typeof processed.result === 'object' && !Array.isArray(processed.result)
@@ -134,7 +121,6 @@ export class G3ClosureProcessor {
       : {};
     if (
       !processed.duplicate &&
-      normalized.state === 'COMPLETADA' &&
       activationResult.activated === true &&
       typeof activationResult.idCliente === 'number' &&
       typeof activationResult.idServicio === 'number' &&
@@ -146,11 +132,10 @@ export class G3ClosureProcessor {
           { idCliente: activationResult.idCliente, idServicio: activationResult.idServicio },
           record,
         );
-      } catch (error) {
+      } catch {
         console.error('No se pudo registrar el tracking de activación G1 después del commit G8', {
           idIntegracionG3: tracking.idIntegracion,
           idEmpresa: tracking.idEmpresa,
-          error: error instanceof Error ? error.message : 'Error desconocido',
         });
       }
     }
@@ -159,33 +144,11 @@ export class G3ClosureProcessor {
   }
 
   private async resolveTracking(payload: Record<string, unknown>) {
-    if (typeof payload.request_id === 'string' && payload.request_id.trim()) {
-      const tracking = await this.prisma.integracionInstalacionG3.findUnique({
-        where: { requestId: payload.request_id.trim() },
-      });
-      if (!tracking) throw new NotFoundException('El request_id no corresponde a una instalacion conocida');
-      return tracking;
-    }
-
-    const idOtG3 = externalWorkOrderId(payload);
-    const codigoOtG3 = externalWorkOrderCode(payload);
-    if (!idOtG3 && !codigoOtG3) {
-      throw new BadRequestException('El cierre requiere request_id, id_ot o codigo_ot para correlacion');
-    }
-    const idEmpresa = typeof payload.id_empresa === 'number' ? payload.id_empresa : undefined;
-    const candidates = await this.prisma.integracionInstalacionG3.findMany({
-      where: {
-        ...(idEmpresa ? { idEmpresa } : {}),
-        OR: [
-          ...(idOtG3 ? [{ idOtG3 }] : []),
-          ...(codigoOtG3 ? [{ codigoOtG3 }] : []),
-        ],
-      },
-      take: 2,
+    const tracking = await this.prisma.integracionInstalacionG3.findUnique({
+      where: { requestId: String(payload.request_id) },
     });
-    if (candidates.length === 0) throw new NotFoundException('No existe tracking para la orden G3');
-    if (candidates.length > 1) throw new ConflictException('La referencia G3 es ambigua');
-    return candidates[0];
+    if (!tracking) throw new NotFoundException('El request_id no corresponde a una instalacion conocida');
+    return tracking;
   }
 
   private validateCorrelations(
@@ -204,34 +167,37 @@ export class G3ClosureProcessor {
         throw new BadRequestException(`La correlacion ${field} no corresponde al tracking`);
       }
     }
-    const receivedTrace = payload.trace_id;
-    if (typeof receivedTrace === 'string' && receivedTrace !== tracking.traceId) {
+    if (String(payload.id_ot) !== tracking.idOtG3) {
+      throw new BadRequestException('La correlacion id_ot no corresponde al tracking');
+    }
+    if (payload.trace_id !== tracking.traceId) {
       throw new BadRequestException('La correlacion trace_id no corresponde al tracking');
     }
   }
 
-  private eventType(original: string | null, known: boolean) {
-    const suffix = known ? original ?? 'SIN_ESTADO' : `DESCONOCIDO_${sha256Payload(original).slice(0, 10)}`;
-    return `WORK_ORDER_${suffix}`.slice(0, 50);
+  private assertContractPayload(payload: Record<string, unknown>) {
+    const requiredStrings = ['request_id', 'trace_id'];
+    for (const field of requiredStrings) {
+      const value = payload[field];
+      if (typeof value !== 'string' || !value.trim() || value !== value.trim()) {
+        throw new BadRequestException(`El cierre requiere ${field} valido`);
+      }
+    }
+    const requiredIds = ['id_ot', 'id_empresa', 'id_prospecto', 'id_contrato', 'id_plan'];
+    for (const field of requiredIds) {
+      const value = payload[field];
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+        throw new BadRequestException(`El cierre requiere ${field} valido`);
+      }
+    }
+    if (!Array.isArray(payload.equipos_instalados) || !Array.isArray(payload.equipos_retirados)) {
+      throw new BadRequestException('El cierre requiere equipos_instalados y equipos_retirados');
+    }
   }
 
-  private normalizeText(value: string) {
-    return value.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }
-
-  private async auditStatus(idIntegracion: number, state: string, known: boolean, result: unknown) {
-    const action = !known
-      ? 'ESTADO_G3_DESCONOCIDO'
-      : state === 'COMPLETADA'
-        ? 'ACTIVAR_SERVICIO_DESDE_G3'
-        : state === 'CANCELADA'
-          ? 'CANCELAR_INSTALACION_G3'
-          : state === 'PENDIENTE_CLIENTE_AUSENTE'
-            ? 'CLIENTE_AUSENTE_G3'
-            : null;
-    if (!action) return;
+  private async auditStatus(idIntegracion: number, result: unknown) {
     await this.auditService.record({
-      accion: action,
+      accion: 'ACTIVAR_SERVICIO_DESDE_G3',
       entidadAfectada: 'integracion_instalacion_g3',
       idEntidadAfectada: idIntegracion,
       valorNuevo: result as Prisma.InputJsonValue,

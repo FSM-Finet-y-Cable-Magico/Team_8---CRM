@@ -56,7 +56,7 @@ export type G1ActivationPayload = {
   event_id: string;
   trace_id: string;
   id_empresa: number;
-  id_ot: number | string;
+  id_ot: number;
   id_cliente: number;
   rut_cliente: string;
   id_servicio: number;

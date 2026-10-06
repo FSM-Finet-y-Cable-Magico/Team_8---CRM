@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class RequestG3InstallationDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idProspecto?: number;
@@ -8,22 +8,15 @@ export class RequestG3InstallationDto {
 }
 
 export class G3ClosureDto {
-  @IsString() @IsNotEmpty() @MaxLength(100) estado!: string;
-  @IsOptional() id_ot?: string | number;
-  @IsOptional() @IsString() @MaxLength(100) codigo_ot?: string;
-  @IsOptional() @IsString() @MaxLength(20) tipo?: string;
-  @IsOptional() @IsString() @MaxLength(60) request_id?: string;
-  @IsOptional() @IsString() @MaxLength(60) trace_id?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) id_empresa?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) id_prospecto?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) id_contrato?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) id_plan?: number;
-  @IsOptional() resultado?: unknown;
-  @IsOptional() resultado_tecnico?: unknown;
-  @IsOptional() tecnico?: unknown;
-  @IsOptional() direccion?: unknown;
-  @IsOptional() persona?: unknown;
-  @IsOptional() @IsString() fecha?: string;
+  @Type(() => Number) @IsInt() @Min(1) id_ot!: number;
+  @IsString() @IsNotEmpty() @MaxLength(100) request_id!: string;
+  @IsString() @IsNotEmpty() @MaxLength(60) trace_id!: string;
+  @Type(() => Number) @IsInt() @Min(1) id_empresa!: number;
+  @Type(() => Number) @IsInt() @Min(1) id_prospecto!: number;
+  @Type(() => Number) @IsInt() @Min(1) id_contrato!: number;
+  @Type(() => Number) @IsInt() @Min(1) id_plan!: number;
+  @IsArray() equipos_instalados!: unknown[];
+  @IsArray() equipos_retirados!: unknown[];
 }
 
 export class CreateServiceWithdrawalDto {

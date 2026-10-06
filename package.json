@@ -7,6 +7,8 @@
     "frontend"
   ],
   "scripts": {
+    "test:i3-release": "node scripts/i3-release-acceptance.mjs --run-local",
+    "schema:i3:proposal": "node scripts/i3-schema-proposal.mjs",
     "dev": "npm run dev --workspaces --if-present",
     "dev:backend": "npm run start:dev -w backend",
     "dev:frontend": "npm run dev -w frontend",
@@ -18,7 +20,17 @@
     "docker:local": "docker compose up --build -d",
     "docker:local:down": "docker compose down",
     "docker:railway": "docker compose --env-file .env.railway -f docker-compose.railway.yml up --build -d",
-    "docker:railway:down": "docker compose --env-file .env.railway -f docker-compose.railway.yml down"
+    "docker:railway:down": "docker compose --env-file .env.railway -f docker-compose.railway.yml down",
+    "test": "npm run test -w backend -- --runInBand && npm run test:global-tools && npm run test:frontend-runtime",
+    "test:global-tools": "node --test scripts/global-schema.test.mjs scripts/g1-smoke.test.mjs scripts/validate-production-env.test.mjs scripts/smoke-billing-write.test.mjs",
+    "test:frontend-runtime": "npm run test:runtime -w frontend",
+    "db:verify:global": "node scripts/verify-global-db.mjs",
+    "db:verify:global:railway": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-global-db-readonly.ps1",
+    "db:audit:prisma-global": "node scripts/audit-prisma-global.mjs",
+    "smoke:g1:readonly": "node scripts/smoke-g1-readonly.mjs",
+    "smoke:g1:activation": "node scripts/smoke-g1-activation.mjs",
+    "env:validate:production": "node scripts/validate-production-env.mjs",
+    "smoke:billing:write": "npm run build -w backend && node scripts/smoke-billing-write.mjs"
   },
   "engines": {
     "node": ">=20.11"

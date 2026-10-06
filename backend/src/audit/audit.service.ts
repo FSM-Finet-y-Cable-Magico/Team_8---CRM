@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -14,9 +14,17 @@ type AuditInput = {
 
 @Injectable()
 export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: AuditInput) {
+  async record(input: AuditInput, transaction?: Prisma.TransactionClient) {
+    // Financial operations require audit persistence in the same transaction.
+    if (transaction) return transaction.logAuditoria.create({ data: {
+      idUsuario: input.idUsuario ?? null, accion: input.accion, entidadAfectada: input.entidadAfectada,
+      idEntidadAfectada: input.idEntidadAfectada ?? null, valorAnterior: input.valorAnterior ?? Prisma.JsonNull,
+      valorNuevo: input.valorNuevo ?? Prisma.JsonNull, ipOrigen: input.ipOrigen ?? null,
+    } });
     try {
       await this.prisma.logAuditoria.create({
         data: {
@@ -29,9 +37,10 @@ export class AuditService {
           ipOrigen: input.ipOrigen ?? null,
         },
       });
-    } catch (error) {
+    } catch {
       // La auditoria no debe romper la operacion principal, pero si queda visible en logs.
-      console.error('No se pudo registrar auditoria', error);
+      // No registrar el error crudo: el driver puede incluir URL, SQL o datos sensibles.
+      this.logger.error('No se pudo registrar auditoria');
     }
   }
 

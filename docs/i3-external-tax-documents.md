@@ -61,13 +61,14 @@ Las pruebas cubren tipos y campos obligatorios, fechas, Decimal, coherencia de m
 
 | Pregunta | Estado comprobado |
 | --- | --- |
-| ¿Contrato API disponible? | No se encontró contrato oficial en las fuentes del repositorio. `FACTURACION_CL_CONTRACT_PENDING`. |
+| ¿Documentación oficial disponible? | Sí; se revisó el manual público general de Facturacion.cl. |
+| ¿Contrato específico del proyecto disponible? | No: faltan módulos contratados, ambientes, formato, mapeo, errores e idempotencia. `PENDIENTE_CONTRATO_FACTURACION_CL`. |
 | ¿Credenciales técnicas disponibles? | No; no se solicitaron ni agregaron. |
 | ¿Sandbox validado? | No. |
 | ¿Emisión implementada? | NO. |
 | ¿CU-86 depende de ella? | NO. |
 
-Estado: `NO_INTEGRADO`. No se creó adapter, payload, endpoint, autenticación ni variable de entorno sin contrato ratificado. El registro manual de CU-86 funciona de forma independiente.
+Estado: `ARCHITECTURE_READY / PENDIENTE_CONTRATO_FACTURACION_CL`. Existe una frontera técnica cerrada y configuración multiempresa no secreta, pero no se creó payload, endpoint, autenticación ni cliente HTTP. El registro manual de CU-86 funciona de forma independiente. Ver [i3-facturacion-cl-integration.md](i3-facturacion-cl-integration.md).
 
 ## Fuera de alcance
 

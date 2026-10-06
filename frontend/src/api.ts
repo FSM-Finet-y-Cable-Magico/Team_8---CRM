@@ -365,6 +365,24 @@ export type InventoryUnit = {
   } | null;
 };
 
+
+export type BillingInvoice = {
+  idFactura: number; idContrato: number | null; folioExterno: string | null; estado: string; estadoCalculado: string;
+  monto: number | null; pagado: number; saldo: number | null; saldoFavor: number | null; saldoExigible: number | null;
+  fechaLimitePago: string; fechaVencimientoEfectiva: string; diasAtraso: number; aceptaPagos: boolean;
+  contrato: { idContrato: number; idEmpresa: number | null; diaVencimiento: number; estado: string;
+    cliente: { idCliente: number; nombreCompleto: string; rut: string | null } | null } | null;
+  pagos: Array<{ idPago: number; monto: string; fechaPago: string; pasarela: string; codigoTransaccion: string | null }>;
+};
+export type BillingInvoicePage = { items: BillingInvoice[]; pagination: { page: number; pageSize: number; totalRows: number; totalPages: number } };
+export type BillingInvoiceDetail = BillingInvoice & {
+  convenios: Array<{ idConvenio: number; montoComprometido: string; estado: string; condiciones: string; cuotas: Array<{ idCuota: number; numero: number; monto: string; fechaVencimiento: string; estado: string }> }>;
+  prorrogas: Array<{ idProrroga: number; fechaOriginal: string; nuevaFecha: string; estado: string; motivo: string }>;
+  cargos: Array<{ idCargo: number; tipo: string; monto: string; estado: string; observacion: string | null }>;
+  cambios: Array<{ idCambio: number; tipoCambio: string; valorAnterior: string; valorNuevo: string; justificacion: string }>;
+  eventos: Array<{ idEvento: number; tipo: string; fecha: string; canal: string; observacion: string | null }>;
+};
+
 export type BillingOverview = {
   fechaCorteCalculo: string;
   reglaCorteDias: number;
@@ -382,6 +400,7 @@ export type BillingOverview = {
     saldo: number;
     fechaLimitePago: string;
     diasAtraso: number;
+    fechaVencimientoEfectiva: string;
     estadoFactura: string;
     cliente: {
       idCliente: number;

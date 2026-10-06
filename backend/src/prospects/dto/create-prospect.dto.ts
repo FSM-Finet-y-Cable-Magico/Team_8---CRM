@@ -47,4 +47,10 @@ export class CreateProspectDto {
   @IsInt()
   @Min(1)
   idEmpresa?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idPlanInteres?: number;
 }

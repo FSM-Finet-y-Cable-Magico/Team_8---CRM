@@ -16,7 +16,11 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   constructor(private readonly config: ConfigService) {}
 
   configured() {
-    return this.enabled() && Boolean(this.baseUrl() && this.apiKey());
+    try {
+      return this.enabled() && Boolean(this.baseUrl() && this.apiKey()) && this.timeoutMs() > 0;
+    } catch {
+      return false;
+    }
   }
 
   async getEquipmentTypes(input: {
@@ -25,19 +29,32 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     buscar?: string;
     activo?: boolean;
   }) {
-    const query = new URLSearchParams({ id_empresa: String(input.idEmpresa) });
+    const idEmpresa = this.positiveId(input.idEmpresa, 'id_empresa');
+    const query = new URLSearchParams({ id_empresa: String(idEmpresa) });
     if (input.categoria) query.set('categoria', input.categoria);
     if (input.buscar) query.set('buscar', input.buscar);
     if (input.activo !== undefined) query.set('activo', String(input.activo));
-    return this.request<G1EquipmentType[]>(`/api/integraciones/tipos-equipo?${query}`);
+    return this.request<G1EquipmentType[]>(`/api/integraciones/tipos-equipo?${query}`)
+      .then(result => this.validateCompanyArray(result, idEmpresa));
   }
 
   getUnitBySerial(serial: string, idEmpresa: number) {
-    const query = new URLSearchParams({ id_empresa: String(idEmpresa) });
-    return this.request<G1Unit>(`/api/integraciones/unidades/${encodeURIComponent(serial)}?${query}`);
+    const company = this.positiveId(idEmpresa, 'id_empresa');
+    const normalizedSerial = serial.trim();
+    if (!normalizedSerial) {
+      throw new G1IntegrationError('G1_SERIAL_REQUIRED', null, false, 'G1 requiere un número de serie.');
+    }
+    const query = new URLSearchParams({ id_empresa: String(company) });
+    return this.request<G1Unit>(`/api/integraciones/unidades/${encodeURIComponent(normalizedSerial)}?${query}`)
+      .then(result => this.validateCompanyObject(result, company));
   }
 
   sendActivation(payload: G1ActivationPayload) {
+    this.positiveId(payload.id_empresa, 'id_empresa');
+    this.positiveId(payload.id_ot, 'id_ot', 'G1_ID_OT_REQUIRED');
+    this.positiveId(payload.id_cliente, 'id_cliente');
+    this.positiveId(payload.id_servicio, 'id_servicio');
+    this.positiveId(payload.id_contrato, 'id_contrato');
     return this.request<Record<string, unknown>>('/api/integraciones/activaciones', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -45,12 +62,25 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   getEquipmentByService(idServicio: number, idEmpresa: number) {
-    const query = new URLSearchParams({ id_empresa: String(idEmpresa), id_servicio: String(idServicio) });
-    return this.request<G1ServiceEquipment[]>(`/api/integraciones/equipos?${query}`);
+    const company = this.positiveId(idEmpresa, 'id_empresa');
+    const service = this.positiveId(idServicio, 'id_servicio');
+    const query = new URLSearchParams({ id_empresa: String(company), id_servicio: String(service) });
+    return this.request<G1ServiceEquipment[]>(`/api/integraciones/equipos?${query}`)
+      .then(result => this.validateCompanyArray(result, company));
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<G1ClientResult<T>> {
-    if (!this.configured()) {
+    if (!this.enabled()) {
+      throw new G1IntegrationError(
+        'INTEGRACION_G1_NO_CONFIGURADA',
+        null,
+        true,
+        'La integración con Inventario/Bodega no está configurada.',
+      );
+    }
+    const baseUrl = this.baseUrl();
+    const apiKey = this.apiKey();
+    if (!baseUrl || !apiKey) {
       throw new G1IntegrationError(
         'INTEGRACION_G1_NO_CONFIGURADA',
         null,
@@ -63,12 +93,13 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs());
     try {
-      const response = await fetch(`${this.baseUrl()}${path}`, {
+      const response = await fetch(`${baseUrl}${path}`, {
         ...init,
+        redirect: 'error',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'X-API-KEY': this.apiKey(),
+          'X-API-KEY': apiKey,
           ...init.headers,
         },
         signal: controller.signal,
@@ -107,7 +138,7 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   private errorCode(status: number) {
-    if (status === 401) return 'G1_UNAUTHORIZED';
+    if (status === 401) return 'AUTH_CONFIGURATION_MISMATCH';
     if (status === 403) return 'G1_COMPANY_FORBIDDEN';
     if (status === 404) return 'G1_NOT_FOUND';
     if (status === 409) return 'G1_CONFLICT';
@@ -129,15 +160,61 @@ export class HttpG1InventoryClient implements G1InventoryClient {
   }
 
   private baseUrl() {
-    return (this.config.get<string>('G1_API_URL') ?? '').trim().replace(/\/$/, '');
+    const raw = this.config.get<string>('G1_API_URL') ?? '';
+    if (!raw) return '';
+    try {
+      const url = new URL(raw);
+      const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+      if (raw !== raw.trim() || url.username || url.password || url.search || url.hash
+        || url.pathname !== '/' || !/^https?:\/\/[^/]+\/?$/.test(raw)
+        || (url.protocol !== 'https:' && !(local && url.protocol === 'http:'))) throw new Error();
+      return url.origin;
+    } catch {
+      throw new G1IntegrationError('G1_INVALID_URL', null, false, 'G1_API_URL debe ser el origen HTTPS sin credenciales, rutas, query ni fragmento; solo un slash final opcional.');
+    }
   }
 
   private apiKey() {
-    return (this.config.get<string>('G1_API_KEY') ?? '').trim();
+    const raw = this.config.get<string>('G1_API_KEY') ?? '';
+    if (!raw) return '';
+    if (raw !== raw.trim() || /[\r\n]/.test(raw)) {
+      throw new G1IntegrationError('G1_INVALID_API_KEY_FORMAT', null, false, 'G1_API_KEY tiene un formato inválido.');
+    }
+    return raw;
   }
 
   private timeoutMs() {
     const parsed = Number(this.config.get<string>('G1_REQUEST_TIMEOUT_MS') ?? 8000);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 8000;
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 60000) {
+      throw new G1IntegrationError('G1_INVALID_TIMEOUT', null, false, 'G1_REQUEST_TIMEOUT_MS debe ser un entero entre 1 y 60000.');
+    }
+    return parsed;
+  }
+
+  private positiveId(value: number, field: string, code = 'G1_INVALID_REQUEST') {
+    if (!Number.isSafeInteger(value) || value < 1 || value > 2147483647) {
+      throw new G1IntegrationError(code, null, false, `G1 requiere ${field} como entero positivo.`);
+    }
+    return value;
+  }
+
+  private validateCompanyArray<T extends { id_empresa: number }>(result: G1ClientResult<T[]>, idEmpresa: number) {
+    if (!Array.isArray(result.data)) {
+      throw new G1IntegrationError('G1_INVALID_RESPONSE', result.status, true, 'G1 devolvió una respuesta inválida.');
+    }
+    if (result.data.some(row => !row || row.id_empresa !== idEmpresa)) {
+      throw new G1IntegrationError('G1_COMPANY_MISMATCH', 403, false, 'G1 devolvió datos fuera del alcance de empresa.');
+    }
+    return result;
+  }
+
+  private validateCompanyObject<T extends { id_empresa: number }>(result: G1ClientResult<T>, idEmpresa: number) {
+    if (!result.data || typeof result.data !== 'object') {
+      throw new G1IntegrationError('G1_INVALID_RESPONSE', result.status, true, 'G1 devolvió una respuesta inválida.');
+    }
+    if (result.data.id_empresa !== idEmpresa) {
+      throw new G1IntegrationError('G1_COMPANY_MISMATCH', 403, false, 'G1 devolvió datos fuera del alcance de empresa.');
+    }
+    return result;
   }
 }

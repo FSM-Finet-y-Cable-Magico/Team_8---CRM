@@ -74,6 +74,7 @@ export class UsersService {
           if (!others.some(u => isAdministrator(u.usuarioRoles.map(r => r.rol.nombreRol)))) throw new BadRequestException('Debe quedar al menos un administrador activo');
         }
         const data = { nombreCompleto: dto.nombreCompleto.trim(), email: dto.email.trim().toLowerCase(), idEmpresa: dto.idEmpresa ?? null, activo: dto.activo };
+        if (before?.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: before.idUsuario, versionSesion: null }, data: { versionSesion: 0 } });
         const saved = before ? await tx.usuario.update({ where: { idUsuario: before.idUsuario }, data: { ...data, versionSesion: { increment: 1 } } })
           : await tx.usuario.create({ data: { ...data, passwordHash: passwordHash!, esPasswordTemporal: false } });
         await tx.usuarioRol.deleteMany({ where: { idUsuario: saved.idUsuario } });
@@ -94,6 +95,7 @@ export class UsersService {
     await this.prisma.$transaction(async tx => {
       const target = await tx.usuario.findUnique({ where: { idUsuario: id } });
       if (!target) throw new NotFoundException('Usuario no encontrado');
+      if (target.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: id, versionSesion: null }, data: { versionSesion: 0 } });
       await tx.usuario.update({ where: { idUsuario: id }, data: { passwordHash: hash, versionSesion: { increment: 1 }, intentosFallidos: 0, esPasswordTemporal: false } });
       await tx.logAuditoria.create({ data: { idUsuario: currentUser.idUsuario, accion: 'RESTABLECER_ACCESO', entidadAfectada: 'usuario', idEntidadAfectada: id, valorNuevo: { sesionesRevocadas: true } } });
     });
@@ -122,6 +124,7 @@ export class UsersService {
         }
       }
 
+      if (target.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: id, versionSesion: null }, data: { versionSesion: 0 } });
       const saved = await tx.usuario.update({
         where: { idUsuario: id },
         data: { activo: false, versionSesion: { increment: 1 } },

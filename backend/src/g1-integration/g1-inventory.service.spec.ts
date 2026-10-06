@@ -18,9 +18,19 @@ function setup() {
 describe('Etapa 4 - consultas G1 con scope', () => {
   it('lista equipos por servicio con garantía física y fuente G1', async () => {
     const { service, client, prisma } = setup();
-    await expect(service.equipmentByService(20, support)).resolves.toMatchObject({ fuente: 'G1', data: [{ numero_serie: 'ONT-1', garantia: { vigente: true }, estadoFisicoOficial: true }] });
+    await expect(service.equipmentByService(20, support)).resolves.toMatchObject({
+      fuente: 'G1',
+      estadoContrato: 'G1_REAL_SMOKE_PASS',
+      data: [{ numero_serie: 'ONT-1', garantia: { vigente: true }, estadoFisicoOficial: true }],
+    });
     expect(client.getEquipmentByService).toHaveBeenCalledWith(20, 1);
     expect(prisma).not.toHaveProperty('unidadEquipo');
+  });
+
+  it('marca como probadas las lecturas reales de tipos y unidad', async () => {
+    const { service } = setup();
+    await expect(service.equipmentTypes(support, {})).resolves.toMatchObject({ estadoContrato: 'G1_REAL_SMOKE_PASS' });
+    await expect(service.unitBySerial('ONT-1', support, 1)).resolves.toMatchObject({ estadoContrato: 'G1_REAL_SMOKE_PASS' });
   });
 
   it('oculta servicio de otra empresa antes de llamar G1', async () => {

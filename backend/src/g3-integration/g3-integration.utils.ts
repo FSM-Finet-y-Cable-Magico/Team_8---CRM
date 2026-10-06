@@ -35,13 +35,6 @@ export function normalizeG3State(value: unknown): {
   };
 }
 
-export function hasTechnicalResult(payload: Record<string, unknown>) {
-  const result = payload.resultado_tecnico ?? payload.resultado;
-  if (typeof result === 'string') return result.trim().length > 0;
-  if (Array.isArray(result)) return result.length > 0;
-  return Boolean(result && typeof result === 'object' && Object.keys(result as object).length > 0);
-}
-
 export function externalWorkOrderId(payload: Record<string, unknown>) {
   const value = payload.id_ot;
   return typeof value === 'string' || typeof value === 'number' ? String(value) : null;

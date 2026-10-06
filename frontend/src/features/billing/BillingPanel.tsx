@@ -4,6 +4,8 @@ import { formatDateOnly, formatDateTime } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { Modal, StatCard, StatusBadge, TablePagination } from '../../shared/components';
 import { CoveragePicker, CoverageLocation } from '../coverage';
+import { BillingInvoicesPanel } from './BillingInvoicesPanel';
+import { useRef } from 'react';
 import { ExternalTaxDocumentsPanel } from './ExternalTaxDocumentsPanel';
 export function BillingPanel({
   overview,
@@ -23,6 +25,15 @@ export function BillingPanel({
   onChanged: () => void;
 }) {
   const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const notificationKeys=useRef(new Map<string,string>());
+  async function notify(idCliente:number,idFactura:number,tipo:'Preventiva'|'Ultimo aviso') {
+    const key=`${idCliente}:${idFactura}:${tipo}`;
+    let correlationId=notificationKeys.current.get(key);
+    if(!correlationId){correlationId=crypto.randomUUID();notificationKeys.current.set(key,correlationId);}
+    await api.post('/billing/notifications',{idCliente,idFactura,tipo,correlationId});
+    notificationKeys.current.delete(key);
+  }
   const [coverageAddress, setCoverageAddress] = useState('');
   const [coverageLocation, setCoverageLocation] = useState<CoverageLocation | null>(null);
   useEffect(() => { setCoverageLocation(null); }, [writeCompanyId, coverageAddress]);
@@ -55,14 +66,18 @@ export function BillingPanel({
   }, [status]);
 
   async function run(action: () => Promise<unknown>, success: string) {
+    if (busy) return false;
+    setBusy(true);
     try {
       setStatus('');
       await action();
       setStatus(success);
       onChanged();
+      return true;
     } catch (err) {
       setStatus(apiErrorMessage(err));
-    }
+      return false;
+    } finally { setBusy(false); }
   }
 
   async function loadZonesAndRules() {
@@ -131,7 +146,7 @@ export function BillingPanel({
       return;
     }
 
-    await run(
+    const saved = await run(
       () => api.post('/billing/payments', {
         idFactura: paymentTarget.idFactura,
         monto: amount,
@@ -140,7 +155,7 @@ export function BillingPanel({
       }),
       'Pago registrado y estado de cobranza actualizado',
     );
-    setPaymentTarget(null);
+    if (saved) setPaymentTarget(null);
   }
 
   const morosos = overview?.morosos ?? [];
@@ -165,6 +180,8 @@ export function BillingPanel({
 
       {status && <p className="inline-status">{status}</p>}
 
+      <BillingInvoicesPanel key={scope} scope={scope} permissions={permissions} onChanged={onChanged} revision={overview} />
+
       {permissions.viewExternalTaxDocuments && (
         <ExternalTaxDocumentsPanel
           customers={customers}
@@ -183,7 +200,7 @@ export function BillingPanel({
         </div>
           {permissions.manageBilling && (
             <div className="billing-section-actions">
-              <button className="secondary compact" type="button" onClick={() => void run(() => api.post('/billing/refresh-delinquency'), 'Estados de morosidad sincronizados')}>
+              <button className="secondary compact" type="button" onClick={() => void run(() => api.post('/billing/refresh-delinquency', undefined, { params: { scope } }), 'Estados de morosidad sincronizados')}>
                 Sincronizar estados
               </button>
             </div>
@@ -208,7 +225,7 @@ export function BillingPanel({
                   <td>{row.cliente.nombreCompleto}</td>
                   <td>{row.cliente.rut ?? '-'}</td>
                   <td>{row.contrato.plan ?? '-'}</td>
-                  <td>{formatDateOnly(row.fechaLimitePago)}</td>
+                  <td>{formatDateOnly(row.fechaVencimientoEfectiva ?? row.fechaLimitePago)}</td>
                   <td>${row.saldo.toLocaleString('es-CL')}</td>
                   <td>{row.diasAtraso} día(s)</td>
                   <td><span className="billing-table-status">{row.cliente.estado}</span></td>
@@ -221,7 +238,7 @@ export function BillingPanel({
                         <button
                           className="secondary compact"
                           type="button"
-                          onClick={() => void run(() => api.post('/billing/notifications', { idCliente: row.cliente.idCliente, idFactura: row.idFactura, tipo: 'Preventiva' }), 'Aviso preventivo registrado')}
+                          onClick={() => void run(() => notify(row.cliente.idCliente,row.idFactura,'Preventiva'), 'Aviso preventivo registrado')}
                         >
                           Aviso
                         </button>
@@ -269,7 +286,7 @@ export function BillingPanel({
                         <button
                           className="secondary compact"
                           type="button"
-                          onClick={() => void run(() => api.post('/billing/notifications', { idCliente: row.cliente.idCliente, idFactura: row.idFactura, tipo: 'Ultimo aviso' }), 'Ultimo aviso registrado')}
+                          onClick={() => void run(() => notify(row.cliente.idCliente,row.idFactura,'Ultimo aviso'), 'Ultimo aviso registrado')}
                         >
                           Ultimo aviso
                         </button>
@@ -298,7 +315,7 @@ export function BillingPanel({
         <section className="panel stack">
         <div className="section-heading">
           <h2>Notificaciones de cobranza</h2>
-          <p>Historial de avisos registrados en modo simulado o desactivado.</p>
+          <p>Historial de avisos y estados de entrega. Los avisos simulados no se envían al cliente.</p>
         </div>
         <div className="table-wrap">
           <table>
@@ -415,7 +432,7 @@ export function BillingPanel({
             </section>
             <label>
               Monto pagado
-              <input type="number" min="1" value={paymentForm.monto} onChange={(event) => setPaymentForm({ ...paymentForm, monto: event.target.value })} />
+              <input type="number" min="0.01" step="0.01" max={paymentTarget.saldo} value={paymentForm.monto} onChange={(event) => setPaymentForm({ ...paymentForm, monto: event.target.value })} />
             </label>
             <label>
               Pasarela o medio
@@ -425,7 +442,7 @@ export function BillingPanel({
               Codigo transaccion opcional
               <input value={paymentForm.codigoTransaccion} onChange={(event) => setPaymentForm({ ...paymentForm, codigoTransaccion: event.target.value })} />
             </label>
-            <button>Guardar pago</button>
+            <button disabled={busy}>{busy ? 'Registrando…' : 'Guardar pago'}</button>
           </form>
         )}
       </Modal>

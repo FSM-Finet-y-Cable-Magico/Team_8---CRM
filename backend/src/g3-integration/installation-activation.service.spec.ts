@@ -6,8 +6,8 @@ function setup(existing = false) {
     idServicio: existing ? 50 : null, requestId: '11111111-1111-4111-8111-111111111111', traceId: '22222222-2222-4222-8222-222222222222',
     idOtG3: '901', codigoOtG3: 'G3-901', payloadSnapshot: {
       request_id: '11111111-1111-4111-8111-111111111111', trace_id: '22222222-2222-4222-8222-222222222222',
-      id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7, rut: '12345678-5',
-      persona: { nombre_completo: 'Persona Demo', telefono: '+56912345678' },
+      id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7,
+      persona: { rut: '12345678-5', nombre_completo: 'Persona Demo', telefono: '+56912345678' },
       direccion: { direccion_completa: 'Calle Demo 123', comuna: 'Valparaiso' },
     },
   };

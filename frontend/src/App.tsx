@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -187,6 +187,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [prospectsLoading, setProspectsLoading] = useState(true);
+  const [prospectsError, setProspectsError] = useState('');
+  const prospectsRequest = useRef(0);
   const [pendingActivationProspects, setPendingActivationProspects] = useState<Prospect[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -223,14 +226,31 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     return user.idEmpresa ?? companies[0]?.idEmpresa ?? 1;
   }, [companies, scope, user.idEmpresa]);
 
+  async function loadProspects() {
+    const request = ++prospectsRequest.current;
+    setProspectsLoading(true);
+    setProspectsError('');
+    setProspects([]);
+    try {
+      const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000 });
+      if (request === prospectsRequest.current) setProspects(data);
+    } catch {
+      if (request === prospectsRequest.current) {
+        setProspectsError('No se pudieron cargar los prospectos. Comprueba la conexión del servidor y la configuración de la base de datos.');
+      }
+    } finally {
+      if (request === prospectsRequest.current) setProspectsLoading(false);
+    }
+  }
+
   async function loadData() {
+    void loadProspects();
     setMessage('');
     const errors: string[] = [];
     const loadCustomers = canManageCustomers || permissions.installEquipment;
     const [
       summaryResult,
       companiesResult,
-      prospectsResult,
       pendingActivationProspectsResult,
       plansResult,
       customersResult,
@@ -243,7 +263,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     ] = await Promise.allSettled([
       api.get<Summary>('/companies/summary', { params: { scope } }),
       isAdmin ? api.get<Company[]>('/companies') : Promise.resolve({ data: [] as Company[] }),
-      api.get<Prospect[]>('/prospects', { params: { scope } }),
       canViewInstallations
         ? api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
         : Promise.resolve({ data: [] as Prospect[] }),
@@ -265,7 +284,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
     setSummary(summaryData);
     setCompanies(companyOptions.length > 0 ? companyOptions : summaryData?.empresas ?? []);
-    setProspects(settledData(prospectsResult, [] as Prospect[], errors));
     setPendingActivationProspects(settledData(pendingActivationProspectsResult, [] as Prospect[], errors));
     setPlans(settledData(plansResult, [] as Plan[], errors));
     setCustomers(settledData(customersResult, [] as Customer[], errors));
@@ -395,6 +413,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           {activeTab === 'prospects' && permissions.viewProspects && (
             <ProspectsPanel
               prospects={prospects}
+              loading={prospectsLoading}
+              loadError={prospectsError}
+              onReload={() => void loadProspects()}
               plans={plans}
               writeCompanyId={writeCompanyId}
               permissions={permissions}

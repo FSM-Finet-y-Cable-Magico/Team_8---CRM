@@ -8,6 +8,7 @@ import { validateRut } from '../rut/rut.util';
 import { G3ClosureProcessor } from './g3-closure.processor';
 import { RequestG3InstallationDto } from './g3-integration.dto';
 import {
+  G3ClosurePayload,
   G3InstallationPayload,
   G3IntegrationClient,
   G3IntegrationError,
@@ -112,13 +113,13 @@ export class InstallationIntegrationService {
     const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
     if (!externalId) return this.toView(tracking);
     try {
-      const response = await this.client.getWorkOrder(externalId);
+      const response = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
       const state = normalizeG3State(response.data.estado);
       const updated = await this.prisma.integracionInstalacionG3.update({
         where: { idIntegracion },
         data: {
-          estadoIntegracion: state.known && state.state !== 'COMPLETADA' ? 'ENVIADA' : 'EN_SEGUIMIENTO',
+          estadoIntegracion: this.trackingState(state.known, state.state),
           estadoOtG3: state.state,
           estadoOriginalG3: state.known ? null : state.original,
           fechaUltimaSincronizacion: new Date(),
@@ -148,17 +149,29 @@ export class InstallationIntegrationService {
     const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
     if (!externalId) throw new BadRequestException('La solicitud aun no tiene una referencia de OT G3');
     try {
-      const response = await this.client.getWorkOrderClosure(externalId);
+      const response = await this.client.getWorkOrderClosure(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
-      if (!response.data.estado) {
+      if (!response.data.id_ot || !response.data.request_id
+        || (response.data.estado && response.data.estado.trim().toUpperCase() !== 'COMPLETADA')) {
         const updated = await this.prisma.integracionInstalacionG3.update({
           where: { idIntegracion },
           data: { fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: null },
         });
         return { available: false, tracking: this.toView(updated) };
       }
+      const closure = {
+        id_ot: Number(response.data.id_ot),
+        request_id: response.data.request_id,
+        trace_id: response.data.trace_id,
+        id_empresa: response.data.id_empresa,
+        id_prospecto: response.data.id_prospecto,
+        id_contrato: response.data.id_contrato,
+        id_plan: response.data.id_plan,
+        equipos_instalados: response.data.equipos_instalados,
+        equipos_retirados: response.data.equipos_retirados,
+      };
       const result = await this.closureProcessor.process(
-        response.data as G3WorkOrderResponse & { estado: string },
+        closure as G3ClosurePayload,
         'RECONCILIACION',
         tracking.idIntegracion,
       );
@@ -230,7 +243,7 @@ export class InstallationIntegrationService {
         data: {
           idOtG3,
           codigoOtG3,
-          estadoIntegracion: state.known && state.state !== 'COMPLETADA' ? 'ENVIADA' : 'EN_SEGUIMIENTO',
+          estadoIntegracion: this.trackingState(state.known, state.state),
           estadoOtG3: state.state,
           estadoOriginalG3: state.known ? null : state.original,
           fechaUltimaSincronizacion: new Date(),
@@ -367,8 +380,14 @@ export class InstallationIntegrationService {
       ...(context.prospect ? { id_prospecto: context.prospect.idProspecto } : {}),
       id_contrato: context.contract.idContrato,
       id_plan: context.plan.idPlan,
-      rut: context.rut,
-      persona: { nombre_completo: context.name, telefono: context.phone },
+      persona: {
+        rut: context.rut,
+        nombre_completo: context.name,
+        telefono: context.phone,
+        ...(context.prospect?.email?.trim() || context.customer?.email?.trim()
+          ? { email: context.prospect?.email?.trim() || context.customer?.email?.trim() || undefined }
+          : {}),
+      },
       direccion: { direccion_completa: context.address, comuna: context.comuna },
     };
   }
@@ -412,6 +431,11 @@ export class InstallationIntegrationService {
     if (state === 'PENDIENTE_CLIENTE_AUSENTE') return 'Cliente ausente';
     if (state === 'EN_SEGUIMIENTO') return 'Instalacion en seguimiento';
     return 'Instalacion en G3';
+  }
+
+  private trackingState(known: boolean, state: string) {
+    if (!known || state === 'COMPLETADA') return 'EN_SEGUIMIENTO';
+    return 'ENVIADA';
   }
 
   private auditContext(tracking: { requestId: string; traceId: string; idEmpresa: number; idProspecto: number | null; idContrato: number; idOtG3: string | null }) {

@@ -1,0 +1,17 @@
+{
+  "category": "RAILWAY_READ_TEST",
+  "executedAt": "2026-09-29T14:59:36.185Z",
+  "mode": "Controller compiled locally, direct invocation; no AppModule, no scheduler, no deployed HTTP endpoint",
+  "configurationScope": "Provided process environment; does not inspect Railway service flags",
+  "result": {
+    "application": "UP",
+    "database": "UP",
+    "global_schema": "DEGRADED",
+    "schema_check": "TABLES_COLUMNS_TYPES_NULLABILITY",
+    "missing_columns": 429,
+    "different_columns": 26,
+    "g1_payload_snapshot": "PENDING_APPROVAL_OR_RECONCILIATION",
+    "g1_configured": false,
+    "g3_configured": false
+  }
+}

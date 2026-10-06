@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-03",
+  "environment": "Isolated Docker localhost; Facturacion.cl API PRUEBAS",
+  "payment": {
+    "idPago": 1,
+    "idFactura": 4,
+    "idContrato": 5,
+    "amount": 100,
+    "totalInvoice": 200,
+    "remainingBalance": 100
+  },
+  "tax": {
+    "state": "GENERADO",
+    "dteType": 39,
+    "environment": "sandbox",
+    "folio": "9234371045",
+    "emissionAttempts": 1,
+    "pdf": "DISPONIBLE",
+    "email": "ENVIADO",
+    "pdfPages": 1,
+    "pdfBytes": 4729,
+    "pdfTextAndVisualCheck": "folio 9234371045, Pago CRM 1 - documento de cobro 4, total 100",
+    "emailDelivery": "Observed Mailpit LOCAL inbox with one PDF attachment; no external mailbox delivery"
+  },
+  "duplicatePayment": {
+    "http": 409,
+    "secondPayment": false
+  },
+  "provider": {
+    "processingRequests": 1,
+    "productionRequests": 0,
+    "reemissionRequests": 0
+  },
+  "g3": {
+    "idProspecto": 4,
+    "idContrato": 6,
+    "idIntegracion": 1,
+    "state": "FALLIDA_REINTENTABLE",
+    "idOtG3": null,
+    "attempts": 1,
+    "requestId": "fb2f4cd0-f6e6-4f21-934a-bb06d1b6813d",
+    "traceId": "45434620-dec8-4403-b306-85f0981d604c",
+    "error": "La integracion tecnica con G3 no esta configurada.",
+    "externalPost": false,
+    "receptionVerified": false
+  },
+  "railwayChanges": 0,
+  "pullRequests": 0,
+  "secretsIncluded": false
+}

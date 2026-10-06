@@ -4,6 +4,8 @@ Fecha de cierre técnico local: 2026-09-26
 Rama: `feat/i3-g1-inventory-integration`  
 Commit base de Etapa 3: `ed0a2203`
 
+> Actualización 2026-10-01: `G8_TO_G1_REAL_RAILWAY=PASS` y `G1_RECONCILIATION_LOGIC=PASS`. El cero inicial representó correctamente `PENDIENTE_CIERRE`; G1 simuló después el cierre técnico y los GET confirmaron el equipo instalado y la asignación activa. `FULL_REAL_G3_TO_G1_CROSS_GROUP_E2E=PENDING`. Ver [el cierre vigente](i3-g1-real-integration-closure.md).
+
 ## Propósito y ownership
 
 G1 es la fuente de verdad de inventario y bodega. G8 deja de administrar unidades físicas, tipos de equipo, bodegas, movimientos, stock, transferencias, estados físicos, bajas, mantenciones, consumos y garantías físicas. El CRM conserva el lifecycle comercial, Cliente, ServicioContratado, Contrato, Plan, garantías comerciales y las referencias externas necesarias para integrar los dominios.
@@ -20,15 +22,15 @@ La Etapa 0 identificó 33 sitios de escritura física en 16 métodos y 13 endpoi
 
 ## Contratos y evidencia de disponibilidad
 
-Los acuerdos aportados describen contratos HTTP, pero el código G1 entregado solo demuestra la consulta básica de una unidad y el cierre G3→G1. La feature flag queda desactivada por defecto y no se hicieron llamadas a G1 real ni a Railway.
+Los acuerdos aportados describen contratos HTTP, pero el código G1 entregado solo demuestra la consulta básica de una unidad y el cierre G3→G1. La feature flag queda desactivada por defecto. Los smokes reales comunicados se ejecutaron manualmente con autorización; Codex no realizó llamadas a G1 ni modificó Railway.
 
 | Contrato G1 | ACORDADO | IMPLEMENTADO_G1 demostrado | DESPLEGADO_G1 demostrado | Estado usado por G8 |
 |---|---:|---:|---:|---|
-| Autenticación S2S `X-API-KEY` | Sí | G1 confirmó receptor configurado el 2026-09-28 | Pendiente smoke test desde G8 | `RECEPTOR_API_KEY_G1_CONFIRMADO` |
-| `GET /api/integraciones/tipos-equipo` | Sí | No | No | `PENDIENTE_DESPLIEGUE_G1` |
-| `GET /api/integraciones/unidades/{numeroSerie}` | Sí | Parcial: respuesta base | No se demostró el contrato ampliado | Adapter listo; ampliación `PENDIENTE_DESPLIEGUE_G1` |
-| `POST /api/integraciones/activaciones` | Sí | No | No | Tracking y retry listos; `PENDIENTE_DESPLIEGUE_G1` |
-| `GET /api/integraciones/equipos?id_empresa=&id_servicio=` | Sí, P1 | No | No | `PENDIENTE_DESPLIEGUE_G1`; sin fallback local |
+| Autenticación S2S `X-API-KEY` | Sí | Sí | Sí, smoke real empresa 1 | `PASS_REAL` |
+| `GET /api/integraciones/tipos-equipo` | Sí | Sí | Sí, catálogo real | `PASS_REAL` |
+| `GET /api/integraciones/unidades/{numeroSerie}` | Sí | Sí | Sí, unidad real del mismo scope | `PASS_REAL` |
+| `POST /api/integraciones/activaciones` | Sí | Sí | HTTP, idempotencia y semántica pendiente confirmados | `PASS`; conciliación posterior confirmada tras cierre simulado por G1 |
+| `GET /api/integraciones/equipos?id_empresa=&id_servicio=` | Sí, P1 | Sí | Vacío antes del cierre; equipo instalado después del cierre simulado por G1 | `PASS_REAL`; sin fallback local |
 | `POST /api/integraciones/ordenes/{idOt}/cierre` | Sí | Sí, en G1 aportado | No probado en esta etapa | No se llama desde G8; corresponde a G3→G1 |
 | Lectura de consumo/stock suficiente para CU-61 | No | No | No | `PARCIAL_BLOQUEADO_G1_P2` |
 | Semántica multiunidad de `event_id` | Sí: cabecera única con `equipos[]` | Adapter y tracking G8 actualizados | Pendiente smoke test | `LISTO_PARA_VALIDACION_G1` |
@@ -47,13 +49,13 @@ Los acuerdos aportados describen contratos HTTP, pero el código G1 entregado so
 Los servicios, controladores y frontend consumen las APIs G8; no llaman a G1 directamente. La autenticación `X-API-KEY` se agrega únicamente en backend. Configuración en `backend/.env.example`:
 
 ```dotenv
-G1_API_URL=
+G1_API_URL=https://backend-production-6ada.up.railway.app
 G1_API_KEY=
 G1_REQUEST_TIMEOUT_MS=8000
 G1_INTEGRATION_ENABLED=false
 ```
 
-G1 confirmó el 2026-09-28 que su receptor está configurado para validar la clave compartida enviada en `X-API-KEY`. Esta confirmación acredita preparación de autenticación, no una prueba de conectividad ni el despliegue de todos los endpoints. La feature flag permanece en `false` hasta recibir `G1_API_URL`, intercambiar `G1_API_KEY` por un canal seguro y aprobar un smoke test P0/P1. La clave no se incluye en Git, frontend, logs ni documentación.
+G1 confirmó y los smokes manuales demostraron la clave compartida literal en `X-API-KEY`. La feature flag permanece en `false` hasta ejecutar el E2E con un cierre originado por G3 real y revisar el deploy definitivo. La clave no se incluye en Git, frontend, logs ni documentación.
 
 La URL publica entregada por G1 se configura como `G1_API_URL`: en `backend/.env` si NestJS se ejecuta directamente, en `.env` para Docker local o en `.env.railway` para el stack local conectado a la base Railway. En un backend desplegado directamente en Railway, las cuatro variables G1 se configuran en la pestana Variables del servicio backend. Los contratos actuales son salientes desde G8 hacia G1 y no requieren entregar a G1 una URL G8. Si se acuerda un callback futuro, debe definirse primero su ruta, autenticacion e idempotencia.
 
@@ -109,7 +111,8 @@ El `event_id` es estable: `g8-g1-activation-{requestIdG3}`. Cada retry reutiliza
 Estados principales del tracking:
 
 - `PENDIENTE_ENVIO` y `ENVIANDO`;
-- `COMPLETADA` para respuesta 2xx, incluida respuesta duplicada idempotente;
+- `COMPLETADA` únicamente cuando la respuesta 2xx confirma `equipos_asociados` igual a la cantidad de series solicitadas, incluida una respuesta duplicada idempotente que confirme esa asociación;
+- `PENDIENTE_SINCRONIZACION_G1` cuando G1 acepta el evento pero devuelve `equipos_asociados=0` durante `PENDIENTE_CIERRE`, o cuando la asociación no puede confirmarse todavía;
 - `PENDIENTE_SINCRONIZACION_G1` para timeout o indisponibilidad reintentable;
 - `ERROR_G1` para rechazo no reintentable;
 - `PENDIENTE_DATOS_EQUIPO_G1` cuando G3 no entregó serie;
@@ -190,10 +193,10 @@ Las suites verifican cliente G1, filtros y autenticación; todos los códigos de
 
 ## Pendientes externos
 
-1. Recibir `G1_API_URL` y la clave compartida por un canal seguro, sin incorporarlas al repositorio.
-2. Ejecutar smoke test autenticado de tipos, unidad, activación multiunidad y equipos por servicio.
-3. Confirmar despliegue G1 de tipos de equipo, activación y equipos por servicio.
-4. Verificar la respuesta ampliada por serie.
+1. Ejecutar el E2E coordinado con un cierre originado por G3 real; el cierre usado en el smoke aprobado fue simulado por G1.
+2. No ejecutar más POST reales en esta etapa ni reutilizar el evento `smoke-g8-8f9f25a04a404a8f9ed5ff3a16f68bf0` con un payload distinto.
+3. Mantener `G1_INTEGRATION_ENABLED=false` hasta aprobar el E2E real G3 → G1 y la revisión operativa de deploy.
+4. Conservar `G8_INTEGRATION_API_KEYS=[]`; G1 no consume operaciones G8 actualmente.
 5. Obtener contrato G1 P2 para consumos/materiales de CU-61.
 6. Obtener contrato G3 para poste/NAP de CU-18.
 7. Coordinar el retiro de schema y servicios físicos legacy después de migrar todos los lectores históricos.

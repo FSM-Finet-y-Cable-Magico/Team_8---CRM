@@ -1,0 +1,111 @@
+name: finet-facturacion-local
+
+# Local QA only. The database is a separate volume; no Railway connection.
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fsm_facturacion_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FACTURACION_LOCAL_DB_PASSWORD:?Use .env.facturacion-local}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - facturacion_data:/var/lib/postgresql/data
+      - ./db/global/init-global.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/init/03_seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+      - ./db/init/04_seed_demo.sql:/docker-entrypoint-initdb.d/03-demo.sql:ro
+      - ./db/init/05_seed_cable_magico.sql:/docker-entrypoint-initdb.d/04-cable-magico.sql:ro
+      - ./db/init/06_seed_incremento2.sql:/docker-entrypoint-initdb.d/05-billing.sql:ro
+      - ./db/init/07_seed_portal_monitoring_tvip.sql:/docker-entrypoint-initdb.d/06-monitoring.sql:ro
+      - ./db/init/08_seed_reunion_duenos_servicios_contratos.sql:/docker-entrypoint-initdb.d/07-services.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fsm_facturacion_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:${FACTURACION_LOCAL_DB_PASSWORD}@db:5432/fsm_facturacion_local?schema=public
+      JWT_SECRET: ${FACTURACION_LOCAL_JWT_SECRET:?Use .env.facturacion-local}
+      JWT_EXPIRES_IN: 8h
+      PORT: 3000
+      FRONTEND_URL: http://localhost:5173
+      G1_INTEGRATION_ENABLED: "false"
+      G3_API_URL: ${G3_API_URL:-}
+      G3_API_KEY: ${G3_API_KEY:-}
+      G3_INTEGRATION_ENABLED: ${G3_INTEGRATION_ENABLED:-false}
+      G3_REQUEST_TIMEOUT_MS: 8000
+      G8_INTEGRATION_API_KEYS: ${G8_INTEGRATION_API_KEYS:-[]}
+      FACTURACION_CL_INTEGRATION_ENABLED: ${FACTURACION_CL_INTEGRATION_ENABLED:-false}
+      FACTURACION_CL_COMPANIES: ${FACTURACION_CL_COMPANIES:-[]}
+      FACTURACION_CL_PROFILES: ${FACTURACION_CL_PROFILES:-[]}
+      FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS: ${FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS:-}
+      FACTURACION_CL_FINET_SANDBOX_CREDENTIALS: ${FACTURACION_CL_FINET_SANDBOX_CREDENTIALS:-}
+      FACTURACION_CL_DELIVERY_ENABLED: ${FACTURACION_CL_DELIVERY_ENABLED:-false}
+      BILLING_NOTIFICATION_MODE: ${BILLING_NOTIFICATION_MODE:-mock}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-disabled}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-}
+      WHATSAPP_COMPANIES: ${WHATSAPP_COMPANIES:-[]}
+      WHATSAPP_FINET_ACCESS_TOKEN: ${WHATSAPP_FINET_ACCESS_TOKEN:-}
+      WHATSAPP_FINET_APP_SECRET: ${WHATSAPP_FINET_APP_SECRET:-}
+      WHATSAPP_FINET_VERIFY_TOKEN: ${WHATSAPP_FINET_VERIFY_TOKEN:-}
+      WHATSAPP_CABLE_MAGICO_ACCESS_TOKEN: ${WHATSAPP_CABLE_MAGICO_ACCESS_TOKEN:-}
+      WHATSAPP_CABLE_MAGICO_APP_SECRET: ${WHATSAPP_CABLE_MAGICO_APP_SECRET:-}
+      WHATSAPP_CABLE_MAGICO_VERIFY_TOKEN: ${WHATSAPP_CABLE_MAGICO_VERIFY_TOKEN:-}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-CRM FiNet}
+      SMTP_HELO: ${SMTP_HELO:-crm-finet.local}
+      SMTP_TIMEOUT_MS: ${SMTP_TIMEOUT_MS:-15000}
+      SMTP_REJECT_UNAUTHORIZED: "true"
+      SMTP_ALLOW_INSECURE_LOCAL: ${SMTP_ALLOW_INSECURE_LOCAL:-false}
+      SMTP_TLS_SERVERNAME: ${SMTP_TLS_SERVERNAME:-}
+      SMTP_TLS_CA: ${SMTP_TLS_CA:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npx prisma generate && npm run start:dev"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: /api
+      API_PROXY_TARGET: http://backend:3000
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+
+  # Optional local inbox. SMTP is internal to this Docker network; no external relay.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: [mail-qa]
+    ports:
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  facturacion_data:

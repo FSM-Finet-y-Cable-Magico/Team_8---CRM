@@ -72,7 +72,9 @@ describe('CommercialControlBookService', () => {
   it('aplica alcance multiempresa y rechaza orden arbitrario', async () => {
     const { service, prisma } = harness();
     await service.list({ page: 1, pageSize: 30, idEmpresa: 1 }, commercial);
-    expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ contrato: { is: { idEmpresa: 1 } } }) }));
+    expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } },
+    }) }));
     await expect(service.list({ page: 1, pageSize: 30, sort: 'DROP TABLE' } as never, commercial)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.list({ page: 1, pageSize: 30 }, { ...support, roles: ['Terreno'] })).rejects.toBeInstanceOf(ForbiddenException);
   });
@@ -81,7 +83,7 @@ describe('CommercialControlBookService', () => {
     const ownCompany = harness();
     await ownCompany.service.list({ page: 1, pageSize: 30 }, admin);
     expect(ownCompany.prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1 } } }),
+      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } } }),
     }));
     await expect(harness().service.list(
       { page: 1, pageSize: 30 },
@@ -231,7 +233,10 @@ describe('CommercialControlBookService - reglas complementarias', () => {
     expect(result).toMatchObject({ diasAnticipacion: 7, count: 2 });
     expect(result.items.map((item) => item.diasRestantes)).toEqual(expect.arrayContaining([3, -2]));
     expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1 } }, fechaLimitePago: expect.objectContaining({ lte: expect.any(Date) }) }),
+      where: expect.objectContaining({
+        contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } },
+        fechaLimitePago: expect.objectContaining({ lte: expect.any(Date) }),
+      }),
     }));
     await expect(service.expiringPlans(7, 2, commercial)).rejects.toBeInstanceOf(ForbiddenException);
 
