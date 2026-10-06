@@ -1,10 +1,12 @@
 # Integración y depuración de ramas — 2026-10-06
 
-## Resultado preparado
+## Resultado publicado
 
 La integración parte de `develop` (`a3d90c4b2564`) y conserva el rediseño UX/UI aprobado (`af51cae02809`). Incluye el cierre global I3 y Facturacion.cl del estado final de `feat/i3-facturacion-cl` (`5fd580a0c852`), que ya contiene `feature/incremento3` (`1af19cc96e78`).
 
 Facturación se incorporó mediante un commit nuevo sobre `develop`, sin trasladar los 14 commits exclusivos de la rama original. No se mezclan cambios antiguos que puedan revertir el flujo actual de clientes, prospectos o permisos.
+
+La integración se publicó en `develop` mediante la conexión Git del proyecto, después de completar las validaciones. Se retiraron once ramas remotas incorporadas, la rama temporal de integración y quince ramas locales integradas. Quedan cinco ramas remotas y cuatro locales; la copia local actual es `develop` y está sincronizada con GitHub.
 
 ## Clave de localhost
 
@@ -19,7 +21,7 @@ Se encontró una clave privada PEM en `backend/src/mail/fixtures/localhost-test-
 
 El commit original con la clave no es ancestro de la integración nueva. Eliminar una rama no garantiza la purga física de objetos o cachés antiguos en GitHub; esta operación sanea la nueva línea de desarrollo y retira la referencia de facturación una vez incorporado su código.
 
-## Ramas remotas que se pueden retirar
+## Ramas remotas retiradas
 
 | Rama | Revisión previa | Motivo |
 | --- | --- | --- |
@@ -35,7 +37,7 @@ El commit original con la clave no es ancestro de la integración nueva. Elimina
 | `feature/incremento3` | `1af19cc96e78` | Contenida en el estado de facturación incorporado |
 | `feat/i3-facturacion-cl` | `5fd580a0c852` | Código incorporado con saneamiento de las pruebas TLS |
 
-La rama temporal `codex/integracion-i3-depuracion` también se retira una vez integrada. Las eliminaciones se condicionan a que las referencias sigan apuntando a las revisiones auditadas.
+La rama temporal `codex/integracion-i3-depuracion` también se retiró después de integrarla. La eliminación remota fue atómica y verificó las revisiones auditadas mediante leases; `main`, `develop` y las tres ramas con commits propios quedaron fuera de la operación.
 
 ## Ramas que se conservan
 
@@ -47,7 +49,7 @@ La rama temporal `codex/integracion-i3-depuracion` también se retira una vez in
 | `fix/crm-activation-flow` | `0dad19d7eb20` | 1 commit; cambios de pruebas de activación y lockfile del portal |
 | `fix/operational-endpoints-pre-commercial` | `f87764f1b2a4` | 1 commit; direcciones de servicios, estado de instalación y vista de clientes |
 
-La copia local `feat/role-permission-matrix` (`0f2c8f3c3120`) también se conserva: tiene un commit propio aunque su rama remota ya había sido eliminada. Se retiran solamente las demás ramas locales que sean ancestros de la integración final.
+La copia local `feat/role-permission-matrix` (`0f2c8f3c3120`) también se conserva: tiene un commit propio aunque su rama remota ya había sido eliminada. Se retiraron solamente las demás ramas locales que eran ancestros de la integración final.
 
 ## Validación
 
