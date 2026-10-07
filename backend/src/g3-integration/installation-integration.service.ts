@@ -40,7 +40,7 @@ export class InstallationIntegrationService {
   async requestInstallation(dto: RequestG3InstallationDto, currentUser: AuthUser) {
     const context = await this.resolveContext(dto, currentUser);
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(
         CAST(${G3_INSTALLATION_LOCK_NAMESPACE} AS integer),
         CAST(${context.contract.idContrato} AS integer)
       )`;

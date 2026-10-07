@@ -46,7 +46,7 @@ function setup() {
       let release: (() => void) | undefined;
       const transaction = {
         ...tx,
-        $queryRaw: async (strings: TemplateStringsArray, namespace: number, idContrato: number) => {
+        $executeRaw: async (strings: TemplateStringsArray, namespace: number, idContrato: number) => {
           advisoryLock(strings, namespace, idContrato);
           const key = `${namespace}:${idContrato}`;
           const previous = lockTails.get(key) ?? Promise.resolve();
@@ -55,7 +55,7 @@ function setup() {
           lockTails.set(key, previous.then(() => current));
           await previous;
           release = unlock;
-          return [{ pg_advisory_xact_lock: null }];
+          return 1;
         },
       };
       try {
