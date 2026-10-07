@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { parseGlobalSchema, normalizeType, normalizeExpression, normalizeCheckExpression, ownerOf } from './global-schema.mjs';
+import { parseGlobalSchema, normalizeType, normalizeExpression, normalizeCheckExpression, normalizeIndexDefinition, ownerOf } from './global-schema.mjs';
 
 export async function readCatalog(prisma) {
   return prisma.$transaction(async tx => {
@@ -40,15 +40,25 @@ export async function readCatalog(prisma) {
 }
 const actions = { a:'NO ACTION', r:'RESTRICT', c:'CASCADE', n:'SET NULL', d:'SET DEFAULT' };
 const same = (a,b) => JSON.stringify(a)===JSON.stringify(b);
+const PRESERVED_LEGACY_EXTRAS = new Set([
+  'TABLE:solicitud_clave_wifi:solicitud_clave_wifi',
+  'COLUMN:lista_negra:nivel',
+  'COLUMN:log_notificacion:id_ot',
+  'CONSTRAINT:log_notificacion:log_notificacion_id_ot_fkey',
+  'INDEX:log_notificacion:log_notificacion_estado_envio_fecha_envio_idx',
+]);
 export const classifyDifference = row => {
   if (row.status === 'MATCH') return null;
   if (row.status === 'EXTRA_LEGACY' && row.kind === 'TABLE' && row.table === '_prisma_migrations') {
     return 'TECHNICAL_ALLOWED_EXTRA';
   }
+  if (row.status === 'EXTRA_LEGACY' && PRESERVED_LEGACY_EXTRAS.has(`${row.kind}:${row.table}:${row.name}`)) {
+    return 'PRESERVED_LEGACY_EXTRA';
+  }
   if (row.status === 'EXTRA_LEGACY') return 'UNOWNED_EXTRA';
   return 'CONTRACT_DIFFERENCE';
 };
-export const isAllowedDifference = row => classifyDifference(row)==='TECHNICAL_ALLOWED_EXTRA';
+export const isAllowedDifference = row => ['TECHNICAL_ALLOWED_EXTRA','PRESERVED_LEGACY_EXTRA'].includes(classifyDifference(row));
 function sameDefault(expected, observed, columnType) {
   const clean = value => {
     let result = normalizeExpression(value);
@@ -58,6 +68,13 @@ function sameDefault(expected, observed, columnType) {
     return result;
   };
   return clean(expected) === clean(observed);
+}
+function expressionOptions(table) {
+  return {
+    textColumns: new Set(table.columns
+      .filter(column => /^(?:varchar|char)(?:\(|$)|^text$/.test(column.type))
+      .map(column => column.name)),
+  };
 }
 export function compareCatalog(global, actual) {
   const rows = []; const add=(kind,table,name,status,expected,observed,action) => rows.push({kind,table,name,owner:ownerOf(table),status,expected,observed,action:action ?? (status==='MATCH'?'Ninguna':'Revisar y reconciliar antes de baseline')});
@@ -78,8 +95,8 @@ export function compareCatalog(global, actual) {
     }
     const pk=actual.constraints.find(c=>c.table===table.name&&c.kind==='p');
     add('PK',table.name,`${table.name}_pkey`,same(pk?.columns,table.pk)?'MATCH':'REQUIRES_REVIEW',table.pk,pk?.columns??null);
-    for(const c of table.checks){ const a=actual.constraints.find(x=>x.table===table.name&&x.name===c.name&&x.kind==='c');
-      add('CHECK',table.name,c.name,a&&a.validated&&normalizeCheckExpression(a.definition)===normalizeCheckExpression(c.definition)?'MATCH':'REQUIRES_REVIEW',c.definition,a?.definition??null);
+    for(const c of table.checks){ const a=actual.constraints.find(x=>x.table===table.name&&x.name===c.name&&x.kind==='c'); const options=expressionOptions(table);
+      add('CHECK',table.name,c.name,a&&a.validated&&normalizeCheckExpression(a.definition,options)===normalizeCheckExpression(c.definition,options)?'MATCH':'REQUIRES_REVIEW',c.definition,a?.definition??null);
     }
   }
   for(const fk of global.fks){
@@ -91,7 +108,8 @@ export function compareCatalog(global, actual) {
   for(const index of global.indexes){
     const a=actual.indexes.find(i=>i.table===index.table&&i.name===index.name);
     const def=a?.definition.replace(/^CREATE (?:UNIQUE )?INDEX \S+ ON (?:public\.)?\S+ (?:USING btree )?/,'');
-    add('INDEX',index.table,index.name,!a?'MISSING_INDEX':a.unique===index.unique&&a.valid&&a.ready&&normalizeExpression(def)===normalizeExpression(index.definition)?'MATCH':'INDEX_MISMATCH',index.definition,def??null);
+    const options=expressionOptions(global.tables.find(table=>table.name===index.table));
+    add('INDEX',index.table,index.name,!a?'MISSING_INDEX':a.unique===index.unique&&a.valid&&a.ready&&same(normalizeIndexDefinition(def,options),normalizeIndexDefinition(index.definition,options))?'MATCH':'INDEX_MISMATCH',index.definition,def??null);
   }
   for(const table of global.tables) for(const col of table.columns.filter(c=>c.serial)) {
     const name=`${table.name}_${col.name}_seq`; const a=actual.sequences.find(s=>s.name===name);
@@ -109,6 +127,7 @@ export function compareCatalog(global, actual) {
     const classification=classifyDifference(row);
     if (classification) row.classification=classification;
     if (classification==='TECHNICAL_ALLOWED_EXTRA') row.owner='Prisma';
+    if (classification==='PRESERVED_LEGACY_EXTRA') row.owner='LEGACY_PRESERVED';
     if (classification==='UNOWNED_EXTRA') row.owner='UNDETERMINED';
   }
   const summary=rows.reduce((r,x)=>{r[x.status]=(r[x.status]??0)+1;return r;},{});

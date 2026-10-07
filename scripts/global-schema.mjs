@@ -66,35 +66,104 @@ function splitBoolean(value, operator) {
   parts.push(value.slice(start)); return parts;
 }
 
-function checkAst(value) {
+const SQL_STRING = String.raw`'(?:''|[^'])*'`;
+const NUMERIC_LITERAL = String.raw`[-+]?\d+(?:\.\d+)?`;
+const SAFE_LITERAL = String.raw`(?:${SQL_STRING}|${NUMERIC_LITERAL})`;
+const SAFE_LITERAL_LIST = String.raw`${SAFE_LITERAL}(?:,${SAFE_LITERAL})*`;
+const TEXT_CAST = String.raw`(?:::(?:text|charactervarying|varchar))+`;
+const SIMPLE_ATOM = String.raw`(?:[a-z_][a-z0-9_]*|${SAFE_LITERAL})`;
+const REPRESENTATION_CAST = String.raw`(?:::[a-z][a-z0-9_]*(?:\[\])?)+`;
+
+function mapOutsideSqlStrings(value, transform) {
+  return value.split(/('(?:''|[^'])*')/).map((part, index) => index % 2 ? part : transform(part)).join('');
+}
+
+function normalizeSafeRepresentationCasts(value, textColumns) {
+  // Parentheses around one atom immediately followed by another cast cannot
+  // change evaluation. Preserve every cast while removing that formatting.
+  let result = value.replace(new RegExp(`\\((${SIMPLE_ATOM}${REPRESENTATION_CAST})\\)(?=::)`, 'gi'), '$1');
+  result = result.replace(new RegExp(`\\((${SIMPLE_ATOM})\\)(?=::)`, 'gi'), '$1');
+  // Only direct string literals lose textual representation casts. Casts on
+  // functions or compound expressions remain intact and therefore comparable.
+  result = result.replace(new RegExp(`\\((${SQL_STRING})\\)${TEXT_CAST}`, 'gi'), '$1');
+  result = result.replace(new RegExp(`(${SQL_STRING})${TEXT_CAST}`, 'gi'), '$1');
+  const safeTextColumn = column => textColumns == null || textColumns.has(column.toLowerCase());
+  result = mapOutsideSqlStrings(result, part => part
+    // PostgreSQL adds these casts to textual columns whose types are validated
+    // by compareCatalog. With an explicit type context, other columns retain it.
+    .replace(new RegExp(`\\(([a-z_][a-z0-9_]*)\\)${TEXT_CAST}`, 'gi'), (match, column) => safeTextColumn(column) ? column : match)
+    .replace(new RegExp(`(?<![a-z0-9_:])([a-z_][a-z0-9_]*)${TEXT_CAST}`, 'gi'), (match, column) => safeTextColumn(column) ? column : match)
+    // A numeric cast is discarded only for a numeric literal, never for a
+    // column, function result or arithmetic expression.
+    .replace(new RegExp(`\\((${NUMERIC_LITERAL})\\)::numeric`, 'gi'), '$1')
+    .replace(new RegExp(`(?<![a-z0-9_.])(${NUMERIC_LITERAL})::numeric`, 'gi'), '$1'));
+
+  // Array casts are removed only from arrays made exclusively of literals.
+  // Values, order and cardinality remain part of the normalized expression.
+  const arrayCast = String.raw`::(?:text|charactervarying|varchar)\[\]`;
+  result = result.replace(new RegExp(`\\((array\\[${SAFE_LITERAL_LIST}\\])\\)${arrayCast}`, 'gi'), '$1');
+  result = result.replace(new RegExp(`(array\\[${SAFE_LITERAL_LIST}\\])${arrayCast}`, 'gi'), '$1');
+  result = result.replace(new RegExp(`any\\(\\((array\\[${SAFE_LITERAL_LIST}\\])\\)\\)`, 'gi'), 'any($1)');
+  return result;
+}
+
+function normalizeLiteralMembership(value) {
+  const membership = new RegExp(`(?<![a-z0-9_])([a-z_][a-z0-9_]*)in\\((${SAFE_LITERAL_LIST})\\)`, 'gi');
+  return value.replace(membership, (match, column, literals) => {
+    // Do not reinterpret NOT IN after whitespace has been removed.
+    if (column.toLowerCase().endsWith('not')) return match;
+    return `${column}=any(array[${literals}])`;
+  });
+}
+
+function checkAst(value, options = {}) {
   const expression = stripOuterParentheses(value.trim());
   const or = splitBoolean(expression, 'or');
-  if (or) return ['or', ...or.map(checkAst)];
+  if (or) return ['or', ...or.map(part => checkAst(part, options))];
   const and = splitBoolean(expression, 'and');
-  if (and) return ['and', ...and.map(checkAst)];
+  if (and) return ['and', ...and.map(part => checkAst(part, options))];
   let predicate = normalizeExpression(expression);
-  // Only unwrap atoms that PostgreSQL parenthesizes before a cast. Keeping all
-  // other parentheses preserves arithmetic, function and operator precedence.
-  const atom = String.raw`(?:[a-z_][a-z0-9_]*|[-+]?\d+(?:\.\d+)?|'(?:''|[^'])*')`;
-  const cast = String.raw`(?:::[a-z][a-z0-9]*(?:\[\])?)+`;
-  const atomicCast = new RegExp(`\\((${atom}${cast}?)\\)(?=::)`, 'gi');
-  predicate = predicate.replace(atomicCast, '$1');
-  predicate = predicate.replace(new RegExp(`\\((${atom})\\)(?=::)`, 'gi'), '$1');
-  // PostgreSQL renders varchar arrays either with an array-level ::text[] cast or
-  // per-element ::text casts. VARCHAR and TEXT are equivalent here because the
-  // compared column type is verified separately by compareCatalog.
-  predicate = predicate.replace(/::charactervarying/g, '').replace(/::text\[\]/g, '').replace(/::text/g, '');
-  // After removing the equivalent array cast, an extra wrapper can remain as the
-  // sole ANY argument. This rule is deliberately restricted to ARRAY literals.
-  predicate = predicate.replace(/any\(\((array\[[^\]]*\])\)\)/g, 'any($1)');
+  predicate = normalizeSafeRepresentationCasts(predicate, options.textColumns);
+  predicate = normalizeLiteralMembership(predicate);
   return ['predicate', predicate];
 }
 
-export function normalizeCheckExpression(value) {
+export function normalizePredicateExpression(value, options) {
+  if (value == null) return null;
+  return JSON.stringify(checkAst(value, options));
+}
+
+export function normalizeCheckExpression(value, options) {
   if (value == null) return null;
   const match = /^check\s*\(([\s\S]*)\)$/i.exec(value.trim());
   if (!match) return null;
-  return JSON.stringify(checkAst(match[1]));
+  return normalizePredicateExpression(match[1], options);
+}
+
+function splitIndexPredicate(value) {
+  let depth = 0; let quote = false;
+  const lower = value.toLowerCase();
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === "'") { if (quote && value[i + 1] === "'") { i++; continue; } quote = !quote; continue; }
+    if (quote) continue;
+    if (ch === '(' || ch === '[') depth++;
+    if (ch === ')' || ch === ']') depth--;
+    if (depth !== 0 || lower.slice(i, i + 5) !== 'where') continue;
+    const before = lower[i - 1], after = lower[i + 5];
+    if ((before && /[a-z0-9_]/.test(before)) || (after && /[a-z0-9_]/.test(after))) continue;
+    return { indexed: value.slice(0, i).trim(), predicate: value.slice(i + 5).trim() };
+  }
+  return { indexed: value.trim(), predicate: null };
+}
+
+export function normalizeIndexDefinition(value, options) {
+  if (value == null) return null;
+  const { indexed, predicate } = splitIndexPredicate(value);
+  return {
+    indexed: normalizeExpression(indexed),
+    predicate: predicate == null ? null : normalizePredicateExpression(predicate, options),
+  };
 }
 export function ownerOf(table) {
   if (table === 'solicitud_instalacion_integracion') return 'G3';
