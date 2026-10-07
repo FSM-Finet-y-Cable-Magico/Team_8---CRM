@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { G3IntegrationError } from './g3-integration.types';
 import { InstallationIntegrationService } from './installation-integration.service';
 
@@ -17,7 +17,7 @@ function setup() {
     },
   };
   const integration = {
-    findFirst: jest.fn().mockResolvedValue(null),
+    findFirst: jest.fn().mockImplementation(() => Promise.resolve(stored)),
     findUnique: jest.fn().mockImplementation(() => Promise.resolve(stored)),
     create: jest.fn().mockImplementation(({ data }) => {
       stored = {
@@ -34,13 +34,36 @@ function setup() {
     }),
   };
   const tx = { integracionInstalacionG3: integration, prospecto: { update: jest.fn().mockResolvedValue({}) } };
+  const advisoryLock = jest.fn();
+  const lockTails = new Map<string, Promise<void>>();
   const prisma = {
     contrato: { findFirst: jest.fn().mockResolvedValue(contract), findUnique: jest.fn().mockResolvedValue(contract) },
     servicioContratado: { findUnique: jest.fn().mockResolvedValue(null) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
     prospecto: { findUnique: jest.fn().mockResolvedValue(contract.prospecto), update: jest.fn().mockResolvedValue({}) },
     integracionInstalacionG3: integration,
-    $transaction: jest.fn().mockImplementation((callback) => callback(tx)),
+    $transaction: jest.fn().mockImplementation(async (callback) => {
+      let release: (() => void) | undefined;
+      const transaction = {
+        ...tx,
+        $queryRaw: async (strings: TemplateStringsArray, namespace: number, idContrato: number) => {
+          advisoryLock(strings, namespace, idContrato);
+          const key = `${namespace}:${idContrato}`;
+          const previous = lockTails.get(key) ?? Promise.resolve();
+          let unlock!: () => void;
+          const current = new Promise<void>((resolve) => { unlock = resolve; });
+          lockTails.set(key, previous.then(() => current));
+          await previous;
+          release = unlock;
+          return [{ pg_advisory_xact_lock: null }];
+        },
+      };
+      try {
+        return await callback(transaction);
+      } finally {
+        release?.();
+      }
+    }),
     ordenTrabajo: { create: jest.fn() },
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -54,13 +77,29 @@ function setup() {
     getWorkOrder: jest.fn(), getWorkOrderClosure: jest.fn(),
   };
   const service = new InstallationIntegrationService(prisma as never, audit as never, closure as never, client as never);
-  return { service, prisma, audit, closure, client, contract, getStored: () => stored, setStored: (value: any) => { stored = value; } };
+  return { service, prisma, audit, closure, client, contract, advisoryLock, getStored: () => stored, setStored: (value: any) => { stored = value; } };
 }
 
 describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   it('1. instalacion valida invoca POST G3 mediante el adapter', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
     expect(client.createInstallation).toHaveBeenCalledTimes(1);
+  });
+  it('1b. dos solicitudes concurrentes del mismo contrato crean y envian una sola integracion', async () => {
+    const context = setup();
+    const [first, second]: any[] = await Promise.all([
+      context.service.requestInstallation({ idContrato: 20 }, user),
+      context.service.requestInstallation({ idContrato: 20 }, user),
+    ]);
+    expect(context.prisma.integracionInstalacionG3.create).toHaveBeenCalledTimes(1);
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    expect(first.idIntegracion).toBe(second.idIntegracion);
+    expect(first.requestId).toBe(second.requestId);
+    expect(context.advisoryLock).toHaveBeenCalledTimes(2);
+    expect(context.advisoryLock.mock.calls.map((call) => call.slice(1))).toEqual([
+      [20260926, 20],
+      [20260926, 20],
+    ]);
   });
   it('2. el payload contiene RUT canonico', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
@@ -82,6 +121,10 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   it('6. el payload contiene comuna', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
     expect(client.createInstallation.mock.calls[0][0].direccion.comuna).toBe('Valparaiso');
+  });
+  it('6b. el payload siempre contiene id_prospecto', async () => {
+    const { service, client } = setup(); await service.requestInstallation({ idContrato: 20 }, user);
+    expect(client.createInstallation.mock.calls[0][0].id_prospecto).toBe(10);
   });
   it('7. request_id es UUID', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
@@ -105,9 +148,11 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   });
   it('11. solicitud repetida devuelve tracking sin duplicarlo', async () => {
     const context = setup(); const first: any = await context.service.requestInstallation({ idProspecto: 10 }, user);
-    context.prisma.integracionInstalacionG3.findFirst.mockResolvedValue(context.getStored());
-    await context.service.requestInstallation({ idProspecto: 10 }, user);
-    expect(context.prisma.integracionInstalacionG3.create).toHaveBeenCalledTimes(1); expect(first.requestId).toBe(context.getStored().requestId);
+    const second: any = await context.service.requestInstallation({ idProspecto: 10 }, user);
+    expect(context.prisma.integracionInstalacionG3.create).toHaveBeenCalledTimes(1);
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    expect(second.idIntegracion).toBe(first.idIntegracion);
+    expect(second.requestId).toBe(first.requestId);
   });
   it('12. HTTP 409 se registra como conflicto definitivo', async () => {
     const { service, client } = setup(); client.createInstallation.mockRejectedValue(new G3IntegrationError('G3_REQUEST_ID_CONFLICTO', 409, false, 'Conflicto'));
@@ -133,6 +178,51 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   it('17. referencias de empresa cruzada son rechazadas', async () => {
     const { service, contract } = setup(); contract.plan.idEmpresa = 2;
     await expect(service.requestInstallation({ idProspecto: 10 }, user)).rejects.toBeInstanceOf(BadRequestException);
+  });
+  it('17b. conserva una empresa 2 coherente en tracking y payload', async () => {
+    const context = setup();
+    context.contract.idEmpresa = 2;
+    context.contract.plan.idEmpresa = 2;
+    context.contract.prospecto.idEmpresa = 2;
+    context.client.createInstallation.mockResolvedValue({
+      status: 201, durationMs: 12,
+      data: { id_ot: 902, codigo_ot: 'G3-902', estado: 'PENDIENTE', id_empresa: 2 },
+    });
+    await context.service.requestInstallation({ idContrato: 20 }, { ...user, idEmpresa: 2 });
+    expect(context.client.createInstallation.mock.calls[0][0]).toMatchObject({ id_empresa: 2, id_prospecto: 10 });
+    expect(context.getStored()).toMatchObject({ idEmpresa: 2, idProspecto: 10 });
+  });
+  it('17c. rechaza idContrato sin prospecto antes de crear tracking o llamar G3', async () => {
+    const context = setup();
+    (context.contract as any).idProspecto = null;
+    (context.contract as any).prospecto = null;
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user))
+      .rejects.toThrow('La integracion G3 requiere un contrato originado desde un prospecto.');
+    expect(context.prisma.$transaction).not.toHaveBeenCalled();
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+  it('17d. rechaza idServicio cuyo contrato no tiene prospecto antes de llamar G3', async () => {
+    const context = setup();
+    (context.contract as any).idProspecto = null;
+    (context.contract as any).prospecto = null;
+    context.prisma.servicioContratado.findUnique.mockResolvedValue({ idServicio: 50, idContrato: 20, idEmpresa: 1 });
+    await expect(context.service.requestInstallation({ idServicio: 50 }, user))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(context.prisma.$transaction).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+  it('17e. rechaza otra empresa antes de revelar que el contrato no tiene prospecto', async () => {
+    const context = setup();
+    context.contract.idEmpresa = 2;
+    (context.contract as any).idProspecto = null;
+    (context.contract as any).prospecto = null;
+    const request = context.service.requestInstallation({ idContrato: 20 }, user);
+    await expect(request).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(request).rejects.toThrow('El registro no pertenece a tu empresa');
+    expect(context.prisma.$transaction).not.toHaveBeenCalled();
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
   });
   it('GET defensivo presenta un estado no contractual como seguimiento sin activar', async () => {
     const context = setup();
