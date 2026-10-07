@@ -34,8 +34,10 @@ export type G3WorkOrderResponse = {
   id_ot?: string | number;
   codigo_ot?: string;
   tipo?: string;
+  tipo_ot?: string;
   estado?: string;
   fecha?: string;
+  fecha_creacion?: string;
   tecnico?: unknown;
   direccion?: unknown;
   persona?: unknown;
