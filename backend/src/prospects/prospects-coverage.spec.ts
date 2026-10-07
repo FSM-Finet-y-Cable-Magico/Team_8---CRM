@@ -5,7 +5,7 @@ describe('Factibilidad geografica en prospectos', () => {
   const location = { latitud: -33.58, longitud: -70.63 };
   const input = { rut: '21600781-6', nombreCompleto: 'Prueba', telefono: '+56912345678', direccion: 'Calle 10, La Pintana', ubicacion: location };
 
-  function setup(estado = 'FACTIBLE', pipeline = 'Prospecto Nuevo') {
+  function setup(coberturaComercial = true, pipeline = 'Prospecto Nuevo', withMicrozone = false) {
     const prospect = { idProspecto: 7, idEmpresa: 1, direccion: input.direccion, estadoPipeline: pipeline, latitud: null, longitud: null, idZonaPago: null };
     const prisma = {
       prospecto: {
@@ -20,39 +20,110 @@ describe('Factibilidad geografica en prospectos', () => {
     };
     prisma.$transaction.mockImplementation(callback => callback(prisma));
     const coverage = { check: jest.fn().mockResolvedValue({
-      estado, coberturaComercial: estado !== 'NO_FACTIBLE', zona: estado === 'NO_FACTIBLE' ? null : { idZonaPago: 10 }, microzona: null,
-      planes: [], tecnica: { estado: 'PENDIENTE', proveedor: 'G3', traceId: 'trace' }, ubicacion: location, cajas: [], motivo: 'Prueba', consultadoEn: new Date().toISOString(),
+      estado: coberturaComercial ? 'FACTIBLE' : 'NO_FACTIBLE',
+      coberturaComercial,
+      zona: coberturaComercial ? { idZonaPago: 10 } : null,
+      microzona: coberturaComercial && withMicrozone ? { idZonaPago: 11 } : null,
+      planes: [],
+      tecnica: { estado: 'PENDIENTE', proveedor: 'NINGUNO', traceId: 'trace' },
+      ubicacion: location,
+      cajas: [],
+      motivo: coberturaComercial ? 'Cobertura disponible' : 'Fuera de cobertura',
+      consultadoEn: new Date().toISOString(),
     }) };
     const audit = { record: jest.fn() };
     const service = new ProspectsService(prisma as never, audit as never, {} as never, coverage as never);
     return { service, prisma, coverage, audit };
   }
 
-  it.each(['FACTIBLE', 'NO_FACTIBLE', 'PENDIENTE_VALIDACION_TECNICA'])('reconsulta al crear, persiste coordenadas y conserva el resultado %s', async state => {
-    const { service, prisma, coverage, audit } = setup(state);
+  it('crea como Factible dentro de cobertura general y genera evidencia interna', async () => {
+    const { service, prisma, coverage, audit } = setup();
     const result = await service.create(input, user);
+
     expect(coverage.check).toHaveBeenCalledWith(1, location, user);
-    expect(result.estadoPipeline).toBe(state === 'PENDIENTE_VALIDACION_TECNICA' ? 'Prospecto Nuevo' : state === 'FACTIBLE' ? 'Factible' : 'No Factible');
+    expect(result.estadoPipeline).toBe('Factible');
     const data = prisma.prospecto.create.mock.calls[0][0].data;
-    expect(data).toMatchObject({ latitud: location.latitud, longitud: location.longitud, idZonaPago: state === 'NO_FACTIBLE' ? null : 10 });
-    expect(Boolean(data.cotizaciones)).toBe(state === 'FACTIBLE');
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ cobertura: expect.objectContaining({ estado: state }) }) }));
+    expect(data).toMatchObject({ latitud: location.latitud, longitud: location.longitud, idZonaPago: 10 });
+    expect(data.cotizaciones).toEqual({ create: { factibilidadVerificada: true } });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      valorNuevo: expect.objectContaining({ cobertura: expect.objectContaining({ estado: 'FACTIBLE' }) }),
+    }));
   });
 
-  it('sin ubicación registra el prospecto pendiente sin consultar', async () => {
+  it('prefiere la microzona como idZonaPago cuando el punto pertenece a ella', async () => {
+    const { service, prisma } = setup(true, 'Prospecto Nuevo', true);
+
+    expect((await service.create(input, user)).estadoPipeline).toBe('Factible');
+    expect(prisma.prospecto.create.mock.calls[0][0].data.idZonaPago).toBe(11);
+  });
+
+  it('crea como No Factible fuera de cobertura general sin evidencia positiva', async () => {
+    const { service, prisma } = setup(false);
+
+    expect((await service.create(input, user)).estadoPipeline).toBe('No Factible');
+    const data = prisma.prospecto.create.mock.calls[0][0].data;
+    expect(data.idZonaPago).toBeNull();
+    expect(data.cotizaciones).toBeUndefined();
+  });
+
+  it('sin ubicacion registra el prospecto como Prospecto Nuevo sin consultar cobertura', async () => {
     const { service, coverage } = setup();
+
     expect((await service.create({ ...input, ubicacion: undefined }, user)).estadoPipeline).toBe('Prospecto Nuevo');
     expect(coverage.check).not.toHaveBeenCalled();
   });
 
-  it('un error del proveedor conserva el estado y no crea una verificación', async () => {
-    const { service, prisma } = setup('PENDIENTE_VALIDACION_TECNICA', 'Factible');
+  it('el endpoint legacy usa cobertura comercial y registra Factible sin TomoDAT', async () => {
+    const { service, prisma, coverage, audit } = setup();
+
     expect((await service.verifyTomodat(7, location, user)).estadoPipeline).toBe('Factible');
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'VERIFICAR_FACTIBILIDAD',
+      valorNuevo: expect.objectContaining({ origen: 'COBERTURA_COMERCIAL' }),
+    }));
   });
 
-  it('la revisión negativa invalida las verificaciones anteriores dentro de una transacción', async () => {
-    const { service, prisma } = setup('NO_FACTIBLE', 'Factible');
+  it('el endpoint manual no puede marcar No Factible un punto dentro de cobertura', async () => {
+    const { service, prisma, coverage } = setup();
+    prisma.prospecto.findUnique.mockResolvedValue({
+      idProspecto: 7,
+      idEmpresa: 1,
+      direccion: input.direccion,
+      estadoPipeline: 'Prospecto Nuevo',
+      latitud: location.latitud,
+      longitud: location.longitud,
+      idZonaPago: 10,
+    });
+
+    const result = await service.verifyFeasibility(7, { resultado: 'No Factible' }, user);
+
+    expect(result.estadoPipeline).toBe('Factible');
+    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
+  });
+
+  it('el endpoint manual no puede marcar Factible un punto fuera de cobertura', async () => {
+    const { service, prisma, coverage } = setup(false);
+    prisma.prospecto.findUnique.mockResolvedValue({
+      idProspecto: 7,
+      idEmpresa: 1,
+      direccion: input.direccion,
+      estadoPipeline: 'Prospecto Nuevo',
+      latitud: location.latitud,
+      longitud: location.longitud,
+      idZonaPago: null,
+    });
+
+    const result = await service.verifyFeasibility(7, { resultado: 'Factible' }, user);
+
+    expect(result.estadoPipeline).toBe('No Factible');
+    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
+  });
+
+  it('la revision fuera de cobertura invalida evidencias anteriores dentro de una transaccion', async () => {
+    const { service, prisma } = setup(false, 'Factible');
+
     expect((await service.verifyTomodat(7, location, user)).estadoPipeline).toBe('No Factible');
     expect(prisma.cotizacion.updateMany).toHaveBeenCalledWith({ where: { idProspecto: 7 }, data: { factibilidadVerificada: false } });
     const feasibilityUpdate = prisma.prospecto.update.mock.calls.find(call => call[0].data.estadoPipeline === 'No Factible');
@@ -60,7 +131,7 @@ describe('Factibilidad geografica en prospectos', () => {
   });
 
   it.each(['Cotizacion Enviada', 'Pendiente firma', 'Servicio Activo', 'Perdido'])('no retrocede procesos avanzados o cerrados (%s)', async status => {
-    const { service, prisma, coverage } = setup('NO_FACTIBLE', status);
+    const { service, prisma, coverage } = setup(false, status);
     await expect(service.verifyTomodat(7, location, user)).rejects.toThrow('antes de cotizar');
     expect(coverage.check).not.toHaveBeenCalled();
     expect(prisma.prospecto.update).not.toHaveBeenCalled();

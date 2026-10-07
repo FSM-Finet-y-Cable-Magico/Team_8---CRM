@@ -35,16 +35,15 @@ export class CoverageDomainService {
   status(idEmpresa: number, user: AuthUser) {
     this.assertAccess(idEmpresa, user);
     const selected = this.technicalProvider();
-    const configured = selected === 'LEGACY_TOMODAT'
+    const technicalConfigured = selected === 'LEGACY_TOMODAT'
       ? this.legacyTomodat.configuredFor(idEmpresa)
       : this.g3.configured();
     return {
       comercialConfigurado: true,
       proveedorTecnico: selected === 'LEGACY_TOMODAT' ? 'LEGACY_TOMODAT' : 'G3',
-      configurado: configured,
-      mensaje: configured
-        ? 'La cobertura comercial funciona localmente y la validacion tecnica esta configurada.'
-        : 'La cobertura comercial funciona localmente. La validacion tecnica quedara pendiente.',
+      configurado: true,
+      validacionTecnicaConfigurada: technicalConfigured,
+      mensaje: 'La cobertura general activa determina la factibilidad comercial. La disponibilidad operativa se resuelve durante la instalacion.',
     };
   }
 
@@ -185,27 +184,19 @@ export class CoverageDomainService {
     this.assertCoordinates(location.latitud, location.longitud);
     const commercial = await this.commercial.resolvePlanAvailabilityForLocation(idEmpresa, location.latitud, location.longitud);
     const traceId = randomUUID();
-    let technical: TechnicalCoverageResult;
-    if (!commercial.coberturaComercial) {
-      technical = { estado: 'PENDIENTE', proveedor: 'NINGUNO', motivo: 'No corresponde consultar factibilidad tecnica fuera de cobertura comercial.', traceId };
-    } else if (this.technicalProvider() === 'LEGACY_TOMODAT') {
-      technical = await this.legacyTomodat.check(idEmpresa, location.latitud, location.longitud, traceId);
-    } else {
-      technical = await this.g3.check(idEmpresa, location.latitud, location.longitud, traceId);
-    }
-    const estado = !commercial.coberturaComercial
-      ? 'NO_FACTIBLE'
-      : technical.estado === 'FACTIBLE'
-        ? 'FACTIBLE'
-        : technical.estado === 'NO_FACTIBLE'
-          ? 'NO_FACTIBLE'
-          : 'PENDIENTE_VALIDACION_TECNICA';
+    const technical: TechnicalCoverageResult = {
+      estado: 'PENDIENTE',
+      proveedor: 'NINGUNO',
+      motivo: 'La disponibilidad tecnica y operacional se resuelve durante el proceso de instalacion.',
+      traceId,
+    };
+    const estado = commercial.coberturaComercial ? 'FACTIBLE' : 'NO_FACTIBLE';
     const result: CoverageResult = {
       ...commercial,
       estado,
-      motivo: !commercial.coberturaComercial
-        ? 'La ubicacion esta fuera de la cobertura comercial configurada.'
-        : technical.motivo,
+      motivo: commercial.coberturaComercial
+        ? 'La ubicacion esta dentro de una cobertura general activa.'
+        : 'La ubicacion esta fuera de la cobertura comercial configurada.',
       consultadoEn: new Date().toISOString(),
       ubicacion: { latitud: location.latitud, longitud: location.longitud },
       tecnica: technical,
@@ -213,7 +204,7 @@ export class CoverageDomainService {
     };
     await this.audit.record({
       idUsuario: user.idUsuario,
-      accion: 'CONSULTAR_FACTIBILIDAD',
+      accion: 'CONSULTAR_COBERTURA_COMERCIAL',
       entidadAfectada: 'coverage',
       valorNuevo: {
         idEmpresa,

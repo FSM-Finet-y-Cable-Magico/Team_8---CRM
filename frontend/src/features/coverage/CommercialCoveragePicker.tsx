@@ -128,7 +128,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     }
     for (const box of result?.cajas ?? []) {
       const label = document.createElement('span');
-      label.textContent = `${box.nombre} Â· ${box.puertosLibres} puertos libres`;
+      label.textContent = `${box.nombre} - ${box.puertosLibres} puertos libres`;
       L.circleMarker([box.latitud, box.longitud], { radius: 7, color: '#137a4c', fillOpacity: 0.8 }).bindTooltip(label).addTo(group);
     }
   }, [value?.latitud, value?.longitud, result]);
@@ -163,10 +163,10 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     }
   }
 
-  return <section className="coverage-picker" aria-label="Consulta de cobertura comercial y tecnica">
+  return <section className="coverage-picker" aria-label="Consulta de cobertura comercial">
     <div className="coverage-heading">
       <strong>Cobertura comercial</strong>
-      <button type="button" className="secondary compact" disabled={disabled || geocoding} onClick={() => void geocodeAddress()}>{geocoding ? 'Ubicandoâ€¦' : 'Ubicar direccion'}</button>
+      <button type="button" className="secondary compact" disabled={disabled || geocoding} onClick={() => void geocodeAddress()}>{geocoding ? 'Ubicando...' : 'Ubicar direccion'}</button>
     </div>
     <p>Marca o corrige en el mapa el domicilio exacto de {direccion.trim() || 'la direccion ingresada'}.</p>
     <p className="coverage-note">Pin azul: domicilio. Borde continuo: cobertura general. Borde segmentado: microzona. La seleccion manual siempre permanece disponible.</p>
@@ -179,14 +179,14 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       <button type="button" className="secondary compact" disabled={disabled} onClick={applyCoordinates}>Ubicar punto</button>
     </details>
     <div className="coverage-result" aria-live="polite">
-      {busy ? <p>Consultando coberturaâ€¦</p> : result ? <>
+      {busy ? <p>Consultando cobertura...</p> : result ? <>
         <strong>{result.estado.replace(/_/g, ' ')}</strong><p>{result.motivo}</p>
-        {result.zona && <p><b>Cobertura:</b> {result.zona.nombreZona}{result.microzona ? ` Â· Microzona: ${result.microzona.nombreZona}` : ''}</p>}
+        {result.zona && <p><b>Cobertura:</b> {result.zona.nombreZona}{result.microzona ? ` - Microzona: ${result.microzona.nombreZona}` : ''}</p>}
         {result.planes.length > 0 && <><b>Planes disponibles</b><ul>{result.planes.map(plan => <li key={plan.idPlan}>{plan.nombre}: ${plan.precioAplicable.toLocaleString('es-CL')} ({plan.origenPrecio})</li>)}</ul></>}
         {result.coberturaComercial && result.planes.length === 0 && <p>No hay planes activos configurados para esta ubicacion.</p>}
         {result.cajas.length > 0 && <ul>{result.cajas.map(box => <li key={box.id}>{box.nombre}: {box.puertosLibres} puertos libres</li>)}</ul>}
-        <small>Validacion tecnica: {result.tecnica.proveedor} / {result.tecnica.estado}. Consulta: {new Date(result.consultadoEn).toLocaleString('es-CL')}</small>
-      </> : <p>{connection?.mensaje ?? 'Comprobando configuracion de coberturaâ€¦'}</p>}
+        <small>Consulta de cobertura comercial: {new Date(result.consultadoEn).toLocaleString('es-CL')}</small>
+      </> : <p>{connection?.mensaje ?? 'Comprobando configuracion de cobertura...'}</p>}
       {error && <p role="alert">{error}</p>}
     </div>
     <div className="coverage-actions">
