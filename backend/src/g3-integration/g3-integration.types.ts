@@ -15,7 +15,7 @@ export type G3InstallationPayload = {
   request_id: string;
   trace_id: string;
   id_empresa: number;
-  id_prospecto?: number;
+  id_prospecto: number;
   id_contrato: number;
   id_plan: number;
   persona: {
