@@ -22,7 +22,6 @@ import {
 import {
   api,
   apiErrorMessage,
-  AdvancedInventory,
   AuditLog,
   AuthUser,
   BillingOverview,
@@ -202,7 +201,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryUnit[]>([]);
-  const [advancedInventory, setAdvancedInventory] = useState<AdvancedInventory | null>(null);
   const [billingOverview, setBillingOverview] = useState<BillingOverview | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>([]);
@@ -263,7 +261,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       plansResult,
       customersResult,
       inventoryResult,
-      advancedInventoryResult,
       billingResult,
       ticketsResult,
       categoriesResult,
@@ -277,7 +274,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
       canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-      canViewInventory ? api.get<AdvancedInventory>('/inventory/advanced', { params: { scope } }) : Promise.resolve({ data: null as AdvancedInventory | null }),
       canViewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
       canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
       canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
@@ -296,7 +292,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     setPlans(settledData(plansResult, [] as Plan[], errors));
     setCustomers(settledData(customersResult, [] as Customer[], errors));
     setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
-    setAdvancedInventory(settledData(advancedInventoryResult, null as AdvancedInventory | null, errors));
     setBillingOverview(settledData(billingResult, null as BillingOverview | null, errors));
     setTickets(settledData(ticketsResult, [] as Ticket[], errors));
     setTicketCategories(settledData(categoriesResult, [] as TicketCategory[], errors));
@@ -462,13 +457,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
-              inventory={inventory}
-              advancedInventory={advancedInventory}
-              customers={customers}
-              workOrders={workOrders}
-              writeCompanyId={writeCompanyId}
-              permissions={permissions}
-              onChanged={() => void loadData()}
+              companyId={writeCompanyId}
+              companyName={currentCompanyName}
             />
           )}
           {activeTab === 'plans' && permissions.managePlans && (
