@@ -14,7 +14,24 @@ function fixture(){
  sequences:global.tables.flatMap(t=>t.columns.filter(c=>c.serial).map(c=>({name:t.name+'_'+c.name+'_seq',type:c.type,increment:'1',cycle:false}))),migrations:[]};
 }
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:92,columns:910,pk:92,fk:214,checks:35,indexes:114});
+ assert.deepEqual(global.counts,{tables:94,columns:965,pk:94,fk:221,checks:58,indexes:124});
+ const taxIntent=global.tables.find(table=>table.name==='tax_emission_intent');
+ assert.ok(taxIntent);
+ assert.equal(taxIntent.columns.length,28);
+ assert.equal(taxIntent.checks.length,13);
+ assert.equal(taxIntent.checks.filter(check=>check.name==='tax_intent_email_check').length,1);
+ assert.match(taxIntent.checks.find(check=>check.name==='tax_intent_email_check').definition,/SIMULADO/);
+ const taxJob=global.tables.find(table=>table.name==='tax_payment_job');
+ assert.ok(taxJob);
+ assert.equal(taxJob.columns.length,18);
+ assert.equal(taxJob.checks.length,9);
+ assert.equal(global.fks.some(fk=>fk.table==='tax_payment_job'&&fk.columns.includes('id_cliente')),false);
+ assert.ok(global.indexes.some(index=>index.name==='tax_job_reserved_folio_key'&&index.unique&&/WHERE folio_esperado <> '0'/.test(index.definition)));
+ const notification=global.tables.find(table=>table.name==='log_notificacion');
+ assert.equal(notification.columns.length,17);
+ assert.equal(notification.columns.find(column=>column.name==='estado_envio').type,'varchar(30)');
+ assert.ok(notification.checks.some(check=>check.name==='log_notificacion_intentos_check'));
+ assert.ok(global.fks.some(fk=>fk.name==='log_notificacion_id_empresa_fkey'&&fk.onDelete==='RESTRICT'&&fk.onUpdate==='CASCADE'));
  const g3Request=global.tables.find(table=>table.name==='solicitud_instalacion_integracion');
  assert.equal(g3Request.owner,'G3');
  assert.deepEqual(g3Request.columns.map(({name,type,nullable,default:defaultValue})=>({name,type,nullable,default:defaultValue})),[

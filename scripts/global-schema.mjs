@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-export const CONTRACT_HASH = '6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e';
+export const CONTRACT_HASH = 'f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa';
 export const contractPath = new URL('../db/global/init-global.sql', import.meta.url);
 export function splitSql(text) {
   const parts = []; let start = 0, depth = 0, quote = false;
@@ -134,6 +134,6 @@ export function parseGlobalSchema(bytes = readFileSync(contractPath), verifyHash
   }
   for (const m of sql.matchAll(/CREATE (UNIQUE )?INDEX IF NOT EXISTS (\w+) ON (\w+) ([^;]+);/g)) indexes.push({ name:m[2], table:m[3], unique:Boolean(m[1]), definition:m[4], sql:m[0] });
   const counts = { tables:tables.length, columns:tables.reduce((n,t)=>n+t.columns.length,0), pk:tables.filter(t=>t.pk.length).length, fk:fks.length, checks:tables.reduce((n,t)=>n+t.checks.length,0), indexes:indexes.length };
-  if (verifyHash && (counts.tables!==92 || counts.columns!==910 || counts.pk!==92 || counts.fk!==214 || counts.checks!==35 || counts.indexes!==114)) throw new Error(`GLOBAL_PARSE_INCOMPLETE ${JSON.stringify(counts)}`);
+  if (verifyHash && (counts.tables!==94 || counts.columns!==965 || counts.pk!==94 || counts.fk!==221 || counts.checks!==58 || counts.indexes!==124)) throw new Error(`GLOBAL_PARSE_INCOMPLETE ${JSON.stringify(counts)}`);
   return { hash, tables, fks, indexes, counts };
 }

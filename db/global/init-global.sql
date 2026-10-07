@@ -662,6 +662,75 @@ CREATE TABLE IF NOT EXISTS pago (
     CONSTRAINT pago_comprobante_estado_check CHECK (((comprobante_estado)::text = ANY ((ARRAY['PENDIENTE'::character varying, 'GENERADO'::character varying, 'FALLIDO'::character varying])::text[])))
 );
 
+CREATE TABLE IF NOT EXISTS tax_emission_intent (
+    id_intencion                 UUID NOT NULL,
+    id_empresa                   INTEGER NOT NULL,
+    id_factura                   INTEGER NOT NULL,
+    id_pago                      INTEGER,
+    business_key                 VARCHAR(120) NOT NULL,
+    policy_version               VARCHAR(64) NOT NULL,
+    ambiente                     VARCHAR(20) NOT NULL,
+    proveedor                    VARCHAR(30) NOT NULL DEFAULT 'FACTURACION_CL'::character varying,
+    tipo_dte                     INTEGER NOT NULL,
+    formato                      INTEGER NOT NULL,
+    fingerprint                  CHAR(64) NOT NULL,
+    folio_esperado               VARCHAR(10) NOT NULL,
+    estado                       VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE'::character varying,
+    intentos                     INTEGER NOT NULL DEFAULT 0,
+    claim_id                     UUID,
+    folio                        VARCHAR(10),
+    ultimo_error                 VARCHAR(64),
+    fecha_creacion               TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_inicio                 TIMESTAMPTZ(3),
+    fecha_envio                  TIMESTAMPTZ(3),
+    fecha_actualizacion          TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    artefacto_url                TEXT,
+    artefacto_estado             VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE'::character varying,
+    email_estado                 VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE'::character varying,
+    fecha_email_inicio           TIMESTAMPTZ(3),
+    email_intentos               INTEGER NOT NULL DEFAULT 0 CHECK (email_intentos >= 0),
+    fecha_proximo_email          TIMESTAMPTZ(3),
+    ultimo_error_email           VARCHAR(64),
+    CONSTRAINT tax_emission_intent_pkey PRIMARY KEY (id_intencion),
+    CONSTRAINT tax_intent_environment_check CHECK (ambiente IN ('sandbox', 'production')),
+    CONSTRAINT tax_intent_provider_check CHECK (proveedor = 'FACTURACION_CL'),
+    CONSTRAINT tax_intent_type_check CHECK (tipo_dte IN (33, 34, 39, 41)),
+    CONSTRAINT tax_intent_format_check CHECK ((tipo_dte IN (33, 34) AND formato = 2) OR (tipo_dte IN (39, 41) AND formato = 1)),
+    CONSTRAINT tax_intent_fingerprint_check CHECK (fingerprint ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT tax_intent_expected_folio_check CHECK (folio_esperado ~ '^[1-9][0-9]{0,9}$' OR (folio_esperado = '0' AND tipo_dte IN (39, 41))),
+    CONSTRAINT tax_intent_state_check CHECK (estado IN ('PENDIENTE', 'EN_PROCESO', 'GENERADO', 'FALLIDO', 'RESULTADO_INDETERMINADO')),
+    CONSTRAINT tax_intent_attempts_check CHECK (intentos >= 0),
+    CONSTRAINT tax_intent_claim_check CHECK (estado <> 'EN_PROCESO' OR (claim_id IS NOT NULL AND fecha_inicio IS NOT NULL)),
+    CONSTRAINT tax_intent_generated_check CHECK (estado <> 'GENERADO' OR (folio IS NOT NULL AND folio ~ '^[1-9][0-9]{0,9}$' AND (folio = folio_esperado OR (folio_esperado = '0' AND tipo_dte IN (39, 41))))),
+    CONSTRAINT tax_intent_artifact_check CHECK (artefacto_estado IN ('PENDIENTE', 'DISPONIBLE', 'FALLIDO')),
+    CONSTRAINT tax_intent_email_check CHECK (email_estado IN ('PENDIENTE', 'NO_CONFIGURADO', 'SIN_DESTINATARIO', 'EN_PROCESO', 'ENVIADO', 'RESULTADO_INDETERMINADO', 'REINTENTO_PENDIENTE', 'FALLIDO', 'SIMULADO'))
+);
+
+CREATE TABLE IF NOT EXISTS tax_payment_job (
+    id_trabajo                   UUID NOT NULL,
+    id_empresa                   INTEGER NOT NULL,
+    id_factura                   INTEGER NOT NULL,
+    id_pago                      INTEGER NOT NULL,
+    id_cliente                   INTEGER NOT NULL,
+    monto                        NUMERIC(10,2) NOT NULL CHECK (monto > 0),
+    ambiente                     VARCHAR(20) NOT NULL DEFAULT 'sandbox'::character varying CHECK (ambiente = 'sandbox'),
+    policy_version               VARCHAR(64) NOT NULL,
+    profile_hash                 CHAR(64) NOT NULL CHECK (profile_hash ~ '^[a-f0-9]{64}$'),
+    documento                    BYTEA,
+    tipo_dte                     INTEGER CHECK (tipo_dte IN (33, 34, 39, 41)),
+    formato                      INTEGER CHECK (formato IN (1, 2)),
+    folio_esperado               VARCHAR(10),
+    email                        VARCHAR(120),
+    nombre_cliente               VARCHAR(120) NOT NULL,
+    estado                       VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE'::character varying CHECK (estado IN ('PENDIENTE', 'DATOS_REQUERIDOS', 'PROCESADO')),
+    ultimo_error                 VARCHAR(64),
+    fecha_creacion               TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT tax_payment_job_pkey PRIMARY KEY (id_trabajo),
+    CONSTRAINT tax_job_pending_document_check CHECK (estado <> 'PENDIENTE' OR (documento IS NOT NULL AND octet_length(documento) > 0 AND tipo_dte IS NOT NULL AND formato IS NOT NULL AND folio_esperado IS NOT NULL)),
+    CONSTRAINT tax_job_document_format_check CHECK ((tipo_dte IN (33, 34) AND formato = 2) OR (tipo_dte IN (39, 41) AND formato = 1)),
+    CONSTRAINT tax_job_folio_check CHECK (folio_esperado ~ '^[1-9][0-9]{0,9}$' OR (folio_esperado = '0' AND tipo_dte IN (39, 41)))
+);
+
 CREATE TABLE IF NOT EXISTS plan (
     id_plan                      SERIAL PRIMARY KEY,
     id_empresa                   INTEGER,
@@ -1112,9 +1181,18 @@ CREATE TABLE IF NOT EXISTS log_notificacion (
     id_plantilla                 INTEGER,
     canal                        VARCHAR(20),
     fecha_envio                  TIMESTAMP,
-    estado_envio                 VARCHAR(20),
+    estado_envio                 VARCHAR(30),
     mensaje_enviado              TEXT,
-    id_alerta                    INTEGER
+    id_alerta                    INTEGER,
+    id_empresa                   INTEGER,
+    proveedor                    VARCHAR(20),
+    correlation_id               UUID,
+    payload_hash                 CHAR(64),
+    provider_message_id          VARCHAR(512),
+    mensaje                      JSONB,
+    intentos                     INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    fecha_inicio                 TIMESTAMPTZ(3),
+    ultimo_error                 VARCHAR(64)
 );
 
 CREATE TABLE IF NOT EXISTS mensaje_bot (
@@ -1339,6 +1417,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS usuario_email_key ON usuario (email);
 CREATE UNIQUE INDEX IF NOT EXISTS usuario_nombre_usuario_key ON usuario (nombre_usuario);
 CREATE UNIQUE INDEX IF NOT EXISTS usuario_rol_id_usuario_id_rol_key ON usuario_rol (id_usuario, id_rol);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_zona_pago_empresa_nombre ON zona_pago (COALESCE(id_empresa, 0), lower((nombre_zona)::text));
+CREATE UNIQUE INDEX IF NOT EXISTS tax_emission_intent_id_empresa_ambiente_business_key_key ON tax_emission_intent (id_empresa, ambiente, business_key);
+CREATE UNIQUE INDEX IF NOT EXISTS tax_intent_generated_folio_key ON tax_emission_intent (id_empresa, ambiente, tipo_dte, folio) WHERE estado = 'GENERADO';
+CREATE UNIQUE INDEX IF NOT EXISTS tax_payment_job_id_pago_key ON tax_payment_job (id_pago);
+CREATE UNIQUE INDEX IF NOT EXISTS tax_job_reserved_folio_key ON tax_payment_job (id_empresa, tipo_dte, folio_esperado) WHERE folio_esperado <> '0';
+CREATE UNIQUE INDEX IF NOT EXISTS log_notificacion_correlation_id_key ON log_notificacion (correlation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS log_notificacion_provider_message_id_key ON log_notificacion (provider_message_id);
 CREATE INDEX IF NOT EXISTS alerta_monitoreo_id_empresa_resuelta_idx ON alerta_monitoreo (id_empresa, resuelta);
 CREATE INDEX IF NOT EXISTS alerta_monitoreo_tipo_clave_caja_resuelta_idx ON alerta_monitoreo (tipo, clave_caja, resuelta);
 CREATE INDEX IF NOT EXISTS ix_asignacion_empresa_servicio_activa ON asignacion_equipo_servicio (id_empresa, id_servicio_externo, activa);
@@ -1383,6 +1467,7 @@ CREATE INDEX IF NOT EXISTS solicitud_instalacion_integracion_id_empresa_idx ON s
 CREATE INDEX IF NOT EXISTS intento_fallido_rut_intentado_bloqueado_hasta_idx ON intento_fallido (rut_intentado, bloqueado_hasta);
 CREATE INDEX IF NOT EXISTS log_notificacion_id_alerta_idx ON log_notificacion (id_alerta);
 CREATE INDEX IF NOT EXISTS log_notificacion_id_cliente_idx ON log_notificacion (id_cliente);
+CREATE INDEX IF NOT EXISTS log_notificacion_proveedor_estado_envio_fecha_envio_idx ON log_notificacion (proveedor, estado_envio, fecha_envio);
 CREATE INDEX IF NOT EXISTS monitoreo_ont_id_registro_ont_timestamp_medicion_idx ON monitoreo_ont (id_registro_ont, timestamp_medicion);
 CREATE INDEX IF NOT EXISTS idx_observacion_operativa_entidad ON observacion_operativa (tipo_entidad, id_entidad);
 CREATE INDEX IF NOT EXISTS orden_trabajo_id_caja_nap_idx ON orden_trabajo (id_caja_nap);
@@ -1394,6 +1479,9 @@ CREATE INDEX IF NOT EXISTS idx_orden_trabajo_id_prospecto ON orden_trabajo (id_p
 CREATE INDEX IF NOT EXISTS orden_trabajo_id_tecnico_estado_idx ON orden_trabajo (id_tecnico, estado);
 CREATE INDEX IF NOT EXISTS plan_id_empresa_idx ON plan (id_empresa);
 CREATE INDEX IF NOT EXISTS plan_zona_precio_id_plan_id_zona_pago_idx ON plan_zona_precio (id_plan, id_zona_pago);
+CREATE INDEX IF NOT EXISTS tax_emission_intent_id_empresa_estado_fecha_actualizacion_idx ON tax_emission_intent (id_empresa, estado, fecha_actualizacion);
+CREATE INDEX IF NOT EXISTS tax_intent_email_pending_idx ON tax_emission_intent (id_empresa, email_estado, fecha_proximo_email) WHERE estado = 'GENERADO';
+CREATE INDEX IF NOT EXISTS tax_payment_job_estado_fecha_creacion_idx ON tax_payment_job (estado, fecha_creacion);
 CREATE INDEX IF NOT EXISTS plan_zona_precio_id_zona_pago_activo_fechas_idx ON plan_zona_precio (id_zona_pago, activo, fecha_inicio, fecha_fin);
 CREATE INDEX IF NOT EXISTS plantilla_notificacion_id_empresa_idx ON plantilla_notificacion (id_empresa);
 CREATE INDEX IF NOT EXISTS prorroga_pago_id_empresa_estado_nueva_fecha_idx ON prorroga_pago (id_empresa, estado, nueva_fecha);
@@ -1924,6 +2012,11 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+    ALTER TABLE log_notificacion ADD CONSTRAINT log_notificacion_id_empresa_fkey
+        FOREIGN KEY (id_empresa) REFERENCES empresa (id_empresa) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
     ALTER TABLE mensaje_bot ADD CONSTRAINT fk_mensaje_bot_id_conversacion
         FOREIGN KEY (id_conversacion) REFERENCES conversacion_bot (id_conversacion);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -2106,6 +2199,36 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
     ALTER TABLE pago ADD CONSTRAINT fk_pago_id_factura
         FOREIGN KEY (id_factura) REFERENCES factura (id_factura);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_emission_intent ADD CONSTRAINT tax_intent_company_fk
+        FOREIGN KEY (id_empresa) REFERENCES empresa (id_empresa) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_emission_intent ADD CONSTRAINT tax_intent_invoice_fk
+        FOREIGN KEY (id_factura) REFERENCES factura (id_factura) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_emission_intent ADD CONSTRAINT tax_intent_payment_fk
+        FOREIGN KEY (id_pago) REFERENCES pago (id_pago) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_payment_job ADD CONSTRAINT tax_payment_job_id_empresa_fkey
+        FOREIGN KEY (id_empresa) REFERENCES empresa (id_empresa) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_payment_job ADD CONSTRAINT tax_payment_job_id_factura_fkey
+        FOREIGN KEY (id_factura) REFERENCES factura (id_factura) ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE tax_payment_job ADD CONSTRAINT tax_payment_job_id_pago_fkey
+        FOREIGN KEY (id_pago) REFERENCES pago (id_pago) ON DELETE RESTRICT ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
