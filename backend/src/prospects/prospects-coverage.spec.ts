@@ -19,7 +19,7 @@ describe('Factibilidad geografica en prospectos', () => {
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(callback => callback(prisma));
-    const coverage = { check: jest.fn().mockResolvedValue({
+    const coverage = { resolveAddress: jest.fn().mockResolvedValue(location), check: jest.fn().mockResolvedValue({
       estado: coberturaComercial ? 'FACTIBLE' : 'NO_FACTIBLE',
       coberturaComercial,
       zona: coberturaComercial ? { idZonaPago: 10 } : null,
@@ -70,6 +70,23 @@ describe('Factibilidad geografica en prospectos', () => {
     const { service, coverage } = setup();
 
     expect((await service.create({ ...input, ubicacion: undefined }, user)).estadoPipeline).toBe('Prospecto Nuevo');
+    expect(coverage.check).not.toHaveBeenCalled();
+  });
+
+  it('el registro con validación automática guarda el punto verificado, no coordenadas arbitrarias del cliente', async () => {
+    const { service, prisma, coverage } = setup();
+    const dto = { ...input, validarDireccion: true, comuna: 'La Pintana', ubicacion: { latitud: 0, longitud: 0 } };
+    const result = await service.create(dto, user);
+    expect(coverage.resolveAddress).toHaveBeenCalledWith(dto);
+    expect(result.estadoPipeline).toBe('Factible');
+    expect(prisma.prospecto.create.mock.calls[0][0].data).toMatchObject(location);
+  });
+
+  it('una dirección inválida no crea un registro incompleto ni consulta cobertura', async () => {
+    const { service, prisma, coverage } = setup();
+    coverage.resolveAddress.mockRejectedValue(new Error('Ingresa una dirección válida'));
+    await expect(service.create({ ...input, validarDireccion: true }, user)).rejects.toThrow('dirección válida');
+    expect(prisma.prospecto.create).not.toHaveBeenCalled();
     expect(coverage.check).not.toHaveBeenCalled();
   });
 

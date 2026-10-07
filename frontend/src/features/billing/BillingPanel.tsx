@@ -43,7 +43,7 @@ export function BillingPanel({
   const [invoiceFocus, setInvoiceFocus] = useState<ControlRow | null>(null);
   useEffect(() => { setInvoiceFocus(null); }, [scope]);
   useEffect(() => {
-    if (!focusedInvoice) return;
+    if (!focusedInvoice?.idFactura) return;
     if (scope === 'consolidado' || String(focusedInvoice.idEmpresa) === scope) setInvoiceFocus(focusedInvoice);
     else setStatus('El documento solicitado no pertenece al alcance seleccionado.');
     onFocusConsumed?.();
@@ -442,7 +442,7 @@ export function BillingPanel({
           <header><h3>{invoiceFocus.nombre}</h3><p>{invoiceFocus.rut ?? 'Sin RUT'} · Contrato {invoiceFocus.numeroContrato}</p></header>
           <dl className="billing-invoice-totals">{[
             ['Monto del documento', !focusedBillingRow && invoiceFocus.montoDocumento === null ? '—' : currency.format(focusedBillingRow?.monto ?? invoiceFocus.montoDocumento ?? 0)],
-            ['Pagado', currency.format(focusedBillingRow?.pagado ?? invoiceFocus.totalPagado)],
+            ['Pagado', !focusedBillingRow && invoiceFocus.totalPagado === null ? '—' : currency.format(focusedBillingRow?.pagado ?? invoiceFocus.totalPagado ?? 0)],
             ['Saldo pendiente', invoiceFocus.saldoPendiente === null && !focusedBillingRow ? '—' : currency.format(focusedBillingRow?.saldo ?? invoiceFocus.saldoPendiente ?? 0)],
             ['Días de atraso', focusedBillingRow?.diasAtraso ?? invoiceFocus.diasAtraso ?? '—'],
           ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>

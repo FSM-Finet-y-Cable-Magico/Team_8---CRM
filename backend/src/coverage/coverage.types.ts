@@ -60,6 +60,7 @@ export type GeocodingCandidate = {
   etiqueta: string;
   latitud: number;
   longitud: number;
+  direccion?: { calle: string; numero: string; localidades: string[]; region: string; pais: string };
 };
 
 export interface GeocodingProvider {

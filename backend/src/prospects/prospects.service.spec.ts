@@ -212,6 +212,42 @@ describe('ProspectsService', () => {
       data: expect.objectContaining({ estadoPipeline: 'Cotizacion Enviada', idPlanInteres: 8 }),
     }));
   });
+  it('ubica automáticamente un prospecto previo al cotizar, sin convertirlo en cliente', async () => {
+    const prospect = { idProspecto: 14, idEmpresa: 1, idCliente: null, email: 'prueba@example.com', nombreCompleto: 'Prueba', estadoPipeline: 'Prospecto Nuevo', idPlanInteres: null,
+      direccion: 'Plaza de Armas 951', comuna: 'Santiago', region: 'Región Metropolitana', latitud: null, longitud: null };
+    const quote = { idCotizacion: 24, prospecto: { empresa: { nombre: 'FiNet' } } };
+    const prisma = {
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })) },
+      cotizacion: { create: jest.fn().mockResolvedValue(quote), update: jest.fn().mockResolvedValue(quote) },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 8, idEmpresa: 1, activo: true }) },
+      cliente: { create: jest.fn() }, servicioContratado: { create: jest.fn() },
+    };
+    const location = { latitud: -33.4371, longitud: -70.6506 };
+    const coverage = { resolveAddress: jest.fn().mockResolvedValue(location), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, zona: { idZonaPago: 3 }, planes: [{ idPlan: 8 }] }) };
+    const audit = { record: jest.fn() };
+    const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService,
+      { sendQuote: jest.fn().mockResolvedValue({ status: 'skipped' }) } as unknown as MailService, coverage as unknown as CoverageDomainService);
+    jest.spyOn(service as any, 'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('pdf'));
+
+    await service.generateQuote(14, { planId: 8, validarDireccion: true }, admin);
+
+    expect(coverage.resolveAddress).toHaveBeenCalledWith({ direccion: prospect.direccion, comuna: prospect.comuna, region: prospect.region });
+    expect(coverage.plansForLocation).toHaveBeenCalledWith(1, location, admin);
+    expect(prisma.prospecto.update).toHaveBeenCalledWith({ where: { idProspecto: 14 }, data: { ...location, idZonaPago: 3 } });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_UBICACION_PROSPECTO' }));
+    expect(prisma.cliente.create).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
+  });
+
+  it('una dirección previa no localizable bloquea la cotización sin guardar cambios', async () => {
+    const prisma = { prospecto: { findUnique: jest.fn().mockResolvedValue({ idProspecto: 14, idEmpresa: 1, direccion: 'Dirección de prueba', comuna: 'Santiago', latitud: null, longitud: null }), update: jest.fn() }, cotizacion: { create: jest.fn() } };
+    const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService, {} as MailService,
+      { resolveAddress: jest.fn().mockRejectedValue(new Error('No pudimos ubicar esa dirección')) } as unknown as CoverageDomainService);
+    await expect(service.generateQuote(14, { planId: 8, validarDireccion: true }, admin)).rejects.toThrow('No pudimos ubicar');
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(prisma.cotizacion.create).not.toHaveBeenCalled();
+  });
+
   it('rechaza cotizar un plan activo de otra empresa', async () => {
     const prospect = {
       idProspecto: 12,

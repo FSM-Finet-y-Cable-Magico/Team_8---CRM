@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/features/commercial/control-book-model.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
-const { actionDisabledReason, buildInstallments, COLUMNS, ESSENTIAL, exportColumns, OPERATIONAL, VIEW_ACTIONS, WORK_VIEWS } = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'));
+const { actionDisabledReason, buildInstallments, COLUMNS, ESSENTIAL, exportColumns, managementRelations, OPERATIONAL, recordContext, VIEW_ACTIONS, WORK_VIEWS } = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'));
 
 test('cuotas de fin de mes conservan el día original y respetan febrero', () => {
   const installments = buildInstallments(34991, 3, '2026-01-31');
@@ -41,9 +41,21 @@ test('gestiones respetan deuda, atraso y servicio requerido', () => {
   const paid = { saldoPendiente: 0, diasAtraso: 0, idServicio: null };
   for (const action of ['agreement', 'extension', 'lastNotice', 'withdrawal']) assert.ok(actionDisabledReason(action, paid));
   assert.ok(actionDisabledReason('lastNotice', { ...paid, saldoPendiente: 2000 }));
-  assert.equal(actionDisabledReason('lastNotice', { saldoPendiente: 2000, diasAtraso: 7, idServicio: 1 }), '');
+  assert.equal(actionDisabledReason('lastNotice', { idFactura: 30, saldoPendiente: 2000, diasAtraso: 7, idServicio: 1 }), '');
   assert.equal(actionDisabledReason('event', paid), '');
   assert.equal(actionDisabledReason('charge', paid), '');
+});
+
+test('cliente sin factura permite contacto y cargos, y exige relaciones para otras gestiones', () => {
+  const row = { idCliente: 10, idContrato: null, idFactura: null, idServicio: null, saldoPendiente: null, diasAtraso: null };
+  assert.equal(actionDisabledReason('event', row), '');
+  assert.equal(actionDisabledReason('charge', row), '');
+  for (const action of ['agreement', 'extension', 'lastNotice', 'paymentDay', 'withdrawal']) assert.ok(actionDisabledReason(action, row));
+  assert.equal(actionDisabledReason('paymentDay', { ...row, idContrato: 20 }), '');
+  assert.equal(actionDisabledReason('withdrawal', { ...row, idServicio: 40 }), '');
+  assert.equal(JSON.stringify(managementRelations(row)), '{"idCliente":10}');
+  assert.equal(recordContext(row), 'Sin contrato · Sin facturas');
+  assert.equal(recordContext({ ...row, idContrato: 20, numeroContrato: 'C-20' }), 'Contrato C-20 · Sin facturas');
 });
 
 test('las secciones conservan todas las gestiones y limitan sus columnas', () => {

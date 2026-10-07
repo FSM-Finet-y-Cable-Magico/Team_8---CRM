@@ -223,11 +223,17 @@ export class CoverageDomainService {
     return this.commercial.resolvePlanAvailabilityForLocation(idEmpresa, location.latitud, location.longitud);
   }
 
-  async geocode(address: string) {
-    const candidates = await this.geocoding.geocode(address);
+  resolveAddress(input: { direccion: string; comuna?: string; region?: string }) {
+    return this.geocoding.resolveAddress(input);
+  }
+
+  async geocode(address: string, context?: { comuna?: string; region?: string; validarDireccion?: boolean }) {
+    const candidates = context?.validarDireccion
+      ? [await this.resolveAddress({ direccion: address, comuna: context.comuna, region: context.region })]
+      : await this.geocoding.geocode(address);
     return {
       candidatos: candidates,
-      mensaje: candidates.length ? null : 'No fue posible ubicar automaticamente la direccion. Selecciona el punto manualmente.',
+      mensaje: candidates.length ? null : 'El servicio de mapas no pudo confirmar la ubicación exacta. La dirección puede existir aunque no esté registrada allí.',
     };
   }
 

@@ -1,10 +1,12 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { emptyProspectForm, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
-import { CoveragePicker, CoverageLocation } from '../coverage';
+import { prospectStageLabel, registeredCoverage } from './prospect-coverage';
+import { useProspectAddress } from './useProspectAddress';
+import './prospects.css';
 
 export function ProspectsPanel({
   prospects,
@@ -29,9 +31,15 @@ export function ProspectsPanel({
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [location, setLocation] = useState<CoverageLocation | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { setLocation(null); }, [writeCompanyId, form.direccion]);
+  const addressCheck = useProspectAddress({ direccion: form.direccion, comuna: form.comuna, region: form.region }, writeCompanyId);
+  const submission = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setSelectedId(null);
+    setStatus('');
+    setSubmitting(false);
+    return () => submission.current?.abort();
+  }, [writeCompanyId]);
 
   const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const pageSize = 20;
@@ -51,7 +59,11 @@ export function ProspectsPanel({
     }
 
     setSubmitting(true);
+    const controller = new AbortController();
+    submission.current = controller;
     try {
+      const checked = await addressCheck.validate(true);
+      if (controller.signal.aborted || !checked) return;
       const { data } = await api.post('/prospects', {
         rut: normalizeRutInput(form.rut),
         nombreCompleto: form.nombreCompleto.trim(),
@@ -62,24 +74,26 @@ export function ProspectsPanel({
         region: form.region.trim() || undefined,
         origenContacto: form.origenContacto.trim(),
         idEmpresa: writeCompanyId,
-        ubicacion: location ?? undefined,
-      });
+        ubicacion: checked.location,
+        validarDireccion: true,
+      }, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       setForm(emptyProspectForm);
-      setLocation(null);
-      setStatus(data.cobertura ? `Prospecto creado. Cobertura: ${data.cobertura.estado}. ${data.cobertura.motivo}` : 'Prospecto creado sin ubicacion. Estado: Prospecto Nuevo.');
+      setStatus(`Prospecto registrado. ${data.cobertura?.coberturaComercial ? 'Factible' : 'No factible'}.`);
       onCreated();
     } catch (err) {
-      setStatus(apiErrorMessage(err));
+      if (!controller.signal.aborted) setStatus(apiErrorMessage(err));
     } finally {
-      setSubmitting(false);
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   }
 
   return (
-    <section className="workspace-grid">
+    <section className="workspace-grid prospects-workspace">
       {permissions.createProspects && (
         <form className="stack prospect-create-form" onSubmit={submit}>
           <h2>Registro</h2>
+          <fieldset disabled={submitting}>
           <label>
             RUT
             <input
@@ -137,6 +151,7 @@ export function ProspectsPanel({
             <input
               value={form.direccion}
               onChange={(event) => setForm({ ...form, direccion: event.target.value })}
+              onBlur={() => void addressCheck.validate()}
               placeholder="Av. Siempre Viva 123, Comuna"
               maxLength={200}
               required
@@ -144,16 +159,21 @@ export function ProspectsPanel({
           </label>
           <label>
             Comuna
-            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} placeholder="Comuna" maxLength={80} />
+            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} onBlur={() => void addressCheck.validate()} placeholder="Comuna" maxLength={80} required />
           </label>
           <label>
             Region
-            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} placeholder="Region" maxLength={80} />
+            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} onBlur={() => void addressCheck.validate()} placeholder="Region" maxLength={80} />
           </label>
-          {status && <p className="inline-status">{status}</p>}
-          <details><summary>Confirmar ubicación y consultar cobertura</summary>
-            <CoveragePicker idEmpresa={writeCompanyId} direccion={form.direccion} value={location} onChange={setLocation} disabled={submitting} />
-          </details>
+          </fieldset>
+          <div className="prospect-address-feedback" aria-live="polite">
+            {addressCheck.checking && <p role="status">Ubicando dirección y comprobando cobertura…</p>}
+            {addressCheck.error && <p className="alert" role="alert">{addressCheck.error}</p>}
+            {addressCheck.result && <p className="prospect-address-confirmed"><span>Dirección ubicada</span>
+              <span className={`prospect-coverage-badge ${addressCheck.result.coverage.coberturaComercial ? 'covered' : 'outside'}`}>{addressCheck.result.coverage.coberturaComercial ? 'Factible' : 'No factible'}</span>
+            </p>}
+          </div>
+          {status && <p className="inline-status" role="status">{status}</p>}
           <button disabled={submitting}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>
       )}
@@ -167,29 +187,29 @@ export function ProspectsPanel({
           </div>
         )}
         <div className="table-wrap" aria-busy={loading}>
-          <table>
+          <table className="prospect-table">
             <thead>
               <tr>
-                <th>RUT</th>
-                <th>Nombre</th>
+                <th>Prospecto</th>
                 <th>Estado</th>
+                <th>Cobertura</th>
                 <th>Origen</th>
-                <th>Empresa</th>
-                <th></th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={6} role="status">Cargando prospectos…</td></tr>}
+              {loading && <tr><td colSpan={5} role="status">Cargando prospectos…</td></tr>}
               {!loading && !loadError && prospects.length === 0 && (
-                <tr><td colSpan={6}>No hay prospectos pendientes de gestión para la empresa seleccionada.</td></tr>
+                <tr><td colSpan={5}>No hay prospectos pendientes de gestión para la empresa seleccionada.</td></tr>
               )}
               {!loading && !loadError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
-                  <td>{prospect.rut}</td>
-                  <td>{prospect.nombreCompleto}</td>
-                  <td>{prospect.estadoPipeline}</td>
-                  <td>{prospect.origenContacto ?? '-'}</td>
-                  <td>{prospect.empresa?.nombre ?? '-'}</td>
+                  <td className="prospect-table-person"><strong>{prospect.nombreCompleto}</strong><span>{prospect.rut} · {prospect.empresa?.nombre ?? 'Sin empresa'}</span></td>
+                  <td data-label="Estado">{prospectStageLabel(prospect)}</td>
+                  <td data-label="Cobertura"><span className={`prospect-coverage-badge ${registeredCoverage(prospect)}`}>
+                    {registeredCoverage(prospect) === 'covered' ? 'Factible' : registeredCoverage(prospect) === 'outside' ? 'No factible' : 'Pendiente'}
+                  </span></td>
+                  <td data-label="Origen">{prospect.origenContacto ?? '-'}</td>
                   <td>
                     <button type="button" className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
@@ -208,6 +228,7 @@ export function ProspectsPanel({
         >
           {selectedProspect && (
             <ProspectWorkflowPanel
+              key={selectedProspect.idProspecto}
               prospect={selectedProspect}
               plans={plans}
               permissions={permissions}

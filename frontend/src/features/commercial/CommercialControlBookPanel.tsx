@@ -4,7 +4,7 @@ import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { ControlBookDrawer } from './ControlBookDrawer';
 import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
-import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, WORK_VIEWS, WorkView, currency, dateLabel, exportColumns, readable } from './control-book-model';
+import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, WORK_VIEWS, WorkView, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './commercial-control-book.css';
 
@@ -13,10 +13,10 @@ export function CommercialStatus({ row }: { row: ControlRow }) {
 }
 
 function Cell({ column, row }: { column: string; row: ControlRow }) {
-  if (column === 'cliente') return <><strong>{row.nombre}</strong><small>{row.rut ?? 'Sin RUT'}</small><small className="control-row-context">Contrato {row.numeroContrato} · Doc. {row.numeroDocumento}</small></>;
-  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span><small>Contrato {row.numeroContrato} · {row.tipoDocumento ? readable(row.tipoDocumento) : 'Documento'} {row.numeroDocumento}</small></>;
+  if (column === 'cliente') return <><strong>{row.nombre}</strong><small>{row.rut ?? 'Sin RUT'}</small><small className="control-row-context">{recordContext(row)}</small></>;
+  if (column === 'servicio') return <><span>{row.plan ?? (row.idServicio ? 'Servicio sin plan asociado' : 'Sin plan asociado')}</span><small>{recordContext(row)}</small></>;
   if (column === 'deuda') return <strong>{row.saldoPendiente === null ? '—' : currency.format(row.saldoPendiente)}</strong>;
-  if (column === 'estado') return <><CommercialStatus row={row}/><small>{row.diasAtraso === null ? 'Atraso sin datos' : row.diasAtraso > 0 ? row.diasAtraso + ' días de atraso' : 'Sin atraso'}</small></>;
+  if (column === 'estado') return <><CommercialStatus row={row}/>{row.idFactura && <small>{row.diasAtraso === null ? 'Atraso sin datos' : row.diasAtraso > 0 ? row.diasAtraso + ' días de atraso' : 'Sin atraso'}</small>}</>;
   if (column === 'accion') return row.accionSugerida.toLocaleLowerCase('es-CL').includes('sin gestión pendiente') ? null : <span>{row.accionSugerida}</span>;
   if (column === 'contacto') return <><span>{row.telefono ?? 'Sin teléfono'}</span><small>{row.email ?? 'Sin correo'}</small></>;
   if (column === 'gestion') return <><span>{readable(row.ultimaGestion)}</span><small>{dateLabel(row.fechaUltimaGestion)}{row.responsableUltimaGestion ? ' · ' + row.responsableUltimaGestion : ''}</small></>;
@@ -176,10 +176,10 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
       <div className="control-list">
         <div className="control-table-shell" aria-busy={loading}>
           {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="control-empty"><Search size={24}/><strong>No hay resultados</strong><span>Prueba con otra búsqueda o ajusta los filtros.</span>{(activeFilters.length > 0 || search) && <button className="control-outline" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
-            <caption className="control-sr-only">Libro de control. Una fila por cliente, contrato y factura. Selecciona una fila o pulsa Enter para abrir su detalle.</caption>
+            <caption className="control-sr-only">Libro de control. Incluye clientes con y sin facturas; los documentos se muestran por contrato. Selecciona una fila o pulsa Enter para abrir su detalle.</caption>
             <colgroup>{visible.map(key => <col key={key} style={{ width: `${(key === 'cliente' ? 1.45 : 1) / (visible.length + 0.45) * 100}%` }}/>)}</colgroup>
             <thead><tr>{visible.map((key) => <th scope="col" key={key} className={'column-' + key} aria-sort={COLUMNS[key].sort === filters.sort ? filters.order === 'asc' ? 'ascending' : 'descending' : undefined}>{COLUMNS[key].sort ? <button disabled={drawerBusy} onClick={() => sortBy(COLUMNS[key].sort!)}>{COLUMNS[key].label}{COLUMNS[key].sort === filters.sort && (filters.order === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</button> : COLUMNS[key].label}</th>)}</tr></thead>
-            <tbody>{data.items.map((row) => <tr key={row.rowId} tabIndex={0} data-row-id={row.rowId} aria-label={'Ver ' + row.nombre + ', contrato ' + row.numeroContrato + ', documento ' + row.numeroDocumento} onClick={() => openRecord(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(row); } }}>{visible.map((key) => <td key={key} className={'column-' + key} data-label={COLUMNS[key].label}><Cell column={key} row={row}/></td>)}</tr>)}</tbody>
+            <tbody>{data.items.map((row) => <tr key={row.rowId} tabIndex={0} data-row-id={row.rowId} aria-label={'Ver ' + row.nombre + ', ' + recordContext(row)} onClick={() => openRecord(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(row); } }}>{visible.map((key) => <td key={key} className={'column-' + key} data-label={COLUMNS[key].label}><Cell column={key} row={row}/></td>)}</tr>)}</tbody>
           </table>}
         </div>
         <footer className="control-pagination"><span>{data?.items.length ? ((page - 1) * 30 + 1) + '–' + ((page - 1) * 30 + data.items.length) + ' de ' + data.pagination.totalRows : '0 registros'}</span><button className="control-icon" aria-label="Página anterior" disabled={page <= 1 || loading || drawerBusy} onClick={() => { setPage(page - 1); setSelected(null); }}><ChevronLeft size={18}/></button><span>Página {data?.pagination.page ?? page} de {data?.pagination.totalPages ?? 1}</span><button className="control-icon" aria-label="Página siguiente" disabled={!data || page >= data.pagination.totalPages || loading || drawerBusy} onClick={() => { setPage(page + 1); setSelected(null); }}><ChevronRight size={18}/></button></footer>

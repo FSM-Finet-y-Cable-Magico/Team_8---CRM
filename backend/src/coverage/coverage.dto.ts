@@ -148,4 +148,18 @@ export class GeocodeAddressDto {
   @IsString()
   @MaxLength(240)
   direccion!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  comuna?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  region?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  validarDireccion?: boolean;
 }

@@ -140,8 +140,9 @@ export class ProspectsService {
       throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
-    const cobertura = dto.ubicacion
-      ? await this.coverageService.check(idEmpresa, dto.ubicacion, currentUser)
+    const ubicacion = dto.validarDireccion ? await this.coverageService.resolveAddress(dto) : dto.ubicacion;
+    const cobertura = ubicacion
+      ? await this.coverageService.check(idEmpresa, ubicacion, currentUser)
       : null;
     const prospect = await this.prisma.prospecto.create({
       data: {
@@ -154,8 +155,8 @@ export class ProspectsService {
         direccion: dto.direccion.trim(),
         comuna: dto.comuna?.trim() || null,
         region: dto.region?.trim() || null,
-        latitud: dto.ubicacion?.latitud ?? null,
-        longitud: dto.ubicacion?.longitud ?? null,
+        latitud: ubicacion?.latitud ?? null,
+        longitud: ubicacion?.longitud ?? null,
         idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
         idPlanInteres: dto.idPlanInteres ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
@@ -356,15 +357,19 @@ export class ProspectsService {
   }
 
   async generateQuote(idProspecto: number, dto: GenerateQuoteDto, currentUser: AuthUser) {
-    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    let prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const storedLocation = prospect.latitud !== null && prospect.latitud !== undefined && prospect.longitud !== null && prospect.longitud !== undefined;
+    const locatedAddress = !storedLocation && dto.validarDireccion
+      ? await this.coverageService.resolveAddress({ direccion: prospect.direccion ?? '', comuna: prospect.comuna ?? undefined, region: prospect.region ?? undefined })
+      : null;
 
-    if (prospect.latitud === null || prospect.latitud === undefined || prospect.longitud === null || prospect.longitud === undefined) {
+    if (!storedLocation && !locatedAddress) {
       throw new BadRequestException('El prospecto debe tener una ubicacion valida antes de cotizar');
     }
 
     const commercial = await this.coverageService.plansForLocation(
       prospect.idEmpresa ?? 0,
-      { latitud: prospect.latitud, longitud: prospect.longitud },
+      { latitud: locatedAddress?.latitud ?? prospect.latitud!, longitud: locatedAddress?.longitud ?? prospect.longitud! },
       currentUser,
     );
     if (!commercial.coberturaComercial || !commercial.planes.some(plan => plan.idPlan === dto.planId)) {
@@ -374,6 +379,7 @@ export class ProspectsService {
     if (!prospect.email?.trim()) {
       throw new BadRequestException('El prospecto debe tener correo electronico');
     }
+    const email = prospect.email;
 
     if (prospect.estadoPipeline === LOST_PIPELINE_STATUS) {
       throw new BadRequestException('Un prospecto perdido no puede avanzar a cotizacion');
@@ -385,6 +391,18 @@ export class ProspectsService {
 
     if (!plan || plan.activo === false || plan.idEmpresa !== prospect.idEmpresa) {
       throw new BadRequestException('Plan inexistente o inactivo');
+    }
+
+    if (locatedAddress) {
+      const updated = await this.prisma.prospecto.update({
+        where: { idProspecto },
+        data: { latitud: locatedAddress.latitud, longitud: locatedAddress.longitud, idZonaPago: commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago ?? null },
+      });
+      await this.auditService.record({ idUsuario: currentUser.idUsuario, accion: 'ACTUALIZAR_UBICACION_PROSPECTO', entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
+        valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud },
+        valorNuevo: { latitud: locatedAddress.latitud, longitud: locatedAddress.longitud, origen: 'DIRECCION_VERIFICADA' },
+      });
+      prospect = { ...prospect, ...updated };
     }
 
     const quote = await this.prisma.cotizacion.create({
@@ -409,7 +427,7 @@ export class ProspectsService {
 
     try {
       emailDelivery = await this.mailService.sendQuote({
-        to: prospect.email,
+        to: email,
         prospectName: prospect.nombreCompleto ?? 'Cliente',
         companyName: updatedQuote.prospecto?.empresa?.nombre ?? 'FiNet',
         pdf,

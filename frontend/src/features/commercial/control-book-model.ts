@@ -1,10 +1,10 @@
 export type ControlRow = {
   rowId: string; idEmpresa: number | null; idCliente: number; rut: string | null; nombre: string; telefono: string | null; email: string | null; direccion: string | null;
-  idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number; numeroContrato: string; idPlan: number | null; plan: string | null;
-  idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number; numeroDocumento: string; fechaEmision: string | null; fechaVencimiento: string;
-  fechaVencimientoEfectiva: string; estadoDocumento: string; montoDocumento: number | null; totalPagado: number; saldoPendiente: number | null; saldoFavor: number | null;
+  idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number | null; numeroContrato: string | null; idPlan: number | null; plan: string | null;
+  idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number | null; numeroDocumento: string | null; fechaEmision: string | null; fechaVencimiento: string | null;
+  fechaVencimientoEfectiva: string | null; estadoDocumento: string | null; montoDocumento: number | null; totalPagado: number | null; saldoPendiente: number | null; saldoFavor: number | null;
   diasAtraso: number | null; estadoComercial: string; ultimaGestion: string | null; fechaUltimaGestion: string | null; responsableUltimaGestion: string | null; accionSugerida: string;
-  convenioActivo: boolean; prorrogaActiva: boolean; diaPago: number; cambioFecha: string | null; fechaInstalacion: string | null; fechaCorte: string | null; estadoCorte: string | null;
+  convenioActivo: boolean; prorrogaActiva: boolean; diaPago: number | null; cambioFecha: string | null; fechaInstalacion: string | null; fechaCorte: string | null; estadoCorte: string | null;
   avisoRetiro: boolean; retiroPendiente: boolean; observacionRelevante: string | null; ultimoPago: string | null; formaPago: string | null; codigoTransaccion: string | null;
   valorRecibido: number | null; cargosPendientes: number;
 };
@@ -40,7 +40,7 @@ export function today() {
 }
 const STATUS_LABELS: Record<string, string> = {
   AL_DIA: 'Al día', SALDO_PENDIENTE: 'Por vencer', DEUDA_VENCIDA: 'Deuda vencida', CON_PRORROGA: 'Con prórroga',
-  CON_CONVENIO: 'Con convenio', ULTIMO_AVISO_REGISTRADO: 'Último aviso', RETIRO_PENDIENTE: 'Retiro pendiente', SIN_DATOS_FINANCIEROS: 'Sin datos financieros',
+  CON_CONVENIO: 'Con convenio', ULTIMO_AVISO_REGISTRADO: 'Último aviso', RETIRO_PENDIENTE: 'Retiro pendiente', SIN_DATOS_FINANCIEROS: 'Sin datos financieros', SIN_FACTURAS: 'Sin facturas',
 };
 export const readable = (value: string | null | undefined) => value ? STATUS_LABELS[value] ?? value.replace(/_/g, ' ').toLocaleLowerCase('es-CL') : '—';
 export const ACTION_LABELS: Record<ActionName, string> = {
@@ -48,10 +48,23 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
 };
 export function actionDisabledReason(action: ActionName, row: ControlRow) {
+  if (['lastNotice', 'agreement', 'extension'].includes(action) && !row.idFactura) return 'Requiere una factura asociada';
   if (['lastNotice', 'agreement', 'extension'].includes(action) && !(Number(row.saldoPendiente) > 0)) return 'Requiere saldo pendiente';
   if (action === 'lastNotice' && !(Number(row.diasAtraso) > 0)) return 'Requiere deuda vencida';
   if (action === 'withdrawal' && !row.idServicio) return 'Requiere un servicio asociado';
+  if (action === 'paymentDay' && !row.idContrato) return 'Requiere un contrato asociado';
   return '';
+}
+
+export function recordContext(row: ControlRow) {
+  return [
+    row.idContrato ? 'Contrato ' + row.numeroContrato : 'Sin contrato',
+    row.idFactura ? (row.tipoDocumento ? readable(row.tipoDocumento) : 'Documento') + ' ' + row.numeroDocumento : 'Sin facturas',
+  ].join(' · ');
+}
+
+export function managementRelations(row: ControlRow) {
+  return { idCliente: row.idCliente, idContrato: row.idContrato ?? undefined, idServicio: row.idServicio ?? undefined, idFactura: row.idFactura ?? undefined };
 }
 
 type Column = { label: string; fields: (keyof ControlRow)[]; group: string; sort?: string };

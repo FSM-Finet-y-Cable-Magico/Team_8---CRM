@@ -1,8 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsEmail, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { CoverageLocationDto } from '../../coverage/coverage.dto';
 
 export class CreateProspectDto {
+  @IsOptional()
+  @IsBoolean()
+  validarDireccion?: boolean;
+
   @IsOptional()
   @ValidateNested()
   @Type(() => CoverageLocationDto)

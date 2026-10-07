@@ -240,11 +240,11 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación administrada por G3'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Resumen de instalación'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'Esta orden local se conserva como antecedente histórico de solo lectura.'
-                        : 'El cierre técnico, los equipos y el resultado físico se registran en G3. CRM recibirá el cierre por integración.'}
+                        ? 'Esta orden se conserva en el historial de instalaciones.'
+                        : 'Consulta el estado registrado y los antecedentes de la visita.'}
                     </p>
                   </div>
                 </div>
@@ -260,7 +260,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                     }
                   />
                 </div>
-                <p className="inline-status">Fuente operativa: G3. No hay cierre local ni asignación física de inventario desde CRM.</p>
               </section>
             ) : selectedOrderHasTicket ? (
               <section className="work-order-completion">

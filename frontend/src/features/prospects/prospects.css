@@ -1,0 +1,46 @@
+.prospects-workspace { min-width: 0; }
+.prospects-workspace .prospects-list-section { display: grid; gap: 14px; }
+.prospects-workspace table td { overflow-wrap: anywhere; }
+.prospects-workspace table button { white-space: nowrap; }
+.prospect-table-person strong { display: block; font-size: .82rem; }
+.prospect-table-person > span { display: block; margin-top: 4px; color: #66796d; font-size: .72rem; }
+.prospect-coverage-badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; padding: 5px 9px; border-radius: 7px; color: #775e24; background: #f5efdf; font-size: .72rem; font-weight: 650; white-space: nowrap; }
+.prospect-coverage-badge.covered { color: #247c68; background: #eaf3ef; }
+.prospect-coverage-badge.outside { color: #984638; background: #f9eeeb; }
+.prospect-coverage-section { min-width: 0; overflow: hidden; border: 1px solid #d6e2dc; border-radius: 12px; }
+.prospect-coverage-section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; }
+.prospect-coverage-section h4 { margin: 0 0 5px; font-size: .88rem; }
+.prospect-coverage-section header p { margin: 0; color: #65776d; font-size: .8rem; overflow-wrap: anywhere; }
+.prospect-location-map { height: 270px; width: 100%; isolation: isolate; }
+.prospect-location-empty { display: grid; justify-items: center; align-content: center; gap: 10px; min-height: 155px; padding: 20px; color: #67786f; background: #f3f6f4; text-align: center; }
+.prospect-location-empty p { margin: 0; font-size: .83rem; }
+.prospect-coverage-section > .alert { margin: 10px 16px; }
+.prospect-workflow .prospect-action-card { --prospect-accent: #247c68; --prospect-soft: #edf3f0; box-shadow: none; }
+.prospect-workflow .prospect-action-icon { color: #247c68; background: #edf3f0; }
+.prospect-workflow .status-badge.neutral { color: #46594e; background: #eef1ef; }
+.prospect-address-feedback p { margin: 0; font-size: .8rem; }
+.prospect-address-confirmed { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.prospect-history-note { margin: 0; color: #6a766e; font-size: .8rem; }
+.prospect-create-form fieldset { min-width: 0; padding: 0; margin: 0; border: 0; display: grid; gap: 14px; }
+.prospects-workspace:has(.prospect-create-form) { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+.prospects-workspace:not(:has(.prospect-create-form)) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1100px) { .prospects-workspace:has(.prospect-create-form) { grid-template-columns: minmax(0, 1fr); } .prospect-create-form fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .prospect-create-form fieldset { grid-template-columns: minmax(0, 1fr); }
+  .prospect-coverage-section > header { align-items: flex-start; }
+  .prospect-location-map { height: 230px; }
+  .modal-card:has(.prospect-workflow) .modal-header { flex-direction: row; flex-wrap: nowrap; align-items: center; }
+  .prospect-table thead { display: none; }
+  .prospect-table tbody { display: grid; }
+  .prospect-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px 0; border-bottom: 1px solid #d6e2dc; }
+  .prospect-table tbody td { min-width: 0; padding: 0; border: 0; }
+  .prospect-table tbody td:first-child { grid-column: 1 / -1; }
+  .prospect-table tbody td:last-child { align-self: end; justify-self: end; }
+  .prospect-table tbody td::before { display: block; content: attr(data-label); margin-bottom: 5px; color: #65776d; font-size: .72rem; }
+  .prospect-table tbody td:not([data-label])::before { display: none; }
+}
+.theme-dark .prospect-coverage-section { border-color: #34483e; }
+.theme-dark .prospect-location-empty { background: #17271f; color: #a8bcb0; }
+.theme-dark .prospect-coverage-badge { color: #dbc58d; background: #3c3323; }
+.theme-dark .prospect-coverage-badge.covered { color: #9eceb8; background: #234133; }
+.theme-dark .prospect-coverage-badge.outside { color: #e6b5a8; background: #482e29; }

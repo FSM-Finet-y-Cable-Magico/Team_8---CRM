@@ -12,7 +12,7 @@ function textValue(value: unknown) {
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    return String(record.nombre_completo ?? record.nombre ?? record.direccion_completa ?? 'Disponible en G3');
+    return String(record.nombre_completo ?? record.nombre ?? record.direccion_completa ?? 'Sin detalle disponible');
   }
   return '-';
 }
@@ -52,25 +52,25 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
   if (!tracking) return <div className="g3-installation-card">
-    <p>G3 administrará la orden, agenda, técnico, evidencia y cierre de terreno.</p>
-    <button type="button" disabled={!canRequest || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación a G3'}</button>
+    <p>Solicita la visita técnica para coordinar la instalación.</p>
+    <button type="button" disabled={!canRequest || busy || Boolean(error)} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>
     {!canRequest && <p className="alert">Primero confirma el contrato firmado y la factibilidad.</p>}
-    {error && <p className="alert">{error}</p>}
+    {error && <><p className="alert">{error}</p><button type="button" className="secondary" disabled={busy} onClick={() => void load()}>Reintentar consulta</button></>}
   </div>;
 
   const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   return <div className="g3-installation-card">
-    <header><div><strong>Instalación técnica</strong><span className="source-badge">Fuente G3</span></div><StatusBadge value={state} /></header>
+    <header><div><strong>Instalación técnica</strong></div><StatusBadge value={state} /></header>
     <dl className="customer-readonly-details">
-      <div><dt>Código OT G3</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de respuesta'}</dd></div>
+      <div><dt>Orden</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de respuesta'}</dd></div>
       <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
       <div><dt>Última sincronización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>
       <div><dt>Intentos</dt><dd>{tracking.intentos}</dd></div>
       {tracking.detalle && <><div><dt>Técnico</dt><dd>{textValue(tracking.detalle.tecnico)}</dd></div><div><dt>Dirección</dt><dd>{textValue(tracking.detalle.direccion)}</dd></div></>}
     </dl>
-    {tracking.estadoOriginalG3 && <p className="inline-status">Estado original G3: {tracking.estadoOriginalG3}. Se mantiene en seguimiento y no activa el servicio.</p>}
+    {tracking.estadoOriginalG3 && <p className="inline-status">Estado informado: {tracking.estadoOriginalG3}. Se mantiene en seguimiento y no activa el servicio.</p>}
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
-    {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">Cliente ausente. La reprogramación queda pendiente del mecanismo que defina G3.</p>}
+    {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">Cliente ausente. La visita queda pendiente de reprogramación.</p>}
     {tracking.ultimoErrorSanitizado && <p className="alert">{tracking.ultimoErrorSanitizado}</p>}
     <div className="button-row">
       {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Ver detalle</button>}

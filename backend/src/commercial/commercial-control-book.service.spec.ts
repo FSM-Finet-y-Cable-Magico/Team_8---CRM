@@ -10,6 +10,7 @@ import { CommercialStatusService } from './commercial-status.service';
 
 const admin: AuthUser = { idUsuario: 1, idEmpresa: 1, email: null, nombreCompleto: 'Admin Test', roles: ['Administrador'] };
 const commercial: AuthUser = { ...admin, idUsuario: 2, nombreCompleto: 'Comercial Test', roles: ['Comercial'] };
+const firstPage = { page: 1, pageSize: 30 };
 const support: AuthUser = { ...admin, idUsuario: 3, nombreCompleto: 'Soporte Test', roles: ['Soporte'] };
 
 function invoiceFixture(overrides: Record<string, unknown> = {}) {
@@ -22,10 +23,16 @@ function invoiceFixture(overrides: Record<string, unknown> = {}) {
       idContrato: 20, idCliente: 10, idEmpresa: 1, idPlan: 5, idZonaPago: 7, diaVencimiento: 10, estado: 'Activo', fechaSuspension: null,
       numeroContratoExterno: 'C-20', direccionInstalacion: 'Dirección sintética', cliente: { idCliente: 10, idEmpresa: 1, rut: '11111111-1', nombreCompleto: 'Cliente Sintético', telefono: '+56911111111', email: 'test@example.test' },
       plan: { nombreComercial: 'Plan Prueba' }, zonaPago: { nombreZona: 'Zona Prueba' },
-      servicios: [{ idServicio: 40, idZonaPago: 7, estadoOperativo: 'Activo', fechaCreacion: new Date('2026-01-01'), direccion: { direccionCompleta: 'Dirección sintética' }, zonaPago: { nombreZona: 'Zona Prueba' } }],
+      servicios: [{ idServicio: 40, idCliente: 10, idZonaPago: 7, estadoOperativo: 'Activo', fechaCreacion: new Date('2026-01-01'), direccion: { direccionCompleta: 'Dirección sintética' }, zonaPago: { nombreZona: 'Zona Prueba' } }],
       cambiosCondicionPago: [], cargosAdicionales: [],
     },
     ...overrides,
+  };
+}
+
+function customerFixture(invoice = invoiceFixture()) {
+  return { ...invoice.contrato.cliente, direcciones: [], servicios: [], eventosGestionComercial: [], cargosAdicionales: [],
+    contratos: [{ ...invoice.contrato, facturas: [invoice] }],
   };
 }
 
@@ -33,7 +40,7 @@ function harness(invoice = invoiceFixture()) {
   const basePrisma = {
     factura: { findMany: jest.fn().mockResolvedValue([invoice]), findUnique: jest.fn().mockResolvedValue(invoice) },
     observacionOperativa: { findMany: jest.fn().mockResolvedValue([{ idCliente: 10, observacion: 'Observación sintética' }]) },
-    cliente: { findUnique: jest.fn().mockResolvedValue(invoice.contrato?.cliente), findFirst: jest.fn().mockResolvedValue(null) },
+    cliente: { findMany: jest.fn().mockResolvedValue([customerFixture(invoice)]), findUnique: jest.fn().mockResolvedValue(invoice.contrato?.cliente), findFirst: jest.fn().mockResolvedValue(null) },
     prospecto: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idProspecto: 90, clasificacionComercial: 'INTERESADO_NO_CONTRATANTE' }) },
     servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 40, idCliente: 10, idEmpresa: 1, idContrato: 20 }) },
     contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 20, idCliente: 10, idEmpresa: 1, diaVencimiento: 10 }), update: jest.fn() },
@@ -54,6 +61,82 @@ function harness(invoice = invoiceFixture()) {
 }
 
 describe('CommercialControlBookService', () => {
+  it('incluye al cliente sin contrato ni factura y conserva su contacto y última gestión', async () => {
+    const { service, prisma } = harness();
+    prisma.cliente.findMany.mockResolvedValue([{ ...customerFixture(), contratos: [],
+      direcciones: [{ direccionCompleta: 'Dirección de prueba' }],
+      eventosGestionComercial: [{ idEvento: 1, tipo: 'CONTACTO_CLIENTE', fecha: new Date('2026-09-25T12:00:00Z'), responsable: { nombreCompleto: 'Comercial Test' } }],
+    }]);
+    const result = await service.list({ ...firstPage, search: 'cliente sintetico' }, commercial);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ idCliente: 10, idContrato: null, idServicio: null, idFactura: null, estadoComercial: 'SIN_FACTURAS',
+      direccion: 'Dirección de prueba', saldoPendiente: null, totalPagado: null, diasAtraso: null, ultimaGestion: 'CONTACTO_CLIENTE', responsableUltimaGestion: 'Comercial Test',
+    });
+    expect(result.summary).toMatchObject({ totalRows: 1, totalDebt: 0, overdueCount: 0, agreementsCount: 0, extensionsCount: 0 });
+    await service.registerEvent({ idCliente: 10, tipo: 'CONTACTO_CLIENTE', canal: 'TELEFONO', fecha: '2026-09-25T12:00:00Z' }, commercial);
+    expect(prisma.eventoGestionComercial.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idCliente: 10, idContrato: undefined, idServicio: undefined, idFactura: undefined }) }));
+  });
+
+  it('muestra contrato y servicio sin factura sin inventar monto, deuda ni vencimiento', async () => {
+    const { service, prisma } = harness();
+    const customer = customerFixture();
+    customer.contratos[0].facturas = [];
+    prisma.cliente.findMany.mockResolvedValue([customer]);
+    const result = await service.list({ ...firstPage, idPlan: 5, idZona: 7 }, commercial);
+    expect(result.items[0]).toMatchObject({ idContrato: 20, idServicio: 40, idFactura: null, plan: 'Plan Prueba', diaPago: 10,
+      estadoComercial: 'SIN_FACTURAS', montoDocumento: null, saldoPendiente: null, fechaVencimiento: null, fechaVencimientoEfectiva: null,
+    });
+    expect((await service.list({ ...firstPage, idPlan: 999 }, commercial)).items).toHaveLength(0);
+    expect((await service.list({ ...firstPage, fechaVencimientoDesde: '2026-09-01' }, commercial)).items).toHaveLength(0);
+    expect((await service.list({ ...firstPage, conDeuda: true }, commercial)).items).toHaveLength(0);
+    expect((await service.list({ ...firstPage, vencido: true }, commercial)).items).toHaveLength(0);
+    expect((await service.list({ ...firstPage, conDeuda: false }, commercial)).items).toHaveLength(1);
+  });
+
+  it('conserva servicio sin contrato y no duplica el cliente como registro vacío', async () => {
+    const { service, prisma } = harness();
+    const customer = customerFixture();
+    prisma.cliente.findMany.mockResolvedValue([{ ...customer, contratos: [], servicios: [customer.contratos[0].servicios[0]] }]);
+    const result = await service.list({ ...firstPage,}, commercial);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ idCliente: 10, idServicio: 40, idContrato: null, idFactura: null, estadoServicio: 'Activo' });
+  });
+
+  it('muestra avisos de un servicio sin factura y mantiene visible el último contacto del cliente', async () => {
+    const { service, prisma } = harness();
+    const customer = customerFixture();
+    const contact = { idEvento: 1, tipo: 'CONTACTO_CLIENTE', fecha: new Date('2026-09-25T12:00:00Z'), responsable: { nombreCompleto: 'Comercial Test' } };
+    prisma.cliente.findMany.mockResolvedValue([{ ...customer, eventosGestionComercial: [contact] }]);
+    expect((await service.list({ ...firstPage }, commercial)).items[0]).toMatchObject({ ultimaGestion: 'CONTACTO_CLIENTE', estadoComercial: 'DEUDA_VENCIDA', ultimoAviso: false });
+    customer.contratos[0].facturas = [];
+    prisma.cliente.findMany.mockResolvedValue([{ ...customer, eventosGestionComercial: [{ ...contact, tipo: 'AVISO_PREVIO_RETIRO', idContrato: 20, idServicio: 40 }] }]);
+    expect((await service.list({ ...firstPage, retiroPendiente: true }, commercial)).items[0]).toMatchObject({ idFactura: null, avisoRetiro: true, retiroPendiente: true });
+  });
+
+  it('mezcla clientes facturados y sin factura sin alterar el resumen financiero', async () => {
+    const { service, prisma } = harness();
+    const customer = customerFixture();
+    prisma.cliente.findMany.mockResolvedValue([customer, { ...customer, idCliente: 11, contratos: [] }]);
+    const result = await service.list({ ...firstPage,}, commercial);
+    expect(result.items).toHaveLength(2);
+    expect(result.summary).toMatchObject({ totalRows: 2, totalDebt: 6000, overdueCount: 1 });
+    expect(new Set(result.items.map((row) => row.rowId)).size).toBe(2);
+    expect((await service.list({ ...firstPage, estadoComercial: 'SIN_FACTURAS' }, commercial)).items.map((row) => row.idCliente)).toEqual([11]);
+    expect((await service.list({ ...firstPage, fechaVencimientoHasta: '2026-09-10' }, commercial)).items.map((row) => row.idFactura)).toEqual([30]);
+    expect((await service.list({ page: 2, pageSize: 1 }, commercial)).pagination).toMatchObject({ totalRows: 2, totalPages: 2 });
+  });
+
+  it('no limita la búsqueda a los primeros 5000 registros y exporta clientes sin factura', async () => {
+    const { service, prisma } = harness();
+    const customer = { ...customerFixture(), contratos: [] };
+    prisma.cliente.findMany.mockResolvedValue(Array.from({ length: 5001 }, (_, index) => ({ ...customer, idCliente: index + 1, nombreCompleto: `Persona ${index + 1}` })));
+    const result = await service.list({ ...firstPage, search: 'Persona 5001' }, commercial);
+    expect(result.items[0]).toMatchObject({ idCliente: 5001, idFactura: null });
+    expect(prisma.cliente.findMany.mock.calls[0][0]).not.toHaveProperty('take');
+    const csv = await service.export({ ...firstPage, search: 'Persona 5001', columns: 'nombre,numeroDocumento,saldoPendiente' }, 'csv', commercial);
+    expect(csv.buffer.toString('utf8')).toContain('Persona 5001,,');
+  });
+
   it('proyecta factura parcial, estado, última observación, filtros y paginación', async () => {
     const { service } = harness();
     const result = await service.list({ page: 1, pageSize: 10, search: '11111111', conDeuda: true }, commercial);
@@ -72,9 +155,10 @@ describe('CommercialControlBookService', () => {
   it('aplica alcance multiempresa y rechaza orden arbitrario', async () => {
     const { service, prisma } = harness();
     await service.list({ page: 1, pageSize: 30, idEmpresa: 1 }, commercial);
-    expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } },
-    }) }));
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1 },
+      include: expect.objectContaining({ contratos: expect.objectContaining({ where: { idEmpresa: 1 } }), servicios: expect.objectContaining({ where: { idEmpresa: 1, idContrato: null } }) }),
+    }));
+    await expect(service.list({ ...firstPage, idEmpresa: 2 }, commercial)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(service.list({ page: 1, pageSize: 30, sort: 'DROP TABLE' } as never, commercial)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.list({ page: 1, pageSize: 30 }, { ...support, roles: ['Terreno'] })).rejects.toBeInstanceOf(ForbiddenException);
   });
@@ -82,9 +166,7 @@ describe('CommercialControlBookService', () => {
   it('mantiene una empresa concreta para administrador y exige selección si no tiene empresa', async () => {
     const ownCompany = harness();
     await ownCompany.service.list({ page: 1, pageSize: 30 }, admin);
-    expect(ownCompany.prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } } }),
-    }));
+    expect(ownCompany.prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1 } }));
     await expect(harness().service.list(
       { page: 1, pageSize: 30 },
       { ...admin, idEmpresa: null },
