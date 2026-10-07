@@ -66,7 +66,7 @@ export function ProspectsPanel({
       });
       setForm(emptyProspectForm);
       setLocation(null);
-      setStatus(data.cobertura ? `Prospecto creado. Cobertura: ${data.cobertura.estado}. ${data.cobertura.motivo}` : 'Prospecto creado. Factibilidad pendiente de revisión.');
+      setStatus(data.cobertura ? `Prospecto creado. Cobertura: ${data.cobertura.estado}. ${data.cobertura.motivo}` : 'Prospecto creado sin ubicacion. Estado: Prospecto Nuevo.');
       onCreated();
     } catch (err) {
       setStatus(apiErrorMessage(err));

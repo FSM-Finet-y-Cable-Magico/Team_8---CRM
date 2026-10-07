@@ -159,12 +159,12 @@ export class ProspectsService {
         idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
         idPlanInteres: dto.idPlanInteres ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
-        estadoPipeline: cobertura?.estado === 'FACTIBLE'
+        estadoPipeline: cobertura?.coberturaComercial
           ? FEASIBLE_PIPELINE_STATUS
-          : cobertura?.estado === 'NO_FACTIBLE'
+          : cobertura
             ? NOT_FEASIBLE_PIPELINE_STATUS
             : INITIAL_PIPELINE_STATUS,
-        ...(cobertura?.estado === 'FACTIBLE' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
+        ...(cobertura?.coberturaComercial ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         fechaCreacion: new Date(),
       },
       include: {
@@ -221,7 +221,27 @@ export class ProspectsService {
   }
 
   async verifyFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser) {
-    return this.saveFeasibility(idProspecto, dto, currentUser);
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (prospect.latitud === null || prospect.latitud === undefined
+      || prospect.longitud === null || prospect.longitud === undefined) {
+      throw new BadRequestException('El prospecto debe tener una ubicacion valida para determinar cobertura comercial');
+    }
+    const cobertura = await this.coverageService.check(
+      prospect.idEmpresa ?? 0,
+      { latitud: prospect.latitud, longitud: prospect.longitud },
+      currentUser,
+    );
+    const updated = await this.saveFeasibility(
+      idProspecto,
+      {
+        resultado: cobertura.coberturaComercial ? 'Factible' : 'No Factible',
+        observaciones: dto.observaciones,
+      },
+      currentUser,
+      cobertura,
+    );
+    return { ...updated, cobertura };
   }
 
   async verifyTomodat(idProspecto: number, location: CoverageLocationDto, currentUser: AuthUser) {
@@ -245,17 +265,9 @@ export class ProspectsService {
       valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
       valorNuevo: { latitud: location.latitud, longitud: location.longitud, idZonaPago: locatedProspect.idZonaPago },
     });
-    if (cobertura.estado === 'PENDIENTE_VALIDACION_TECNICA') {
-      await this.auditService.record({
-        idUsuario: currentUser.idUsuario, accion: 'CONSULTAR_COBERTURA_PENDIENTE',
-        entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
-        valorNuevo: { direccion: prospect.direccion, cobertura },
-      });
-      return { ...locatedProspect, cobertura };
-    }
     const updated = await this.saveFeasibility(
       idProspecto,
-      { resultado: cobertura.estado === 'FACTIBLE' ? 'Factible' : 'No Factible' },
+      { resultado: cobertura.coberturaComercial ? 'Factible' : 'No Factible' },
       currentUser,
       cobertura,
     );
@@ -335,7 +347,7 @@ export class ProspectsService {
         resultado: dto.resultado,
         observaciones: dto.observaciones,
         estadoPipeline: nextStatus,
-        origen: cobertura ? cobertura.tecnica.proveedor : 'Manual',
+        origen: cobertura ? 'COBERTURA_COMERCIAL' : 'Manual',
         ...(cobertura ? { direccion: prospect.direccion, cobertura } : {}),
       },
     });
@@ -363,19 +375,8 @@ export class ProspectsService {
       throw new BadRequestException('El prospecto debe tener correo electronico');
     }
 
-    const hasFeasibility = await this.prisma.cotizacion.findFirst({
-      where: {
-        idProspecto,
-        factibilidadVerificada: true,
-      },
-    });
-
-    if ([NOT_FEASIBLE_PIPELINE_STATUS, LOST_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')) {
-      throw new BadRequestException('La factibilidad debe estar marcada como Factible');
-    }
-
-    if (!hasFeasibility && this.statusIndex(prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS) < this.statusIndex(FEASIBLE_PIPELINE_STATUS)) {
-      throw new BadRequestException('La factibilidad debe estar marcada como Factible');
+    if (prospect.estadoPipeline === LOST_PIPELINE_STATUS) {
+      throw new BadRequestException('Un prospecto perdido no puede avanzar a cotizacion');
     }
 
     const plan = await this.prisma.plan.findUnique({

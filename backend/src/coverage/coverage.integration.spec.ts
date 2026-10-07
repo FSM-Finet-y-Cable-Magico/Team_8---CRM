@@ -17,7 +17,7 @@ integration('Prospecto -> ubicacion -> cobertura -> zona -> planes en PostgreSQL
   beforeAll(() => prisma.$connect());
   afterAll(() => prisma.$disconnect());
 
-  it('persiste y recupera coordenadas, resuelve microzona/plan y mantiene politica tecnica', async () => {
+  it('persiste coordenadas y resuelve cobertura, microzona y plan con autoridad comercial', async () => {
     expect.assertions(9);
     try {
       await prisma.$transaction(async tx => {
@@ -56,7 +56,7 @@ integration('Prospecto -> ubicacion -> cobertura -> zona -> planes en PostgreSQL
           new G3CoverageProvider(config), new LegacyTomodatCoverageProvider(config), { geocode: jest.fn() } as never,
         );
         expect((await pendingDomain.check(company.idEmpresa, { latitud: -33.59, longitud: -70.61 }, user)).estado)
-          .toBe('PENDIENTE_VALIDACION_TECNICA');
+          .toBe('FACTIBLE');
         expect((await pendingDomain.check(company.idEmpresa, { latitud: -34, longitud: -71 }, user)).estado).toBe('NO_FACTIBLE');
 
         const positiveDomain = new CoverageDomainService(

@@ -139,7 +139,7 @@ describe('ProspectsService', () => {
     );
   });
 
-  it('no permite cotizar un prospecto marcado como no factible', async () => {
+  it('bloquea la cotizacion cuando la ubicacion esta fuera de cobertura general', async () => {
     const prisma = {
       prospecto: {
         findUnique: jest.fn().mockResolvedValue({
@@ -151,16 +151,66 @@ describe('ProspectsService', () => {
           longitud: -70.63,
         }),
       },
-      cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1, factibilidadVerificada: true }) },
+      cotizacion: { create: jest.fn() },
     };
     const service = new ProspectsService(
       prisma as unknown as PrismaService,
       { record: jest.fn() } as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
-      { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 8 }] }) } as unknown as CoverageDomainService,
+      { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: false, planes: [] }) } as unknown as CoverageDomainService,
     );
 
-    await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('Factible');
+    await expect(service.generateQuote(11, { planId: 8 }, admin)).rejects.toThrow('no esta disponible');
+    expect(prisma.cotizacion.create).not.toHaveBeenCalled();
+  });
+
+  it('permite cotizar dentro de cobertura general sin depender de una evidencia tecnica previa', async () => {
+    const prospect = {
+      idProspecto: 14,
+      idEmpresa: 1,
+      email: 'cliente@example.com',
+      nombreCompleto: 'Prospecto FiNet',
+      estadoPipeline: 'Prospecto Nuevo',
+      idPlanInteres: null,
+      latitud: -33.58,
+      longitud: -70.63,
+    };
+    const quote = {
+      idCotizacion: 24,
+      idProspecto: 14,
+      idPlan: 8,
+      plan: { idPlan: 8, nombreComercial: 'Fibra 600' },
+      prospecto: { empresa: { nombre: 'FiNet Limitada' } },
+    };
+    const prisma = {
+      prospecto: {
+        findUnique: jest.fn().mockResolvedValue(prospect),
+        update: jest.fn().mockResolvedValue({ ...prospect, estadoPipeline: 'Cotizacion Enviada', idPlanInteres: 8 }),
+      },
+      cotizacion: {
+        create: jest.fn().mockResolvedValue(quote),
+        update: jest.fn().mockResolvedValue({ ...quote, pdfUrl: '/prospects/14/quotes/24/pdf' }),
+      },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 8, idEmpresa: 1, activo: true }) },
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const mail = { sendQuote: jest.fn().mockResolvedValue({ status: 'skipped' }) };
+    const coverage = { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 8 }] }) };
+    const service = new ProspectsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+      mail as unknown as MailService,
+      coverage as unknown as CoverageDomainService,
+    );
+    jest.spyOn(service as any, 'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('pdf'));
+
+    await expect(service.generateQuote(14, { planId: 8 }, admin)).resolves.toMatchObject({ idCotizacion: 24 });
+    expect(prisma.cotizacion.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idProspecto: 14, idPlan: 8, factibilidadVerificada: true }),
+    }));
+    expect(prisma.prospecto.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ estadoPipeline: 'Cotizacion Enviada', idPlanInteres: 8 }),
+    }));
   });
   it('rechaza cotizar un plan activo de otra empresa', async () => {
     const prospect = {

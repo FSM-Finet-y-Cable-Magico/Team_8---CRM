@@ -33,12 +33,15 @@ describe('CommercialCoverageProvider', () => {
   });
 
   it('hereda precio desde cobertura padre y luego desde el plan base', async () => {
-    const parent = setup(undefined, [{ idPlanZonaPrecio: 1, idZonaPago: 10, precioMensual: 17990, activo: true, fechaInicio: null, fechaFin: null }]);
-    expect((await parent.provider.resolvePlanAvailabilityForLocation(1, -33.59, -70.61)).planes[0])
-      .toMatchObject({ precioAplicable: 17990, origenPrecio: 'ZONA_PADRE' });
-    const base = setup();
-    expect((await base.provider.resolvePlanAvailabilityForLocation(1, -33.59, -70.61)).planes[0])
-      .toMatchObject({ precioAplicable: 20000, origenPrecio: 'PLAN_BASE' });
+    const parent = setup([general], [{ idPlanZonaPrecio: 1, idZonaPago: 10, precioMensual: 17990, activo: true, fechaInicio: null, fechaFin: null }]);
+    const parentResult = await parent.provider.resolvePlanAvailabilityForLocation(1, -33.66, -70.66);
+    expect(parentResult).toMatchObject({ coberturaComercial: true, zona: { idZonaPago: 10 }, microzona: null });
+    expect(parentResult.planes[0]).toMatchObject({ precioAplicable: 17990, origenPrecio: 'ZONA_PADRE' });
+
+    const base = setup([general]);
+    const baseResult = await base.provider.resolvePlanAvailabilityForLocation(1, -33.66, -70.66);
+    expect(baseResult).toMatchObject({ coberturaComercial: true, zona: { idZonaPago: 10 }, microzona: null });
+    expect(baseResult.planes[0]).toMatchObject({ precioAplicable: 20000, origenPrecio: 'PLAN_BASE' });
   });
 
   it('declara fuera de cobertura y no consulta planes', async () => {

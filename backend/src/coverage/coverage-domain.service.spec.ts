@@ -88,18 +88,59 @@ describe('CoverageDomainService', () => {
     expect(legacy.check).not.toHaveBeenCalled();
   });
 
-  it('dentro sin G3 queda pendiente y solo usa legacy mediante configuracion explicita', async () => {
-    const base = { coberturaComercial: true, zona: { idZonaPago: 10 }, microzona: null, planes: [] };
-    const normal = setup();
-    normal.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue(base);
-    normal.g3.check.mockResolvedValue({ estado: 'PENDIENTE', proveedor: 'G3', motivo: 'pendiente', traceId: 'trace' });
-    expect((await normal.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial)).estado).toBe('PENDIENTE_VALIDACION_TECNICA');
-    expect(normal.legacy.check).not.toHaveBeenCalled();
+  it('dentro de cobertura general sin microzona es FACTIBLE aunque G3 no este configurado', async () => {
+    const current = setup();
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      planes: [],
+    });
 
-    const configured = setup({ COVERAGE_TECHNICAL_PROVIDER: 'LEGACY_TOMODAT' });
-    configured.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue(base);
-    configured.legacy.check.mockResolvedValue({ estado: 'FACTIBLE', proveedor: 'LEGACY_TOMODAT', motivo: 'ok', traceId: 'trace', cajas: [] });
-    expect((await configured.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial)).estado).toBe('FACTIBLE');
-    expect(configured.g3.check).not.toHaveBeenCalled();
+    const result = await current.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial);
+
+    expect(result).toMatchObject({
+      estado: 'FACTIBLE',
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      tecnica: { estado: 'PENDIENTE', proveedor: 'NINGUNO' },
+      cajas: [],
+    });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
+    expect(current.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CONSULTAR_COBERTURA_COMERCIAL' }));
+  });
+
+  it('dentro de microzona es FACTIBLE y conserva la microzona como zona comercial aplicable', async () => {
+    const current = setup();
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: { idZonaPago: 11 },
+      planes: [],
+    });
+
+    const result = await current.service.check(1, { latitud: -33.59, longitud: -70.61 }, commercial);
+
+    expect(result).toMatchObject({ estado: 'FACTIBLE', microzona: { idZonaPago: 11 } });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
+  });
+
+  it('errores potenciales de G3 o TomoDAT no afectan ni son consultados por la factibilidad comercial', async () => {
+    const current = setup({ COVERAGE_TECHNICAL_PROVIDER: 'LEGACY_TOMODAT' });
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      planes: [],
+    });
+    current.g3.check.mockRejectedValue(new Error('G3 no disponible'));
+    current.legacy.check.mockRejectedValue(new Error('TomoDAT no configurado'));
+
+    await expect(current.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial))
+      .resolves.toMatchObject({ estado: 'FACTIBLE', tecnica: { proveedor: 'NINGUNO' } });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
   });
 });

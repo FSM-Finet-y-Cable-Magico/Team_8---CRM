@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileClock, HandCoins, TrendingDown, UserRoundPlus, Wrench } from 'lucide-react';
+import { FileClock, HandCoins, TrendingDown, UserRoundPlus } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
@@ -23,7 +23,6 @@ export function ProspectWorkflowPanel({
   onChanged: () => void;
   onClose?: () => void;
 }) {
-  const [feasibilityResult, setFeasibilityResult] = useState<'Factible' | 'No Factible'>('Factible');
   const [quotePlanId, setQuotePlanId] = useState('');
   const [contractPlanId, setContractPlanId] = useState('');
   const [contractConfirmationDate, setContractConfirmationDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -41,7 +40,6 @@ export function ProspectWorkflowPanel({
   const [checkingCoverage, setCheckingCoverage] = useState(false);
 
   useEffect(() => {
-    setFeasibilityResult('Factible');
     setLocation(prospect.latitud !== null && prospect.latitud !== undefined && prospect.longitud !== null && prospect.longitud !== undefined
       ? { latitud: prospect.latitud, longitud: prospect.longitud }
       : null);
@@ -215,50 +213,14 @@ export function ProspectWorkflowPanel({
               try {
                 const { data } = await api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location);
                 setStatus(`${data.cobertura.estado}: ${data.cobertura.motivo}`);
-                setStatusIsError(data.cobertura.estado === 'PENDIENTE_VALIDACION_TECNICA');
+                setStatusIsError(data.cobertura.estado === 'NO_FACTIBLE');
                 onChanged();
               } catch (err) { setStatus(apiErrorMessage(err)); setStatusIsError(true); }
               finally { setCheckingCoverage(false); }
-            }}>{checkingCoverage ? 'Verificando…' : 'Guardar ubicacion y verificar cobertura'}</button>
+            }}>{checkingCoverage ? 'Verificando…' : 'Guardar ubicacion y verificar cobertura comercial'}</button>
           </section>
         )}
-        {permissions.verifyFeasibility && (
-          <section className="prospect-action-card prospect-action-card-blue">
-            <header className="prospect-action-header">
-              <span className="prospect-action-icon" aria-hidden="true">
-                <Wrench size={19} strokeWidth={1.8} />
-              </span>
-              <div>
-                <h4>Revisión técnica manual</h4>
-                <p>Define si el prospecto puede avanzar a cotización.</p>
-              </div>
-            </header>
-            <label>
-              Resultado
-              <select
-                value={feasibilityResult}
-                disabled={isWorkflowLocked || isQuoted || checkingCoverage}
-                onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}
-              >
-                <option value="Factible">Factible</option>
-                <option value="No Factible">No factible</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={isWorkflowLocked || isQuoted || checkingCoverage}
-              onClick={() =>
-                void runAction(
-                  () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
-                  'Factibilidad registrada',
-                )
-              }
-            >
-              Registrar factibilidad
-            </button>
-            {isNoFactible && <p className="alert">El prospecto no factible no puede avanzar a cotización ni contrato externo.</p>}
-          </section>
-        )}
+        {isNoFactible && <p className="alert">El prospecto fuera de cobertura no puede avanzar a cotización ni contrato externo.</p>}
 
         {permissions.generateQuotes && (
           <section className="prospect-action-card prospect-action-card-violet">
@@ -268,7 +230,7 @@ export function ProspectWorkflowPanel({
               </span>
               <div>
                 <h4>Generar cotización</h4>
-                <p>Crea el PDF de cotización solo después de factibilidad positiva.</p>
+                <p>Crea el PDF cuando la ubicacion tiene cobertura comercial y el plan esta disponible.</p>
               </div>
             </header>
             <label>
