@@ -33,6 +33,7 @@ model Empresa {
   intencionesTributarias     TaxEmissionIntent[]
   trabajosTributarios        TaxPaymentJob[]
   resultadosWifiG2           IntegracionResultadoWifiG2[]
+  logsNotificacion           LogNotificacion[]
 
   @@map("empresa")
 }
@@ -1090,6 +1091,7 @@ model LogNotificacion {
   intentos       Int       @default(0)
   fechaInicio    DateTime? @map("fecha_inicio") @db.Timestamptz(3)
   ultimoError    String?   @map("ultimo_error") @db.VarChar(64)
+  empresa        Empresa?  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade, map: "log_notificacion_id_empresa_fkey")
 
   @@index([proveedor, estadoEnvio, fechaEnvio])
 

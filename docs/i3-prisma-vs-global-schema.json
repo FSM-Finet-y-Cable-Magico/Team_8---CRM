@@ -1,14 +1,12 @@
 {
-  "contractHash": "6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e",
+  "contractHash": "f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa",
   "modeledTables": 61,
   "summary": {
-    "MATCH": 821,
-    "PRISMA_ONLY": 55,
-    "INDEX_MISMATCH": 59,
-    "FK_MISMATCH": 71,
-    "TYPE_WIDENING_REQUIRED": 1,
+    "MATCH": 893,
     "COLUMN_GLOBAL_ONLY": 35,
-    "OWNER_EXTERNAL": 325
+    "OWNER_EXTERNAL": 325,
+    "INDEX_MISMATCH": 53,
+    "FK_MISMATCH": 65
   },
   "rows": [
     {
@@ -2392,316 +2390,403 @@
       "table": "tax_emission_intent",
       "column": "id_intencion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "uuid",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "uuid",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "id_empresa",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "id_factura",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "id_pago",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "business_key",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(120)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(120)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "policy_version",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "ambiente",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(20)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(20)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "proveedor",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "tipo_dte",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "formato",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fingerprint",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "char(64)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "char(64)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "folio_esperado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(10)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(10)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "estado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "intentos",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "claim_id",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "uuid",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "uuid",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "folio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(10)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(10)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "ultimo_error",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "artefacto_url",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "text",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "text",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "artefacto_estado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "email_estado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_email_inicio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "email_intentos",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_proximo_email",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "ultimo_error_email",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_creacion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_inicio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_envio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "fecha_actualizacion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "PRIMARY KEY",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": [
+        "id_intencion"
+      ],
+      "global": [
         "id_intencion"
       ]
     },
@@ -2709,40 +2794,49 @@
       "table": "tax_emission_intent",
       "column": "FK:empresa",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "FK:factura",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "FK:pago",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_emission_intent",
       "column": "INDEX:id_empresa,ambiente,business_key",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "id_empresa",
@@ -2757,7 +2851,7 @@
       "table": "tax_emission_intent",
       "column": "INDEX:id_empresa,estado,fecha_actualizacion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "id_empresa",
@@ -2772,206 +2866,263 @@
       "table": "tax_payment_job",
       "column": "id_trabajo",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "uuid",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "uuid",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "id_empresa",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "id_factura",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "id_pago",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "id_cliente",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "monto",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "numeric(10,2)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "numeric(10,2)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "ambiente",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(20)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(20)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "policy_version",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "profile_hash",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "char(64)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "char(64)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "documento",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "bytea",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "bytea",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "tipo_dte",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "formato",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "folio_esperado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(10)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(10)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "email",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(120)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(120)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "nombre_cliente",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(120)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(120)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "estado",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "varchar(30)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "ultimo_error",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": true
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "fecha_creacion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": false
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "PRIMARY KEY",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": [
+        "id_trabajo"
+      ],
+      "global": [
         "id_trabajo"
       ]
     },
@@ -2979,40 +3130,49 @@
       "table": "tax_payment_job",
       "column": "FK:empresa",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "FK:factura",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "FK:pago",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "FK_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "onDelete": "RESTRICT",
         "onUpdate": "CASCADE"
       },
-      "global": null
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
     },
     {
       "table": "tax_payment_job",
       "column": "INDEX:id_pago",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "id_pago"
@@ -3025,7 +3185,7 @@
       "table": "tax_payment_job",
       "column": "INDEX:estado,fecha_creacion",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "estado",
@@ -10619,9 +10779,37 @@
       "table": "log_notificacion",
       "column": "estado_envio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "TYPE_WIDENING_REQUIRED",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(30)",
+        "nullable": true
+      },
+      "global": {
+        "type": "varchar(30)",
+        "nullable": true
+      }
+    },
+    {
+      "table": "log_notificacion",
+      "column": "id_empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": true
+      },
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "log_notificacion",
+      "column": "proveedor",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(20)",
         "nullable": true
       },
       "global": {
@@ -10631,102 +10819,101 @@
     },
     {
       "table": "log_notificacion",
-      "column": "id_empresa",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
-      "prisma": {
-        "type": "integer",
-        "nullable": true
-      },
-      "global": null
-    },
-    {
-      "table": "log_notificacion",
-      "column": "proveedor",
-      "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
-      "prisma": {
-        "type": "varchar(20)",
-        "nullable": true
-      },
-      "global": null
-    },
-    {
-      "table": "log_notificacion",
       "column": "correlation_id",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "uuid",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "uuid",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
       "column": "payload_hash",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "char(64)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "char(64)",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
       "column": "provider_message_id",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(512)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(512)",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
       "column": "mensaje",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "jsonb",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "jsonb",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
       "column": "intentos",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "integer",
         "nullable": false
       },
-      "global": null
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
     },
     {
       "table": "log_notificacion",
       "column": "fecha_inicio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "timestamptz(3)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "timestamptz(3)",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
       "column": "ultimo_error",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "PRISMA_ONLY",
+      "status": "MATCH",
       "prisma": {
         "type": "varchar(64)",
         "nullable": true
       },
-      "global": null
+      "global": {
+        "type": "varchar(64)",
+        "nullable": true
+      }
     },
     {
       "table": "log_notificacion",
@@ -10742,9 +10929,23 @@
     },
     {
       "table": "log_notificacion",
+      "column": "FK:empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "log_notificacion",
       "column": "INDEX:correlation_id",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "correlation_id"
@@ -10757,7 +10958,7 @@
       "table": "log_notificacion",
       "column": "INDEX:provider_message_id",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "provider_message_id"
@@ -10770,7 +10971,7 @@
       "table": "log_notificacion",
       "column": "INDEX:proveedor,estado_envio,fecha_envio",
       "owner": "G8 (coordinar columnas compartidas)",
-      "status": "INDEX_MISMATCH",
+      "status": "MATCH",
       "prisma": {
         "columns": [
           "proveedor",
@@ -15803,6 +16004,22 @@
       "global": "(COALESCE(id_empresa, 0), lower((nombre_zona)::text))"
     },
     {
+      "table": "tax_emission_intent",
+      "column": "INDEX:tax_intent_generated_folio_key",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(id_empresa, ambiente, tipo_dte, folio) WHERE estado = 'GENERADO'"
+    },
+    {
+      "table": "tax_payment_job",
+      "column": "INDEX:tax_job_reserved_folio_key",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(id_empresa, tipo_dte, folio_esperado) WHERE folio_esperado <> '0'"
+    },
+    {
       "table": "alerta_monitoreo",
       "column": "INDEX:alerta_monitoreo_id_empresa_resuelta_idx",
       "owner": "G3/Ops",
@@ -15993,6 +16210,14 @@
       "status": "INDEX_MISMATCH",
       "prisma": null,
       "global": "(id_empresa)"
+    },
+    {
+      "table": "tax_emission_intent",
+      "column": "INDEX:tax_intent_email_pending_idx",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "INDEX_MISMATCH",
+      "prisma": null,
+      "global": "(id_empresa, email_estado, fecha_proximo_email) WHERE estado = 'GENERADO'"
     },
     {
       "table": "registro_ont",

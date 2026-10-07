@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 6f3c9afdfc8693730a26a4f7f3dc58e81e0046ee74136daef077e39bce8ab20e; no seeds or credentials.
+// Generated from init-global.sql SHA256 f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -2719,6 +2719,282 @@ export const GLOBAL_COLUMNS = [
     "nullable": false
   },
   {
+    "table": "tax_emission_intent",
+    "name": "id_intencion",
+    "type": "uuid",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "id_factura",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "id_pago",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "business_key",
+    "type": "varchar(120)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "policy_version",
+    "type": "varchar(64)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "ambiente",
+    "type": "varchar(20)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "proveedor",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "tipo_dte",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "formato",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fingerprint",
+    "type": "char(64)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "folio_esperado",
+    "type": "varchar(10)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "intentos",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "claim_id",
+    "type": "uuid",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "folio",
+    "type": "varchar(10)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "ultimo_error",
+    "type": "varchar(64)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_creacion",
+    "type": "timestamptz(3)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_inicio",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_envio",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_actualizacion",
+    "type": "timestamptz(3)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "artefacto_url",
+    "type": "text",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "artefacto_estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "email_estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_email_inicio",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "email_intentos",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "fecha_proximo_email",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "tax_emission_intent",
+    "name": "ultimo_error_email",
+    "type": "varchar(64)",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "id_trabajo",
+    "type": "uuid",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "id_factura",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "id_pago",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "id_cliente",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "monto",
+    "type": "numeric(10,2)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "ambiente",
+    "type": "varchar(20)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "policy_version",
+    "type": "varchar(64)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "profile_hash",
+    "type": "char(64)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "documento",
+    "type": "bytea",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "tipo_dte",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "formato",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "folio_esperado",
+    "type": "varchar(10)",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "email",
+    "type": "varchar(120)",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "nombre_cliente",
+    "type": "varchar(120)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "ultimo_error",
+    "type": "varchar(64)",
+    "nullable": true
+  },
+  {
+    "table": "tax_payment_job",
+    "name": "fecha_creacion",
+    "type": "timestamptz(3)",
+    "nullable": false
+  },
+  {
     "table": "plan",
     "name": "id_plan",
     "type": "integer",
@@ -4635,7 +4911,7 @@ export const GLOBAL_COLUMNS = [
   {
     "table": "log_notificacion",
     "name": "estado_envio",
-    "type": "varchar(20)",
+    "type": "varchar(30)",
     "nullable": true
   },
   {
@@ -4648,6 +4924,60 @@ export const GLOBAL_COLUMNS = [
     "table": "log_notificacion",
     "name": "id_alerta",
     "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "proveedor",
+    "type": "varchar(20)",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "correlation_id",
+    "type": "uuid",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "payload_hash",
+    "type": "char(64)",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "provider_message_id",
+    "type": "varchar(512)",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "mensaje",
+    "type": "jsonb",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "intentos",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "log_notificacion",
+    "name": "fecha_inicio",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "log_notificacion",
+    "name": "ultimo_error",
+    "type": "varchar(64)",
     "nullable": true
   },
   {
