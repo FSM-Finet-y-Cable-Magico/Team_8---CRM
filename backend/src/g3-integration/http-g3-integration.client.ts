@@ -36,9 +36,11 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
 
   async getWorkOrderClosure(id: string, idEmpresa: number) {
     this.assertCompanyId(idEmpresa);
-    // El contrato vigente no demuestra que GET /cierre acepte id_empresa como query.
-    // El caller entrega la empresa persistida para validar el contexto sin inventar ese contrato.
-    return this.request<G3WorkOrderResponse>(`/api/integraciones/ordenes/${encodeURIComponent(id)}/cierre`);
+    return this.request<G3WorkOrderResponse>(
+      `/api/integraciones/ordenes/${encodeURIComponent(id)}/cierre`,
+      {},
+      { id_empresa: String(idEmpresa) },
+    );
   }
 
   private enabled() {
@@ -80,7 +82,11 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
       });
       const body = await this.parseBody(response);
       if (!response.ok) throw this.httpError(response.status);
-      return { status: response.status, data: body as T, durationMs: Date.now() - startedAt };
+      return {
+        status: response.status,
+        data: this.normalizeSuccessBody(body) as T,
+        durationMs: Date.now() - startedAt,
+      };
     } catch (error) {
       if (error instanceof G3IntegrationError) throw error;
       if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
@@ -125,6 +131,28 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
     } catch {
       return {};
     }
+  }
+
+  private normalizeSuccessBody(body: unknown) {
+    const unwrapped = this.isSuccessEnvelope(body) ? body.data : body;
+    if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) return unwrapped;
+    const data = unwrapped as Record<string, unknown>;
+    const tipo = data.tipo ?? data.tipo_ot;
+    const fecha = data.fecha ?? data.fecha_creacion;
+    if (tipo === undefined && fecha === undefined) return unwrapped;
+    return {
+      ...data,
+      ...(tipo === undefined ? {} : { tipo }),
+      ...(fecha === undefined ? {} : { fecha }),
+    };
+  }
+
+  private isSuccessEnvelope(body: unknown): body is { success: true; data: unknown } {
+    return Boolean(body)
+      && typeof body === 'object'
+      && !Array.isArray(body)
+      && (body as Record<string, unknown>).success === true
+      && Object.prototype.hasOwnProperty.call(body, 'data');
   }
 
   private httpError(status: number) {

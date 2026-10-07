@@ -21,25 +21,67 @@ describe('Etapa 3 - adaptador HTTP G3', () => {
     expect(fetchMock.mock.calls[0][1]?.body).toContain('"persona":{"rut":"12345678-5"');
     expect(fetchMock.mock.calls[0][1]?.body).not.toContain('"rut":"12345678-5","persona"');
   });
-  it('acepta HTTP 201 de creacion', async () => {
-    jest.spyOn(global, 'fetch').mockResolvedValue(response(201, { id_ot: 1 })); await expect(setup().createInstallation({} as never)).resolves.toMatchObject({ status: 201 });
+  it('desenvuelve HTTP 201 de creacion y agrega aliases de presentacion', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(response(201, {
+      success: true,
+      data: {
+        request_id: 'request-1', trace_id: 'trace-1', id_ot: 901,
+        tipo_ot: 'INSTALACION', estado: 'PENDIENTE', fecha_creacion: '2026-10-07T00:00:00.000Z',
+      },
+      message: 'Solicitud de instalacion aceptada',
+    }));
+    const result = await setup().createInstallation({} as never);
+    expect(result).toMatchObject({
+      status: 201,
+      data: {
+        id_ot: 901, estado: 'PENDIENTE', tipo_ot: 'INSTALACION', tipo: 'INSTALACION',
+        fecha_creacion: '2026-10-07T00:00:00.000Z', fecha: '2026-10-07T00:00:00.000Z',
+      },
+    });
   });
-  it('acepta HTTP 200 idempotente', async () => {
-    jest.spyOn(global, 'fetch').mockResolvedValue(response(200, { id_ot: 1, duplicado: true })); await expect(setup().createInstallation({} as never)).resolves.toMatchObject({ status: 200, data: { duplicado: true } });
+  it('desenvuelve HTTP 200 idempotente y conserva duplicado', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(response(200, {
+      success: true,
+      data: { request_id: 'request-1', id_ot: 901, estado: 'PENDIENTE', duplicado: true },
+    }));
+    await expect(setup().createInstallation({} as never)).resolves.toMatchObject({
+      status: 200, data: { id_ot: 901, duplicado: true },
+    });
   });
   it.each([1, 2])('GET detalle agrega el scope de empresa %s y preserva el encoding del id', async (idEmpresa) => {
-    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(200, { id_ot: 1, id_empresa: idEmpresa }));
-    await setup().getWorkOrder('OT/QA 1', idEmpresa);
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(200, {
+      success: true,
+      data: {
+        id_ot: 1, id_empresa: idEmpresa, tipo_ot: 'INSTALACION', estado: 'PENDIENTE',
+        fecha_creacion: '2026-10-07T00:00:00.000Z',
+      },
+    }));
+    const result = await setup().getWorkOrder('OT/QA 1', idEmpresa);
     const url = fetchMock.mock.calls[0][0] as URL;
     expect(url.pathname).toBe('/api/integraciones/ordenes/OT%2FQA%201');
     expect(url.searchParams.get('id_empresa')).toBe(String(idEmpresa));
+    expect(result.data).toMatchObject({
+      id_ot: 1, id_empresa: idEmpresa, tipo_ot: 'INSTALACION', tipo: 'INSTALACION',
+      fecha_creacion: '2026-10-07T00:00:00.000Z', fecha: '2026-10-07T00:00:00.000Z',
+    });
   });
-  it('GET cierre valida la empresa, pero no inventa un query todavía no ratificado', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(200, { id_ot: 1, id_empresa: 2 }));
+  it('mantiene compatibilidad con una respuesta directa antigua', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(response(200, {
+      id_ot: 1, id_empresa: 1, tipo: 'LEGACY', fecha: '2026-10-06T00:00:00.000Z',
+    }));
+    await expect(setup().getWorkOrder('1', 1)).resolves.toMatchObject({
+      status: 200,
+      data: { id_ot: 1, id_empresa: 1, tipo: 'LEGACY', fecha: '2026-10-06T00:00:00.000Z' },
+    });
+  });
+  it('GET cierre agrega el scope de empresa confirmado por contrato', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(200, {
+      success: true, data: { id_ot: 1, id_empresa: 2 },
+    }));
     await setup().getWorkOrderClosure('OT/QA 1', 2);
     const url = fetchMock.mock.calls[0][0] as URL;
     expect(url.pathname).toBe('/api/integraciones/ordenes/OT%2FQA%201/cierre');
-    expect(url.search).toBe('');
+    expect(url.searchParams.get('id_empresa')).toBe('2');
   });
   it.each([0, -1, 1.5, Number.NaN])('rechaza id_empresa no positivo antes de consultar G3: %s', async (idEmpresa) => {
     const fetchMock = jest.spyOn(global, 'fetch');
