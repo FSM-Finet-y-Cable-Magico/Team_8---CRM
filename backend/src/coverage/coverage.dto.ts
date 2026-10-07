@@ -18,11 +18,13 @@ export const COVERAGE_ZONE_TYPES = ['COBERTURA_GENERAL', 'MICROZONA_COMERCIAL'] 
 export type CoverageZoneType = (typeof COVERAGE_ZONE_TYPES)[number];
 
 export class CoverageLocationDto {
+  @Type(() => Number)
   @IsNumber()
   @Min(-90)
   @Max(90)
   latitud!: number;
 
+  @Type(() => Number)
   @IsNumber()
   @Min(-180)
   @Max(180)
