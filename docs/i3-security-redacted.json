@@ -373,7 +373,7 @@
     {
       "source": "G8_WORKTREE",
       "file": "frontend/src/features/customers/CustomersPanel.tsx",
-      "line": 578,
+      "line": 591,
       "type": "CREDENTIAL_LITERAL",
       "value": "[REDACTED]",
       "status": "POTENTIAL_COMMITTED_SECRET",
@@ -419,6 +419,69 @@
       "source": "G8_WORKTREE",
       "file": "scripts/g1-smoke.test.mjs",
       "line": 16,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/i3-release-acceptance.mjs",
+      "line": 21,
+      "type": "DATABASE_URI",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/i3-release-acceptance.mjs",
+      "line": 22,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "POTENTIAL_COMMITTED_SECRET",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/repository-hygiene.test.mjs",
+      "line": 22,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/repository-hygiene.test.mjs",
+      "line": 23,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/repository-hygiene.test.mjs",
+      "line": 24,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/repository-hygiene.test.mjs",
+      "line": 26,
+      "type": "CREDENTIAL_LITERAL",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "action": "Revisar vigencia; retirar literal y rotar si es real; no rotado automaticamente."
+    },
+    {
+      "source": "G8_WORKTREE",
+      "file": "scripts/repository-hygiene.test.mjs",
+      "line": 27,
       "type": "CREDENTIAL_LITERAL",
       "value": "[REDACTED]",
       "status": "TEST_OR_EXAMPLE_REVIEW",
