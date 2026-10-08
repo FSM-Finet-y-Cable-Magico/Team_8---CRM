@@ -47,7 +47,7 @@ export class CommercialCoverageProvider {
     if (!resolved.zona) return { coberturaComercial: false, zona: null, microzona: null, planes: [] };
     const zoneIds = [resolved.microzona?.idZonaPago, resolved.zona.idZonaPago].filter((id): id is number => Boolean(id));
     const plans = await this.prisma.plan.findMany({
-      where: { idEmpresa, activo: { not: false } },
+      where: { idEmpresa, activo: { not: false }, preciosZona: { some: { idZonaPago: { in: zoneIds }, activo: true } } },
       include: {
         preciosZona: {
           where: { idZonaPago: { in: zoneIds }, activo: { not: false } },
@@ -56,14 +56,15 @@ export class CommercialCoverageProvider {
       },
       orderBy: { idPlan: 'asc' },
     });
-    const available: LocationPlan[] = plans.map(plan => {
+    const available: LocationPlan[] = plans.flatMap(plan => {
       const activeRules = plan.preciosZona.filter(rule => this.isApplicable(rule, at));
       const microRule = resolved.microzona
         ? activeRules.find(rule => rule.idZonaPago === resolved.microzona?.idZonaPago)
         : undefined;
       const parentRule = activeRules.find(rule => rule.idZonaPago === resolved.zona?.idZonaPago);
       const applicable = microRule ?? parentRule;
-      return {
+      if (!applicable) return [];
+      return [{
         idPlan: plan.idPlan,
         nombre: plan.nombreComercial,
         tipo: plan.tipoPlan,
@@ -71,7 +72,7 @@ export class CommercialCoverageProvider {
         precioBase: Number(plan.precioMensual),
         precioAplicable: Number(applicable?.precioMensual ?? plan.precioMensual),
         origenPrecio: microRule ? 'MICROZONA' : parentRule ? 'ZONA_PADRE' : 'PLAN_BASE',
-      };
+      }];
     });
     return { coberturaComercial: true, ...resolved, planes: available };
   }

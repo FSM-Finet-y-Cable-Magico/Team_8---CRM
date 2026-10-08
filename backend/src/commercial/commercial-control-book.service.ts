@@ -8,6 +8,7 @@ import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
+import { invoiceBalance } from '../billing/invoice-balance';
 import {
   ChangePaymentConditionDto,
   CommercialEventDto,
@@ -46,24 +47,94 @@ export class CommercialControlBookService {
     private readonly config: ConfigService,
   ) {}
 
+  async customerHistory(idCliente: number, requestedCompany: number | undefined, user: AuthUser) {
+    this.assertViewer(user);
+    const idEmpresa = this.queryCompany(requestedCompany, user);
+    const customer = await this.prisma.cliente.findFirst({
+      where: { idCliente, idEmpresa },
+      select: {
+        idCliente: true,
+        contratos: { where: { idEmpresa }, select: {
+          idContrato: true, direccionInstalacion: true, numeroContratoExterno: true, plan: { select: { nombreComercial: true } },
+          facturas: { orderBy: [{ periodoAnio: 'desc' }, { periodoMes: 'desc' }, { idFactura: 'desc' }], include: {
+            pagos: { select: { idPago: true, monto: true, fechaPago: true, pasarela: true, codigoTransaccion: true }, orderBy: [{ fechaPago: 'desc' }, { idPago: 'desc' }] },
+            prorrogasPago: { where: { idEmpresa, estado: 'APROBADA' } },
+          } },
+        } },
+        eventosGestionComercial: { where: { idEmpresa }, include: { responsable: { select: { nombreCompleto: true } } } },
+        conveniosPago: { where: { idEmpresa }, include: { responsable: { select: { nombreCompleto: true } }, aprobador: { select: { nombreCompleto: true } }, cuotas: { orderBy: { numero: 'asc' } } } },
+        prorrogasPago: { where: { idEmpresa }, include: { responsable: { select: { nombreCompleto: true } } } },
+        cambiosCondicionPago: { where: { idEmpresa }, include: { responsable: { select: { nombreCompleto: true } } } },
+        cargosAdicionales: { where: { idEmpresa }, include: { responsable: { select: { nombreCompleto: true } } } },
+      },
+    });
+    if (!customer) throw new NotFoundException('Cliente no encontrado en la empresa seleccionada');
+    const date = (value: Date) => value.toISOString();
+    type Movement = {
+      key: string; tipo: string; fecha: string; fechaRegistro: string; detalle: string | null; estado: string | null;
+      responsable: string | null; idContrato: number | null; idFactura: number | null; canal?: string; monto?: number;
+      fechaOriginal?: string; nuevaFecha?: string; valorAnterior?: string; valorNuevo?: string;
+      fechaAprobacion?: string | null; aprobador?: string | null;
+      cuotas?: Array<{ numero: number; monto: number; fechaVencimiento: string; estado: string; fechaPago: string | null }>;
+    };
+    const movements: Movement[] = [
+      ...customer.eventosGestionComercial.map(e => ({ key: `event-${e.idEvento}`, tipo: e.tipo, fecha: date(e.fecha), fechaRegistro: date(e.createdAt), detalle: e.observacion, estado: e.estadoGestion, canal: e.canal, responsable: e.responsable.nombreCompleto, idContrato: e.idContrato, idFactura: e.idFactura })),
+      ...customer.conveniosPago.map(c => ({ key: `agreement-${c.idConvenio}`, tipo: 'CONVENIO', fecha: date(c.fechaRegistro), fechaRegistro: date(c.fechaRegistro), detalle: c.condiciones, estado: c.estado, monto: Number(c.montoComprometido), responsable: c.responsable.nombreCompleto, idContrato: c.idContrato, idFactura: c.idFactura,
+        fechaAprobacion: c.fechaAprobacion ? date(c.fechaAprobacion) : null, aprobador: c.aprobador?.nombreCompleto ?? null,
+        cuotas: c.cuotas.map(q => ({ numero: q.numero, monto: Number(q.monto), fechaVencimiento: date(q.fechaVencimiento), estado: q.estado, fechaPago: q.fechaPago ? date(q.fechaPago) : null })),
+      })),
+      ...customer.prorrogasPago.map(p => ({ key: `extension-${p.idProrroga}`, tipo: 'PRORROGA', fecha: date(p.fechaRegistro), fechaRegistro: date(p.fechaRegistro), detalle: p.motivo, estado: p.estado, responsable: p.responsable.nombreCompleto, idContrato: p.idContrato, idFactura: p.idFactura, fechaOriginal: date(p.fechaOriginal), nuevaFecha: date(p.nuevaFecha) })),
+      ...customer.cambiosCondicionPago.map(c => ({ key: `condition-${c.idCambio}`, tipo: c.tipoCambio, fecha: date(c.fechaRegistro), fechaRegistro: date(c.fechaRegistro), detalle: c.justificacion, estado: null, responsable: c.responsable.nombreCompleto, idContrato: c.idContrato, idFactura: c.idFactura, valorAnterior: c.valorAnterior, valorNuevo: c.valorNuevo })),
+      ...customer.cargosAdicionales.map(c => ({ key: `charge-${c.idCargo}`, tipo: `CARGO_${c.tipo}`, fecha: date(c.fecha), fechaRegistro: date(c.fechaRegistro), detalle: c.observacion, estado: c.estado, monto: Number(c.monto), responsable: c.responsable.nombreCompleto, idContrato: c.idContrato, idFactura: null })),
+    ];
+    const invoices = customer.contratos.flatMap(contract => contract.facturas.map(invoice => {
+      const balance = invoiceBalance(invoice);
+      return {
+        idFactura: invoice.idFactura, idContrato: contract.idContrato, plan: contract.plan?.nombreComercial ?? null,
+        periodoMes: invoice.periodoMes, periodoAnio: invoice.periodoAnio, tipoDocumento: invoice.tipoDocumento, folio: invoice.folioExterno,
+        fechaEmision: invoice.fechaEmision ? date(invoice.fechaEmision) : null, fechaVencimiento: date(invoice.fechaLimitePago),
+        fechaVencimientoEfectiva: balance.fechaVencimientoEfectiva, monto: balance.monto, pagado: balance.pagado,
+        saldo: balance.saldoExigible, estado: balance.estadoCalculado,
+        pagos: invoice.pagos.map(p => ({ idPago: p.idPago, monto: Number(p.monto), fecha: date(p.fechaPago), medio: p.pasarela, referencia: p.codigoTransaccion })),
+      };
+    })).sort((a, b) => b.periodoAnio - a.periodoAnio || b.periodoMes - a.periodoMes || b.idFactura - a.idFactura);
+    const contexts = new Map(customer.contratos.map(c => [c.idContrato, [c.plan?.nombreComercial, c.direccionInstalacion, c.numeroContratoExterno].filter(Boolean).join(' · ')]));
+    movements.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.fechaRegistro.localeCompare(a.fechaRegistro) || a.key.localeCompare(b.key));
+    return { idCliente,
+      invoices: invoices.map(i => ({ ...i, contexto: contexts.get(i.idContrato) ?? null })),
+      movements: movements.map(m => ({ ...m, contexto: m.idContrato ? contexts.get(m.idContrato) ?? null : null })),
+    };
+  }
+
   async list(query: ControlBookQueryDto, user: AuthUser) {
     this.assertViewer(user);
-    const rows = await this.loadRows(query, user);
+    const allRows = await this.loadRows({ idEmpresa: query.idEmpresa, page: 1, pageSize: 30 }, user);
+    const rows = this.filterRows(allRows, query);
+    this.sortRows(rows, query.sort ?? 'diasAtraso', query.order ?? 'desc');
     const page = query.page || 1;
     const pageSize = query.pageSize || 30;
     const totalRows = rows.length;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
     const items = rows.slice((page - 1) * pageSize, page * pageSize);
     const invoiceSummary = new Map<number, { saldo: number; vencida: boolean; convenio: boolean; prorroga: boolean }>();
-    rows.forEach((row) => invoiceSummary.set(row.idFactura, {
-      saldo: row.saldoPendiente ?? 0,
-      vencida: (row.diasAtraso ?? 0) > 0,
-      convenio: row.convenioActivo,
-      prorroga: row.prorrogaActiva,
-    }));
+    rows.forEach((row) => {
+      if (row.idFactura === null) return;
+      invoiceSummary.set(row.idFactura, {
+        saldo: row.saldoPendiente ?? 0,
+        vencida: (row.diasAtraso ?? 0) > 0,
+        convenio: row.convenioActivo,
+        prorroga: row.prorrogaActiva,
+      });
+    });
 
     return {
       items,
+      dashboard: {
+        customerCount: new Set(allRows.map(r => r.idCliente)).size,
+        overdueCustomerCount: new Set(allRows.filter(r => (r.diasAtraso ?? 0) > 0).map(r => r.idCliente)).size,
+        overdueInvoiceCount: new Set(allRows.filter(r => (r.diasAtraso ?? 0) > 0 && r.idFactura !== null).map(r => r.idFactura)).size,
+        totalDebt: this.money([...new Map(allRows.filter(r => r.idFactura !== null).map(r => [r.idFactura, r.saldoPendiente ?? 0])).values()].reduce((sum, amount) => sum + amount, 0)),
+      },
       pagination: { page, pageSize, totalRows, totalPages },
       summary: {
         totalRows,
@@ -330,61 +401,87 @@ export class CommercialControlBookService {
 
   private async loadRows(query: ControlBookQueryDto, user: AuthUser) {
     const company = this.queryCompany(query.idEmpresa, user);
-    const invoices = await this.prisma.factura.findMany({
-      where: {
-        ...(company ? { contrato: { is: { idEmpresa: company, cliente: { is: { idEmpresa: company } } } } } : {}),
-        ...(query.idPlan ? { contrato: { is: { ...(company ? { idEmpresa: company, cliente: { is: { idEmpresa: company } } } : {}), idPlan: query.idPlan } } } : {}),
-        ...(query.fechaVencimientoDesde || query.fechaVencimientoHasta ? { fechaLimitePago: { ...(query.fechaVencimientoDesde ? { gte: this.dateOnly(query.fechaVencimientoDesde, 'fechaVencimientoDesde') } : {}), ...(query.fechaVencimientoHasta ? { lte: this.dateOnly(query.fechaVencimientoHasta, 'fechaVencimientoHasta') } : {}) } } : {}),
-      },
+    const customers = await this.prisma.cliente.findMany({
+      where: { idEmpresa: company },
       include: {
-        pagos: { orderBy: { fechaPago: 'desc' } },
-        eventosGestionComercial: { include: { responsable: { select: { nombreCompleto: true } } }, orderBy: { fecha: 'desc' }, take: 10 },
-        conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 },
-        prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 },
-        contrato: { include: { cliente: true, plan: true, zonaPago: true, servicios: { include: { direccion: true, zonaPago: true }, orderBy: { fechaCreacion: 'asc' } }, cambiosCondicionPago: { orderBy: { fechaRegistro: 'desc' }, take: 1 }, cargosAdicionales: { where: { estado: 'PENDIENTE_FACTURACION' } } } },
+        direcciones: { orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }] },
+        servicios: { where: { idEmpresa: company }, include: { direccion: true, zonaPago: true }, orderBy: { idServicio: 'asc' } },
+        eventosGestionComercial: { where: { idEmpresa: company }, include: { responsable: { select: { nombreCompleto: true } } }, orderBy: [{ fecha: 'desc' }, { idEvento: 'desc' }] },
+        cargosAdicionales: { where: { idEmpresa: company, estado: 'PENDIENTE_FACTURACION' } },
+        contratos: {
+          where: { idEmpresa: company }, orderBy: { idContrato: 'asc' },
+          include: {
+            plan: true, zonaPago: true,
+            cambiosCondicionPago: { where: { idEmpresa: company, tipoCambio: 'FECHA_COMPROMETIDA' }, orderBy: { fechaRegistro: 'desc' }, take: 1 },
+            facturas: { orderBy: { idFactura: 'desc' }, include: {
+              pagos: { orderBy: { fechaPago: 'desc' } },
+              conveniosPago: { where: { idEmpresa: company, estado: { in: ACTIVE_AGREEMENT_STATES } }, orderBy: { fechaRegistro: 'desc' }, take: 1 },
+              prorrogasPago: { where: { idEmpresa: company, estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 },
+            } },
+          },
+        },
       },
-      orderBy: { idFactura: 'desc' },
-      take: 5000,
+      orderBy: { idCliente: 'asc' },
     });
-    const customerIds = [...new Set(invoices.map((invoice) => invoice.contrato?.idCliente).filter((id): id is number => Boolean(id)))];
-    const observations = customerIds.length ? await this.prisma.observacionOperativa.findMany({ where: { idCliente: { in: customerIds }, ...(company ? { idEmpresa: company } : {}) }, orderBy: { fechaCreacion: 'desc' }, take: Math.min(5000, customerIds.length * 5) }) : [];
+    const observations = customers.length ? await this.prisma.observacionOperativa.findMany({
+      where: { idEmpresa: company, idCliente: { in: customers.map((customer) => customer.idCliente) } },
+      orderBy: [{ fechaCreacion: 'desc' }, { idObservacion: 'desc' }],
+    }) : [];
     const observationByCustomer = new Map<number, string>();
     observations.forEach((item) => { if (item.idCliente && !observationByCustomer.has(item.idCliente)) observationByCustomer.set(item.idCliente, item.observacion); });
-    let rows = invoices.flatMap((invoice) => {
-      const contract = invoice.contrato;
-      const customer = contract?.cliente;
-      if (!contract || !customer) return [];
-      const service = contract.servicios.length === 1 ? contract.servicios[0] : null;
-      const lastEvent = invoice.eventosGestionComercial[0] ?? null;
-      const lastNotice = invoice.eventosGestionComercial.find((event) => event.tipo === 'ULTIMO_AVISO_CORTE');
-      const withdrawal = invoice.eventosGestionComercial.find((event) => event.tipo === 'AVISO_PREVIO_RETIRO');
-      const extension = invoice.prorrogasPago[0] ?? null;
-      const status = this.statusService.calculate({ monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: extension?.nuevaFecha, convenioActivo: invoice.conveniosPago.length > 0, ultimoAviso: Boolean(lastNotice), retiroPendiente: Boolean(withdrawal), umbralUltimoAvisoDias: this.cutDays() });
-      const lastPayment = invoice.pagos[0] ?? null;
-      return [{
-        rowId: `${customer.idCliente}-${contract.idContrato}-${invoice.idFactura}`,
-        idEmpresa: contract.idEmpresa, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
-        telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract.direccionInstalacion,
-        idServicio: service?.idServicio ?? null, serviciosRelacionados: contract.servicios.map((item) => item.idServicio), estadoServicio: service?.estadoOperativo ?? (contract.servicios.length > 1 ? 'Múltiples servicios' : null),
-        idContrato: contract.idContrato, numeroContrato: contract.numeroContratoExterno ?? String(contract.idContrato), idPlan: contract.idPlan,
-        plan: contract.plan?.nombreComercial ?? null, nombrePlan: contract.plan?.nombreComercial ?? null,
-        idZona: service?.idZonaPago ?? contract.idZonaPago, zona: service?.zonaPago?.nombreZona ?? contract.zonaPago?.nombreZona ?? null,
-        idFactura: invoice.idFactura, tipoDocumento: invoice.tipoDocumento, numeroDocumento: invoice.folioExterno ?? String(invoice.idFactura),
-        fechaEmision: invoice.fechaEmision?.toISOString().slice(0, 10) ?? null, fechaVencimiento: invoice.fechaLimitePago.toISOString().slice(0, 10),
-        fechaVencimientoEfectiva: status.fechaVencimientoEfectiva.toISOString().slice(0, 10), estadoDocumento: invoice.estado,
+    type Customer = (typeof customers)[number];
+    type Contract = Customer['contratos'][number];
+    type Service = Customer['servicios'][number];
+    type Invoice = Contract['facturas'][number];
+    const project = (customer: Customer, contract: Contract | null, services: Service[], invoice: Invoice | null) => {
+      const service = services.length === 1 ? services[0] : null;
+      const events = customer.eventosGestionComercial.filter((event) =>
+        (event.idFactura === null || event.idFactura === invoice?.idFactura) &&
+        (event.idContrato === null || event.idContrato === contract?.idContrato) &&
+        (event.idServicio === null || services.some((item) => item.idServicio === event.idServicio)));
+      const lastEvent = events[0] ?? null;
+      const lastNotice = events.find((event) => event.tipo === 'ULTIMO_AVISO_CORTE');
+      const withdrawal = events.find((event) => event.tipo === 'AVISO_PREVIO_RETIRO');
+      const extension = invoice?.prorrogasPago[0] ?? null;
+      const status = invoice ? this.statusService.calculate({ monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: extension?.nuevaFecha, convenioActivo: invoice.conveniosPago.length > 0, ultimoAviso: Boolean(lastNotice), retiroPendiente: Boolean(withdrawal), umbralUltimoAvisoDias: this.cutDays() }) : {
+        montoDocumento: null, totalPagado: null, saldoPendiente: null, saldoFavor: null, fechaVencimientoEfectiva: null,
+        diasAtraso: null, estadoComercial: 'SIN_FACTURAS', accionSugerida: 'Registrar contacto con el cliente',
+      };
+      const lastPayment = invoice?.pagos[0] ?? null;
+      const charges = customer.cargosAdicionales.filter((charge) => contract ? charge.idContrato === contract.idContrato : service ? charge.idContrato === null && charge.idServicio === service.idServicio : charge.idContrato === null && charge.idServicio === null);
+      return {
+        rowId: invoice ? `${customer.idCliente}-${contract!.idContrato}-${invoice.idFactura}` : `${customer.idCliente}-${contract?.idContrato ?? 'sin-contrato'}-${service?.idServicio ?? 'sin-servicio'}-sin-factura`,
+        idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
+        telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract?.direccionInstalacion ?? customer.direcciones[0]?.direccionCompleta ?? null,
+        idServicio: service?.idServicio ?? null, serviciosRelacionados: services.map((item) => item.idServicio), estadoServicio: service?.estadoOperativo ?? (services.length > 1 ? 'Múltiples servicios' : null),
+        idContrato: contract?.idContrato ?? null, numeroContrato: contract ? contract.numeroContratoExterno ?? String(contract.idContrato) : null, idPlan: contract?.idPlan ?? null,
+        plan: contract?.plan?.nombreComercial ?? null, nombrePlan: contract?.plan?.nombreComercial ?? null,
+        idZona: service?.idZonaPago ?? contract?.idZonaPago ?? null, zona: service?.zonaPago?.nombreZona ?? contract?.zonaPago?.nombreZona ?? null,
+        idFactura: invoice?.idFactura ?? null, tipoDocumento: invoice?.tipoDocumento ?? null, numeroDocumento: invoice ? invoice.folioExterno ?? String(invoice.idFactura) : null,
+        fechaEmision: invoice?.fechaEmision?.toISOString().slice(0, 10) ?? null, fechaVencimiento: invoice?.fechaLimitePago.toISOString().slice(0, 10) ?? null,
+        fechaVencimientoEfectiva: status.fechaVencimientoEfectiva?.toISOString().slice(0, 10) ?? null, estadoDocumento: invoice?.estado ?? 'SIN_FACTURAS',
         montoDocumento: status.montoDocumento, totalPagado: status.totalPagado, saldoPendiente: status.saldoPendiente, saldoFavor: status.saldoFavor,
         diasAtraso: status.diasAtraso, estadoComercial: status.estadoComercial, ultimaGestion: lastEvent?.tipo ?? null,
         fechaUltimaGestion: lastEvent?.fecha.toISOString() ?? null, responsableUltimaGestion: lastEvent?.responsable.nombreCompleto ?? null,
-        accionSugerida: status.accionSugerida, convenioActivo: invoice.conveniosPago.length > 0, prorrogaActiva: Boolean(extension),
+        accionSugerida: status.accionSugerida, convenioActivo: Boolean(invoice?.conveniosPago.length), prorrogaActiva: Boolean(extension),
         ultimoAviso: Boolean(lastNotice),
-        diaPago: contract.diaVencimiento, cambioFecha: contract.cambiosCondicionPago[0]?.valorNuevo ?? null,
-        fechaInstalacion: service?.fechaCreacion?.toISOString().slice(0, 10) ?? null, fechaCorte: contract.fechaSuspension?.toISOString().slice(0, 10) ?? null,
-        estadoCorte: contract.estado === 'Suspendido' ? 'SUSPENDIDO_COMERCIAL' : null, fechaReactivacion: null,
+        diaPago: contract?.diaVencimiento ?? null, cambioFecha: contract?.cambiosCondicionPago[0]?.valorNuevo ?? null,
+        fechaInstalacion: service?.fechaCreacion?.toISOString().slice(0, 10) ?? null, fechaCorte: contract?.fechaSuspension?.toISOString().slice(0, 10) ?? null,
+        estadoCorte: contract?.estado === 'Suspendido' ? 'SUSPENDIDO_COMERCIAL' : null, fechaReactivacion: null,
         avisoRetiro: Boolean(withdrawal), retiroPendiente: Boolean(withdrawal), observacionRelevante: observationByCustomer.get(customer.idCliente) ?? null,
         ultimoPago: lastPayment?.fechaPago.toISOString().slice(0, 10) ?? null, formaPago: lastPayment?.pasarela ?? null,
         codigoTransaccion: lastPayment?.codigoTransaccion ?? null, valorRecibido: lastPayment ? Number(lastPayment.monto) : null,
-        cargosPendientes: this.money(contract.cargosAdicionales.reduce((sum, charge) => sum + Number(charge.monto), 0)),
-      }];
+        cargosPendientes: this.money(charges.reduce((sum, charge) => sum + Number(charge.monto), 0)),
+      };
+    };
+    let rows = customers.flatMap((customer) => {
+      const contractRows = customer.contratos.flatMap((contract) => {
+        const services = customer.servicios.filter((service) => service.idContrato === contract.idContrato);
+        return contract.facturas.length ? contract.facturas.map((invoice) => project(customer, contract, services, invoice)) : [project(customer, contract, services, null)];
+      });
+      const unlinkedServices = customer.servicios.filter((service) => !customer.contratos.some((contract) => contract.idContrato === service.idContrato));
+      const serviceRows = unlinkedServices.map((service) => project(customer, null, [service], null));
+      return contractRows.length || serviceRows.length ? [...contractRows, ...serviceRows] : [project(customer, null, [], null)];
     });
     rows = this.filterRows(rows, query);
     this.sortRows(rows, query.sort ?? 'diasAtraso', query.order ?? 'desc');
@@ -398,14 +495,17 @@ export class CommercialControlBookService {
       if (query.estadoComercial && row.estadoComercial !== query.estadoComercial) return false;
       if (query.estadoServicio && row.estadoServicio !== query.estadoServicio) return false;
       if (query.idZona && row.idZona !== query.idZona) return false;
+      if (query.idPlan && row.idPlan !== query.idPlan) return false;
+      if (query.fechaVencimientoDesde && (!row.fechaVencimiento || String(row.fechaVencimiento) < query.fechaVencimientoDesde)) return false;
+      if (query.fechaVencimientoHasta && (!row.fechaVencimiento || String(row.fechaVencimiento) > query.fechaVencimientoHasta)) return false;
       if (query.conDeuda !== undefined && (Number(row.saldoPendiente ?? 0) > 0) !== query.conDeuda) return false;
       if (query.vencido !== undefined && (Number(row.diasAtraso ?? 0) > 0) !== query.vencido) return false;
       if (query.conConvenio !== undefined && Boolean(row.convenioActivo) !== query.conConvenio) return false;
       if (query.conProrroga !== undefined && Boolean(row.prorrogaActiva) !== query.conProrroga) return false;
       if (query.conUltimoAviso !== undefined && Boolean(row.ultimoAviso) !== query.conUltimoAviso) return false;
       if (query.retiroPendiente !== undefined && Boolean(row.retiroPendiente) !== query.retiroPendiente) return false;
-      if (query.diasAtrasoMin !== undefined && Number(row.diasAtraso ?? 0) < query.diasAtrasoMin) return false;
-      if (query.diasAtrasoMax !== undefined && Number(row.diasAtraso ?? 0) > query.diasAtrasoMax) return false;
+      if (query.diasAtrasoMin !== undefined && (row.diasAtraso === null || Number(row.diasAtraso) < query.diasAtrasoMin)) return false;
+      if (query.diasAtrasoMax !== undefined && (row.diasAtraso === null || Number(row.diasAtraso) > query.diasAtrasoMax)) return false;
       return true;
     });
   }

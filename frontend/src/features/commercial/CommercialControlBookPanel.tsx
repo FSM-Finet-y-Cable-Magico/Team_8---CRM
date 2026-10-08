@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Filter, RefreshCw, Search, X } from 'lucide-react';
+import { type Customer } from '../../api';
+import { ControlBookFinancePanel } from './ControlBookFinancePanel';
 import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { ControlBookDrawer } from './ControlBookDrawer';
 import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
-import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, WORK_VIEWS, WorkView, currency, dateLabel, exportColumns, readable } from './control-book-model';
+import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './commercial-control-book.css';
 
@@ -13,8 +15,8 @@ export function CommercialStatus({ row }: { row: ControlRow }) {
 }
 
 function Cell({ column, row }: { column: string; row: ControlRow }) {
-  if (column === 'cliente') return <><strong>{row.nombre}</strong><small>{row.rut ?? 'Sin RUT'}</small><small className="control-row-context">Contrato {row.numeroContrato} · Doc. {row.numeroDocumento}</small></>;
-  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span><small>Contrato {row.numeroContrato} · {row.tipoDocumento ? readable(row.tipoDocumento) : 'Documento'} {row.numeroDocumento}</small></>;
+  if (column === 'cliente') return <><strong>{row.nombre}</strong><small>{row.rut ?? 'Sin RUT'}</small></>;
+  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span>{row.direccion && <small>{row.direccion}</small>}<small>{readable(row.estadoServicio)} · {row.idFactura ? 'Vence ' + dateLabel(row.fechaVencimientoEfectiva) : 'Sin facturas'}</small></>;
   if (column === 'deuda') return <strong>{row.saldoPendiente === null ? '—' : currency.format(row.saldoPendiente)}</strong>;
   if (column === 'estado') return <><CommercialStatus row={row}/><small>{row.diasAtraso === null ? 'Atraso sin datos' : row.diasAtraso > 0 ? row.diasAtraso + ' días de atraso' : 'Sin atraso'}</small></>;
   if (column === 'accion') return row.accionSugerida.toLocaleLowerCase('es-CL').includes('sin gestión pendiente') ? null : <span>{row.accionSugerida}</span>;
@@ -28,9 +30,11 @@ function Cell({ column, row }: { column: string; row: ControlRow }) {
   return <>{value === null ? '—' : String(value)}</>;
 }
 
-export function CommercialControlBookPanel({ view = 'general', scope, writeCompanyId, permissions, onOpenCustomers, onOpenBilling }: {
-  view?: WorkView; scope: string; writeCompanyId: number; permissions: DashboardPermissions; onOpenCustomers: (row: ControlRow) => void; onOpenBilling: (row: ControlRow) => void;
+export function CommercialControlBookPanel({ scope, writeCompanyId, permissions, onOpenCustomers, customers, onChanged }: {
+  scope: string; writeCompanyId: number; permissions: DashboardPermissions; onOpenCustomers: (row: ControlRow) => void; customers: Customer[]; onChanged: () => void;
 }) {
+  const [focusedInvoice, setFocusedInvoice] = useState<Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'> | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [data, setData] = useState<ControlResponse | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [search, setSearch] = useState('');
@@ -40,7 +44,7 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
   const { message, showMessage: setMessage, clearMessage } = useTransientMessage(5000);
   const [refresh, setRefresh] = useState(0);
   const [updatedAt, setUpdatedAt] = useState('');
-  const [visible, setVisible] = useState<string[]>(() => [...WORK_VIEWS[view].columns]);
+  const [visible, setVisible] = useState<string[]>(() => [...ESSENTIAL]);
   const [optionsPanel, setOptionsPanel] = useState<'filters' | 'columns' | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -53,11 +57,11 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
   const workspace = useRef<HTMLElement>(null);
   const openerId = useRef<string | null>(null);
   const returning = useRef(false);
+  const synchronizing = useRef(false);
   const companyId = scope !== 'consolidado' ? scope : String(writeCompanyId);
   const previousCompany = useRef(companyId);
-  const params = useMemo(() => ({ idEmpresa: companyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 30 }), [companyId, filters, page]);
+  const params = useMemo(() => ({ idEmpresa: companyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 20 }), [companyId, filters, page]);
 
-  useEffect(() => { setVisible([...WORK_VIEWS[view].columns]); setSelected(null); setOptionsPanel(null); }, [view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setFilters((current) => current.search === search ? current : { ...current, search }); setPage(1); }, 300);
@@ -67,7 +71,7 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
   useEffect(() => {
     if (previousCompany.current === companyId) return;
     previousCompany.current = companyId;
-    setSelected(null); setDrawerBusy(false); setData(null); setCatalog(undefined); setPage(1); clearMessage(); setUpdatedAt('');
+    setSelected(null); setFocusedInvoice(null); setHighlightedId(null); setDrawerBusy(false); setData(null); setCatalog(undefined); setPage(1); clearMessage(); setUpdatedAt('');
     setOptionsPanel(null); setExportOpen(false); setSearch(''); setFilters(EMPTY_FILTERS);
   }, [companyId, clearMessage]);
 
@@ -106,13 +110,22 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
   }, [exportOpen]);
 
   const activeFilters = (Object.keys(FILTER_LABELS) as (keyof Filters)[]).filter((key) => filters[key] !== '');
-  function applyFilters(next: Filters) { setFilters(next); setPage(1); setOptionsPanel(null); filtersButton.current?.focus(); }
+  function applyFilters(next: Filters) { setHighlightedId(null); setFilters(next); setPage(1); setOptionsPanel(null); filtersButton.current?.focus(); }
   function closeOptions() { (optionsPanel === 'filters' ? filtersButton : columnsButton).current?.focus(); setOptionsPanel(null); }
   function sortBy(sort: string) { setFilters((current) => ({ ...current, sort, order: current.sort === sort && current.order === 'desc' ? 'asc' : 'desc' })); setPage(1); }
   function closeDrawer() { returning.current = true; setSelected(null); }
   function openRecord(row: ControlRow) {
     if (drawerBusy) return;
-    openerId.current = row.rowId; setSelected(row); setOptionsPanel(null);
+    openerId.current = row.rowId; setHighlightedId(row.rowId); setSelected(row); setOptionsPanel(null);
+  }
+  async function synchronizeDelinquency() {
+    if (synchronizing.current || loading || !permissions.manageBilling) return;
+    synchronizing.current = true; setDrawerBusy(true); setError('');
+    try {
+      await api.post('/billing/refresh-delinquency', undefined, { params: { scope: companyId } });
+      setMessage('Estados de morosidad actualizados.'); setRefresh(value => value + 1); onChanged();
+    } catch (err) { setError(apiErrorMessage(err)); }
+    finally { synchronizing.current = false; setDrawerBusy(false); }
   }
   async function exportFile(format: 'csv' | 'xlsx') {
     if (!permissions.exportControlBook || exporting) return;
@@ -128,26 +141,28 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
   if (selected) return <section ref={workspace} className="control-book-workspace">
     {message && <div className="control-feedback" role="status">{message}<button className="control-icon" aria-label="Cerrar mensaje" onClick={clearMessage}><X size={16}/></button></div>}
     {error && <p className="control-feedback error" role="alert">{error}</p>}
-    <ControlBookDrawer key={companyId + '-' + selected.rowId} row={selected} view={view} canManage={permissions.manageCommercialCollections} canViewCustomers={permissions.viewCustomers} canViewBilling={permissions.viewBilling} onClose={closeDrawer} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh((value) => value + 1); }} onOpenCustomers={onOpenCustomers} onOpenBilling={onOpenBilling}/>
+    <ControlBookDrawer key={companyId + '-' + selected.rowId} row={selected} revision={refresh} canManage={permissions.manageCommercialCollections} canViewCustomers={permissions.viewCustomers} canViewBilling={permissions.viewBilling} onClose={closeDrawer} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh((value) => value + 1); }} onOpenCustomers={onOpenCustomers} onOpenBilling={setFocusedInvoice} financialTools={permissions.viewBilling && <ControlBookFinancePanel key={companyId + '-' + selected.idCliente} row={selected} scope={companyId} customers={customers} permissions={permissions} revision={refresh} onChanged={() => { setRefresh(value => value + 1); onChanged(); }} focusedInvoice={focusedInvoice} onFocusConsumed={() => setFocusedInvoice(null)}/>}/>
   </section>;
 
-  return <section ref={workspace} className="control-book-workspace" aria-label={'Libro de control: ' + WORK_VIEWS[view].label}>
+  return <section ref={workspace} className="control-book-workspace" aria-label="Libro de control">
     <header className="control-book-header"><h1>Libro de control</h1><div className="control-book-header-actions">
       <button className="control-refresh" aria-label="Actualizar libro de control" disabled={loading || drawerBusy} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} className={loading ? 'control-spinning' : ''}/><span>{loading ? 'Actualizando…' : updatedAt ? 'Actualizado ' + updatedAt : 'Actualizar'}</span></button>
+      {permissions.manageBilling && <button type="button" className="control-text-button" disabled={loading || drawerBusy} onClick={() => void synchronizeDelinquency()}>Actualizar morosidad</button>}
       {permissions.exportControlBook && <div className="control-export" ref={exportRef}>
         <button className="control-outline" disabled={exporting || loading || !data?.items.length} aria-expanded={exportOpen} aria-controls="control-export-options" onClick={() => setExportOpen(!exportOpen)}><Download size={16}/>{exporting ? 'Exportando…' : 'Exportar'}<ChevronDown size={14}/></button>
         {exportOpen && <div className="control-menu" id="control-export-options"><button onClick={() => void exportFile('xlsx')}>Excel (.xlsx)</button><button onClick={() => void exportFile('csv')}>CSV (.csv)</button><small>Con los filtros y columnas de esta vista.</small></div>}
       </div>}
     </div></header>
 
-    {view === 'general' && <div className="control-book-summary" aria-label="Resumen de los resultados filtrados" aria-busy={loading}>
-      {[
-        ['Saldo pendiente', data ? currency.format(data.summary.totalDebt) : '—'],
-        ['Facturas vencidas', data?.summary.overdueCount ?? '—'],
-        ['Facturas con convenio', data?.summary.agreementsCount ?? '—'],
-        ['Facturas con prórroga', data?.summary.extensionsCount ?? '—'],
-      ].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{label === 'Facturas con convenio' ? 'Convenios aprobados o activos' : label === 'Facturas con prórroga' ? 'Prórrogas aprobadas' : label === 'Saldo pendiente' ? 'Sin cargos por facturar' : 'Según vencimiento efectivo'}</small></div>)}
-    </div>}
+    <dl className="control-book-summary" aria-label="Resumen de la empresa" aria-busy={loading}>
+      {([
+        ['Clientes', data?.dashboard.customerCount ?? '—'],
+        ['Saldo pendiente', data ? currency.format(data.dashboard.totalDebt) : '—'],
+        ['Clientes morosos', data?.dashboard.overdueCustomerCount ?? '—'],
+        ['Facturas vencidas', data?.dashboard.overdueInvoiceCount ?? '—'],
+      ] as const).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+    </dl>
+
     {message && <div className="control-feedback" role="status">{message}<button className="control-icon" aria-label="Cerrar mensaje" onClick={clearMessage}><X size={16}/></button></div>}
     {error && <p className="control-feedback error" role="alert">{error}</p>}
 
@@ -164,7 +179,7 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
       {optionsPanel === 'filters' ? <ControlBookFilters filters={filters} options={catalog} onApply={applyFilters} onClose={closeOptions}/> : <section id="control-columns" className="control-options-panel" aria-label="Seleccionar columnas">
         <header><h2>Campos de esta vista</h2><button className="control-icon" aria-label="Cerrar campos" onClick={closeOptions}><X size={18}/></button></header>
         <div className="control-column-picker">{[...new Set(Object.values(COLUMNS).map((column) => column.group))].map((group) => <fieldset key={group}><legend>{group}</legend>{Object.entries(COLUMNS).filter(([, column]) => column.group === group).map(([key, column]) => <label key={key}><input type="checkbox" checked={visible.includes(key)} disabled={key === 'cliente' || !visible.includes(key) && visible.length >= 6} onChange={() => setVisible((current) => current.includes(key) ? current.filter((item) => item !== key) : current.length < 6 ? Object.keys(COLUMNS).filter((item) => [...current, key].includes(item)) : current)}/>{column.label}{key === 'cliente' && <small>Fijo</small>}</label>)}</fieldset>)}</div>
-        <footer><span>{visible.length} de 6 campos. Desmarca uno para sustituirlo. Selecciona una fila para ver su detalle.</span><button className="control-text-button" onClick={() => setVisible([...WORK_VIEWS[view].columns])}>Restablecer vista</button></footer>
+        <footer><span>{visible.length} de 6 campos. Desmarca uno para sustituirlo. Selecciona una fila para ver su detalle.</span><button className="control-text-button" onClick={() => setVisible([...ESSENTIAL])}>Restablecer vista</button></footer>
       </section>}
     </div>}
 
@@ -176,13 +191,13 @@ export function CommercialControlBookPanel({ view = 'general', scope, writeCompa
       <div className="control-list">
         <div className="control-table-shell" aria-busy={loading}>
           {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="control-empty"><Search size={24}/><strong>No hay resultados</strong><span>Prueba con otra búsqueda o ajusta los filtros.</span>{(activeFilters.length > 0 || search) && <button className="control-outline" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
-            <caption className="control-sr-only">Libro de control. Una fila por cliente, contrato y factura. Selecciona una fila o pulsa Enter para abrir su detalle.</caption>
+            <caption className="control-sr-only">Libro de control. Incluye clientes con y sin facturas; los documentos se muestran por contrato. Selecciona una fila o pulsa Enter para abrir su detalle.</caption>
             <colgroup>{visible.map(key => <col key={key} style={{ width: `${(key === 'cliente' ? 1.45 : 1) / (visible.length + 0.45) * 100}%` }}/>)}</colgroup>
             <thead><tr>{visible.map((key) => <th scope="col" key={key} className={'column-' + key} aria-sort={COLUMNS[key].sort === filters.sort ? filters.order === 'asc' ? 'ascending' : 'descending' : undefined}>{COLUMNS[key].sort ? <button disabled={drawerBusy} onClick={() => sortBy(COLUMNS[key].sort!)}>{COLUMNS[key].label}{COLUMNS[key].sort === filters.sort && (filters.order === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}</button> : COLUMNS[key].label}</th>)}</tr></thead>
-            <tbody>{data.items.map((row) => <tr key={row.rowId} tabIndex={0} data-row-id={row.rowId} aria-label={'Ver ' + row.nombre + ', contrato ' + row.numeroContrato + ', documento ' + row.numeroDocumento} onClick={() => openRecord(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(row); } }}>{visible.map((key) => <td key={key} className={'column-' + key} data-label={COLUMNS[key].label}><Cell column={key} row={row}/></td>)}</tr>)}</tbody>
+            <tbody>{data.items.map((row) => <tr key={row.rowId} tabIndex={0} className={highlightedId === row.rowId ? 'is-selected' : undefined} data-row-id={row.rowId} aria-label={'Ver ' + row.nombre + ', ' + recordContext(row)} onClick={() => openRecord(row)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(row); } }}>{visible.map((key) => <td key={key} className={'column-' + key} data-label={COLUMNS[key].label}><Cell column={key} row={row}/></td>)}</tr>)}</tbody>
           </table>}
         </div>
-        <footer className="control-pagination"><span>{data?.items.length ? ((page - 1) * 30 + 1) + '–' + ((page - 1) * 30 + data.items.length) + ' de ' + data.pagination.totalRows : '0 registros'}</span><button className="control-icon" aria-label="Página anterior" disabled={page <= 1 || loading || drawerBusy} onClick={() => { setPage(page - 1); setSelected(null); }}><ChevronLeft size={18}/></button><span>Página {data?.pagination.page ?? page} de {data?.pagination.totalPages ?? 1}</span><button className="control-icon" aria-label="Página siguiente" disabled={!data || page >= data.pagination.totalPages || loading || drawerBusy} onClick={() => { setPage(page + 1); setSelected(null); }}><ChevronRight size={18}/></button></footer>
+        <footer className="control-pagination"><span>{data?.items.length ? ((page - 1) * 20 + 1) + '–' + ((page - 1) * 20 + data.items.length) + ' de ' + data.pagination.totalRows : '0 registros'}</span><button className="control-icon" aria-label="Página anterior" disabled={page <= 1 || loading || drawerBusy} onClick={() => { setPage(page - 1); setSelected(null); }}><ChevronLeft size={18}/></button><span>Página {data?.pagination.page ?? page} de {data?.pagination.totalPages ?? 1}</span><button className="control-icon" aria-label="Página siguiente" disabled={!data || page >= data.pagination.totalPages || loading || drawerBusy} onClick={() => { setPage(page + 1); setSelected(null); }}><ChevronRight size={18}/></button></footer>
       </div>
     </div>
   </section>;

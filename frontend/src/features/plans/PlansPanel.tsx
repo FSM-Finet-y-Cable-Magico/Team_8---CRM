@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { MapPin, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, apiErrorMessage, type Company, type Plan } from '../../api';
+import { DashboardPermissions } from '../../permissions';
+import { PlanZonesModal } from './PlanZonesModal';
 import { planCustomerTypeOptions, serviceTypeOptions } from '../../constants';
 import { Modal, TablePagination } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
@@ -36,7 +38,7 @@ function canonicalCustomerType(value: string) {
   return normalized === 'empresarial' || normalized === 'empresa' ? 'Empresarial' : 'Residencial';
 }
 
-export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { plans: Plan[]; companies: Company[]; writeCompanyId: number; onChanged: () => void }) {
+export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope, permissions }: { plans: Plan[]; companies: Company[]; writeCompanyId: number; onChanged: () => void; scope: string; permissions: DashboardPermissions }) {
   const { message: status, showMessage: setStatus, clearMessage: clearStatus } = useTransientMessage();
   const [pageError, setPageError] = useState('');
   const [modalError, setModalError] = useState('');
@@ -47,6 +49,8 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
   const [form, setForm] = useState(initialForm(writeCompanyId));
+  const [assigningPlan, setAssigningPlan] = useState<Plan | null>(null);
+  useEffect(() => { setAssigningPlan(null); }, [scope, writeCompanyId]);
 
   useEffect(() => { if (!editingPlan) setForm(initialForm(writeCompanyId)); }, [writeCompanyId, editingPlan?.idPlan]);
 
@@ -223,6 +227,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
                   <td>
                     <div className="table-actions plan-table-actions">
                       <button type="button" className={plan.activo === false ? 'plan-toggle' : 'plan-toggle active'} role="switch" aria-checked={plan.activo !== false} aria-label={`Cambiar estado de ${plan.nombreComercial}`} onClick={() => void togglePlan(plan)}><span /></button>
+                      {permissions.managePlans && <button type="button" className="secondary compact plan-assign-action" title="Asignar zonas" aria-label={`Asignar zonas a ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setAssigningPlan(plan); }}><MapPin size={15} aria-hidden="true"/></button>}
                       <button type="button" className="secondary compact plan-edit-action" aria-label={`Editar ${plan.nombreComercial}`} onClick={() => editPlan(plan)}><Pencil size={15} /></button>
                       <button type="button" className="secondary compact plan-delete-action" aria-label={`Eliminar ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setDeleteError(''); setDeletingPlan(plan); }}><Trash2 size={15} /></button>
                     </div>
@@ -235,7 +240,10 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged }: { pl
         <TablePagination currentPage={page} totalItems={plans.length} onPageChange={setPage} />
       </section>
 
-      <Modal title={editingPlan ? 'Editar plan comercial' : 'Crear plan comercial'} open={modalOpen} onClose={closeModal}>
+
+      {assigningPlan && <PlanZonesModal key={assigningPlan.idPlan} plan={assigningPlan} onClose={() => setAssigningPlan(null)} onSaved={() => { setAssigningPlan(null); setStatus('Zonas asignadas al plan.'); onChanged(); }}/>}
+
+      <Modal title={editingPlan ? 'Editar plan comercial' : 'Crear plan'} open={modalOpen} onClose={closeModal}>
         <form className="plan-modal-form" noValidate onSubmit={savePlan}>
           <div className="plan-form-grid">
             <label>Empresa<select value={form.idEmpresa} onChange={(event) => setForm({ ...form, idEmpresa: event.target.value })}>{companies.map((company) => <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>)}</select></label>

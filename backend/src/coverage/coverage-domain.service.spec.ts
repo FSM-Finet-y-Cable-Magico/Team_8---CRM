@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CommercialCoverageProvider } from './commercial-coverage.provider';
@@ -53,6 +54,78 @@ describe('CoverageDomainService', () => {
     expect(result).toMatchObject({ idZonaPago: 20, tipoZona: 'COBERTURA_GENERAL', fuenteCobertura: 'MANUAL' });
     expect(prisma.zonaPago.create).toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_ZONA_GEOGRAFICA' }));
+  });
+
+  it.each(['create', 'update'] as const)('explica el nombre duplicado al %s sin registrar una zona exitosa', async operation => {
+    const { service, prisma, audit } = setup();
+    const duplicate = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.22.0', meta: { target: 'uq_zona_pago_empresa_nombre' },
+    });
+    prisma.zonaPago[operation].mockRejectedValueOnce(duplicate);
+    const request = operation === 'create'
+      ? service.createZone({ idEmpresa: 1, nombre: 'Cobertura Sur', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)
+      : service.updateZone(10, { nombre: 'Cobertura Sur' }, commercial);
+    await expect(request).rejects.toMatchObject({
+      status: 409, message: 'Ya existe una zona o cobertura con ese nombre en esta empresa. Usa otro nombre.',
+    });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('conserva otros errores de almacenamiento sin atribuirlos a nombres duplicados', async () => {
+    const { service, prisma } = setup();
+    const failure = new Error('Database unavailable');
+    prisma.zonaPago.create.mockRejectedValueOnce(failure);
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Nueva', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)).rejects.toBe(failure);
+  });
+
+  function deletionSetup(counts = {}) {
+    const current = setup();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id_zona_pago: 10 }]),
+      zonaPago: {
+        findUnique: jest.fn().mockResolvedValue({ ...parent, _count: { zonasHijas: 0, contratos: 0, servicios: 0, prospectos: 0, ...counts } }),
+        delete: jest.fn().mockResolvedValue(parent),
+      },
+      planZonaPrecio: { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    Object.assign(current.prisma, { $transaction: jest.fn().mockImplementation(callback => callback(tx)) });
+    return { ...current, tx };
+  }
+
+  it('elimina una zona sin uso y sus asignaciones a planes, con auditoría en la misma transacción', async () => {
+    const { service, tx, audit } = deletionSetup();
+    await expect(service.deleteZone(10, commercial)).resolves.toEqual({ idZonaPago: 10, eliminada: true });
+    expect(tx.planZonaPrecio.deleteMany).toHaveBeenCalledWith({ where: { idZonaPago: 10 } });
+    expect(tx.zonaPago.delete).toHaveBeenCalledWith({ where: { idZonaPago: 10 } });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ELIMINAR_ZONA_GEOGRAFICA', valorAnterior: expect.objectContaining({ asignacionesEliminadas: 2 }) }), tx);
+  });
+
+  it.each(['zonasHijas', 'contratos', 'servicios', 'prospectos'])('conserva la zona y sus precios si tiene %s', async relation => {
+    const { service, tx, audit } = deletionSetup({ [relation]: 1 });
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 409 });
+    expect(tx.planZonaPrecio.deleteMany).not.toHaveBeenCalled();
+    expect(tx.zonaPago.delete).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('impide eliminar zonas de otra empresa, sin permiso o inexistentes', async () => {
+    const { service, tx } = deletionSetup();
+    await expect(service.deleteZone(10, support)).rejects.toMatchObject({ status: 403 });
+    await expect(service.deleteZone(10, { ...commercial, idEmpresa: 2 })).rejects.toMatchObject({ status: 403 });
+    tx.zonaPago.findUnique.mockResolvedValueOnce(null);
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 404 });
+    expect(tx.planZonaPrecio.deleteMany).not.toHaveBeenCalled();
+    expect(tx.zonaPago.delete).not.toHaveBeenCalled();
+  });
+
+  it('explica una referencia concurrente y propaga otros fallos de eliminación', async () => {
+    const { service, tx, audit } = deletionSetup();
+    tx.zonaPago.delete.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', { code: 'P2003', clientVersion: '5.22.0' }));
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('información asociada') });
+    const failure = new Error('Database unavailable');
+    tx.zonaPago.delete.mockRejectedValueOnce(failure);
+    await expect(service.deleteZone(10, commercial)).rejects.toBe(failure);
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('rechaza poligono invalido, vigencia invertida y usuario sin permiso', async () => {

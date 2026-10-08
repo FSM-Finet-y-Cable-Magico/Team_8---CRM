@@ -8,7 +8,6 @@ import {
   ClipboardList,
   FileClock,
   FileUp,
-  HandCoins,
   House,
   Map as MapIcon,
   Router,
@@ -51,9 +50,7 @@ import {
 } from './constants';
 import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
-import { BillingPanel } from './features/billing';
 import { CommercialControlBookPanel } from './features/commercial';
-import { WORK_VIEWS, type WorkView, type ControlRow } from './features/commercial/control-book-model';
 import { CustomersPanel } from './features/customers';
 import { CoverageZonesPanel } from './features/coverage';
 import { DashboardHome } from './features/dashboard';
@@ -101,11 +98,7 @@ type Tab =
   | 'customers'
   | 'inventory'
   | 'plans'
-  | 'billing'
   | 'commercial'
-  | 'commercialFollowup'
-  | 'commercialCommitments'
-  | 'commercialBilling'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -114,7 +107,6 @@ type Tab =
   | 'audit';
 
 type NavItem = SidebarNavItem<Tab>;
-const commercialTabs: Partial<Record<Tab, WorkView>> = { commercial: 'general', commercialFollowup: 'followup', commercialCommitments: 'commitments', commercialBilling: 'billing' };
 
 type Summary = {
   scope: string;
@@ -187,7 +179,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [commercialNavigation, setCommercialNavigation] = useState(0);
   const [focusedCustomerId, setFocusedCustomerId] = useState<number | null>(null);
-  const [focusedBillingInvoice, setFocusedBillingInvoice] = useState<ControlRow | null>(null);
   const [scope, setScope] = useState('consolidado');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
@@ -213,7 +204,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const permissions = getDashboardPermissions(user.roles);
   const canManageCustomers = permissions.viewCustomers;
   const canViewInventory = permissions.viewInventory;
-  const canViewBilling = permissions.viewBilling;
   const canViewTickets = permissions.viewTickets;
   const canViewInstallations = permissions.viewInstallations;
   const canViewWorkOrders = permissions.viewWorkOrders;
@@ -274,7 +264,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
       api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
       canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-      canViewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
+      permissions.viewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
       canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
       canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
       canViewWorkOrders || canViewInstallations
@@ -338,8 +328,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
     { tab: 'plans', label: 'Planes', visible: permissions.managePlans, icon: ClipboardList },
-    { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
-    { tab: 'commercial', label: 'Libro de control', visible: permissions.viewControlBook, icon: Table2, children: Object.entries(commercialTabs).map(([tab, view]) => ({ tab: tab as Tab, label: WORK_VIEWS[view].label, visible: permissions.viewControlBook })) },
+    { tab: 'commercial', label: 'Libro de control', visible: permissions.viewControlBook, icon: Table2 },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
     { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
     { tab: 'reports', label: 'Reportes', visible: permissions.viewReports, icon: BarChart3 },
@@ -356,7 +345,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         activeTab={activeTab}
         mainItems={mainNavItems}
         secondaryItems={secondaryNavItems}
-        onNavigate={(tab) => { setActiveTab(tab); if (commercialTabs[tab]) setCommercialNavigation(value => value + 1); }}
+        onNavigate={(tab) => { setActiveTab(tab); if (tab === 'commercial') setCommercialNavigation(value => value + 1); }}
       />
 
       <section className="crm-main">
@@ -465,32 +454,21 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <PlansPanel
               plans={plans}
               companies={companies}
-              writeCompanyId={writeCompanyId}
-              onChanged={() => void loadData()}
-            />
-          )}
-          {activeTab === 'billing' && canViewBilling && (
-            <BillingPanel
-              focusedInvoice={focusedBillingInvoice}
-              onFocusConsumed={() => setFocusedBillingInvoice(null)}
-              overview={billingOverview}
-              plans={plans}
-              customers={customers}
               scope={scope}
-              writeCompanyId={writeCompanyId}
               permissions={permissions}
+              writeCompanyId={writeCompanyId}
               onChanged={() => void loadData()}
             />
           )}
-          {commercialTabs[activeTab] && permissions.viewControlBook && (
+          {activeTab === 'commercial' && permissions.viewControlBook && (
             <CommercialControlBookPanel
-              key={`${commercialTabs[activeTab]}-${commercialNavigation}`}
-              view={commercialTabs[activeTab]}
+              key={commercialNavigation}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
               onOpenCustomers={(row) => { if (permissions.viewCustomers) { setFocusedCustomerId(row.idCliente); setActiveTab('customers'); } }}
-              onOpenBilling={(row) => { if (permissions.viewBilling) { setFocusedBillingInvoice(row); setActiveTab('billing'); } }}
+              customers={customers}
+              onChanged={() => void loadData()}
             />
           )}
           {activeTab === 'tickets' && canViewTickets && (

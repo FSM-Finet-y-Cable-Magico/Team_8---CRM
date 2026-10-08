@@ -1,16 +1,17 @@
 export type ControlRow = {
   rowId: string; idEmpresa: number | null; idCliente: number; rut: string | null; nombre: string; telefono: string | null; email: string | null; direccion: string | null;
-  idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number; numeroContrato: string; idPlan: number | null; plan: string | null;
-  idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number; numeroDocumento: string; fechaEmision: string | null; fechaVencimiento: string;
-  fechaVencimientoEfectiva: string; estadoDocumento: string; montoDocumento: number | null; totalPagado: number; saldoPendiente: number | null; saldoFavor: number | null;
+  idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number | null; numeroContrato: string | null; idPlan: number | null; plan: string | null;
+  idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number | null; numeroDocumento: string | null; fechaEmision: string | null; fechaVencimiento: string | null;
+  fechaVencimientoEfectiva: string | null; estadoDocumento: string; montoDocumento: number | null; totalPagado: number | null; saldoPendiente: number | null; saldoFavor: number | null;
   diasAtraso: number | null; estadoComercial: string; ultimaGestion: string | null; fechaUltimaGestion: string | null; responsableUltimaGestion: string | null; accionSugerida: string;
-  convenioActivo: boolean; prorrogaActiva: boolean; diaPago: number; cambioFecha: string | null; fechaInstalacion: string | null; fechaCorte: string | null; estadoCorte: string | null;
+  convenioActivo: boolean; prorrogaActiva: boolean; diaPago: number | null; cambioFecha: string | null; fechaInstalacion: string | null; fechaCorte: string | null; estadoCorte: string | null;
   avisoRetiro: boolean; retiroPendiente: boolean; observacionRelevante: string | null; ultimoPago: string | null; formaPago: string | null; codigoTransaccion: string | null;
   valorRecibido: number | null; cargosPendientes: number;
 };
 
 export type ControlResponse = {
   items: ControlRow[];
+  dashboard: { customerCount: number; overdueCustomerCount: number; overdueInvoiceCount: number; totalDebt: number };
   pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
   summary: { totalRows: number; totalDebt: number; overdueCount: number; agreementsCount: number; extensionsCount: number };
   filterOptions: { plans: Array<{ id: number; label: string }>; zones: Array<{ id: number; label: string }>; commercialStatuses: string[]; serviceStatuses: string[] };
@@ -40,7 +41,7 @@ export function today() {
 }
 const STATUS_LABELS: Record<string, string> = {
   AL_DIA: 'Al día', SALDO_PENDIENTE: 'Por vencer', DEUDA_VENCIDA: 'Deuda vencida', CON_PRORROGA: 'Con prórroga',
-  CON_CONVENIO: 'Con convenio', ULTIMO_AVISO_REGISTRADO: 'Último aviso', RETIRO_PENDIENTE: 'Retiro pendiente', SIN_DATOS_FINANCIEROS: 'Sin datos financieros',
+  CON_CONVENIO: 'Con convenio', ULTIMO_AVISO_REGISTRADO: 'Último aviso', RETIRO_PENDIENTE: 'Retiro pendiente', SIN_DATOS_FINANCIEROS: 'Sin datos financieros', SIN_FACTURAS: 'Sin facturas',
 };
 export const readable = (value: string | null | undefined) => value ? STATUS_LABELS[value] ?? value.replace(/_/g, ' ').toLocaleLowerCase('es-CL') : '—';
 export const ACTION_LABELS: Record<ActionName, string> = {
@@ -48,10 +49,21 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
 };
 export function actionDisabledReason(action: ActionName, row: ControlRow) {
+  if (['lastNotice', 'agreement', 'extension'].includes(action) && !row.idFactura) return 'Requiere una factura con saldo pendiente';
   if (['lastNotice', 'agreement', 'extension'].includes(action) && !(Number(row.saldoPendiente) > 0)) return 'Requiere saldo pendiente';
   if (action === 'lastNotice' && !(Number(row.diasAtraso) > 0)) return 'Requiere deuda vencida';
   if (action === 'withdrawal' && !row.idServicio) return 'Requiere un servicio asociado';
+  if (action === 'paymentDay' && !row.idContrato) return 'Requiere un contrato';
   return '';
+}
+
+export function managementRelations(row: ControlRow) {
+  return { idCliente: row.idCliente, idContrato: row.idContrato ?? undefined, idServicio: row.idServicio ?? undefined, idFactura: row.idFactura ?? undefined };
+}
+
+export function recordContext(row: ControlRow) {
+  return [row.plan ?? 'Sin plan', row.estadoServicio ? readable(row.estadoServicio) : null,
+    row.idFactura ? 'Vence ' + dateLabel(row.fechaVencimientoEfectiva) : 'Sin facturas'].filter(Boolean).join(' · ');
 }
 
 type Column = { label: string; fields: (keyof ControlRow)[]; group: string; sort?: string };
@@ -80,20 +92,7 @@ export const COLUMNS: Record<string, Column> = {
 };
 export const ESSENTIAL = ['cliente', 'servicio', 'deuda', 'estado'];
 export const OPERATIONAL = ['cliente', 'servicio', 'deuda', 'estado', 'vencimiento', 'gestion'];
-export const WORK_VIEWS = {
-  general: { label: 'General', description: 'Clientes, servicios y situación comercial', columns: ESSENTIAL, tab: 'summary' },
-  followup: { label: 'Seguimiento', description: 'Contacto, avisos y última gestión', columns: ['cliente', 'contacto', 'estado', 'gestion', 'avisoRetiro'], tab: 'history' },
-  commitments: { label: 'Compromisos', description: 'Convenios, prórrogas y fechas de pago', columns: ['cliente', 'deuda', 'convenioActivo', 'prorrogaActiva', 'vencimiento', 'diaPago'], tab: 'commitments' },
-  billing: { label: 'Facturas y pagos', description: 'Documentos, saldos y pagos registrados', columns: ['cliente', 'servicio', 'montoDocumento', 'totalPagado', 'deuda', 'vencimiento'], tab: 'billing' },
-} as const;
-export type WorkView = keyof typeof WORK_VIEWS;
-export type DetailTab = 'summary' | 'billing' | 'history' | 'commitments';
-export const VIEW_ACTIONS: Record<WorkView, ActionName[]> = {
-  general: ['event', 'lastNotice', 'withdrawal', 'agreement', 'extension', 'paymentDay', 'charge'],
-  followup: ['event', 'lastNotice', 'withdrawal'],
-  commitments: ['agreement', 'extension', 'paymentDay'],
-  billing: ['charge'],
-};
+export const CONTROL_ACTIONS: ActionName[] = ['event', 'lastNotice', 'withdrawal', 'agreement', 'extension', 'paymentDay', 'charge'];
 export function exportColumns(visible: string[]) {
   return [...new Set(visible.flatMap((key) => COLUMNS[key]?.fields ?? []))];
 }

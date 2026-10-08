@@ -3483,6 +3483,29 @@ button.profile-menu-item.danger:hover {
 .plan-form-grid textarea { min-height: 88px; resize: vertical; }
 .plan-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .plan-modal-actions button { width: auto; }
+.plan-assign-action { display: inline-grid; place-items: center; min-width: 34px; padding: 0; }
+.plan-zones-form { display: grid; gap: 16px; }
+.modal-card:has(.plan-zones-form) { width: min(720px, 100%); }
+.plan-zones-intro { display: grid; gap: 7px; }
+.plan-zones-intro > strong { font-size: 1.05rem; }
+.plan-zones-intro p { margin: 0; color: #64766d; font-size: .85rem; }
+.plan-zones-search { display: flex; align-items: center; gap: 10px; padding-left: 12px; border: 1px solid #dce6e1; border-radius: 7px; color: #64766d; }
+.plan-zones-search input { flex: 1; min-width: 0; border: 0; background: transparent; }
+.plan-zones-counter { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: .78rem; color: #64766d; }
+.plan-zones-counter strong { color: #247c68; font-weight: 600; }
+.plan-zone-options { display: grid; gap: 9px; max-height: min(340px, 44vh); overflow-y: auto; border: 0; padding: 2px; margin: 0; min-width: 0; }
+.plan-zone-option { display: flex; align-items: center; gap: 12px; padding: 15px 12px; border: 1px solid #dce6e1; border-radius: 8px; cursor: pointer; }
+.plan-zone-option.is-selected { border-color: #91beac; background: #eff7f3; }
+.plan-zone-option > input { flex: 0 0 17px; width: 17px; min-height: 17px; height: 17px; margin: 0; accent-color: #247c68; }
+.plan-zone-option > svg { flex-shrink: 0; color: #247c68; }
+.plan-zone-option > span { display: grid; gap: 5px; min-width: 0; }
+.plan-zone-option strong { font-size: .85rem; font-weight: 600; overflow-wrap: anywhere; }
+.plan-zone-option small { color: #64766d; font-size: .74rem; overflow-wrap: anywhere; }
+.plan-zone-check { margin-left: auto; }
+.plan-zone-empty { margin: 0; font-size: .8rem; color: #64766d; line-height: 1.5; }
+.theme-dark .plan-zones-intro p, .theme-dark .plan-zones-counter, .theme-dark .plan-zone-option small, .theme-dark .plan-zone-empty { color: #aac0b5; }
+.theme-dark .plan-zone-option, .theme-dark .plan-zones-search { border-color: #28473e; }
+.theme-dark .plan-zone-option.is-selected { background: #193e37; border-color: #508574; }
 .modal-card:has(.plan-delete-dialog) { width: min(480px, 100%); }
 .plan-delete-dialog p { margin: 0; color: #506159; line-height: 1.55; }
 .plan-delete-confirm { background: #b7473c; }

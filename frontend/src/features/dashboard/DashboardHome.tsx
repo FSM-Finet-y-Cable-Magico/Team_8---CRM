@@ -29,9 +29,9 @@ type Tab =
   | 'prospects'
   | 'installations'
   | 'customers'
+  | 'commercial'
   | 'inventory'
   | 'plans'
-  | 'billing'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -150,7 +150,7 @@ export function DashboardHome({
       description: 'Con deuda o suspensión',
       icon: HandCoins,
       tone: 'rose' as const,
-      tab: 'billing' as Tab,
+      tab: 'commercial' as Tab,
     },
     {
       label: 'Inventario disponible',
@@ -174,7 +174,7 @@ export function DashboardHome({
       description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`,
       icon: TrendingDown,
       tone: 'amber' as const,
-      tab: 'billing' as Tab,
+      tab: 'commercial' as Tab,
     },
   ];
   const quickActions = [
@@ -250,9 +250,9 @@ export function DashboardHome({
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
     { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Completadas durante el mes', tone: 'green', tab: 'installations' as Tab },
-    { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'billing' as Tab },
+    { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
-    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'billing' as Tab },
+    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
   ];
 
   function selectExpiryFilter(filter: 'overdue' | 'upcoming') {
@@ -476,8 +476,8 @@ export function DashboardHome({
               <span>Seguimiento financiero</span>
               <h2>Resumen de cobranza</h2>
             </div>
-            <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('billing')}>
-              Ver cobranza
+            <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('commercial')}>
+              Ver libro de control
               <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
             </button>
           </div>

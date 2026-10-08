@@ -32,7 +32,7 @@ describe('CommercialCoverageProvider', () => {
     expect(result.planes[0]).toMatchObject({ precioBase: 20000, precioAplicable: 15990, origenPrecio: 'MICROZONA' });
   });
 
-  it('hereda precio desde cobertura padre y luego desde el plan base', async () => {
+  it('ofrece planes asignados a la cobertura padre y omite planes sin asignación', async () => {
     const parent = setup([general], [{ idPlanZonaPrecio: 1, idZonaPago: 10, precioMensual: 17990, activo: true, fechaInicio: null, fechaFin: null }]);
     const parentResult = await parent.provider.resolvePlanAvailabilityForLocation(1, -33.66, -70.66);
     expect(parentResult).toMatchObject({ coberturaComercial: true, zona: { idZonaPago: 10 }, microzona: null });
@@ -41,7 +41,19 @@ describe('CommercialCoverageProvider', () => {
     const base = setup([general]);
     const baseResult = await base.provider.resolvePlanAvailabilityForLocation(1, -33.66, -70.66);
     expect(baseResult).toMatchObject({ coberturaComercial: true, zona: { idZonaPago: 10 }, microzona: null });
-    expect(baseResult.planes[0]).toMatchObject({ precioAplicable: 20000, origenPrecio: 'PLAN_BASE' });
+    expect(baseResult.planes).toEqual([]);
+  });
+
+  it('no ofrece planes asignados a otra zona o con asignaciones vencidas', async () => {
+    for (const rule of [
+      { idZonaPago: 99, activo: true, fechaInicio: null, fechaFin: null },
+      { idZonaPago: 10, activo: false, fechaInicio: null, fechaFin: null },
+      { idZonaPago: 10, activo: true, fechaInicio: new Date('2027-01-01'), fechaFin: null },
+      { idZonaPago: 10, activo: true, fechaInicio: null, fechaFin: new Date('2026-01-01') },
+    ]) {
+      const { provider } = setup([general], [{ ...rule, idPlanZonaPrecio: 1, precioMensual: 20000 }]);
+      expect((await provider.resolvePlanAvailabilityForLocation(1, -33.66, -70.66, new Date('2026-10-07'))).planes).toEqual([]);
+    }
   });
 
   it('declara fuera de cobertura y no consulta planes', async () => {
@@ -67,6 +79,6 @@ describe('CommercialCoverageProvider', () => {
     const { provider, prisma } = setup();
     await provider.resolvePlanAvailabilityForLocation(1, -33.59, -70.61);
     expect(prisma.zonaPago.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1, activo: { not: false } } }));
-    expect(prisma.plan.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1, activo: { not: false } } }));
+    expect(prisma.plan.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1, activo: { not: false }, preciosZona: { some: { idZonaPago: { in: [11, 10] }, activo: true } } } }));
   });
 });

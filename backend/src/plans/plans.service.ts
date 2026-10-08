@@ -39,7 +39,7 @@ export class PlansService {
       precioMensual: dto.precioMensual,
     });
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
-    const created = await this.prisma.plan.create({
+    const planData = {
       data: {
         idEmpresa,
         nombreComercial: dto.nombreComercial.trim(),
@@ -51,7 +51,8 @@ export class PlansService {
         activo: dto.activo ?? true,
       },
       include: { empresa: true },
-    });
+    } satisfies Prisma.PlanCreateArgs;
+    const created = await this.prisma.plan.create(planData);
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -69,6 +70,57 @@ export class PlansService {
     return created;
   }
 
+  async zones(idPlan: number, currentUser: AuthUser) {
+    const plan = await this.getPlanOrThrow(idPlan, currentUser);
+    if (!plan.idEmpresa) throw new BadRequestException('El plan debe tener una empresa para asignar zonas');
+    const zones = await this.prisma.zonaPago.findMany({
+      where: { idEmpresa: plan.idEmpresa, activo: { not: false } },
+      select: {
+        idZonaPago: true, nombreZona: true, tipoZona: true, comuna: true,
+        zonaPadre: { select: { nombreZona: true } },
+        precios: { where: { idPlan, activo: true }, select: { idPlanZonaPrecio: true } },
+      },
+      orderBy: { nombreZona: 'asc' },
+    });
+    return { idPlan, zones: zones.map(({ precios, ...zone }) => ({ ...zone, assigned: precios.length > 0 })) };
+  }
+
+  async assignZones(idPlan: number, zoneIds: number[], currentUser: AuthUser) {
+    if (!Array.isArray(zoneIds) || zoneIds.length > 500 || zoneIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
+      throw new BadRequestException('Selecciona zonas válidas');
+    }
+    const selected = [...new Set(zoneIds)].sort((a, b) => a - b);
+    return this.prisma.$transaction(async tx => {
+      // Serialize changes to this plan's assignments, including repeated saves.
+      await tx.$queryRaw`SELECT id_plan FROM plan WHERE id_plan = ${idPlan} FOR UPDATE`;
+      const plan = await tx.plan.findUnique({ where: { idPlan } });
+      if (!plan) throw new NotFoundException('Plan no encontrado');
+      this.assertCompanyAccess(plan.idEmpresa, currentUser);
+      if (!plan.idEmpresa) throw new BadRequestException('El plan debe tener una empresa para asignar zonas');
+      const zones = selected.length ? await tx.zonaPago.findMany({
+        where: { idEmpresa: plan.idEmpresa, activo: { not: false }, idZonaPago: { in: selected } },
+        select: { idZonaPago: true },
+      }) : [];
+      if (zones.length !== selected.length) {
+        throw new BadRequestException('Las zonas deben estar activas y pertenecer a la empresa del plan');
+      }
+      const previous = await tx.planZonaPrecio.findMany({ where: { idPlan, activo: true }, select: { idZonaPago: true } });
+      await tx.planZonaPrecio.updateMany({
+        where: { idPlan, activo: true, ...(selected.length ? { idZonaPago: { notIn: selected } } : {}) }, data: { activo: false },
+      });
+      const existingIds = new Set(previous.map(rule => rule.idZonaPago));
+      const added = selected.filter(id => !existingIds.has(id));
+      if (added.length) await tx.planZonaPrecio.createMany({ data: added.map(idZonaPago => ({
+        idPlan, idZonaPago, precioMensual: plan.precioMensual, activo: true,
+      })) });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'ASIGNAR_ZONAS_PLAN', entidadAfectada: 'plan', idEntidadAfectada: idPlan,
+        valorAnterior: { zoneIds: previous.map(rule => rule.idZonaPago) }, valorNuevo: { zoneIds: selected },
+      }, tx);
+      return { idPlan, assignedZoneIds: selected };
+    });
+  }
+
   async update(idPlan: number, dto: UpdatePlanDto, currentUser: AuthUser) {
     const plan = await this.getPlanOrThrow(idPlan, currentUser);
     const nextCompany = dto.idEmpresa === undefined ? plan.idEmpresa : this.resolveCompanyId(dto.idEmpresa, currentUser);
@@ -80,19 +132,38 @@ export class PlansService {
       precioMensual: dto.precioMensual ?? Number(plan.precioMensual),
     });
 
-    const updated = await this.prisma.plan.update({
-      where: { idPlan },
-      data: {
-        idEmpresa: nextCompany,
-        nombreComercial: dto.nombreComercial === undefined ? undefined : dto.nombreComercial.trim(),
-        tipoPlan: dto.tipoPlan === undefined ? undefined : dto.tipoPlan.trim(),
-        tipoCliente: dto.tipoCliente === undefined ? undefined : dto.tipoCliente.trim(),
-        velocidadMbps: dto.velocidadMbps,
-        precioMensual: dto.precioMensual,
-        descripcion: dto.descripcion === undefined ? undefined : dto.descripcion.trim() || null,
-        activo: dto.activo,
-      },
-      include: { empresa: true },
+    const updated = await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_plan FROM plan WHERE id_plan = ${idPlan} FOR UPDATE`;
+      const current = await tx.plan.findUnique({ where: { idPlan } });
+      if (!current) throw new NotFoundException('Plan no encontrado');
+      this.assertCompanyAccess(current.idEmpresa, currentUser);
+      const company = dto.idEmpresa === undefined ? current.idEmpresa : nextCompany;
+      if (company !== current.idEmpresa && await tx.planZonaPrecio.count({ where: { idPlan, activo: true } }) > 0) {
+        throw new BadRequestException('Desasigna las zonas antes de cambiar la empresa del plan');
+      }
+      const changed = await tx.plan.update({
+        where: { idPlan },
+        data: {
+          idEmpresa: company,
+          nombreComercial: dto.nombreComercial === undefined ? undefined : dto.nombreComercial.trim(),
+          tipoPlan: dto.tipoPlan === undefined ? undefined : dto.tipoPlan.trim(),
+          tipoCliente: dto.tipoCliente === undefined ? undefined : dto.tipoCliente.trim(),
+          velocidadMbps: dto.velocidadMbps,
+          precioMensual: dto.precioMensual,
+          descripcion: dto.descripcion === undefined ? undefined : dto.descripcion.trim() || null,
+          activo: dto.activo,
+        },
+        include: { empresa: true },
+      });
+      if (dto.precioMensual !== undefined && dto.precioMensual !== Number(current.precioMensual)) {
+        // Assignments created from the base price follow later edits of that price.
+        // Explicit legacy price overrides keep their own amount and validity.
+        await tx.planZonaPrecio.updateMany({
+          where: { idPlan, activo: true, precioMensual: current.precioMensual, valorInstalacion: null, fechaInicio: null, fechaFin: null },
+          data: { precioMensual: dto.precioMensual },
+        });
+      }
+      return changed;
     });
 
     await this.auditService.record({

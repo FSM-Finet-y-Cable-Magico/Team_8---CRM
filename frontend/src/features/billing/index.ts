@@ -1,1 +1,1 @@
-﻿export * from './BillingPanel';
+export * from './BillingInvoicesPanel';

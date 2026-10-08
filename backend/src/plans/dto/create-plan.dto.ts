@@ -44,4 +44,5 @@ export class CreatePlanDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
 }
