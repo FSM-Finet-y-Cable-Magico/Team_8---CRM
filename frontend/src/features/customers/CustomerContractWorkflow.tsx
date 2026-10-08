@@ -8,6 +8,11 @@ import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { G3InstallationStatus } from '../installations/G3InstallationStatus';
 import { CustomerServiceManagementModal } from './CustomerServiceManagementModal';
 import { ContractDocuments } from './ContractDocuments';
+import {
+  contractManagementTarget,
+  serviceForContract,
+  type CustomerServicesLoadState,
+} from './customer-services-state';
 import './customer-contract-workflow.css';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
@@ -19,10 +24,6 @@ function normalize(value?: string | null) {
 
 function signed(contract?: CustomerContract | null) {
   return ['firmado', 'activo', 'suspendido', 'moroso'].includes(normalize(contract?.estado));
-}
-
-function isManagedService(service?: CustomerService | null) {
-  return ['activo', 'suspendido', 'baja'].includes(normalize(service?.estadoOperativo));
 }
 
 function customerAddress(customer: Customer) {
@@ -49,6 +50,7 @@ function formatCurrency(value?: string | number | null) {
 export function CustomerContractWorkflow({
   customer,
   services,
+  servicesLoad,
   plans,
   permissions,
   onRefresh,
@@ -56,6 +58,7 @@ export function CustomerContractWorkflow({
 }: {
   customer: Customer;
   services: CustomerService[];
+  servicesLoad: CustomerServicesLoadState;
   plans: Plan[];
   permissions: DashboardPermissions;
   onRefresh: (preferredServiceId?: number) => Promise<void>;
@@ -119,13 +122,23 @@ export function CustomerContractWorkflow({
   }
 
   function openContract(contract: CustomerContract) {
-    const service = services.find((item) => item.idContrato === contract.idContrato) ?? null;
-    if (isManagedService(service)) {
-      setActiveServiceId(service?.idServicio ?? null);
+    const target = contractManagementTarget(contract.idContrato, services, servicesLoad.status);
+    if (target.kind === 'loading') {
+      showMessage('Espera a que termine la carga de servicios antes de gestionar el contrato.');
       return;
     }
+    if (target.kind === 'error') {
+      showMessage(servicesLoad.error || 'No fue posible cargar los servicios del cliente.');
+      return;
+    }
+    if (target.kind === 'service') {
+      setSelectedContractId(null);
+      setActiveServiceId(target.serviceId);
+      return;
+    }
+    setActiveServiceId(null);
     setSelectedContractId(contract.idContrato);
-    setSelectedServiceId(service?.idServicio ?? null);
+    setSelectedServiceId(target.serviceId);
     setStage(1);
     setSignatureOpen(false);
     setSignatureObservation('');
@@ -195,19 +208,27 @@ export function CustomerContractWorkflow({
           {permissions.manageContracts && <button type="button" className="secondary compact" onClick={() => setAddPlanOpen(true)}><Plus size={15} /> Añadir plan</button>}
         </header>
         {message && <p className="inline-status customer-transient-status">{message}</p>}
+        {servicesLoad.status === 'loading' && <p className="inline-status">Cargando servicios del cliente…</p>}
+        {servicesLoad.status === 'error' && <div className="inline-status"><span>{servicesLoad.error || 'No fue posible cargar los servicios.'}</span> <button type="button" className="secondary compact" onClick={() => void onRefresh()}>Reintentar</button></div>}
         <div className="table-wrap">
           <table>
             <thead><tr><th>Plan</th><th>Empresa</th><th>Contrato</th><th>Servicio</th><th>Dirección</th><th>Acción</th></tr></thead>
             <tbody>
               {contracts.map((contract) => {
-                const service = services.find((item) => item.idContrato === contract.idContrato) ?? null;
+                const service = serviceForContract(contract.idContrato, services);
                 return <tr key={contract.idContrato}>
                   <td>{contract.plan?.nombreComercial ?? 'Sin plan asociado'}</td>
                   <td>{companyName(contract, customer)}</td>
                   <td><StatusBadge value={contract.estado ?? 'Pendiente firma contrato'} /></td>
-                  <td>{service ? service.tipoServicio + ' - ' + formatWorkOrderValue(service.estadoOperativo) : 'Pendiente de firma'}</td>
+                  <td>{servicesLoad.status === 'loading'
+                    ? 'Cargando…'
+                    : servicesLoad.status === 'error'
+                      ? 'No disponible'
+                      : service
+                        ? service.tipoServicio + ' - ' + formatWorkOrderValue(service.estadoOperativo)
+                        : signed(contract) ? 'Sin servicio activo' : 'Pendiente de firma'}</td>
                   <td>{serviceAddress(service, customer)}</td>
-                  <td><button type="button" className="secondary compact" onClick={() => openContract(contract)}>Gestionar <ChevronRight size={14} /></button></td>
+                  <td><button type="button" className="secondary compact" disabled={servicesLoad.status === 'idle' || servicesLoad.status === 'loading'} onClick={() => openContract(contract)}>Gestionar <ChevronRight size={14} /></button></td>
                 </tr>;
               })}
             </tbody>

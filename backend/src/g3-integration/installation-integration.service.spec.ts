@@ -32,6 +32,13 @@ function setup() {
       stored = { ...stored, ...data, intentos: data.intentos?.increment ? stored.intentos + data.intentos.increment : stored.intentos };
       return Promise.resolve(stored);
     }),
+    updateMany: jest.fn().mockImplementation(({ data }) => {
+      if (stored?.estadoIntegracion !== 'COMPLETADA' && !stored?.fechaCierreProcesado) {
+        stored = { ...stored, ...data };
+        return Promise.resolve({ count: 1 });
+      }
+      return Promise.resolve({ count: 0 });
+    }),
   };
   const tx = { integracionInstalacionG3: integration, prospecto: { update: jest.fn().mockResolvedValue({}) } };
   const advisoryLock = jest.fn();
@@ -249,6 +256,69 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     expect(result).toMatchObject({ detalle: null, ultimoErrorSanitizado: 'G3 respondio con una empresa diferente.' });
     expect(context.getStored().estadoOtG3).toBe('PENDIENTE');
   });
+  it('GET detalle informativo no hace retroceder una integracion COMPLETADA', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.setStored({
+      ...context.getStored(),
+      estadoIntegracion: 'COMPLETADA',
+      estadoOtG3: 'COMPLETADA',
+      fechaCierreProcesado: new Date('2026-10-07T13:00:00.000Z'),
+    });
+    context.client.getWorkOrder.mockResolvedValue({
+      status: 200, durationMs: 4,
+      data: { id_ot: 901, id_empresa: 1, estado: 'PENDIENTE', fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77 },
+    });
+
+    const result: any = await context.service.detail(1, user);
+
+    expect(result).toMatchObject({
+      estadoIntegracion: 'COMPLETADA',
+      estadoOtG3: 'COMPLETADA',
+      estadoPresentacion: 'COMPLETADA',
+      estadoRemotoG3: 'PENDIENTE',
+      detalle: { fechaCompletada: '2026-10-07T12:00:00.000Z', idTecnicoG3: 77 },
+    });
+    expect(context.prisma.integracionInstalacionG3.update).toHaveBeenLastCalledWith({
+      where: { idIntegracion: 1 },
+      data: expect.not.objectContaining({ estadoIntegracion: expect.anything(), estadoOtG3: expect.anything() }),
+    });
+  });
+  it('una respuesta GET atrasada no sobrescribe un cierre confirmado durante la consulta', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.client.getWorkOrder.mockImplementation(async () => {
+      context.setStored({
+        ...context.getStored(),
+        estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA',
+        fechaCierreProcesado: new Date('2026-10-07T13:00:00.000Z'),
+      });
+      return { status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 1, estado: 'PENDIENTE' } };
+    });
+
+    const result: any = await context.service.detail(1, user);
+
+    expect(result).toMatchObject({ estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', estadoRemotoG3: 'PENDIENTE' });
+    expect(context.prisma.integracionInstalacionG3.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ estadoIntegracion: { not: 'COMPLETADA' }, fechaCierreProcesado: null }),
+    }));
+  });
+  it('una respuesta POST atrasada no revierte el cierre ni el prospecto ya activado', async () => {
+    const context = setup();
+    context.client.createInstallation.mockImplementation(async () => {
+      context.setStored({
+        ...context.getStored(),
+        idOtG3: '901', estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA',
+        fechaCierreProcesado: new Date('2026-10-07T13:00:00.000Z'),
+      });
+      return { status: 201, durationMs: 12, data: { id_ot: 901, estado: 'PENDIENTE', id_empresa: 1 } };
+    });
+
+    const result: any = await context.service.requestInstallation({ idProspecto: 10 }, user);
+
+    expect(result).toMatchObject({ estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', estadoPresentacion: 'COMPLETADA' });
+    expect(context.prisma.prospecto.update).not.toHaveBeenCalled();
+  });
   it('40. reconciliacion GET de cierre sin estado usa el processor común como COMPLETADA', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
     const tracking = context.getStored();
@@ -261,6 +331,29 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     await context.service.reconcile(1, user);
     expect(context.client.getWorkOrderClosure).toHaveBeenCalledWith('901', 1);
     expect(context.closure.process).toHaveBeenCalledWith(closure, 'RECONCILIACION', 1);
+  });
+  it('40b. reconciliacion conserva los datos tecnicos opcionales informados por G3', async () => {
+    const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
+    const tracking = context.getStored();
+    context.client.getWorkOrderClosure.mockResolvedValue({
+      status: 200, durationMs: 4,
+      data: {
+        id_ot: 901, request_id: tracking.requestId, trace_id: tracking.traceId,
+        id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7,
+        equipos_instalados: [], equipos_retirados: [],
+        fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77,
+        potencia_optica_dbm: -19.4, resultado_llamada: 'CONTACTADO',
+        resuelto_remotamente: false, materiales: [{ nombre: 'Conector' }],
+      },
+    });
+
+    await context.service.reconcile(1, user);
+
+    expect(context.closure.process).toHaveBeenCalledWith(expect.objectContaining({
+      fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77,
+      potencia_optica_dbm: -19.4, resultado_llamada: 'CONTACTADO',
+      resuelto_remotamente: false, materiales: [{ nombre: 'Conector' }],
+    }), 'RECONCILIACION', 1);
   });
   it('41. GET cierre aun no disponible no activa', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);

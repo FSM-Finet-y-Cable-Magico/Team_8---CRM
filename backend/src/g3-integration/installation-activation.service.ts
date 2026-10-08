@@ -164,11 +164,20 @@ export class InstallationActivationService {
     const base = existing && typeof existing === 'object' && !Array.isArray(existing)
       ? existing as Record<string, Prisma.JsonValue>
       : {};
+    const result = technicalResult && typeof technicalResult === 'object' && !Array.isArray(technicalResult)
+      ? technicalResult as Record<string, unknown>
+      : {};
     return {
       ...base,
       fuenteInstalacion: 'G3',
       idOtG3: tracking.idOtG3,
       codigoOtG3: tracking.codigoOtG3,
+      ...(typeof result.fecha_completada === 'string' ? { fechaCompletadaG3: result.fecha_completada } : {}),
+      ...(typeof result.id_tecnico === 'number' ? { idTecnicoG3: result.id_tecnico } : {}),
+      ...(typeof result.potencia_optica_dbm === 'number' ? { potenciaOpticaDbm: result.potencia_optica_dbm } : {}),
+      ...(typeof result.resultado_llamada === 'string' ? { resultadoLlamadaG3: result.resultado_llamada } : {}),
+      ...(typeof result.resuelto_remotamente === 'boolean' ? { resueltoRemotamenteG3: result.resuelto_remotamente } : {}),
+      ...(Array.isArray(result.materiales) ? { materialesG3: result.materiales as Prisma.InputJsonArray } : {}),
       resultadoInstalacion: technicalResult === undefined ? null : technicalResult as Prisma.InputJsonValue,
     } as Prisma.InputJsonValue;
   }

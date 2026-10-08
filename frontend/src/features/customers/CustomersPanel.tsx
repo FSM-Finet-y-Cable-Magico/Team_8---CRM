@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, BarChart3, Boxes, ChevronDown, CircleCheckBig, Router, Ticket as TicketIcon, UserCog, Users, Wifi } from 'lucide-react';
 import {
   api,
@@ -34,6 +34,10 @@ import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination }
 import { ObservationsModal } from '../observations';
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
 import { CustomerRequestsPanel } from './CustomerRequestsPanel';
+import {
+  CustomerServicesRequestGate,
+  type CustomerServicesLoadState,
+} from './customer-services-state';
 
 type CustomerHistory = {
   contratos: Array<{ idContrato: number; estado: string | null; plan?: Plan | null }>;
@@ -146,6 +150,12 @@ export function CustomersPanel({
   const [status, setStatus] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [services, setServices] = useState<CustomerService[]>([]);
+  const [servicesLoad, setServicesLoad] = useState<CustomerServicesLoadState>({
+    customerId: null,
+    status: 'idle',
+    error: '',
+  });
+  const servicesRequestGate = useRef(new CustomerServicesRequestGate());
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
   const [serviceUpdateForm, setServiceUpdateForm] = useState(emptyServiceForm());
@@ -263,8 +273,15 @@ export function CustomersPanel({
       if (permissions.manageTvip) {
         void loadCustomerTvip(selectedCustomer.idCliente, true);
       }
+    } else {
+      servicesRequestGate.current.cancel();
+      setServices([]);
+      setSelectedServiceId(null);
+      setServicesLoad({ customerId: null, status: 'idle', error: '' });
     }
   }, [selectedCustomer?.idCliente]);
+
+  useEffect(() => () => servicesRequestGate.current.cancel(), []);
 
   useEffect(() => {
     if (!selectedService) {
@@ -512,18 +529,25 @@ export function CustomersPanel({
   }
 
   async function loadServicesForCustomer(idCliente: number, silent = false, preferredServiceId?: number) {
+    const token = servicesRequestGate.current.begin(idCliente);
+    setServicesLoad({ customerId: idCliente, status: 'loading', error: '' });
     try {
-      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`);
+      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { signal: token.signal });
+      if (!servicesRequestGate.current.isCurrent(token)) return;
       setServices(data);
       setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);
+      setServicesLoad({ customerId: idCliente, status: data.length ? 'success' : 'empty', error: '' });
 
       if (!silent) {
         setStatus(data.length ? 'Servicios contratados cargados' : 'El cliente no tiene servicios registrados');
       }
     } catch (err) {
+      if (!servicesRequestGate.current.isCurrent(token)) return;
+      const message = apiErrorMessage(err);
       setServices([]);
       setSelectedServiceId(null);
-      setStatus(apiErrorMessage(err));
+      setServicesLoad({ customerId: idCliente, status: 'error', error: message });
+      setStatus(message);
     }
   }
 
@@ -960,7 +984,13 @@ export function CustomersPanel({
                 </div>
                 <div>
                   <dt>Contratos / servicios</dt>
-                  <dd>{contractOptions.length} contrato(s) · {services.length} servicio(s)</dd>
+                  <dd>{contractOptions.length} contrato(s) · {
+                    servicesLoad.customerId !== selectedCustomer.idCliente || servicesLoad.status === 'loading'
+                      ? 'cargando servicios…'
+                      : servicesLoad.status === 'error'
+                        ? 'servicios no disponibles'
+                        : `${services.length} servicio(s)`
+                  }</dd>
                 </div>
               </dl>
             </section>
@@ -969,6 +999,9 @@ export function CustomersPanel({
               key={selectedCustomer.idCliente}
               customer={selectedCustomer}
               services={services}
+              servicesLoad={servicesLoad.customerId === selectedCustomer.idCliente
+                ? servicesLoad
+                : { customerId: selectedCustomer.idCliente, status: 'loading', error: '' }}
               plans={plans}
               permissions={permissions}
               onRefresh={async (preferredServiceId) => {

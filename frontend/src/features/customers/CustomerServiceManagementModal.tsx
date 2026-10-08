@@ -10,7 +10,7 @@ import {
   G1Unit,
   Plan,
 } from '../../api';
-import { dateInputValue, formatDateOnly, formatWorkOrderValue } from '../../lib';
+import { dateInputValue, formatDateOnly, formatDateTime, formatWorkOrderValue } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
@@ -38,7 +38,7 @@ function formatCurrency(value?: string | number | null) {
 
 function technicalValue(service: CustomerService, key: string) {
   const value = service.datosTecnicos?.[key];
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : '-';
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : 'Sin información';
 }
 
 function g1Type(unit: G1Unit) {
@@ -177,6 +177,17 @@ export function CustomerServiceManagementModal({
   }
 
   const installation = service.instalacion;
+  const installationSource = installation?.fuente === 'G3' ? 'G3' : installation ? 'Legado local' : null;
+  const installationTechnician = installation?.fuente === 'G3'
+    ? installation.idTecnicoG3 ? `ID técnico G3 #${installation.idTecnicoG3}` : 'No informado por G3'
+    : installation?.tecnico?.nombreCompleto ?? 'No registrado';
+  const installationCode = installation?.codigoSeguimiento
+    ?? (installation?.idOt != null
+      ? installation.fuente === 'G3' ? `OT G3 #${installation.idOt}` : `OT #${installation.idOt}`
+      : 'Pendiente');
+  const resultadoLlamadaG3 = service.datosTecnicos?.resultadoLlamadaG3;
+  const resueltoRemotamenteG3 = service.datosTecnicos?.resueltoRemotamenteG3;
+  const materialesG3 = service.datosTecnicos?.materialesG3;
 
   return (
     <Modal title="Gestionar servicio" open={open} onClose={onClose}>
@@ -220,15 +231,23 @@ export function CustomerServiceManagementModal({
         {permissions.manageContracts && <ContractDocuments idContrato={contract.idContrato} canGenerate={permissions.generateDigitalContract} />}
 
         <section className="customer-service-history">
-          <header><Wrench size={18} /><h3>Información de instalación</h3></header>
+          <header><Wrench size={18} /><h3>Información de instalación</h3>{installationSource && <span>Fuente: {installationSource}</span>}</header>
           <dl className="customer-readonly-details">
-            <div><dt>Técnico instalador</dt><dd>{installation?.tecnico?.nombreCompleto ?? 'No registrado'}</dd></div>
-            <div><dt>Fecha instalación</dt><dd>{installation?.fechaCompletada ? formatDateOnly(installation.fechaCompletada) : 'Pendiente'}</dd></div>
-            <div><dt>Orden de trabajo</dt><dd>{installation?.codigoSeguimiento ?? (installation ? 'OT #' + installation.idOt : 'Pendiente')}</dd></div>
+            <div><dt>Técnico instalador</dt><dd>{installationTechnician}</dd></div>
+            <div><dt>Fecha instalación</dt><dd>{installation?.fechaCompletada
+              ? formatDateOnly(installation.fechaCompletada)
+              : installation?.fuente === 'G3' ? 'No informada por G3' : 'Pendiente'}</dd></div>
+            <div><dt>Orden de trabajo</dt><dd>{installationCode}</dd></div>
+            {installation?.fuente === 'G3' && <div><dt>Cierre procesado en CRM</dt><dd>{installation.fechaProcesamiento ? formatDateTime(installation.fechaProcesamiento) : 'No registrado'}</dd></div>}
             <div><dt>MAC comercial</dt><dd>{technicalValue(service, 'macAddress')}</dd></div>
             <div><dt>Puerto OLT</dt><dd>{technicalValue(service, 'puertoOlt')}</dd></div>
             <div><dt>Potencia óptica</dt><dd>{technicalValue(service, 'potenciaOpticaDbm')}</dd></div>
+            {typeof resultadoLlamadaG3 === 'string' && <div><dt>Resultado llamada G3</dt><dd>{resultadoLlamadaG3}</dd></div>}
+            {typeof resueltoRemotamenteG3 === 'boolean' && <div><dt>Resuelto remotamente</dt><dd>{resueltoRemotamenteG3 ? 'Sí' : 'No'}</dd></div>}
+            {Array.isArray(materialesG3) && <div><dt>Materiales informados por G3</dt><dd>{materialesG3.length} registro(s)</dd></div>}
+            <div><dt>Estado inventario G1</dt><dd>{service.integracionG1?.estadoIntegracion ?? 'Sin activación registrada'}</dd></div>
           </dl>
+          {service.integracionG1?.ultimoErrorSanitizado && <p className="inline-status">{service.integracionG1.ultimoErrorSanitizado}</p>}
         </section>
 
         <section className="customer-service-history">

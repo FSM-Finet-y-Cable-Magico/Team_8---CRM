@@ -53,6 +53,12 @@ export type G3WorkOrderResponse = {
   id_plan?: number;
   equipos_instalados?: unknown[];
   equipos_retirados?: unknown[];
+  fecha_completada?: string;
+  id_tecnico?: number;
+  potencia_optica_dbm?: number;
+  resultado_llamada?: string;
+  resuelto_remotamente?: boolean;
+  materiales?: unknown[];
 };
 
 export type G3ClientResult<T> = {
@@ -91,4 +97,10 @@ export type G3ClosurePayload = {
   id_plan: number;
   equipos_instalados: unknown[];
   equipos_retirados: unknown[];
+  fecha_completada?: string;
+  id_tecnico?: number;
+  potencia_optica_dbm?: number;
+  resultado_llamada?: string;
+  resuelto_remotamente?: boolean;
+  materiales?: unknown[];
 };

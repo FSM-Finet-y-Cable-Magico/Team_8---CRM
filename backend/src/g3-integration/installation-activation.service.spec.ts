@@ -58,4 +58,28 @@ describe('Etapa 3 - activacion comercial desde G3', () => {
     const { service, tx, tracking } = setup(true); await service.activate(tx as never, tracking, { potencia: -19 });
     expect(tx.cliente.create).not.toHaveBeenCalled(); expect(tx.direccionServicio.create).not.toHaveBeenCalled(); expect(tx.servicioContratado.create).not.toHaveBeenCalled(); expect(tx.servicioContratado.update).toHaveBeenCalledTimes(1);
   });
+  it('conserva procedencia, fecha G3 y datos tecnicos opcionales sin confundir al tecnico con un usuario G8', async () => {
+    const { service, tx, tracking } = setup(true);
+    (tx.servicioContratado.findUnique as jest.Mock).mockResolvedValueOnce({
+      idServicio: 50, idCliente: 30, idEmpresa: 1, idContrato: 20,
+      estadoOperativo: 'Pendiente', fechaActivacion: null,
+      datosTecnicos: { macAddress: 'AA:BB:CC:DD:EE:FF' },
+    });
+    await service.activate(tx as never, tracking, {
+      equipos_instalados: [], equipos_retirados: [],
+      fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77,
+      potencia_optica_dbm: -19.4, resultado_llamada: 'CONTACTADO',
+      resuelto_remotamente: false, materiales: [{ nombre: 'Conector' }],
+    });
+
+    expect(tx.servicioContratado.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        datosTecnicos: expect.objectContaining({
+          macAddress: 'AA:BB:CC:DD:EE:FF', fuenteInstalacion: 'G3', idOtG3: '901',
+          fechaCompletadaG3: '2026-10-07T12:00:00.000Z', idTecnicoG3: 77,
+          potenciaOpticaDbm: -19.4, resueltoRemotamenteG3: false,
+        }),
+      }),
+    }));
+  });
 });

@@ -114,6 +114,8 @@ export type G3InstallationTracking = {
   estadoOtG3: string | null;
   estadoOriginalG3: string | null;
   estadoPresentacion: string;
+  estadoRemotoG3: string | null;
+  estadoOriginalRemotoG3: string | null;
   fechaSolicitud: string;
   fechaUltimaSincronizacion: string | null;
   intentos: number;
@@ -127,6 +129,12 @@ export type G3InstallationTracking = {
     estado: string;
     estadoOriginalG3: string | null;
     fecha: string | null;
+    fechaCompletada: string | null;
+    idTecnicoG3: number | null;
+    potenciaOpticaDbm: number | null;
+    resultadoLlamada: string | null;
+    resueltoRemotamente: boolean | null;
+    materiales: unknown[] | null;
     tecnico: unknown;
     direccion: unknown;
     persona: unknown;
@@ -275,14 +283,26 @@ export type CustomerService = {
   solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
   instalacion?: {
-    idOt: number;
+    fuente: 'G3' | 'LEGACY_LOCAL';
+    idOt: number | string | null;
     codigoSeguimiento: string | null;
+    estado: string;
     fechaCompletada: string | null;
+    fechaProcesamiento: string | null;
     idTecnico: number | null;
+    idTecnicoG3: number | null;
     tecnico?: {
       idUsuario: number;
       nombreCompleto: string;
     } | null;
+  } | null;
+  integracionG1?: {
+    fuente: 'G1';
+    idIntegracion: number;
+    estadoIntegracion: string;
+    ultimoErrorSanitizado: string | null;
+    fechaCompletado: string | null;
+    updatedAt: string;
   } | null;
 };
 

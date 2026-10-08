@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -121,16 +122,22 @@ export class InstallationIntegrationService {
       const response = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
       const state = normalizeG3State(response.data.estado);
-      const updated = await this.prisma.integracionInstalacionG3.update({
-        where: { idIntegracion },
-        data: {
+      const terminal = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+      const updated = terminal
+        ? await this.prisma.integracionInstalacionG3.update({
+          where: { idIntegracion },
+          data: {
+            fechaUltimaSincronizacion: new Date(),
+            ultimoErrorSanitizado: state.known ? null : 'Estado remoto G3 no reconocido; el cierre confirmado en G8 se conserva.',
+          },
+        })
+        : await this.updateNonTerminalTracking(idIntegracion, {
+          fechaUltimaSincronizacion: new Date(),
           estadoIntegracion: this.trackingState(state.known, state.state),
           estadoOtG3: state.state,
           estadoOriginalG3: state.known ? null : state.original,
-          fechaUltimaSincronizacion: new Date(),
           ultimoErrorSanitizado: state.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
-        },
-      });
+        });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario,
         accion: 'CONSULTAR_OT_G3',
@@ -174,6 +181,12 @@ export class InstallationIntegrationService {
         id_plan: response.data.id_plan,
         equipos_instalados: response.data.equipos_instalados,
         equipos_retirados: response.data.equipos_retirados,
+        ...(response.data.fecha_completada === undefined ? {} : { fecha_completada: response.data.fecha_completada }),
+        ...(response.data.id_tecnico === undefined ? {} : { id_tecnico: response.data.id_tecnico }),
+        ...(response.data.potencia_optica_dbm === undefined ? {} : { potencia_optica_dbm: response.data.potencia_optica_dbm }),
+        ...(response.data.resultado_llamada === undefined ? {} : { resultado_llamada: response.data.resultado_llamada }),
+        ...(response.data.resuelto_remotamente === undefined ? {} : { resuelto_remotamente: response.data.resuelto_remotamente }),
+        ...(response.data.materiales === undefined ? {} : { materiales: response.data.materiales }),
       };
       const result = await this.closureProcessor.process(
         closure as G3ClosurePayload,
@@ -243,19 +256,16 @@ export class InstallationIntegrationService {
         throw new G3IntegrationError('G3_RESPUESTA_INVALIDA', 502, true, 'G3 no entrego una referencia de orden.');
       }
       const state = normalizeG3State(response.data.estado ?? 'PENDIENTE');
-      const updated = await this.prisma.integracionInstalacionG3.update({
-        where: { idIntegracion: tracking.idIntegracion },
-        data: {
-          idOtG3,
-          codigoOtG3,
-          estadoIntegracion: this.trackingState(state.known, state.state),
-          estadoOtG3: state.state,
-          estadoOriginalG3: state.known ? null : state.original,
-          fechaUltimaSincronizacion: new Date(),
-          ultimoErrorSanitizado: state.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
-        },
+      const updated = await this.updateNonTerminalTracking(tracking.idIntegracion, {
+        idOtG3,
+        codigoOtG3,
+        estadoIntegracion: this.trackingState(state.known, state.state),
+        estadoOtG3: state.state,
+        estadoOriginalG3: state.known ? null : state.original,
+        fechaUltimaSincronizacion: new Date(),
+        ultimoErrorSanitizado: state.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
       });
-      if (tracking.idProspecto) {
+      if (tracking.idProspecto && updated.estadoIntegracion !== 'COMPLETADA' && !updated.fechaCierreProcesado) {
         await this.prisma.prospecto.update({
           where: { idProspecto: tracking.idProspecto },
           data: { estadoPipeline: this.pipelineState(state.state) },
@@ -280,12 +290,9 @@ export class InstallationIntegrationService {
       return this.toView(updated, response.data);
     } catch (error) {
       const failure = this.normalizeError(error);
-      const updated = await this.prisma.integracionInstalacionG3.update({
-        where: { idIntegracion: tracking.idIntegracion },
-        data: {
-          estadoIntegracion: failure.retryable ? 'FALLIDA_REINTENTABLE' : 'FALLIDA_DEFINITIVA',
-          ultimoErrorSanitizado: failure.message,
-        },
+      const updated = await this.updateNonTerminalTracking(tracking.idIntegracion, {
+        estadoIntegracion: failure.retryable ? 'FALLIDA_REINTENTABLE' : 'FALLIDA_DEFINITIVA',
+        ultimoErrorSanitizado: failure.message,
       });
       this.logger.warn(JSON.stringify({
         result: failure.code, requestId: tracking.requestId, traceId: tracking.traceId,
@@ -414,6 +421,23 @@ export class InstallationIntegrationService {
     return tracking;
   }
 
+  private async updateNonTerminalTracking(
+    idIntegracion: number,
+    data: Prisma.IntegracionInstalacionG3UpdateManyMutationInput,
+  ) {
+    await this.prisma.integracionInstalacionG3.updateMany({
+      where: {
+        idIntegracion,
+        estadoIntegracion: { not: 'COMPLETADA' },
+        fechaCierreProcesado: null,
+      },
+      data,
+    });
+    const current = await this.prisma.integracionInstalacionG3.findUnique({ where: { idIntegracion } });
+    if (!current) throw new NotFoundException('Tracking de instalacion no encontrado');
+    return current;
+  }
+
   private assertCompanyAccess(idEmpresa: number | null, currentUser: AuthUser) {
     if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa || currentUser.idEmpresa !== idEmpresa)) {
       throw new ForbiddenException('El registro no pertenece a tu empresa');
@@ -457,10 +481,14 @@ export class InstallationIntegrationService {
 
   private toView(tracking: Record<string, unknown>, detail?: G3WorkOrderResponse) {
     const { payloadSnapshot: _payloadSnapshot, payloadHash: _payloadHash, ...safeTracking } = tracking;
+    const terminal = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+    const remoteState = detail ? normalizeG3State(detail.estado) : null;
     return {
       ...safeTracking,
       fuente: 'G3',
-      estadoPresentacion: normalizeG3State(detail?.estado ?? tracking.estadoOtG3).state,
+      estadoPresentacion: terminal ? 'COMPLETADA' : normalizeG3State(detail?.estado ?? tracking.estadoOtG3).state,
+      estadoRemotoG3: remoteState?.state ?? null,
+      estadoOriginalRemotoG3: remoteState?.known ? null : remoteState?.original ?? null,
       detalle: detail ? {
         idOtG3: externalWorkOrderId(detail as Record<string, unknown>),
         codigoOtG3: externalWorkOrderCode(detail as Record<string, unknown>),
@@ -468,6 +496,12 @@ export class InstallationIntegrationService {
         estado: normalizeG3State(detail.estado).state,
         estadoOriginalG3: normalizeG3State(detail.estado).known ? null : normalizeG3State(detail.estado).original,
         fecha: detail.fecha ?? null,
+        fechaCompletada: detail.fecha_completada ?? null,
+        idTecnicoG3: detail.id_tecnico ?? null,
+        potenciaOpticaDbm: detail.potencia_optica_dbm ?? null,
+        resultadoLlamada: detail.resultado_llamada ?? null,
+        resueltoRemotamente: detail.resuelto_remotamente ?? null,
+        materiales: detail.materiales ?? null,
         tecnico: detail.tecnico ?? null,
         direccion: detail.direccion ?? null,
         persona: detail.persona ?? null,

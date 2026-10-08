@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, type G3InstallationTracking } from '../../api';
 import { formatDateTime } from '../../lib';
 import { StatusBadge } from '../../shared/components';
@@ -24,15 +24,32 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const loadRevision = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const revision = ++loadRevision.current;
     setLoading(true); setError('');
     try {
       const path = prospectId ? `/integrations/g3/prospects/${prospectId}/installation` : `/integrations/g3/contracts/${contractId}/installation`;
-      const { data } = await api.get<G3InstallationTracking | null>(path);
+      const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
+      if (revision !== loadRevision.current || controller.signal.aborted) return;
       setTracking(data);
-    } catch (cause) { setError(apiErrorMessage(cause)); } finally { setLoading(false); }
+    } catch (cause) {
+      if (revision === loadRevision.current && !controller.signal.aborted) setError(apiErrorMessage(cause));
+    } finally {
+      if (revision === loadRevision.current && !controller.signal.aborted) setLoading(false);
+    }
   }, [contractId, prospectId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => {
+      loadController.current?.abort();
+      loadRevision.current += 1;
+    };
+  }, [load]);
 
   async function run(action: 'request' | 'retry' | 'detail' | 'reconcile') {
     setBusy(true); setError('');
@@ -59,22 +76,35 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   </div>;
 
   const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
+  const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
   return <div className="g3-installation-card">
     <header><div><strong>Instalación técnica</strong><span className="source-badge">Fuente G3</span></div><StatusBadge value={state} /></header>
     <dl className="customer-readonly-details">
       <div><dt>Código OT G3</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de respuesta'}</dd></div>
       <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
       <div><dt>Última sincronización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>
+      {tracking.fechaCierreProcesado && <div><dt>Cierre procesado en CRM</dt><dd>{formatDateTime(tracking.fechaCierreProcesado)}</dd></div>}
       <div><dt>Intentos</dt><dd>{tracking.intentos}</dd></div>
-      {tracking.detalle && <><div><dt>Técnico</dt><dd>{textValue(tracking.detalle.tecnico)}</dd></div><div><dt>Dirección</dt><dd>{textValue(tracking.detalle.direccion)}</dd></div></>}
+      {tracking.estadoRemotoG3 && <div><dt>Estado remoto informado</dt><dd>{STATE_LABELS[tracking.estadoRemotoG3] ?? tracking.estadoRemotoG3}</dd></div>}
+      {tracking.detalle && <>
+        <div><dt>Técnico</dt><dd>{tracking.detalle.tecnico ? textValue(tracking.detalle.tecnico) : tracking.detalle.idTecnicoG3 ? `ID técnico G3 #${tracking.detalle.idTecnicoG3}` : 'No informado por G3'}</dd></div>
+        <div><dt>Dirección</dt><dd>{textValue(tracking.detalle.direccion)}</dd></div>
+        <div><dt>Fecha completada G3</dt><dd>{tracking.detalle.fechaCompletada ? formatDateTime(tracking.detalle.fechaCompletada) : 'No informada por G3'}</dd></div>
+        {tracking.detalle.potenciaOpticaDbm != null && <div><dt>Potencia óptica</dt><dd>{tracking.detalle.potenciaOpticaDbm} dBm</dd></div>}
+        {tracking.detalle.resultadoLlamada && <div><dt>Resultado llamada</dt><dd>{tracking.detalle.resultadoLlamada}</dd></div>}
+        {tracking.detalle.resueltoRemotamente != null && <div><dt>Resuelto remotamente</dt><dd>{tracking.detalle.resueltoRemotamente ? 'Sí' : 'No'}</dd></div>}
+        {tracking.detalle.materiales && <div><dt>Materiales informados</dt><dd>{tracking.detalle.materiales.length} registro(s)</dd></div>}
+      </>}
     </dl>
+    {completed && <p className="inline-status">El cierre ya fue confirmado en CRM. Las consultas de detalle no modifican ese estado terminal.</p>}
+    {tracking.estadoOriginalRemotoG3 && <p className="inline-status">Estado remoto informado por G3: {tracking.estadoOriginalRemotoG3}. El estado confirmado en CRM se conserva.</p>}
     {tracking.estadoOriginalG3 && <p className="inline-status">Estado original G3: {tracking.estadoOriginalG3}. Se mantiene en seguimiento y no activa el servicio.</p>}
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
     {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">Cliente ausente. La reprogramación queda pendiente del mecanismo que defina G3.</p>}
     {tracking.ultimoErrorSanitizado && <p className="alert">{tracking.ultimoErrorSanitizado}</p>}
     <div className="button-row">
       {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Ver detalle</button>}
-      {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>}
+      {!completed && (tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>}
       {tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE' && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
     </div>
     {error && <p className="alert">{error}</p>}

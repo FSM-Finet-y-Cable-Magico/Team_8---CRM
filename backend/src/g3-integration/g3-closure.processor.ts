@@ -58,10 +58,7 @@ export class G3ClosureProcessor {
       const activation = await this.activationService.activate(
         tx,
         current,
-        {
-          equipos_instalados: record.equipos_instalados,
-          equipos_retirados: record.equipos_retirados,
-        },
+        this.technicalResult(record),
       );
 
       const now = new Date();
@@ -97,6 +94,9 @@ export class G3ClosureProcessor {
         },
       });
       return { duplicate: false, result: eventResult, tracking: updated };
+    }, {
+      maxWait: 10_000,
+      timeout: 20_000,
     });
 
     if (!processed.duplicate) {
@@ -193,6 +193,57 @@ export class G3ClosureProcessor {
     if (!Array.isArray(payload.equipos_instalados) || !Array.isArray(payload.equipos_retirados)) {
       throw new BadRequestException('El cierre requiere equipos_instalados y equipos_retirados');
     }
+    this.assertOptionalClosureFields(payload);
+  }
+
+  private assertOptionalClosureFields(payload: Record<string, unknown>) {
+    const fechaCompletada = payload.fecha_completada;
+    if (fechaCompletada !== undefined && fechaCompletada !== null
+      && (typeof fechaCompletada !== 'string' || !fechaCompletada.trim() || !Number.isFinite(Date.parse(fechaCompletada)))) {
+      throw new BadRequestException('El cierre contiene fecha_completada invalida');
+    }
+    const idTecnico = payload.id_tecnico;
+    if (idTecnico !== undefined && idTecnico !== null
+      && (typeof idTecnico !== 'number' || !Number.isSafeInteger(idTecnico) || idTecnico < 1)) {
+      throw new BadRequestException('El cierre contiene id_tecnico invalido');
+    }
+    const potencia = payload.potencia_optica_dbm;
+    if (potencia !== undefined && potencia !== null
+      && (typeof potencia !== 'number' || !Number.isFinite(potencia))) {
+      throw new BadRequestException('El cierre contiene potencia_optica_dbm invalida');
+    }
+    const resultadoLlamada = payload.resultado_llamada;
+    if (resultadoLlamada !== undefined && resultadoLlamada !== null
+      && (typeof resultadoLlamada !== 'string' || !resultadoLlamada.trim())) {
+      throw new BadRequestException('El cierre contiene resultado_llamada invalido');
+    }
+    const resueltoRemotamente = payload.resuelto_remotamente;
+    if (resueltoRemotamente !== undefined && resueltoRemotamente !== null
+      && typeof resueltoRemotamente !== 'boolean') {
+      throw new BadRequestException('El cierre contiene resuelto_remotamente invalido');
+    }
+    const materiales = payload.materiales;
+    if (materiales !== undefined && materiales !== null && !Array.isArray(materiales)) {
+      throw new BadRequestException('El cierre contiene materiales invalidos');
+    }
+  }
+
+  private technicalResult(payload: Record<string, unknown>) {
+    const result: Record<string, unknown> = {
+      equipos_instalados: payload.equipos_instalados,
+      equipos_retirados: payload.equipos_retirados,
+    };
+    for (const field of [
+      'fecha_completada',
+      'id_tecnico',
+      'potencia_optica_dbm',
+      'resultado_llamada',
+      'resuelto_remotamente',
+      'materiales',
+    ]) {
+      if (payload[field] !== undefined && payload[field] !== null) result[field] = payload[field];
+    }
+    return result;
   }
 
   private async auditStatus(idIntegracion: number, result: unknown) {

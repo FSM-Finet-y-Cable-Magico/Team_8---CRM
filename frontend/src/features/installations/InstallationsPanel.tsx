@@ -127,8 +127,9 @@ export function InstallationsPanel({
     <section className="installations-workspace">
       <div className="installations-overview">
         <details className="installation-collapsible">
-          <summary><h2>Instalaciones G3</h2><span className="installation-count">{installationProspects.length}</span><ChevronDown size={18} /></summary>
+          <summary><h2>Pendientes para instalación G3</h2><span className="installation-count">{installationProspects.length}</span><ChevronDown size={18} /></summary>
           <div className="installation-collapsible-content installation-queue">
+            <p className="detail-line">El contador muestra prospectos habilitados o pendientes; no corresponde al historial completo de G3.</p>
             {installationProspects.map((prospect) => (
               <article className="installation-prospect-item" key={prospect.idProspecto}>
                 <div><strong>{prospect.nombreCompleto ?? 'Prospecto sin nombre'}</strong><span>{prospect.rut ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? 'Empresa sin asignar'}</span></div>

@@ -51,10 +51,34 @@ function setup(idEmpresa = 1) {
     equipos_instalados: [{ numero_serie: 'ONT-001' }],
     equipos_retirados: [],
   };
-  return { processor, prisma, activation, audit, g1, tracking, completed };
+  return { processor, prisma, tx, activation, audit, g1, tracking, completed };
 }
 
 describe('G3ClosureProcessor approval-only', () => {
+  it('configura espera y timeout solo en la transaccion atomica del cierre', async () => {
+    const { processor, prisma, completed } = setup();
+
+    await processor.process(completed, 'WEBHOOK');
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 10_000,
+      timeout: 20_000,
+    });
+  });
+
+  it('un fallo dentro de la activacion no confirma tracking, evento, auditoria ni G1', async () => {
+    const { processor, tx, activation, audit, g1, completed } = setup();
+    activation.activate.mockRejectedValueOnce(new Error('Fallo de activacion'));
+
+    await expect(processor.process(completed, 'WEBHOOK')).rejects.toThrow('Fallo de activacion');
+
+    expect(tx.integracionInstalacionG3.update).not.toHaveBeenCalled();
+    expect(tx.integracionEventoEntrante.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
   it('acepta el payload real sin estado e interpreta el cierre como COMPLETADA', async () => {
     const { processor, activation, tracking, completed } = setup();
     const result = await processor.process(completed, 'WEBHOOK');
@@ -65,6 +89,46 @@ describe('G3ClosureProcessor approval-only', () => {
     });
     expect(result).toMatchObject({ duplicate: false, result: { estado: 'COMPLETADA', activated: true } });
     expect(tracking).toMatchObject({ estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA' });
+  });
+
+  it('valida y entrega a la activacion los datos tecnicos opcionales autorizados', async () => {
+    const { processor, activation, completed } = setup();
+    const enriched = {
+      ...completed,
+      fecha_completada: '2026-10-07T12:00:00.000Z',
+      id_tecnico: 77,
+      potencia_optica_dbm: -19.4,
+      resultado_llamada: 'CONTACTADO',
+      resuelto_remotamente: false,
+      materiales: [{ nombre: 'Conector' }],
+    };
+
+    await processor.process(enriched, 'WEBHOOK');
+
+    expect(activation.activate).toHaveBeenCalledWith(expect.any(Object), expect.any(Object), {
+      equipos_instalados: completed.equipos_instalados,
+      equipos_retirados: completed.equipos_retirados,
+      fecha_completada: enriched.fecha_completada,
+      id_tecnico: 77,
+      potencia_optica_dbm: -19.4,
+      resultado_llamada: 'CONTACTADO',
+      resuelto_remotamente: false,
+      materiales: enriched.materiales,
+    });
+  });
+
+  it.each([
+    ['fecha_completada', 'no-es-fecha'],
+    ['id_tecnico', 0],
+    ['potencia_optica_dbm', Number.NaN],
+    ['resultado_llamada', '   '],
+    ['resuelto_remotamente', 'false'],
+    ['materiales', {}],
+  ])('rechaza el dato tecnico opcional invalido %s', async (field, value) => {
+    const { processor, activation, completed } = setup();
+    await expect(processor.process({ ...completed, [field]: value }, 'WEBHOOK'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(activation.activate).not.toHaveBeenCalled();
   });
 
   it('solo después del commit comercial solicita una activación G1', async () => {

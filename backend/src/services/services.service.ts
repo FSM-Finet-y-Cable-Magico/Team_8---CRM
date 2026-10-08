@@ -725,6 +725,60 @@ export class ServicesService {
 
   private async withInstallationContext(services: ServiceWithRelations[]) {
     const completedInstallationByService = new Map<number, ServiceWithRelations['ordenes'][number]>();
+    const serviceIds = services.map((service) => service.idServicio);
+    const [g3Installations, g1Activations] = serviceIds.length
+      ? await Promise.all([
+        this.prisma.integracionInstalacionG3.findMany({
+          where: {
+            idServicio: { in: serviceIds },
+            estadoIntegracion: 'COMPLETADA',
+          },
+          orderBy: { idIntegracion: 'desc' },
+          select: {
+            idIntegracion: true,
+            idEmpresa: true,
+            idContrato: true,
+            idServicio: true,
+            idOtG3: true,
+            codigoOtG3: true,
+            estadoIntegracion: true,
+            estadoOtG3: true,
+            fechaCierreProcesado: true,
+          },
+        }),
+        this.prisma.integracionActivacionG1.findMany({
+          where: { idServicio: { in: serviceIds } },
+          orderBy: [{ createdAt: 'desc' }, { idIntegracion: 'desc' }],
+          select: {
+            idIntegracion: true,
+            idEmpresa: true,
+            idContrato: true,
+            idServicio: true,
+            estadoIntegracion: true,
+            ultimoErrorSanitizado: true,
+            fechaCompletado: true,
+            updatedAt: true,
+          },
+        }),
+      ])
+      : [[], []];
+    const serviceById = new Map(services.map((service) => [service.idServicio, service]));
+    const g3ByService = new Map<number, (typeof g3Installations)[number]>();
+    for (const installation of g3Installations) {
+      if (!installation.idServicio || g3ByService.has(installation.idServicio)) continue;
+      const service = serviceById.get(installation.idServicio);
+      if (service && installation.idEmpresa === service.idEmpresa && installation.idContrato === service.idContrato) {
+        g3ByService.set(installation.idServicio, installation);
+      }
+    }
+    const g1ByService = new Map<number, (typeof g1Activations)[number]>();
+    for (const activation of g1Activations) {
+      if (g1ByService.has(activation.idServicio)) continue;
+      const service = serviceById.get(activation.idServicio);
+      if (service && activation.idEmpresa === service.idEmpresa && activation.idContrato === service.idContrato) {
+        g1ByService.set(activation.idServicio, activation);
+      }
+    }
 
     for (const service of services) {
       const installation = service.ordenes
@@ -744,8 +798,9 @@ export class ServicesService {
     }
 
     const technicianIds = [...new Set(
-      [...completedInstallationByService.values()]
-        .map((order) => order.idTecnico)
+      [...completedInstallationByService.entries()]
+        .filter(([idServicio]) => !g3ByService.has(idServicio))
+        .map(([, order]) => order.idTecnico)
         .filter((id): id is number => id !== null),
     )];
     const technicians = technicianIds.length
@@ -757,17 +812,63 @@ export class ServicesService {
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
 
     return services.map((service) => {
-      const installation = completedInstallationByService.get(service.idServicio);
+      const localInstallation = completedInstallationByService.get(service.idServicio);
+      const g3Installation = g3ByService.get(service.idServicio);
+      const g1Activation = g1ByService.get(service.idServicio);
+      const technicalData = service.datosTecnicos && typeof service.datosTecnicos === 'object' && !Array.isArray(service.datosTecnicos)
+        ? service.datosTecnicos as Record<string, Prisma.JsonValue>
+        : {};
+      const g3Result = technicalData.resultadoInstalacion
+        && typeof technicalData.resultadoInstalacion === 'object'
+        && !Array.isArray(technicalData.resultadoInstalacion)
+        ? technicalData.resultadoInstalacion as Record<string, Prisma.JsonValue>
+        : {};
+      const fechaCompletadaG3 = typeof technicalData.fechaCompletadaG3 === 'string'
+        ? technicalData.fechaCompletadaG3
+        : typeof g3Result.fecha_completada === 'string'
+          ? g3Result.fecha_completada
+          : null;
+      const idTecnicoG3 = typeof technicalData.idTecnicoG3 === 'number'
+        ? technicalData.idTecnicoG3
+        : typeof g3Result.id_tecnico === 'number'
+          ? g3Result.id_tecnico
+          : null;
 
       return {
         ...service,
-        instalacion: installation
+        instalacion: g3Installation
           ? {
-            idOt: installation.idOt,
-            codigoSeguimiento: installation.codigoSeguimiento,
-            fechaCompletada: installation.fechaCompletada,
-            idTecnico: installation.idTecnico,
-            tecnico: installation.idTecnico ? technicianById.get(installation.idTecnico) ?? null : null,
+            fuente: 'G3',
+            idOt: g3Installation.idOtG3,
+            codigoSeguimiento: g3Installation.codigoOtG3,
+            estado: g3Installation.estadoIntegracion,
+            fechaCompletada: fechaCompletadaG3,
+            fechaProcesamiento: g3Installation.fechaCierreProcesado,
+            idTecnico: null,
+            idTecnicoG3,
+            tecnico: null,
+          }
+          : localInstallation
+            ? {
+              fuente: 'LEGACY_LOCAL',
+              idOt: localInstallation.idOt,
+              codigoSeguimiento: localInstallation.codigoSeguimiento,
+              estado: localInstallation.estado,
+              fechaCompletada: localInstallation.fechaCompletada,
+              fechaProcesamiento: null,
+              idTecnico: localInstallation.idTecnico,
+              idTecnicoG3: null,
+              tecnico: localInstallation.idTecnico ? technicianById.get(localInstallation.idTecnico) ?? null : null,
+            }
+            : null,
+        integracionG1: g1Activation
+          ? {
+            fuente: 'G1',
+            idIntegracion: g1Activation.idIntegracion,
+            estadoIntegracion: g1Activation.estadoIntegracion,
+            ultimoErrorSanitizado: g1Activation.ultimoErrorSanitizado,
+            fechaCompletado: g1Activation.fechaCompletado,
+            updatedAt: g1Activation.updatedAt,
           }
           : null,
       };
