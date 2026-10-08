@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -17,14 +17,20 @@ import {
 export const COVERAGE_ZONE_TYPES = ['COBERTURA_GENERAL', 'MICROZONA_COMERCIAL'] as const;
 export type CoverageZoneType = (typeof COVERAGE_ZONE_TYPES)[number];
 
+function coordinateInput({ obj, key }: TransformFnParams): unknown {
+  const value: unknown = obj[key];
+  // Convert nonempty query strings without turning blanks or booleans into zero/one.
+  return typeof value === 'string' && value.trim() ? Number(value) : value;
+}
+
 export class CoverageLocationDto {
-  @Type(() => Number)
+  @Transform(coordinateInput)
   @IsNumber()
   @Min(-90)
   @Max(90)
   latitud!: number;
 
-  @Type(() => Number)
+  @Transform(coordinateInput)
   @IsNumber()
   @Min(-180)
   @Max(180)
@@ -148,6 +154,7 @@ export class UpdateCoverageZoneDto {
 
 export class GeocodeAddressDto {
   @IsString()
-  @MaxLength(240)
+  // Address (200) + comuna (80) + region (80), separators and country.
+  @MaxLength(400)
   direccion!: string;
 }
