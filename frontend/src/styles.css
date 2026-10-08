@@ -3483,7 +3483,7 @@ button.profile-menu-item.danger:hover {
 .plan-form-grid textarea { min-height: 88px; resize: vertical; }
 .plan-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .plan-modal-actions button { width: auto; }
-.plan-assign-action { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: .75rem; }
+.plan-assign-action { display: inline-grid; place-items: center; min-width: 34px; padding: 0; }
 .plan-zones-form { display: grid; gap: 16px; }
 .modal-card:has(.plan-zones-form) { width: min(720px, 100%); }
 .plan-zones-intro { display: grid; gap: 7px; }

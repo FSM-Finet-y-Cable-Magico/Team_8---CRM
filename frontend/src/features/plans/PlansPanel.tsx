@@ -227,7 +227,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
                   <td>
                     <div className="table-actions plan-table-actions">
                       <button type="button" className={plan.activo === false ? 'plan-toggle' : 'plan-toggle active'} role="switch" aria-checked={plan.activo !== false} aria-label={`Cambiar estado de ${plan.nombreComercial}`} onClick={() => void togglePlan(plan)}><span /></button>
-                      {permissions.managePlans && <button type="button" className="secondary compact plan-assign-action" aria-label={`Asignar zonas a ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setAssigningPlan(plan); }}><MapPin size={15}/>Asignar zonas</button>}
+                      {permissions.managePlans && <button type="button" className="secondary compact plan-assign-action" title="Asignar zonas" aria-label={`Asignar zonas a ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setAssigningPlan(plan); }}><MapPin size={15} aria-hidden="true"/></button>}
                       <button type="button" className="secondary compact plan-edit-action" aria-label={`Editar ${plan.nombreComercial}`} onClick={() => editPlan(plan)}><Pencil size={15} /></button>
                       <button type="button" className="secondary compact plan-delete-action" aria-label={`Eliminar ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setDeleteError(''); setDeletingPlan(plan); }}><Trash2 size={15} /></button>
                     </div>

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -60,6 +60,12 @@ export class CoverageController {
   @Roles('Administrador', 'Comercial')
   deactivateZone(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.coverage.deactivateZone(id, user);
+  }
+
+  @Delete('zones/:id')
+  @Roles('Administrador', 'Comercial')
+  deleteZone(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.coverage.deleteZone(id, user);
   }
 
   @Get('plans-for-location')

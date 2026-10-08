@@ -30,6 +30,13 @@
 .coverage-admin-header h2 { margin: 0; color: var(--coverage-text); font-size: 1.65rem; letter-spacing: -.04em; }
 .coverage-admin .coverage-icon { min-width: 32px; min-height: 32px; padding: 5px; color: var(--coverage-muted); background: transparent; }
 .coverage-admin .coverage-icon:hover { background: var(--coverage-mint); color: var(--coverage-primary); }
+.coverage-admin .coverage-zone-delete:hover { color: #b7473c; background: #fff0ee; }
+.modal-card:has(.coverage-zone-delete-dialog) { width: min(480px, 95vw); }
+.coverage-zone-delete-dialog { display: grid; gap: 16px; }
+.coverage-zone-delete-dialog p { margin: 0; font-size: .85rem; line-height: 1.6; }
+.coverage-zone-delete-actions { display: flex; justify-content: flex-end; gap: 12px; }
+.coverage-admin .coverage-zone-delete-confirm { background: #b7473c; }
+.coverage-admin .coverage-zone-delete-confirm:hover { background: #963a31; }
 .coverage-admin .coverage-text-button { min-height: 34px; padding: 0 5px; background: transparent; color: var(--coverage-primary); font-size: .76rem; }
 .coverage-admin .coverage-outline { color: var(--coverage-primary); border: 1px solid #bed5ca; background: transparent; }
 .coverage-admin .coverage-outline:hover { background: var(--coverage-mint); }

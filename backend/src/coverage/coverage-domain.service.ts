@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -178,6 +178,39 @@ export class CoverageDomainService {
       valorNuevo: { activo: false },
     });
     return updated;
+  }
+
+  async deleteZone(idZonaPago: number, user: AuthUser) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_zona_pago FROM zona_pago WHERE id_zona_pago = ${idZonaPago} FOR UPDATE`;
+      const zone = await tx.zonaPago.findUnique({
+        where: { idZonaPago },
+        include: { _count: { select: { zonasHijas: true, contratos: true, servicios: true, prospectos: true } } },
+      });
+      if (!zone) throw new NotFoundException('Zona comercial no encontrada');
+      this.assertManage(zone.idEmpresa ?? 0, user);
+      if (zone._count.zonasHijas) {
+        throw new ConflictException('Esta cobertura tiene microzonas. Elimina primero sus microzonas o desactiva la cobertura.');
+      }
+      if (zone._count.contratos || zone._count.servicios || zone._count.prospectos) {
+        throw new ConflictException('Esta zona está asociada a contratos, servicios o prospectos. Puedes desactivarla para conservar su historial.');
+      }
+      const assignments = await tx.planZonaPrecio.deleteMany({ where: { idZonaPago } });
+      await tx.zonaPago.delete({ where: { idZonaPago } });
+      await this.audit.record({
+        idUsuario: user.idUsuario,
+        accion: 'ELIMINAR_ZONA_GEOGRAFICA',
+        entidadAfectada: 'zona_pago',
+        idEntidadAfectada: idZonaPago,
+        valorAnterior: { zona: this.auditSnapshot(zone), asignacionesEliminadas: assignments.count },
+      }, tx);
+      return { idZonaPago, eliminada: true };
+    }).catch(error => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+        throw new ConflictException('Esta zona tiene información asociada. Puedes desactivarla para conservar su historial.');
+      }
+      throw error;
+    });
   }
 
   async check(idEmpresa: number, location: CoverageLocationDto, user: AuthUser): Promise<CoverageResult> {

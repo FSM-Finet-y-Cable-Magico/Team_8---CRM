@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Undo2, Wifi, X } from 'lucide-react';
+import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, Wifi, X } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
+import { Modal } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './coverage.css';
 
@@ -39,6 +40,10 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [changingStatus, setChangingStatus] = useState<number | null>(null);
+  const [deletingZone, setDeletingZone] = useState<Zone | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deletePending = useRef(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [search, setSearch] = useState('');
@@ -192,6 +197,24 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     finally { if (mounted.current) setChangingStatus(null); }
   }
 
+  function closeDelete() {
+    if (deletePending.current) return;
+    setDeletingZone(null); setDeleteError('');
+  }
+  async function deleteZone() {
+    if (!canManage || !deletingZone || deletePending.current || saving || changingStatus !== null) return;
+    deletePending.current = true; setDeleting(true); setDeleteError(''); clearMessage();
+    try {
+      await api.delete('/coverage/zones/' + deletingZone.idZonaPago);
+      if (!mounted.current) return;
+      setZones(current => current.filter(zone => zone.idZonaPago !== deletingZone.idZonaPago));
+      setSelected(current => current === deletingZone.idZonaPago ? null : current);
+      setDeletingZone(null); setMessage(deletingZone.nombreZona + ' fue eliminada.');
+      await loadZones();
+    } catch (err) { if (mounted.current) setDeleteError(apiErrorMessage(err)); }
+    finally { deletePending.current = false; if (mounted.current) setDeleting(false); }
+  }
+
   const parents = zones.filter(zone => zone.tipoZona === 'COBERTURA_GENERAL' && zone.activo !== false && zone.poligonoGeojson);
   const availableParents = editor.idZonaPadre && !parents.some(zone => String(zone.idZonaPago) === editor.idZonaPadre)
     ? [...parents, ...zones.filter(zone => String(zone.idZonaPago) === editor.idZonaPadre)] : parents;
@@ -244,6 +267,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
           {canManage && <div className="coverage-zone-actions">
             <button type="button" className={'coverage-zone-toggle ' + (zone.activo !== false ? 'active' : '')} role="switch" aria-checked={zone.activo !== false} aria-label={`Cambiar estado de ${zone.nombreZona}`} aria-busy={changingStatus === zone.idZonaPago} disabled={changingStatus !== null || saving} onClick={() => void changeStatus(zone)}><span/></button>
             <button type="button" className="coverage-icon" aria-label={`Editar ${zone.nombreZona}`} title="Editar zona" disabled={changingStatus !== null || saving} onClick={() => beginEdit(zone)}><Pencil size={15}/></button>
+            <button type="button" className="coverage-icon coverage-zone-delete" aria-label={`Eliminar ${zone.nombreZona}`} title="Eliminar zona" disabled={changingStatus !== null || saving} onClick={() => { setDeleteError(''); setDeletingZone(zone); }}><Trash2 size={15} aria-hidden="true"/></button>
           </div>}
           <button type="button" className="coverage-zone-plan-count" aria-expanded={selected === zone.idZonaPago} aria-controls={`coverage-plans-${zone.idZonaPago}`} onClick={() => { if (selected === zone.idZonaPago) setSelected(null); else locateZone(zone); }}><Wifi size={15}/>{assignedPlans(zone).length} {assignedPlans(zone).length === 1 ? 'plan asignado' : 'planes asignados'}<span>{selected === zone.idZonaPago ? 'Cerrar' : 'Ver planes'}</span></button>
           <section id={`coverage-plans-${zone.idZonaPago}`} className="coverage-assigned-plans" hidden={selected !== zone.idZonaPago} aria-label={`Planes de ${zone.nombreZona}`}>
@@ -257,5 +281,16 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
         {error && <button type="button" className="coverage-outline" onClick={() => void loadZones()}>Reintentar carga</button>}
       </section>}
     </div>
+    <Modal title="Eliminar zona" open={Boolean(deletingZone)} onClose={closeDelete}>
+      <div className="coverage-zone-delete-dialog">
+        <p>¿Eliminar la zona <strong>{deletingZone?.nombreZona}</strong>?</p>
+        <p>Se quitará del mapa y de sus planes asignados. Esta acción no se puede deshacer.</p>
+        {deleteError && <p className="coverage-feedback error" role="alert">{deleteError}</p>}
+        <div className="coverage-zone-delete-actions">
+          <button type="button" className="secondary" disabled={deleting} onClick={closeDelete}>Cancelar</button>
+          <button type="button" className="coverage-zone-delete-confirm" disabled={deleting} onClick={() => void deleteZone()}>{deleting ? 'Eliminando…' : 'Eliminar zona'}</button>
+        </div>
+      </div>
+    </Modal>
   </section>;
 }
