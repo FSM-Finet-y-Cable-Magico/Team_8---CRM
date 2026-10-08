@@ -29,9 +29,22 @@ export function ProspectsPanel({
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [location, setLocation] = useState<CoverageLocation | null>(null);
+  const addressParts = [form.direccion, form.comuna, form.region].map(part => part.trim().replace(/\s+/g, ' '));
+  const fullAddress = addressParts.some(Boolean) ? [...addressParts.filter(Boolean), 'Chile'].join(', ') : '';
+  const addressVersion = JSON.stringify([writeCompanyId, ...addressParts.map(part => part.toLocaleLowerCase('es-CL'))]);
+  const [located, setLocated] = useState<{ version: string; location: CoverageLocation } | null>(null);
+  const location = located?.version === addressVersion ? located.location : null;
+  const [confirmedAddress, setConfirmedAddress] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { setLocation(null); }, [writeCompanyId, form.direccion]);
+  useEffect(() => { setLocated(null); setConfirmedAddress(null); }, [addressVersion]);
+
+  function confirmAddress() {
+    if (addressParts.every(Boolean)) setConfirmedAddress(addressVersion);
+  }
+
+  function setLocation(next: CoverageLocation | null) {
+    setLocated(next ? { version: addressVersion, location: next } : null);
+  }
 
   const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
   const pageSize = 20;
@@ -137,6 +150,7 @@ export function ProspectsPanel({
             <input
               value={form.direccion}
               onChange={(event) => setForm({ ...form, direccion: event.target.value })}
+              onBlur={confirmAddress}
               placeholder="Av. Siempre Viva 123, Comuna"
               maxLength={200}
               required
@@ -144,15 +158,15 @@ export function ProspectsPanel({
           </label>
           <label>
             Comuna
-            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} placeholder="Comuna" maxLength={80} />
+            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} onBlur={confirmAddress} placeholder="Comuna" maxLength={80} />
           </label>
           <label>
             Region
-            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} placeholder="Region" maxLength={80} />
+            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} onBlur={confirmAddress} placeholder="Region" maxLength={80} />
           </label>
           {status && <p className="inline-status">{status}</p>}
-          <details><summary>Confirmar ubicación y consultar cobertura</summary>
-            <CoveragePicker idEmpresa={writeCompanyId} direccion={form.direccion} value={location} onChange={setLocation} disabled={submitting} />
+          <details onToggle={event => { if (event.currentTarget.open) confirmAddress(); }}><summary>Confirmar ubicación y consultar cobertura</summary>
+            <CoveragePicker idEmpresa={writeCompanyId} direccion={fullAddress} autoGeocode={confirmedAddress === addressVersion} value={location} onChange={setLocation} disabled={submitting} />
           </details>
           <button disabled={submitting}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>

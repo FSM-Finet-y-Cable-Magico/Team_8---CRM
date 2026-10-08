@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
@@ -31,27 +31,47 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, disabled = false }: {
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, disabled = false, autoGeocode = false }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
   onChange: (location: CoverageLocation | null) => void;
   onResult?: (result: CoverageResult | null) => void;
   disabled?: boolean;
+  // Only enabled after the parent confirms a complete, finished address edit.
+  autoGeocode?: boolean;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
   const [result, setResult] = useState<CoverageResult | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+  const [geocodeMessage, setGeocodeMessage] = useState('');
   const [retry, setRetry] = useState(0);
   const [coordinates, setCoordinates] = useState({ latitud: '', longitud: '' });
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layers = useRef<L.LayerGroup | null>(null);
-  const selection = useRef({ onChange, disabled });
+  const version = JSON.stringify([idEmpresa, direccion.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CL')]);
+  const current = useRef({ version, onChange, value, disabled });
+  current.current = { version, onChange, value, disabled };
+  const geocodeController = useRef<AbortController | null>(null);
+  const attempted = useRef(new Set<string>());
+  const rememberAttempt = useCallback((key: string) => {
+    attempted.current.add(key);
+    if (attempted.current.size > 50) attempted.current.delete(attempted.current.values().next().value!);
+  }, []);
+  const selectLocation = useCallback((location: CoverageLocation | null) => {
+    // A manual selection (including removing the pin) wins over a late response.
+    rememberAttempt(current.current.version);
+    geocodeController.current?.abort();
+    setGeocoding(false);
+    setGeocodeMessage('');
+    current.current.onChange(location);
+  }, [rememberAttempt]);
+  const selection = useRef({ onChange: selectLocation, disabled });
   const resultListener = useRef(onResult);
-  selection.current = { onChange, disabled };
+  selection.current = { onChange: selectLocation, disabled };
   resultListener.current = onResult;
 
   useEffect(() => {
@@ -141,36 +161,61 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       setError('Ingresa una latitud entre -90 y 90 y una longitud entre -180 y 180.');
       return;
     }
-    onChange({ latitud, longitud });
+    selectLocation({ latitud, longitud });
   }
 
-  async function geocodeAddress() {
+  const geocodeAddress = useCallback(async () => {
     if (!direccion.trim()) {
-      setError('Ingresa una direccion antes de intentar ubicarla.');
+      setGeocodeMessage('Ingresa una dirección antes de intentar ubicarla.');
       return;
     }
+    if (current.current.disabled) return;
+    rememberAttempt(version);
+    geocodeController.current?.abort();
+    const controller = new AbortController();
+    geocodeController.current = controller;
     setGeocoding(true);
-    setError('');
+    setGeocodeMessage('');
     try {
-      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; mensaje: string | null }>('/coverage/geocode', { direccion });
+      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; mensaje: string | null }>('/coverage/geocode', { direccion }, { signal: controller.signal });
+      if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
       const first = data.candidatos[0];
-      if (first) onChange({ latitud: first.latitud, longitud: first.longitud });
-      else setError(data.mensaje ?? 'No fue posible ubicar automaticamente la direccion. Selecciona el punto manualmente.');
+      if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
+      else setGeocodeMessage(data.mensaje ?? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.');
     } catch {
-      setError('No fue posible ubicar automaticamente la direccion. Selecciona el punto manualmente.');
+      if (!controller.signal.aborted && current.current.version === version) {
+        setGeocodeMessage('No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.');
+      }
     } finally {
-      setGeocoding(false);
+      if (!controller.signal.aborted && current.current.version === version) setGeocoding(false);
     }
-  }
+  }, [direccion, version, rememberAttempt]);
+
+  useEffect(() => {
+    setGeocoding(false);
+    setGeocodeMessage('');
+    return () => { geocodeController.current?.abort(); };
+  }, [version, disabled]);
+
+  useEffect(() => {
+    if (!autoGeocode || disabled || value || attempted.current.has(version)) return;
+    // Defer past mount/cleanup so React StrictMode does not issue duplicate requests.
+    const timer = window.setTimeout(() => {
+      if (current.current.version === version && !current.current.value && !attempted.current.has(version)) void geocodeAddress();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [autoGeocode, disabled, value, version, geocodeAddress]);
 
   return <section className="coverage-picker" aria-label="Consulta de cobertura comercial">
     <div className="coverage-heading">
       <strong>Cobertura comercial</strong>
-      <button type="button" className="secondary compact" disabled={disabled || geocoding} onClick={() => void geocodeAddress()}>{geocoding ? 'Ubicando...' : 'Ubicar direccion'}</button>
+      <button type="button" className="secondary compact" disabled={disabled || geocoding} onClick={() => void geocodeAddress()}>{geocoding ? 'Ubicando dirección...' : 'Ubicar dirección'}</button>
     </div>
     <p>Marca o corrige en el mapa el domicilio exacto de {direccion.trim() || 'la direccion ingresada'}.</p>
     <p className="coverage-note">Pin azul: domicilio. Borde continuo: cobertura general. Borde segmentado: microzona. La seleccion manual siempre permanece disponible.</p>
     <div ref={container} className="coverage-map" aria-label="Mapa de ubicacion del domicilio" />
+    <small>Geocodificación: <a href="https://nominatim.org/" target="_blank" rel="noreferrer">Nominatim</a> / © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.</small>
+    {geocodeMessage && <p role="status">{geocodeMessage}</p>}
     <details><summary>Ingresar coordenadas</summary>
       <div className="coverage-coordinates">
         <label>Latitud<input type="text" inputMode="decimal" value={coordinates.latitud} disabled={disabled} placeholder="-33.57" onChange={event => setCoordinates({ ...coordinates, latitud: event.target.value })} /></label>
@@ -191,7 +236,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     </div>
     <div className="coverage-actions">
       <button type="button" className="secondary compact" disabled={disabled || busy} onClick={() => setRetry(retry + 1)}>Volver a consultar</button>
-      {value && <button type="button" className="secondary compact" disabled={disabled} onClick={() => onChange(null)}>Quitar ubicacion</button>}
+      {value && <button type="button" className="secondary compact" disabled={disabled} onClick={() => selectLocation(null)}>Quitar ubicacion</button>}
     </div>
   </section>;
 }
