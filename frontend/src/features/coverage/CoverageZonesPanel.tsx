@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Undo2, X } from 'lucide-react';
+import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Undo2, Wifi, X } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
@@ -14,7 +14,7 @@ type Zone = {
   poligonoGeojson: { type: 'Polygon'; coordinates: number[][][] } | null;
   activo: boolean | null; fechaInicio: string | null; fechaFin: string | null;
   zonaPadre?: { nombreZona: string } | null;
-  precios?: Array<{ idPlanZonaPrecio: number; precioMensual: string; activo: boolean | null; plan: { nombreComercial: string } }>;
+  precios?: Array<{ idPlanZonaPrecio: number; precioMensual: string; activo: boolean | null; plan: { idPlan: number; nombreComercial: string; velocidadMbps: number | null; tipoPlan: string; activo: boolean | null } }>;
 };
 const emptyEditor = {
   id: null as number | null, nombre: '', tipoZona: 'COBERTURA_GENERAL' as ZoneType, idZonaPadre: '',
@@ -22,6 +22,8 @@ const emptyEditor = {
 };
 const zoneName = (type: ZoneType | null) => type === 'MICROZONA_COMERCIAL' ? 'Microzona' : 'Cobertura general';
 const zoneColor = (zone: Zone) => zone.tipoZona === 'MICROZONA_COMERCIAL' ? '#b88035' : '#247c68';
+const assignedPlans = (zone: Zone) => [...new Map((zone.precios ?? []).filter(price => price.activo !== false && price.plan.activo !== false).map(price => [price.plan.idPlan, price])).values()];
+const formatPrice = (value: string) => Number(value).toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
 
 export function CoverageZonesPanel(props: { idEmpresa: number; canManage?: boolean }) {
   return <CoverageWorkspace key={props.idEmpresa} {...props}/>;
@@ -237,13 +239,20 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
         <div className="coverage-zone-filters" role="group" aria-label="Filtrar zonas">{([['all', 'Todas'], ['general', 'Coberturas'], ['micro', 'Microzonas']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={zoneFilter === value} className={zoneFilter === value ? 'active' : ''} onClick={() => setZoneFilter(value)}>{label}</button>)}</div>
         {loading ? <p className="coverage-empty" role="status">Cargando zonas…</p> : filteredZones.length === 0 && <p className="coverage-empty">{zones.length ? 'No hay zonas para esta búsqueda.' : 'Crea una cobertura para comenzar.'}</p>}
         {!loading && filteredZones.map(zone => <article key={zone.idZonaPago} className={'coverage-zone-card ' + (selected === zone.idZonaPago ? 'is-selected ' : '') + (zone.activo === false ? 'is-inactive' : '')}>
-          <button type="button" className="coverage-zone-name" onClick={() => locateZone(zone)}>{zone.nombreZona}</button>
+          <button type="button" className="coverage-zone-name" aria-expanded={selected === zone.idZonaPago} aria-controls={`coverage-plans-${zone.idZonaPago}`} onClick={() => { if (selected === zone.idZonaPago) setSelected(null); else locateZone(zone); }}>{zone.nombreZona}<ChevronDown size={16}/></button>
           <span>{zoneName(zone.tipoZona)}{zone.zonaPadre ? ' · ' + zone.zonaPadre.nombreZona : ''}</span>
           {canManage && <div className="coverage-zone-actions">
             <button type="button" className={'coverage-zone-toggle ' + (zone.activo !== false ? 'active' : '')} role="switch" aria-checked={zone.activo !== false} aria-label={`Cambiar estado de ${zone.nombreZona}`} aria-busy={changingStatus === zone.idZonaPago} disabled={changingStatus !== null || saving} onClick={() => void changeStatus(zone)}><span/></button>
             <button type="button" className="coverage-icon" aria-label={`Editar ${zone.nombreZona}`} title="Editar zona" disabled={changingStatus !== null || saving} onClick={() => beginEdit(zone)}><Pencil size={15}/></button>
           </div>}
-          {!!zone.precios?.filter(price => price.activo !== false).length && <details className="coverage-zone-prices"><summary>Planes y precios<ChevronDown size={13}/></summary>{zone.precios.filter(price => price.activo !== false).map(price => <small key={price.idPlanZonaPrecio}>{price.plan.nombreComercial}<strong>{Number(price.precioMensual).toLocaleString('es-CL', { style: 'currency', currency: 'CLP' })}</strong></small>)}</details>}
+          <button type="button" className="coverage-zone-plan-count" aria-expanded={selected === zone.idZonaPago} aria-controls={`coverage-plans-${zone.idZonaPago}`} onClick={() => { if (selected === zone.idZonaPago) setSelected(null); else locateZone(zone); }}><Wifi size={15}/>{assignedPlans(zone).length} {assignedPlans(zone).length === 1 ? 'plan asignado' : 'planes asignados'}<span>{selected === zone.idZonaPago ? 'Cerrar' : 'Ver planes'}</span></button>
+          <section id={`coverage-plans-${zone.idZonaPago}`} className="coverage-assigned-plans" hidden={selected !== zone.idZonaPago} aria-label={`Planes de ${zone.nombreZona}`}>
+            <h4>Planes de esta zona</h4>
+            {assignedPlans(zone).map(price => <article className="coverage-assigned-plan" key={price.plan.idPlan}>
+              <span className="coverage-plan-icon"><Wifi size={18} aria-hidden="true"/></span><div><strong>{price.plan.nombreComercial}</strong><small>{price.plan.velocidadMbps ? `${price.plan.velocidadMbps} Mbps · ` : ''}{price.plan.tipoPlan}</small></div><div className="coverage-plan-amount"><strong>{formatPrice(price.precioMensual)}</strong><small>al mes</small></div>
+            </article>)}
+            {!assignedPlans(zone).length && <p>Esta zona aún no tiene planes asignados.{canManage && ' Puedes asignarlos desde Planes.'}</p>}
+          </section>
         </article>)}
         {error && <button type="button" className="coverage-outline" onClick={() => void loadZones()}>Reintentar carga</button>}
       </section>}

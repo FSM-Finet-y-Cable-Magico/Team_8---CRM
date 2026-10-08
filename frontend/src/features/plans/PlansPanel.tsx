@@ -1,13 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { api, apiErrorMessage, type Company, type Plan, type PaymentZone } from '../../api';
+import { MapPin, Pencil, Plus, Trash2 } from 'lucide-react';
+import { api, apiErrorMessage, type Company, type Plan } from '../../api';
 import { DashboardPermissions } from '../../permissions';
-import { PlanZonePricesPanel } from './PlanZonePricesPanel';
+import { PlanZonesModal } from './PlanZonesModal';
 import { planCustomerTypeOptions, serviceTypeOptions } from '../../constants';
 import { Modal, TablePagination } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 
-const initialForm = (companyId: number) => ({ idEmpresa: String(companyId), nombreComercial: '', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: '', precioMensual: '', descripcion: '', activo: true, idZonaPago: '', valorInstalacionZona: '' });
+const initialForm = (companyId: number) => ({ idEmpresa: String(companyId), nombreComercial: '', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: '', precioMensual: '', descripcion: '', activo: true });
 
 const clpFormatter = new Intl.NumberFormat('es-CL', {
   style: 'currency',
@@ -49,18 +49,8 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
   const [form, setForm] = useState(initialForm(writeCompanyId));
-  const [zones, setZones] = useState<PaymentZone[]>([]);
-  const [zoneRevision, setZoneRevision] = useState(0);
-  useEffect(() => {
-    if (!modalOpen || editingPlan || !permissions.managePaymentZones) return;
-    const controller = new AbortController();
-    setZones([]);
-    void api.get<PaymentZone[]>('/billing/zones', { params: { scope: form.idEmpresa }, signal: controller.signal })
-      .then(({ data }) => { if (!controller.signal.aborted) setZones(data.filter(zone => zone.activo !== false && String(zone.idEmpresa) === form.idEmpresa)); })
-      .catch(error => { if (!controller.signal.aborted) setModalError(apiErrorMessage(error)); });
-    return () => controller.abort();
-  }, [modalOpen, editingPlan, form.idEmpresa, permissions.managePaymentZones]);
-
+  const [assigningPlan, setAssigningPlan] = useState<Plan | null>(null);
+  useEffect(() => { setAssigningPlan(null); }, [scope, writeCompanyId]);
 
   useEffect(() => { if (!editingPlan) setForm(initialForm(writeCompanyId)); }, [writeCompanyId, editingPlan?.idPlan]);
 
@@ -98,7 +88,6 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
       precioMensual: String(Math.round(Number(plan.precioMensual))),
       descripcion: plan.descripcion ?? '',
       activo: plan.activo !== false,
-      idZonaPago: '', valorInstalacionZona: '',
     });
   }
 
@@ -134,9 +123,6 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
       return;
     }
 
-    if (!editingPlan && form.idZonaPago && form.valorInstalacionZona && (!Number.isFinite(Number(form.valorInstalacionZona)) || Number(form.valorInstalacionZona) < 0)) {
-      setModalError('El valor de instalación no puede ser negativo.'); return;
-    }
     setBusy(true);
     const payload = {
       idEmpresa: Number(form.idEmpresa),
@@ -154,8 +140,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
         await api.patch(`/plans/${editingPlan.idPlan}`, payload);
         setStatus('Plan actualizado.');
       } else {
-        await api.post('/plans', { ...payload, ...(form.idZonaPago ? { idZonaPago: Number(form.idZonaPago), valorInstalacionZona: form.valorInstalacionZona ? Number(form.valorInstalacionZona) : undefined } : {}) });
-        setZoneRevision(value => value + 1);
+        await api.post('/plans', payload);
         setStatus('Plan creado.');
       }
       setModalOpen(false);
@@ -242,6 +227,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
                   <td>
                     <div className="table-actions plan-table-actions">
                       <button type="button" className={plan.activo === false ? 'plan-toggle' : 'plan-toggle active'} role="switch" aria-checked={plan.activo !== false} aria-label={`Cambiar estado de ${plan.nombreComercial}`} onClick={() => void togglePlan(plan)}><span /></button>
+                      {permissions.managePlans && <button type="button" className="secondary compact plan-assign-action" aria-label={`Asignar zonas a ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setAssigningPlan(plan); }}><MapPin size={15}/>Asignar zonas</button>}
                       <button type="button" className="secondary compact plan-edit-action" aria-label={`Editar ${plan.nombreComercial}`} onClick={() => editPlan(plan)}><Pencil size={15} /></button>
                       <button type="button" className="secondary compact plan-delete-action" aria-label={`Eliminar ${plan.nombreComercial}`} onClick={() => { clearStatus(); setPageError(''); setDeleteError(''); setDeletingPlan(plan); }}><Trash2 size={15} /></button>
                     </div>
@@ -254,21 +240,18 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
         <TablePagination currentPage={page} totalItems={plans.length} onPageChange={setPage} />
       </section>
 
-      <PlanZonePricesPanel plans={plans} scope={scope} writeCompanyId={writeCompanyId} permissions={permissions} revision={zoneRevision} onChanged={() => { setZoneRevision(value => value + 1); onChanged(); }}/>
 
-      <Modal title={editingPlan ? 'Editar plan comercial' : 'Crear plan comercial'} open={modalOpen} onClose={closeModal}>
+      {assigningPlan && <PlanZonesModal key={assigningPlan.idPlan} plan={assigningPlan} onClose={() => setAssigningPlan(null)} onSaved={() => { setAssigningPlan(null); setStatus('Zonas asignadas al plan.'); onChanged(); }}/>}
+
+      <Modal title={editingPlan ? 'Editar plan comercial' : 'Crear plan'} open={modalOpen} onClose={closeModal}>
         <form className="plan-modal-form" noValidate onSubmit={savePlan}>
           <div className="plan-form-grid">
-            <label>Empresa<select value={form.idEmpresa} onChange={(event) => setForm({ ...form, idEmpresa: event.target.value, idZonaPago: '', valorInstalacionZona: '' })}>{companies.map((company) => <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>)}</select></label>
+            <label>Empresa<select value={form.idEmpresa} onChange={(event) => setForm({ ...form, idEmpresa: event.target.value })}>{companies.map((company) => <option key={company.idEmpresa} value={company.idEmpresa}>{company.nombre}</option>)}</select></label>
             <label>Nombre comercial<input value={form.nombreComercial} onChange={(event) => setForm({ ...form, nombreComercial: event.target.value })} /></label>
             <label>Tipo de plan<select value={form.tipoPlan} onChange={(event) => setForm({ ...form, tipoPlan: event.target.value })}>{serviceTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <label>Tipo de cliente<select value={form.tipoCliente} onChange={(event) => setForm({ ...form, tipoCliente: event.target.value })}>{planCustomerTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <label>Velocidad (Mbps)<input type="number" min="0" value={form.velocidadMbps} onChange={(event) => setForm({ ...form, velocidadMbps: event.target.value })} /></label>
             <label>Precio mensual<input type="text" inputMode="numeric" placeholder="$ 0" value={currencyInputValue(form.precioMensual)} onChange={(event) => setForm({ ...form, precioMensual: currencyDigits(event.target.value) })} /></label>
-            {!editingPlan && permissions.managePaymentZones && <>
-              <label>Zona de precio<select value={form.idZonaPago} onChange={event => setForm({ ...form, idZonaPago: event.target.value, valorInstalacionZona: '' })}><option value="">Sin precio por zona</option>{zones.map(zone => <option value={zone.idZonaPago} key={zone.idZonaPago}>{zone.nombreZona}</option>)}</select></label>
-              {form.idZonaPago && <label>Instalación en esta zona<input type="number" min="0" step="0.01" value={form.valorInstalacionZona} onChange={event => setForm({ ...form, valorInstalacionZona: event.target.value })}/></label>}
-            </>}
             <label className="plan-description-field">Descripción<textarea value={form.descripcion} onChange={(event) => setForm({ ...form, descripcion: event.target.value })} /></label>
           </div>
           {modalError && <p role="alert" className="alert">{modalError}</p>}

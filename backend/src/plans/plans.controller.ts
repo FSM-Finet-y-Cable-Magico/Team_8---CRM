@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
 import { CreatePlanDto } from './dto/create-plan.dto';
+import { AssignPlanZonesDto } from './dto/assign-plan-zones.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 import { PlansService } from './plans.service';
 
@@ -30,6 +31,18 @@ export class PlansController {
   @Roles(...ACCESS_ROLES.MANAGE_PLANS)
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePlanDto, @CurrentUser() user: AuthUser) {
     return this.plansService.update(id, dto, user);
+  }
+
+  @Get(':id/zones')
+  @Roles(...ACCESS_ROLES.MANAGE_PLANS)
+  zones(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.plansService.zones(id, user);
+  }
+
+  @Put(':id/zones')
+  @Roles(...ACCESS_ROLES.MANAGE_PLANS)
+  assignZones(@Param('id', ParseIntPipe) id: number, @Body() dto: AssignPlanZonesDto, @CurrentUser() user: AuthUser) {
+    return this.plansService.assignZones(id, dto.zoneIds, user);
   }
 
   @Patch(':id/activate')

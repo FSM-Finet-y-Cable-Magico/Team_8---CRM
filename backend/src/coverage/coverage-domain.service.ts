@@ -54,7 +54,7 @@ export class CoverageDomainService {
       where: { idEmpresa },
       include: {
         zonaPadre: { select: { idZonaPago: true, nombreZona: true, tipoZona: true } },
-        precios: { include: { plan: true }, orderBy: { idPlanZonaPrecio: 'asc' } },
+        precios: { where: { activo: true, plan: { idEmpresa, activo: { not: false } } }, include: { plan: true }, orderBy: { idPlanZonaPrecio: 'desc' } },
       },
       orderBy: [{ tipoZona: 'asc' }, { nombreZona: 'asc' }],
     });

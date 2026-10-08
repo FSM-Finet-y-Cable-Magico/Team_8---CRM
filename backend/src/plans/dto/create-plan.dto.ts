@@ -45,9 +45,4 @@ export class CreatePlanDto {
   @IsBoolean()
   activo?: boolean;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
-  idZonaPago?: number;
-
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(0)
-  valorInstalacionZona?: number;
 }

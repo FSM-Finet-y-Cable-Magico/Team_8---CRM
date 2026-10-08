@@ -84,10 +84,20 @@
 .coverage-zone-toggle span { display: block; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform .18s ease; }
 .coverage-admin .coverage-zone-toggle.active { background: #28856e; }
 .coverage-zone-toggle.active span { transform: translateX(15px); }
-.coverage-zone-prices { grid-column: 1 / -1; }
-.coverage-zone-prices > summary { display: flex; align-items: center; gap: 7px; color: var(--coverage-muted); cursor: pointer; list-style: none; font-size: .72rem; }
-.coverage-zone-prices small { display: flex; justify-content: space-between; gap: 8px; padding-top: 9px; font-size: .7rem; color: var(--coverage-muted); }
-.coverage-zone-prices small strong { font-weight: 500; color: var(--coverage-text); }
+.coverage-zone-name > svg { margin-left: auto; flex-shrink: 0; color: var(--coverage-muted); transition: transform .18s ease; }
+.coverage-zone-name[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.coverage-admin .coverage-zone-plan-count { grid-column: 1 / -1; justify-content: flex-start; padding: 9px 0 0; color: var(--coverage-primary); background: transparent; font-size: .76rem; }
+.coverage-zone-plan-count > span { margin-left: auto; color: var(--coverage-muted); font-size: .7rem; }
+.coverage-assigned-plans { grid-column: 1 / -1; display: grid; gap: 9px; padding-top: 12px; }
+.coverage-assigned-plans[hidden] { display: none; }
+.coverage-assigned-plans > h4 { margin: 0 0 3px; font-size: .77rem; font-weight: 600; color: var(--coverage-text); }
+.coverage-assigned-plans > p { margin: 0; font-size: .78rem; color: var(--coverage-muted); line-height: 1.5; }
+.coverage-assigned-plan { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 13px 10px; background: var(--coverage-mint); border-radius: 7px; }
+.coverage-plan-icon { display: grid; place-items: center; color: var(--coverage-primary); }
+.coverage-assigned-plan > div { display: grid; gap: 5px; min-width: 0; }
+.coverage-assigned-plan strong { font-size: .79rem; color: var(--coverage-text); font-weight: 600; overflow-wrap: anywhere; }
+.coverage-assigned-plan small { font-size: .68rem; color: var(--coverage-muted); }
+.coverage-plan-amount { text-align: right; white-space: nowrap; }
 .coverage-zone-editor { min-width: 0; padding-left: 24px; border: 0; border-left: 1px solid var(--coverage-line); border-radius: 0; background: transparent; }
 .coverage-zone-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 24px; }
 .coverage-zone-editor h3 { font-size: 1.05rem; margin: 5px 0 0; color: var(--coverage-text); overflow-wrap: anywhere; }
@@ -98,8 +108,6 @@
 .coverage-editor-section { border-top: 1px solid var(--coverage-line); padding-top: 16px; min-width: 0; }
 .coverage-editor-section h4 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--coverage-text); font-size: .78rem; font-weight: 600; }
 .coverage-editor-section h4 small { color: var(--coverage-muted); font-size: .68rem; font-weight: 400; }
-.coverage-zone-prices[open] > summary > svg { transform: rotate(180deg); }
-.coverage-zone-prices > summary::-webkit-details-marker { display: none; }
 .coverage-editor-section .coverage-coordinates { margin: 16px 0 0; }
 .coverage-geometry-details { display: grid; gap: 15px; margin-top: 18px; }
 .coverage-geometry-details > span { color: var(--coverage-muted); font-size: .69rem; }
