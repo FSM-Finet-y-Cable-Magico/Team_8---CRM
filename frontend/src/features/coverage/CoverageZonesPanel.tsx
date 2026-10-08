@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, X } from 'lucide-react';
+import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Undo2, X } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
@@ -32,7 +32,6 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
   const [editor, setEditor] = useState(emptyEditor);
   const [editing, setEditing] = useState(false);
   const [addingPoints, setAddingPoints] = useState(true);
-  const [manualCoordinates, setManualCoordinates] = useState('');
   const { message, showMessage: setMessage, clearMessage } = useTransientMessage(5000);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -138,7 +137,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
   function beginNew(type: ZoneType) {
     if (!canManage || saving || changingStatus !== null) return;
     if (createMenu.current) createMenu.current.open = false;
-    setEditor({ ...emptyEditor, tipoZona: type }); setSelected(null); setManualCoordinates('');
+    setEditor({ ...emptyEditor, tipoZona: type }); setSelected(null);
     setAddingPoints(true); setEditing(true); setError(''); clearMessage();
   }
   function beginEdit(zone: Zone) {
@@ -149,21 +148,11 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
       idZonaPadre: zone.idZonaPadre ? String(zone.idZonaPadre) : '', fechaInicio: zone.fechaInicio?.slice(0, 10) ?? '', fechaFin: zone.fechaFin?.slice(0, 10) ?? '',
       activo: zone.activo !== false, points,
     });
-    setManualCoordinates(points.map(point => point[0] + ', ' + point[1]).join('\n'));
     setAddingPoints(false); setEditing(true); setError(''); clearMessage(); locateZone(zone);
   }
   function cancelEdit() {
     if (saving) return;
-    setEditing(false); setEditor(emptyEditor); setManualCoordinates(''); setError(''); clearMessage();
-  }
-  function applyManualCoordinates() {
-    const lines = manualCoordinates.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-    const points = lines.map(line => line.split(',').map(value => Number(value.trim())) as LatLng);
-    if (points.length < 3 || points.some(point => point.length !== 2 || !Number.isFinite(point[0]) || Math.abs(point[0]) > 90 || !Number.isFinite(point[1]) || Math.abs(point[1]) > 180)) {
-      setError('Ingresa al menos tres líneas en formato latitud, longitud.'); return;
-    }
-    setEditor(current => ({ ...current, points })); setError('');
-    map.current?.fitBounds(L.latLngBounds(points), { padding: [35, 35] });
+    setEditing(false); setEditor(emptyEditor); setError(''); clearMessage();
   }
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -183,7 +172,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
       if (editor.id) await api.patch('/coverage/zones/' + editor.id, payload);
       else await api.post('/coverage/zones', payload);
       if (!mounted.current) return;
-      setEditing(false); setEditor(emptyEditor); setManualCoordinates(''); setMessage('Zona guardada correctamente.');
+      setEditing(false); setEditor(emptyEditor); setMessage('Zona guardada correctamente.');
       await loadZones();
     } catch (err) { if (mounted.current) setError(apiErrorMessage(err)); }
     finally { if (mounted.current) setSaving(false); }
@@ -240,7 +229,6 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
           <label>Tipo de zona<select value={editor.tipoZona} onChange={event => setEditor(current => ({ ...current, tipoZona: event.target.value as ZoneType, idZonaPadre: '' }))}><option value="COBERTURA_GENERAL">Cobertura general</option><option value="MICROZONA_COMERCIAL">Microzona comercial</option></select></label>
           {editor.tipoZona === 'MICROZONA_COMERCIAL' && <label>Cobertura asociada<select value={editor.idZonaPadre} onChange={event => setEditor(current => ({ ...current, idZonaPadre: event.target.value }))} required><option value="">Selecciona una cobertura</option>{availableParents.map(parent => <option key={parent.idZonaPago} value={parent.idZonaPago}>{parent.nombreZona}</option>)}</select></label>}
           <div className="coverage-editor-section"><h4>Fechas de disponibilidad <small>Opcionales</small></h4><div className="coverage-coordinates"><label>Disponible desde<input type="date" value={editor.fechaInicio} onChange={event => setEditor(current => ({ ...current, fechaInicio: event.target.value }))}/></label><label>Disponible hasta<input type="date" value={editor.fechaFin} onChange={event => setEditor(current => ({ ...current, fechaFin: event.target.value }))}/></label></div></div>
-          <div className="coverage-editor-section"><h4>Puntos del mapa</h4><div className="coverage-geometry-details"><span>{editor.points.length} puntos definidos · Latitud, longitud</span><ol>{editor.points.map((point, index) => <li key={index}><span>Punto {index + 1}</span><code>{point[0]}, {point[1]}</code><button type="button" className="coverage-icon" aria-label={'Eliminar punto ' + (index + 1)} onClick={() => setEditor(current => ({ ...current, points: current.points.filter((_, i) => i !== index) }))}><Trash2 size={14}/></button></li>)}</ol><label>Coordenadas manuales<textarea rows={4} value={manualCoordinates} onChange={event => setManualCoordinates(event.target.value)} placeholder="Una coordenada por línea: -33.57, -70.61"/></label><button type="button" className="coverage-outline" onClick={applyManualCoordinates}>Aplicar al mapa</button></div></div>
         </fieldset>
         <footer className="coverage-editor-footer"><button type="button" className="coverage-text-button" disabled={saving} onClick={cancelEdit}>Cancelar</button><button disabled={saving || editor.points.length < 3}><Save size={16}/>{saving ? 'Guardando…' : 'Guardar zona'}</button></footer>
       </form> : <section className="coverage-zone-list" aria-label="Zonas configuradas">

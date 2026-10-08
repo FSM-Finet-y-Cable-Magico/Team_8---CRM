@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { throwZoneNameConflict } from '../common/zone-name-conflict';
 import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CoverageLocationDto, CreateCoverageZoneDto, UpdateCoverageZoneDto } from './coverage.dto';
@@ -97,7 +98,7 @@ export class CoverageDomainService {
         fuenteCobertura: 'MANUAL',
         ...dates,
       },
-    });
+    }).catch(throwZoneNameConflict);
     await this.audit.record({
       idUsuario: user.idUsuario,
       accion: dto.tipoZona === 'MICROZONA_COMERCIAL' ? 'CREAR_MICROZONA' : 'CREAR_ZONA_GEOGRAFICA',
@@ -151,7 +152,7 @@ export class CoverageDomainService {
         centroLng: center.longitud,
         ...dates,
       },
-    });
+    }).catch(throwZoneNameConflict);
     await this.audit.record({
       idUsuario: user.idUsuario,
       accion: type === 'MICROZONA_COMERCIAL' ? 'ACTUALIZAR_MICROZONA' : 'ACTUALIZAR_ZONA_GEOGRAFICA',

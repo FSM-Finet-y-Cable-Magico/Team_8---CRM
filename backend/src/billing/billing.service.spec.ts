@@ -16,6 +16,27 @@ const commercial: AuthUser = {
 
 const paymentDto = { idFactura: 80, monto: 20_000, pasarela: 'Caja local' };
 
+describe('BillingService nombres de zonas', () => {
+  it.each(['create', 'update'] as const)('explica el nombre duplicado al %s una zona de precio', async operation => {
+    const duplicate = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.22.0', meta: { target: 'uq_zona_pago_empresa_nombre' },
+    });
+    const prisma = { zonaPago: {
+      findUnique: jest.fn().mockResolvedValue({ idZonaPago: 10, idEmpresa: 1, nombreZona: 'Centro' }),
+      create: jest.fn().mockRejectedValue(duplicate), update: jest.fn().mockRejectedValue(duplicate),
+    } };
+    const audit = { record: jest.fn() };
+    const service = new BillingService(prisma as unknown as PrismaService, audit as unknown as AuditService, new ConfigService());
+    const request = operation === 'create'
+      ? service.createZone({ idEmpresa: 1, nombreZona: 'Centro', diaVencimientoSugerido: 5 }, commercial)
+      : service.updateZone(10, { nombreZona: 'Centro' }, commercial);
+    await expect(request).rejects.toMatchObject({
+      status: 409, message: 'Ya existe una zona o cobertura con ese nombre en esta empresa. Usa otro nombre.',
+    });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+});
+
 function invoice(overrides: Record<string, unknown> = {}) {
   return {
     idFactura: 80,

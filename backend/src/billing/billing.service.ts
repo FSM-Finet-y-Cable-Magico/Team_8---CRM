@@ -6,6 +6,7 @@ import { TemplateKey } from '../messaging/outbound-messaging.port';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { throwZoneNameConflict } from '../common/zone-name-conflict';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { hasRole, isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
@@ -374,7 +375,7 @@ export class BillingService {
         diaVencimientoSugerido: dto.diaVencimientoSugerido,
         activo: dto.activo ?? true,
       },
-    });
+    }).catch(throwZoneNameConflict);
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -404,7 +405,7 @@ export class BillingService {
         diaVencimientoSugerido: dto.diaVencimientoSugerido,
         activo: dto.activo,
       },
-    });
+    }).catch(throwZoneNameConflict);
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,

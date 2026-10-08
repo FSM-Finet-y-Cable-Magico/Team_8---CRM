@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CommercialCoverageProvider } from './commercial-coverage.provider';
@@ -53,6 +54,28 @@ describe('CoverageDomainService', () => {
     expect(result).toMatchObject({ idZonaPago: 20, tipoZona: 'COBERTURA_GENERAL', fuenteCobertura: 'MANUAL' });
     expect(prisma.zonaPago.create).toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_ZONA_GEOGRAFICA' }));
+  });
+
+  it.each(['create', 'update'] as const)('explica el nombre duplicado al %s sin registrar una zona exitosa', async operation => {
+    const { service, prisma, audit } = setup();
+    const duplicate = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.22.0', meta: { target: 'uq_zona_pago_empresa_nombre' },
+    });
+    prisma.zonaPago[operation].mockRejectedValueOnce(duplicate);
+    const request = operation === 'create'
+      ? service.createZone({ idEmpresa: 1, nombre: 'Cobertura Sur', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)
+      : service.updateZone(10, { nombre: 'Cobertura Sur' }, commercial);
+    await expect(request).rejects.toMatchObject({
+      status: 409, message: 'Ya existe una zona o cobertura con ese nombre en esta empresa. Usa otro nombre.',
+    });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('conserva otros errores de almacenamiento sin atribuirlos a nombres duplicados', async () => {
+    const { service, prisma } = setup();
+    const failure = new Error('Database unavailable');
+    prisma.zonaPago.create.mockRejectedValueOnce(failure);
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Nueva', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)).rejects.toBe(failure);
   });
 
   it('rechaza poligono invalido, vigencia invertida y usuario sin permiso', async () => {
