@@ -28,6 +28,12 @@ export class CommercialController {
     return this.commercial.list(query, user);
   }
 
+  @Get('control-book/customers/:id/history')
+  @Roles(...ACCESS_ROLES.VIEW_CONTROL_BOOK)
+  history(@Param('id', ParseIntPipe) id: number, @Query() query: ControlBookQueryDto, @CurrentUser() user: AuthUser) {
+    return this.commercial.customerHistory(id, query.idEmpresa, user);
+  }
+
   @Get('control-book/export')
   @Roles(...ACCESS_ROLES.EXPORT_CONTROL_BOOK)
   async export(@Query() query: ControlBookQueryDto, @Query('format') format: 'csv' | 'xlsx' = 'csv', @CurrentUser() user: AuthUser, @Res() response: Response) {

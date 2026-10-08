@@ -14,11 +14,12 @@ const EMPTY_FILTERS = {
   estado: '', fechaDesde: '', fechaHasta: '',
 };
 
-export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, canManage }: {
+export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, canManage, fixedCustomerId }: {
   customers: Customer[];
   scope: string;
   writeCompanyId: number;
   canManage: boolean;
+  fixedCustomerId?: number;
 }) {
   const [documents, setDocuments] = useState<ExternalTaxDocument[]>([]);
   const [totalRows, setTotalRows] = useState(0);
@@ -26,17 +27,18 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const customerForm = () => ({ ...EMPTY_FORM, idCliente: fixedCustomerId ? String(fixedCustomerId) : '' });
+  const [form, setForm] = useState(customerForm);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const idEmpresa = scope !== 'consolidado' && Number.isInteger(Number(scope)) ? Number(scope) : writeCompanyId;
   const companyCustomers = useMemo(() => customers.filter((customer) => customer.idEmpresa === idEmpresa), [customers, idEmpresa]);
   const selectedCustomer = companyCustomers.find((customer) => String(customer.idCliente) === form.idCliente);
-  const filterCustomer = companyCustomers.find((customer) => String(customer.idCliente) === filters.idCliente);
+  const filterCustomer = companyCustomers.find((customer) => String(customer.idCliente) === (fixedCustomerId ? String(fixedCustomerId) : filters.idCliente));
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = Object.fromEntries(Object.entries({ idEmpresa, ...filters, page, pageSize: 20 }).filter(([, value]) => value !== ''));
+      const params = Object.fromEntries(Object.entries({ idEmpresa, ...filters, ...(fixedCustomerId ? { idCliente: fixedCustomerId } : {}), page, pageSize: 20 }).filter(([, value]) => value !== ''));
       const { data } = await api.get<ExternalTaxDocumentPage>('/external-tax-documents', { params });
       setDocuments(data.items);
       setTotalRows(data.pagination.totalRows);
@@ -45,14 +47,14 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
     } finally {
       setLoading(false);
     }
-  }, [idEmpresa, filters, page]);
+  }, [idEmpresa, filters, page, fixedCustomerId]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     setPage(1);
     setEditingId(null);
-    setForm(EMPTY_FORM);
-  }, [idEmpresa]);
+    setForm(customerForm());
+  }, [idEmpresa, fixedCustomerId]);
 
   function optionalNumber(value: string, clearWhenEditing = false) {
     if (value) return Number(value);
@@ -74,7 +76,7 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
         iva: optionalNumber(form.iva, true),
         montoTotal: Number(form.montoTotal),
         estado: form.estado,
-        idCliente: optionalNumber(form.idCliente, true),
+        idCliente: fixedCustomerId ?? optionalNumber(form.idCliente, true),
         idContrato: optionalNumber(form.idContrato, true),
         idFactura: optionalNumber(form.idFactura, true),
         idCargoAdicional: optionalNumber(form.idCargoAdicional, true),
@@ -90,7 +92,7 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
         setStatus('Documento tributario registrado');
       }
       setEditingId(null);
-      setForm(EMPTY_FORM);
+      setForm(customerForm());
       await load();
     } catch (error) {
       setStatus(apiErrorMessage(error));
@@ -129,13 +131,9 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   }
 
   return (
-    <details className="billing-workspace-section tax-documents" open>
-      <summary><span>Documentos tributarios</span><strong>{totalRows}</strong></summary>
+    <div className="tax-documents">
       <section className="panel stack">
-        <div className="section-heading">
-          <h2>Documentos tributarios externos</h2>
-          <p>Metadata de boletas y facturas externas. Fuente EXTERNO_MANUAL; Facturación.cl permanece sin integración.</p>
-        </div>
+        <p>Boletas y facturas emitidas fuera del CRM. Registra su folio, monto y comprobante para conservarlos junto al cliente.</p>
         {status && <p className="inline-status">{status}</p>}
 
         {canManage && (
@@ -152,15 +150,15 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
               <label>Exento opcional<input type="number" min="0" step="0.01" value={form.montoExento} onChange={(event) => setForm({ ...form, montoExento: event.target.value })} /></label>
               <label>IVA opcional<input type="number" min="0" step="0.01" value={form.iva} onChange={(event) => setForm({ ...form, iva: event.target.value })} /></label>
               <label>Estado<select value={form.estado} onChange={(event) => setForm({ ...form, estado: event.target.value })}><option value="REGISTRADO">Registrado</option><option value="ANULADO">Anulado</option></select></label>
-              <label>Cliente opcional<select value={form.idCliente} onChange={(event) => setForm({ ...form, idCliente: event.target.value, idContrato: '' })}><option value="">Sin cliente</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto} · {customer.rut ?? 'sin RUT'}</option>)}</select></label>
+              {!fixedCustomerId && <label>Cliente opcional<select value={form.idCliente} onChange={(event) => setForm({ ...form, idCliente: event.target.value, idContrato: '' })}><option value="">Sin cliente</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto} · {customer.rut ?? 'sin RUT'}</option>)}</select></label>}
               <label>Contrato opcional<select value={form.idContrato} onChange={(event) => setForm({ ...form, idContrato: event.target.value })}><option value="">Sin contrato</option>{(selectedCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato} · {contract.estado ?? '-'}</option>)}</select></label>
               <label>Factura opcional<input type="number" min="1" placeholder="ID factura" value={form.idFactura} onChange={(event) => setForm({ ...form, idFactura: event.target.value })} /></label>
               <label>Cargo opcional<input type="number" min="1" placeholder="ID cargo" value={form.idCargoAdicional} onChange={(event) => setForm({ ...form, idCargoAdicional: event.target.value })} /></label>
               <label className="tax-document-wide">URL opcional<input type="url" maxLength={2048} placeholder="https://..." value={form.urlDocumento} onChange={(event) => setForm({ ...form, urlDocumento: event.target.value })} /></label>
               <label className="tax-document-wide">Referencia opcional<input maxLength={200} value={form.referenciaExterna} onChange={(event) => setForm({ ...form, referenciaExterna: event.target.value })} /></label>
               <div className="button-row tax-document-wide">
-                <button type="submit">{editingId ? 'Guardar corrección' : 'Registrar metadata'}</button>
-                {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm(EMPTY_FORM); }}>Cancelar</button>}
+                <button type="submit">{editingId ? 'Guardar corrección' : 'Registrar documento'}</button>
+                {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm(customerForm()); }}>Cancelar</button>}
               </div>
             </form>
           </details>
@@ -171,7 +169,7 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
           <select aria-label="Filtrar tipo" value={filters.tipoDocumento} onChange={(event) => { setPage(1); setFilters({ ...filters, tipoDocumento: event.target.value }); }}><option value="">Todos los tipos</option><option value="BOLETA">Boleta</option><option value="FACTURA">Factura</option></select>
           <input aria-label="Filtrar folio" placeholder="Folio" value={filters.folio} onChange={(event) => { setPage(1); setFilters({ ...filters, folio: event.target.value }); }} />
           <input aria-label="Filtrar emisor" placeholder="Emisor/Proveedor" value={filters.emisorProveedor} onChange={(event) => { setPage(1); setFilters({ ...filters, emisorProveedor: event.target.value }); }} />
-          <select aria-label="Filtrar cliente" value={filters.idCliente} onChange={(event) => { setPage(1); setFilters({ ...filters, idCliente: event.target.value, idContrato: '' }); }}><option value="">Todos los clientes</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto}</option>)}</select>
+          {!fixedCustomerId && <select aria-label="Filtrar cliente" value={filters.idCliente} onChange={(event) => { setPage(1); setFilters({ ...filters, idCliente: event.target.value, idContrato: '' }); }}><option value="">Todos los clientes</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto}</option>)}</select>}
           <select aria-label="Filtrar contrato" value={filters.idContrato} onChange={(event) => { setPage(1); setFilters({ ...filters, idContrato: event.target.value }); }}><option value="">Todos los contratos</option>{(filterCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato}</option>)}</select>
           <input aria-label="Filtrar factura" type="number" min="1" placeholder="ID factura" value={filters.idFactura} onChange={(event) => { setPage(1); setFilters({ ...filters, idFactura: event.target.value }); }} />
           <select aria-label="Filtrar estado" value={filters.estado} onChange={(event) => { setPage(1); setFilters({ ...filters, estado: event.target.value }); }}><option value="">Todos los estados</option><option value="REGISTRADO">Registrado</option><option value="ANULADO">Anulado</option></select>
@@ -202,6 +200,6 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
         {loading && <p className="empty-state">Cargando documentos…</p>}
         <TablePagination currentPage={page} totalItems={totalRows} pageSize={20} onPageChange={setPage} />
       </section>
-    </details>
+    </div>
   );
 }

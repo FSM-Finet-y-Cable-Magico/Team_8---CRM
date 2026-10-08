@@ -39,7 +39,12 @@ export class PlansService {
       precioMensual: dto.precioMensual,
     });
     const idEmpresa = this.resolveCompanyId(dto.idEmpresa, currentUser);
-    const created = await this.prisma.plan.create({
+    if (dto.valorInstalacionZona !== undefined && !dto.idZonaPago) throw new BadRequestException('Selecciona la zona del precio de instalación');
+    if (dto.idZonaPago) {
+      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
+      if (!zone || zone.activo === false || zone.idEmpresa !== idEmpresa) throw new BadRequestException('La zona debe estar activa y pertenecer a la empresa del plan');
+    }
+    const planData = {
       data: {
         idEmpresa,
         nombreComercial: dto.nombreComercial.trim(),
@@ -51,7 +56,14 @@ export class PlansService {
         activo: dto.activo ?? true,
       },
       include: { empresa: true },
-    });
+    } satisfies Prisma.PlanCreateArgs;
+    const created = dto.idZonaPago
+      ? await this.prisma.$transaction(async tx => {
+          const plan = await tx.plan.create(planData);
+          await tx.planZonaPrecio.create({ data: { idPlan: plan.idPlan, idZonaPago: dto.idZonaPago!, precioMensual: dto.precioMensual, valorInstalacion: dto.valorInstalacionZona, activo: true } });
+          return plan;
+        })
+      : await this.prisma.plan.create(planData);
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,

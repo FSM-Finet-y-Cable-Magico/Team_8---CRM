@@ -20,6 +20,42 @@ const administrator: AuthUser = {
 
 describe('PlansService', () => {
   const audit = { record: jest.fn() };
+  beforeEach(() => jest.clearAllMocks());
+  const planInput = { idEmpresa: 1, nombreComercial: 'Plan por zona', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: 400, precioMensual: 24990, idZonaPago: 7, valorInstalacionZona: 15000 };
+
+  it.each([null, { idEmpresa: 2, activo: true }, { idEmpresa: 1, activo: false }])('rechaza zonas inexistentes, inactivas o de otra empresa antes de crear el plan', async zone => {
+    const prisma = { zonaPago: { findUnique: jest.fn().mockResolvedValue(zone) }, plan: { create: jest.fn() }, $transaction: jest.fn() };
+    const service = new PlansService(prisma as never, audit as never);
+    await expect(service.create(planInput, administrator)).rejects.toThrow('La zona');
+    expect(prisma.plan.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('crea plan y precio de zona en la misma transacción', async () => {
+    const created = { ...planInput, idPlan: 8 };
+    const tx = { plan: { create: jest.fn().mockResolvedValue(created) }, planZonaPrecio: { create: jest.fn().mockResolvedValue({}) } };
+    const prisma = { zonaPago: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1, activo: true }) }, plan: { create: jest.fn() }, $transaction: jest.fn(callback => callback(tx)) };
+    const service = new PlansService(prisma as never, audit as never);
+    expect(await service.create(planInput, commercial)).toBe(created);
+    expect(prisma.plan.create).not.toHaveBeenCalled();
+    expect(tx.planZonaPrecio.create).toHaveBeenCalledWith({ data: { idPlan: 8, idZonaPago: 7, precioMensual: 24990, valorInstalacion: 15000, activo: true } });
+    expect(audit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('propaga el fallo de precio por zona sin anunciar un plan creado', async () => {
+    const tx = { plan: { create: jest.fn().mockResolvedValue({ ...planInput, idPlan: 8 }) }, planZonaPrecio: { create: jest.fn().mockRejectedValue(new Error('Falló precio')) } };
+    const prisma = { zonaPago: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1, activo: true }) }, $transaction: jest.fn(callback => callback(tx)) };
+    await expect(new PlansService(prisma as never, audit as never).create(planInput, commercial)).rejects.toThrow('Falló precio');
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('permite crear planes sin zona y rechaza instalación sin zona', async () => {
+    const prisma = { plan: { create: jest.fn().mockResolvedValue({ ...planInput, idPlan: 8 }) } };
+    const service = new PlansService(prisma as never, audit as never);
+    await expect(service.create({ ...planInput, idZonaPago: undefined }, commercial)).rejects.toThrow('Selecciona la zona');
+    await service.create({ ...planInput, idZonaPago: undefined, valorInstalacionZona: undefined }, commercial);
+    expect(prisma.plan.create).toHaveBeenCalledTimes(1);
+  });
 
   it.each([
     [{ nombreComercial: '', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: 300, precioMensual: 19990 }, 'campos obligatorios'],

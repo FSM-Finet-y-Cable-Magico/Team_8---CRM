@@ -2,8 +2,8 @@ import { ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-export function ControlBookActionModal({ title, description, icon, busy, dark, onClose, children }: {
-  title: string; description: string; icon: ReactNode; busy: boolean; dark: boolean; onClose: () => void; children: ReactNode;
+export function ControlBookActionModal({ title, busy, dark, onClose, children }: {
+  title: string; busy: boolean; dark: boolean; onClose: () => void; children: ReactNode;
 }) {
   const dialog = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -42,8 +42,7 @@ export function ControlBookActionModal({ title, description, icon, busy, dark, o
     <div className="control-book-workspace control-action-modal">
       <div className="modal-backdrop" role="presentation" onMouseDown={() => { if (!busy) onClose(); }}>
         <section ref={dialog} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="control-action-title" aria-busy={busy} onMouseDown={event => event.stopPropagation()}>
-          <header className="modal-header"><div className="control-modal-heading"><span className="control-modal-symbol" aria-hidden="true">{icon}</span><div><span className="control-modal-eyebrow">Gestión comercial</span><h2 id="control-action-title" ref={titleRef} tabIndex={-1}>{title}</h2></div></div><button type="button" className="modal-close-button" aria-label="Cerrar formulario" disabled={busy} onClick={onClose}><X size={20}/></button></header>
-          <p className="control-modal-description">{description}</p>
+          <header className="modal-header"><h2 id="control-action-title" ref={titleRef} tabIndex={-1}>{title}</h2><button type="button" className="modal-close-button" aria-label="Cerrar formulario" disabled={busy} onClick={onClose}><X size={20}/></button></header>
           <div className="modal-content">{children}</div>
         </section>
       </div>
