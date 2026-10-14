@@ -1,0 +1,166 @@
+### Smoke local de los endpoints S2S de G2
+### Requiere: base local con scripts/g2/seed-g2-local.sql y backend en http://localhost:3000.
+### Preparación completa en docs/g2/CHECKLIST-ACTIVACION.md, sección "Smoke local".
+### La key de abajo es inventada y solo sirve en local. Nunca usar aquí una key real.
+
+@base = http://localhost:3000/api/integrations/g2
+@key = g2-smoke-local-key
+
+### 1. Sin key → 401
+GET {{base}}/invoices?id_empresa=1&id_cliente=990001
+
+### 2. Facturas por cliente, como las pide G2 → 200, 124 items en la raíz
+###    La suma de saldoExigible debe ser 1222990. La factura 990121 (sin monto) trae saldoExigible 0.
+GET {{base}}/invoices?id_empresa=1&id_cliente=990001
+X-API-KEY: {{key}}
+
+### 3. Facturas por contrato en la empresa 2 → 200, 1 item con saldoExigible 15000
+GET {{base}}/invoices?id_empresa=2&id_contrato=990002
+X-API-KEY: {{key}}
+
+### 4. Empresa fuera del scope de la key → 403
+GET {{base}}/invoices?id_empresa=3&id_cliente=990001
+X-API-KEY: {{key}}
+
+### 5. Cliente de otra empresa → 200 con items vacío (no revela que existe)
+GET {{base}}/invoices?id_empresa=2&id_cliente=990001
+X-API-KEY: {{key}}
+
+### 6. Detalle de la factura con pago parcial → saldoExigible 14990
+GET {{base}}/invoices/990123?id_empresa=1
+X-API-KEY: {{key}}
+
+### 7. Resultado WiFi con el body de G2, ticket en 'abierto' → 201, estado_ticket "Escalado"
+POST {{base}}/tickets/990001/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "47fa3f36-9f27-4a77-a3e0-0f602c080426",
+  "trace_id": "d80359ef-8999-46d8-80e6-699215f783c2",
+  "id_empresa": 1,
+  "resultado": "REQUIERE_ATENCION_MANUAL",
+  "detalle_saneado": "Solicitud registrada para atención por técnico."
+}
+
+### 8. Reintento idéntico → 201 con "duplicate": true (no 409)
+POST {{base}}/tickets/990001/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "47fa3f36-9f27-4a77-a3e0-0f602c080426",
+  "trace_id": "d80359ef-8999-46d8-80e6-699215f783c2",
+  "id_empresa": 1,
+  "resultado": "REQUIERE_ATENCION_MANUAL",
+  "detalle_saneado": "Solicitud registrada para atención por técnico."
+}
+
+### 9. Mismo request_id con otro contenido → 409
+POST {{base}}/tickets/990001/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "47fa3f36-9f27-4a77-a3e0-0f602c080426",
+  "trace_id": "d80359ef-8999-46d8-80e6-699215f783c2",
+  "id_empresa": 1,
+  "resultado": "ERROR_TECNICO",
+  "detalle_saneado": "G3 no respondió a la solicitud."
+}
+
+### 10. Ticket ya Cerrado → 409, el ticket no cambia
+POST {{base}}/tickets/990002/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "9d0c6a52-0c0b-4a3e-9f5e-2b7f4a1c1002",
+  "trace_id": "d80359ef-8999-46d8-80e6-699215f783c2",
+  "id_empresa": 1,
+  "resultado": "REQUIERE_ATENCION_MANUAL",
+  "detalle_saneado": "Solicitud registrada para atención por técnico."
+}
+
+### 11. APLICADO sobre un ticket abierto → 201, estado_ticket "Resuelto"
+POST {{base}}/tickets/990003/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "9d0c6a52-0c0b-4a3e-9f5e-2b7f4a1c1003",
+  "trace_id": "d80359ef-8999-46d8-80e6-699215f783c2",
+  "id_empresa": 1,
+  "resultado": "APLICADO",
+  "detalle_saneado": "Cambio de credenciales confirmado."
+}
+
+### 12. Nombre de campo antiguo → 400 si además falta el detalle
+POST {{base}}/tickets/990003/wifi-result
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "9d0c6a52-0c0b-4a3e-9f5e-2b7f4a1c1004",
+  "id_empresa": 1,
+  "resultado": "APLICADO"
+}
+
+### 13. Pago confirmado → 201, data.estado_factura "Pagada", data.duplicado false
+POST {{base}}/payments
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "id_empresa": 1,
+  "id_factura": 990124,
+  "monto": 8000,
+  "fecha_pago": "2026-10-02T18:15:00Z",
+  "codigo_autorizacion": "AUTH-987654",
+  "codigo_transaccion": "G2-SMOKE-TX-0001",
+  "pasarela": "PORTAL_G2"
+}
+
+### 14. Reintento idéntico del pago → 201, data.duplicado true, sin segundo pago
+POST {{base}}/payments
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "id_empresa": 1,
+  "id_factura": 990124,
+  "monto": 8000,
+  "fecha_pago": "2026-10-02T18:15:00Z",
+  "codigo_autorizacion": "AUTH-987654",
+  "codigo_transaccion": "G2-SMOKE-TX-0001",
+  "pasarela": "PORTAL_G2"
+}
+
+### 15. Sobrepago → 400
+POST {{base}}/payments
+X-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "id_empresa": 1,
+  "id_factura": 990123,
+  "monto": 99999,
+  "fecha_pago": "2026-10-02T18:15:00Z",
+  "codigo_autorizacion": "AUTH-000002",
+  "codigo_transaccion": "G2-SMOKE-TX-0002",
+  "pasarela": "PORTAL_G2"
+}
+
+### 16. Documento tributario → 200, estado "PENDIENTE", motivo "EMISION_NO_HABILITADA"
+GET {{base}}/payments/990001/tax-document?id_empresa=1
+X-API-KEY: {{key}}
+
+### 17. Documento tributario de un pago de otra empresa → 404
+GET {{base}}/payments/990001/tax-document?id_empresa=2
+X-API-KEY: {{key}}
+
+### 18. Comprobante → 200, comprobante_estado "PENDIENTE", sin redirect_url
+GET {{base}}/payments/990001/comprobante?id_empresa=1
+X-API-KEY: {{key}}
