@@ -1,5 +1,13 @@
 # Facturación.cl: emisión por pago en sandbox
 
+## Validación FiNet del 2026-10-15
+
+En `SecurityRealiseMatrizQA`, sobre el código publicado `2369db556f4763df0c0469d688a93fe3b3c0ad06`, se verificó también la empresa FiNet del CRM con una cuenta DEMO del proveedor: autenticación REST, abono de 100 sobre cobro de 200, boleta tipo 39 con folio 9300000141, PDF y replay del mismo pago sin segunda emisión. Ver el [detalle del ensayo](i3-facturacion-cl-checkpoint.md#validación-finet-del-2026-10-15).
+
+No fue necesario cambiar el cliente ni duplicar la integración para FiNet: la configuración existente separa empresas, perfiles y credenciales. Las credenciales recibidas para WebService autenticaron también con REST; no se añadió SOAP ni se interpretó el campo Puerto como un puerto TCP. La consulta de versión mantuvo la discrepancia conocida `version:array`; no se presentó como una versión contractual verificada.
+
+La configuración queda exclusivamente en `.env.facturacion-private`, ignorado por Git: perfil sandbox de FiNet preparado, emisión y entrega persistentes en false. La prueba habilitó el módulo solo en el proceso controlado y en una base temporal propia. El uso de una cuenta DEMO desde la empresa FiNet del CRM no certifica el emisor fiscal de FiNet ni habilita producción. El usuario autorizó un único envío del PDF y Gmail lo aceptó mediante STARTTLS autenticado; el estado quedó ENVIADO. Recuperar de nuevo el mismo documento no produjo otro correo ni una nueva boleta. El usuario confirmó el 2026-10-15 la recepción del correo con el PDF adjunto, cerrando la prueba demo del flujo abono, boleta, PDF y correo para FiNet. Los resultados del 2026-10-03 que siguen son históricos.
+
 Estado al 2026-10-03, rama feat/i3-facturacion-cl: **SANDBOX_BOLETA_VERIFICADA / PRODUCCION_NO_CERTIFICADA**. La API de pruebas de Cable Mágico generó una boleta desde un abono confirmado, se recuperó su PDF y se recibió el correo en una bandeja SMTP local. No acredita entrega a una casilla externa ni certificación SII/producción. FiNet requiere sus propias credenciales/perfil y prueba independiente.
 
 ## Flujo implementado

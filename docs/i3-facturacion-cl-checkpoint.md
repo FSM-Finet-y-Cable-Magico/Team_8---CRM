@@ -1,5 +1,42 @@
 # Checkpoint: boleta por pago y solicitud G3
 
+## Validación FiNet del 2026-10-15
+
+Rama `SecurityRealiseMatrizQA`; código de ejecución `2369db556f4763df0c0469d688a93fe3b3c0ad06`. Ensayo registrado a las 13:13 America/Santiago (2026-10-15T16:13:46.526Z). Esta sección documenta FiNet; el checkpoint posterior del 2026-10-03 conserva sus resultados originales.
+
+Se usaron los servicios reales BillingService, FacturacionClIssuer, PrismaTaxIntentStore, cliente REST y recuperador de PDF del commit indicado. No se inició AppModule ni se usó un endpoint del CRM desplegado. PostgreSQL se creó temporalmente como `fsm_finet_sandbox_qa`, con datos ficticios, sin puertos publicados ni volúmenes persistentes. Se cargó el DDL global y las cuatro migraciones tributarias/correo existentes únicamente en esa base. No se modificaron archivos de esquema, migraciones, servicios de negocio ni la integración de Cable Mágico.
+
+| Comprobación actual | Resultado |
+| --- | --- |
+| Cuenta del proveedor | DEMO; no corresponde a certificación fiscal de FiNet |
+| Autenticación REST con configuración privada de FiNet | PASS_SANDBOX; no se publicaron token, usuario ni clave |
+| Método SOAP público Online | Disponible; sin autenticación ni emisión |
+| Versión REST | CONTRACT_MISMATCH, version:array; discrepancia conocida, no ocultada |
+| Empresa local | FiNet, idEmpresa 1; Cable Mágico sin configurar en este proceso |
+| Registro del abono | BillingService.registerPayment; pago 1, cobro 1, abono 100 de 200, saldo 100 |
+| Orden de ejecución | Pago confirmado en PostgreSQL antes de la solicitud al proveedor |
+| Emisión autorizada en cuenta de pruebas | GENERADO, BOLETA tipo 39, folio 9300000141 |
+| Replay del mismo pago | PASS_SANDBOX; duplicate=true, un pago, una intención y una única solicitud de procesamiento |
+| PDF | DISPONIBLE; HTTPS, 1 página, 4719 bytes; texto confirma folio, receptor ficticio, total 100 y referencias al pago 1/cobro 1 |
+| SHA256 del PDF | 2d5ac16fb0f72f69aa2c07a1c46c98d13a5eb6301d31be28987ace919f5830a1 |
+| Trabajos tributarios de Cable Mágico | 0 |
+| SMTP de este documento | ENVIADO; una aceptación Gmail con STARTTLS y autenticación; mismo PDF verificado |
+| Replay de recuperación del correo | PASS_SANDBOX; un envío, un intento SMTP y cero solicitudes de emisión durante esta etapa |
+| Recepción del correo externo | PASS_SANDBOX; el usuario confirmó el 2026-10-15 la recepción del único correo con el PDF adjunto |
+| Higiene del repositorio | 7 pruebas PASS, 0 FAIL; configuración privada fuera de Git |
+| Railway / base compartida / emisión productiva | No utilizados |
+| Limpieza de QA | Contenedores y red temporales retirados; datos ficticios eliminados; servicios existentes conservados |
+
+Durante la fase pago/replay/PDF: 2 logins, 1 solicitud de procesamiento, 1 obtención de link y 3 descargas PDF (incluida verificación explícita); el replay no generó otro DTE. La lectura previa de autenticación/versión se realizó por separado y tampoco emitió documentos.
+
+La etapa de correo se completó a las 13:21 America/Santiago (2026-10-15T16:21:27.780Z), después de autorización expresa del destinatario de QA. Se recuperó la intención GENERADO existente, sin procesar otro DTE. El adjunto coincide byte a byte con el PDF comprobado anteriormente. El estado de correo quedó ENVIADO, con un intento; la segunda recuperación no llamó a SMTP. La aceptación del servidor y la recepción en buzón son comprobaciones separadas. El usuario confirmó el 2026-10-15 que recibió el correo con el PDF adjunto; queda validado el flujo demo de FiNet desde el abono hasta la recepción del documento.
+
+La configuración privada de FiNet usa las variables existentes FACTURACION_CL_FINET_SANDBOX_CREDENTIALS, FACTURACION_CL_COMPANIES y FACTURACION_CL_PROFILES. El archivo `.env.facturacion-private` permanece ignorado; ambos flags persistentes de emisión/entrega están en false. No se copiaron valores a código, plantillas, documentación ni comandos. Las credenciales del portal web no se mezclan con las del WebService. Durante el ensayo no se creó otra carpeta o repositorio ni se hicieron commits, push, PR, merges o llamadas G1/G2/G3/Meta. Después de confirmar la recepción del PDF, el usuario autorizó el 2026-10-15 publicar estos dos informes en SecurityRealiseMatrizQA, tras revisar el diff y comprobar que las credenciales privadas queden excluidas. El SHA de ejecución indicado arriba identifica el código probado; la publicación posterior de documentación se comprueba en el historial de la rama.
+
+La prueba valida una boleta demo para la empresa FiNet del CRM. Factura tipo 33/34, emisor fiscal productivo, datos fiscales definitivos, revisión del esquema compartido y despliegue permanecen fuera de esta validación.
+
+## Histórico del 2026-10-03
+
 2026-10-03. Rama feat/i3-facturacion-cl, base de continuación e2a7bbb54064e14c6d3c49cc264784b544a66a99. Se mantiene el merge de I3 1af19cc96e78ad1f4c3b12dc339f2d9332a82784. Sin PR, despliegue, Railway ni emisión productiva.
 
 ## Resultado comprobado
