@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { ProspectsService } from './prospects.service';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
+import { Prisma } from '@prisma/client';
 
 describe('ProspectsService', () => {
   const admin: AuthUser = {
@@ -22,15 +23,149 @@ describe('ProspectsService', () => {
     return date.toISOString().slice(0, 10);
   }
 
+  function manualFixture(overrides: Record<string, unknown> = {}, contract: unknown = null) {
+    const prospect = {
+      idProspecto: 10, idEmpresa: 1, idCliente: null, estadoPipeline: 'Prospecto Nuevo',
+      motivoPerdida: null, ...overrides,
+    };
+    const prisma = {
+      prospecto: {
+        findUnique: jest.fn().mockResolvedValue(prospect),
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
+      },
+      contrato: { findFirst: jest.fn().mockResolvedValue(contract) },
+    };
+    const audit = { record: jest.fn() };
+    const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService,
+      {} as MailService, {} as CoverageDomainService);
+    return { prospect, prisma, audit, service };
+  }
+
+  it.each(['Servicio Activo', 'Instalacion Programada', 'Aceptado', 'Pendiente firma',
+    'Contrato externo registrado', 'Factible', 'No Factible', 'Cotizacion Enviada'])(
+    'rechaza fabricar la etapa %s mediante PATCH generico incluso como administrador', async (estadoPipeline) => {
+      const { service, prisma, audit } = manualFixture();
+      await expect(service.updatePipeline(10, { estadoPipeline }, admin)).rejects.toThrow('operacion autorizada');
+      expect(prisma.prospecto.update).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Contactado', 'En Factibilidad', 'Servicio Activo', 'Instalacion Programada', 'Pendiente firma'])(
+    'Perdido no puede saltar a %s', async (estadoPipeline) => {
+      const { service, prisma } = manualFixture({ estadoPipeline: 'Perdido' });
+      await expect(service.updatePipeline(10, { estadoPipeline }, admin)).rejects.toThrow();
+      expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Firmado', 'Activo', 'Moroso', 'Suspendido', 'Pendiente firma contrato'])(
+    'protege relaciones %s tanto al reactivar como al registrar perdida', async (estado) => {
+      const { service, prisma } = manualFixture({ estadoPipeline: 'Perdido' }, { idContrato: 20, estado });
+      await expect(service.updatePipeline(10, { estadoPipeline: 'Prospecto Nuevo' }, admin)).rejects.toThrow('relaciones comerciales');
+      await expect(service.recordLoss(10, { motivo: 'Precio', observaciones: 'Motivo' }, admin)).rejects.toThrow('relaciones comerciales');
+      expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['Servicio Activo', 'Suspendido', 'Moroso', 'Estado historico desconocido'])(
+    'conserva estado historico %s para revision sin sobrescribirlo', async (estadoPipeline) => {
+      const { service, prisma, prospect } = manualFixture({ estadoPipeline });
+      await expect(service.updatePipeline(10, { estadoPipeline: 'Contactado' }, admin)).rejects.toThrow();
+      await expect(service.recordLoss(10, { motivo: 'Precio', observaciones: 'Motivo' }, admin)).rejects.toThrow();
+      expect(prisma.prospecto.update).not.toHaveBeenCalled();
+      expect(prospect.estadoPipeline).toBe(estadoPipeline);
+    },
+  );
+
+  it('protege el cliente relacionado incluso cuando faltan contratos historicos', async () => {
+    const { service, prisma } = manualFixture({ idCliente: 7 });
+    await expect(service.updatePipeline(10, { estadoPipeline: 'Contactado' }, admin)).rejects.toThrow('relaciones comerciales');
+    await expect(service.recordLoss(10, { motivo: 'Precio', observaciones: 'Motivo' }, admin)).rejects.toThrow('relaciones comerciales');
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
+  it('permite avance comercial inicial sin crear conversion ni alterar relaciones', async () => {
+    const { service, prisma } = manualFixture();
+    await service.updatePipeline(10, { estadoPipeline: 'Contactado' }, admin);
+    expect(prisma.prospecto.update).toHaveBeenCalledWith({
+      where: {
+        idProspecto: 10, idEmpresa: 1, estadoPipeline: 'Prospecto Nuevo', idCliente: null,
+        contratos: { none: { estado: { notIn: ['Baja', 'Anulado'] } } },
+      },
+      data: { estadoPipeline: 'Contactado', motivoPerdida: null }, include: { empresa: true },
+    });
+  });
+
+  it('si la activacion cambia el prospecto antes del update, falla sin auditar una transicion inexistente', async () => {
+    const { service, prisma, audit } = manualFixture();
+    prisma.prospecto.update.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('Changed', {
+      code: 'P2025', clientVersion: '5.22.0',
+    }));
+    await expect(service.updatePipeline(10, { estadoPipeline: 'Contactado' }, admin)).rejects.toMatchObject({ status: 409 });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('no permite al usuario sin empresa leer un prospecto sin empresa', async () => {
+    const { service, prisma } = manualFixture({ idEmpresa: null });
+    await expect(service.updatePipeline(10, { estadoPipeline: 'Contactado' }, {
+      ...admin, roles: ['Comercial'], idEmpresa: null,
+    })).rejects.toThrow('no tiene empresa');
+    expect(prisma.prospecto.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('mantiene visible y marcado para revision el historico Servicio Activo sin relacion real', async () => {
+    const historical = { idProspecto: 10, idCliente: null, idEmpresa: 1, estadoPipeline: 'Servicio Activo',
+      clasificacionComercial: 'CLIENTE', contratos: [] };
+    const prisma = { prospecto: { findMany: jest.fn().mockResolvedValue([historical]) } };
+    const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
+      {} as MailService, {} as CoverageDomainService);
+    const [result] = await service.list({ ...admin, roles: ['Comercial'] }, '2');
+    expect(result).toMatchObject({ ...historical, requiereRevisionComercial: true });
+    expect(historical.estadoPipeline).toBe('Servicio Activo');
+    expect(prisma.prospecto.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({ contratos: expect.objectContaining({ where: { idEmpresa: 1 } }) }),
+    }));
+  });
+
+  it('no bloquea visualmente un contrato real pendiente de firma', async () => {
+    const prospect = { idProspecto: 11, idEmpresa: 1, idCliente: null, estadoPipeline: 'Pendiente firma',
+      clasificacionComercial: 'PROSPECTO', contratos: [{ idContrato: 22, estado: 'Pendiente firma contrato' }] };
+    const prisma = { prospecto: { findMany: jest.fn().mockResolvedValue([prospect]) } };
+    const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
+      {} as MailService, {} as CoverageDomainService);
+    expect((await service.list(admin))[0].requiereRevisionComercial).toBe(false);
+  });
+
+  it('pendientes consolidados selecciona el contrato propio aunque exista otro ajeno mas reciente', async () => {
+    const foreign = { idContrato: 91, idEmpresa: 2, estado: 'Firmado', plan: { idEmpresa: 2 } };
+    const own = { idContrato: 90, idEmpresa: 1, estado: 'Firmado', plan: { idEmpresa: 1 } };
+    const prisma = {
+      empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1 }, { idEmpresa: 2 }]) },
+      prospecto: { findMany: jest.fn().mockResolvedValue([{ idProspecto: 10, idEmpresa: 1, contratos: [foreign, own] }]) },
+    };
+    const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
+      {} as MailService, {} as CoverageDomainService);
+    const [result] = await service.listPendingActivation(admin);
+    expect(result.contratos).toEqual([own]);
+    const args = prisma.prospecto.findMany.mock.calls[0][0];
+    expect(args.where.OR).toHaveLength(2);
+    expect(args.where.OR[0].AND[0]).toEqual({ idEmpresa: 1 });
+    expect(args.where.OR[1].AND[0]).toEqual({ idEmpresa: 2 });
+    expect(args.include.contratos.take).toBeUndefined();
+  });
+
   it('reactiva un prospecto perdido y limpia el motivo de perdida', async () => {
     const prospect = {
       idProspecto: 10,
       idEmpresa: 1,
       estadoPipeline: 'Perdido',
       motivoPerdida: 'Precio',
+      idCliente: null,
       fechaCreacion: new Date('2026-06-01T00:00:00.000Z'),
     };
     const prisma = {
+      contrato: { findFirst: jest.fn().mockResolvedValue(null) },
       prospecto: {
         findUnique: jest.fn().mockResolvedValue(prospect),
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
@@ -44,14 +179,14 @@ describe('ProspectsService', () => {
       {} as CoverageDomainService,
     );
 
-    const result = await service.updatePipeline(10, { estadoPipeline: 'Servicio Activo' }, admin);
+    const result = await service.updatePipeline(10, { estadoPipeline: 'Prospecto Nuevo' }, admin);
 
-    expect(result.estadoPipeline).toBe('Servicio Activo');
+    expect(result.estadoPipeline).toBe('Prospecto Nuevo');
     expect(result.motivoPerdida).toBeNull();
     expect(prisma.prospecto.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          estadoPipeline: 'Servicio Activo',
+          estadoPipeline: 'Prospecto Nuevo',
           motivoPerdida: null,
         }),
       }),
@@ -428,8 +563,10 @@ describe('ProspectsService', () => {
       idEmpresa: 1,
       estadoPipeline: 'Factible',
       motivoPerdida: null,
+      idCliente: null,
     };
     const prisma = {
+      contrato: { findFirst: jest.fn().mockResolvedValue(null) },
       prospecto: {
         findUnique: jest.fn().mockResolvedValue(prospect),
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
