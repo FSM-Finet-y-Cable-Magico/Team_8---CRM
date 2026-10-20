@@ -83,6 +83,21 @@ describe('Etapa 3 - adaptador HTTP G3', () => {
     expect(url.pathname).toBe('/api/integraciones/ordenes/OT%2FQA%201/cierre');
     expect(url.searchParams.get('id_empresa')).toBe('2');
   });
+  it('GET cierre autenticado conserva las referencias y campos técnicos del wrapper sin POST', async () => {
+    const data = {
+      id_ot: 901, id_empresa: 2, id_contrato: 20, id_prospecto: 10, id_plan: 7,
+      request_id: 'req-1', trace_id: 'trace-1', fecha_completada: '2026-10-07T12:30:00Z',
+      id_tecnico: 88, potencia_optica_dbm: -19.25, equipos_instalados: [], materiales: [],
+    };
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(200, { success: true, data }));
+    expect((await setup().getWorkOrderClosure('901', 2)).data).toEqual(data);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('http://localhost:3999/api/integraciones/ordenes/901/cierre?id_empresa=2');
+    expect(options?.method ?? 'GET').toBe('GET');
+    expect(options?.body).toBeUndefined();
+    expect(options?.headers).toEqual(expect.objectContaining({ 'X-API-KEY': 'secret-test' }));
+  });
   it.each([0, -1, 1.5, Number.NaN])('rechaza id_empresa no positivo antes de consultar G3: %s', async (idEmpresa) => {
     const fetchMock = jest.spyOn(global, 'fetch');
     await expect(setup().getWorkOrder('1', idEmpresa)).rejects.toMatchObject({ code: 'G3_SCOPE_EMPRESA_INVALIDO' });

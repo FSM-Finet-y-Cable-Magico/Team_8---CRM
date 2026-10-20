@@ -4,6 +4,7 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import PDFDocument from 'pdfkit';
+import { isISO8601 } from 'class-validator';
 import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -562,7 +563,7 @@ export class ContractsService {
 
   private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number) {
     const chunks: Buffer[] = [];
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolveBuffer, reject) => {
       doc.on('end', () => resolveBuffer(Buffer.concat(chunks)));
@@ -571,41 +572,97 @@ export class ContractsService {
 
     const price = await this.resolvePlanPrice(contract.idPlan ?? 0, contract.idZonaPago);
 
-    doc.fontSize(18).text('Contrato digital de servicios', { align: 'center' });
+    const text = (value: unknown, max = 300): string | null => typeof value === 'string'
+      && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value)
+      ? value.trim() : null;
+    const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+    const date = (value: unknown): string | null => {
+      if (typeof value !== 'string' || !isISO8601(value, { strict: true, strictSeparator: true })
+        || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+      return new Date(value).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
+    };
+    const width = doc.page.width - 100;
+    const ensureSpace = (height: number) => {
+      if (doc.y + height > doc.page.height - doc.page.margins.bottom) doc.addPage();
+    };
+    const row = (label: string, value: string | number | null) => {
+      doc.font('Helvetica').fontSize(11);
+      const line = `${label}: ${value ?? 'No informado'}`;
+      const options = { width, lineGap: 3 };
+      // Keep each bounded label/value together; PDFKit wraps long words within the page width.
+      ensureSpace(doc.heightOfString(line, options) + 5);
+      doc.text(line, 50, doc.y, options);
+      doc.moveDown(0.3);
+    };
+    const section = (title: string) => {
+      ensureSpace(80);
+      doc.moveDown(0.6);
+      doc.font('Helvetica-Bold').fontSize(14).text(title, 50, doc.y, { width });
+      doc.moveDown(0.4);
+    };
+    const block = (title: string, rows: Array<[string, string | number | null]>) => {
+      doc.font('Helvetica').fontSize(11);
+      const height = rows.reduce((total, [label, value]) => total
+        + doc.heightOfString(`${label}: ${value ?? 'No informado'}`, { width, lineGap: 3 }) + 5, 40);
+      // Keep a service and the document notes together instead of leaving orphan rows on a new page.
+      ensureSpace(height);
+      section(title);
+      rows.forEach(([label, value]) => row(label, value));
+    };
+    const person = contract.cliente ?? contract.prospecto;
+    doc.font('Helvetica-Bold').fontSize(18).text('Contrato digital de servicios', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(11).text(`Version: ${version}`);
-    doc.text(`Fecha generacion: ${new Date().toLocaleString('es-CL')}`);
-    doc.moveDown();
-    doc.fontSize(14).text('Cliente');
-    doc.fontSize(11).text(`Nombre: ${contract.cliente?.nombreCompleto ?? '-'}`);
-    doc.text(`RUT: ${contract.cliente?.rut ?? '-'}`);
-    doc.text(`Email: ${contract.cliente?.email ?? '-'}`);
-    doc.text(`Telefono: ${contract.cliente?.telefono ?? '-'}`);
-    doc.moveDown();
-    doc.fontSize(14).text('Contrato');
-    doc.fontSize(11).text(`ID contrato: ${contract.idContrato}`);
-    doc.text(`Empresa: ${contract.cliente?.empresa?.nombre ?? contract.idEmpresa ?? '-'}`);
-    doc.text(`Plan: ${contract.plan?.nombreComercial ?? '-'}`);
-    doc.text(`Precio mensual: ${price ? `$${Number(price).toLocaleString('es-CL')}` : '-'}`);
-    doc.text(`Dia de vencimiento: ${contract.diaVencimiento}`);
-    doc.text(`Estado: ${contract.estado}`);
-    doc.text(`Zona de pago: ${contract.zonaPago?.nombreZona ?? '-'}`);
-    doc.moveDown();
-    doc.fontSize(14).text('Servicios asociados');
-    contract.servicios.forEach((service) => {
-      doc.fontSize(11).text(`Servicio ${service.idServicio}: ${service.tipoServicio} - ${service.estadoOperativo}`);
-      doc.text(`Direccion: ${service.direccion?.direccionCompleta ?? '-'}`);
-      doc.text(`Datos tecnicos: ${JSON.stringify(service.datosTecnicos ?? {})}`);
-      if (service.equipos.length) {
-        doc.text('Equipos:');
-        service.equipos.forEach((unit) => {
-          doc.text(`- ${unit.numeroSerie} ${unit.modelo ?? ''} (${unit.estado}) modalidad: ${unit.modalidadAsignacion ?? '-'}`);
-        });
+    row('Versión', version);
+    row('Fecha de generación (Chile)', new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }));
+    section('Cliente');
+    row('Nombre', text(person?.nombreCompleto));
+    row('RUT', text(person?.rut, 12));
+    row('Correo electrónico', text(person?.email));
+    row('Teléfono', text(person?.telefono, 30));
+    section('Condiciones comerciales');
+    row('Empresa', text(person?.empresa?.nombre));
+    row('Plan', text(contract.plan?.nombreComercial));
+    row('Velocidad del plan', finite(contract.plan?.velocidadMbps) && contract.plan.velocidadMbps > 0
+      ? `${contract.plan.velocidadMbps} Mbps` : null);
+    const amount = price == null ? null : Number(price);
+    row('Precio mensual', finite(amount) && amount >= 0 ? `$${amount.toLocaleString('es-CL')}` : null);
+    row('Día de vencimiento', Number.isInteger(contract.diaVencimiento) && contract.diaVencimiento >= 1
+      && contract.diaVencimiento <= 31 ? contract.diaVencimiento : null);
+    row('Estado del contrato', text(contract.estado, 60));
+    row('Zona de pago', text(contract.zonaPago?.nombreZona));
+    if (!contract.servicios.length) {
+      section('Servicio contratado');
+      row('Dirección de instalación', text(contract.direccionInstalacion));
+      row('Datos de instalación', 'Todavía no registrados');
+    }
+    contract.servicios.forEach((service, index) => {
+      const rows: Array<[string, string | number | null]> = [
+        ['Tipo de servicio', text(service.tipoServicio, 60)],
+        ['Estado del servicio', text(service.estadoOperativo, 60)],
+        ['Dirección de instalación', text(service.direccion?.direccionCompleta)],
+      ];
+      const technical = service.datosTecnicos && typeof service.datosTecnicos === 'object'
+        && !Array.isArray(service.datosTecnicos) ? service.datosTecnicos : {};
+      // Whitelist persisted presentation fields only. No payloads, identifiers or live integration calls.
+      const completed = date(technical.fechaCompletadaG3);
+      if (completed) rows.push(['Finalización de instalación (Chile)', completed]);
+      if (finite(technical.potenciaOpticaDbm)) rows.push(['Potencia óptica registrada', `${technical.potenciaOpticaDbm} dBm`]);
+      const mac = text(technical.macAddress, 17);
+      const validMac = mac && /^(?:[\da-f]{2}:){5}[\da-f]{2}$/i.test(mac) ? mac : null;
+      if (validMac) rows.push(['MAC registrada', validMac]);
+      const olt = text(technical.puertoOlt, 80);
+      const validOlt = olt && /^[\w .:/-]+$/.test(olt) ? olt : null;
+      if (validOlt) rows.push(['Puerto OLT registrado', validOlt]);
+      if (!completed && !finite(technical.potenciaOpticaDbm) && !validMac && !validOlt) {
+        rows.push(['Datos técnicos', 'Sin información técnica validada']);
       }
-      doc.moveDown(0.5);
+      block(`Servicio contratado ${index + 1}`, rows);
     });
-    doc.moveDown();
-    doc.fontSize(10).text('Documento generado por el CRM FiNet/Cable Magico. La firma electronica avanzada queda fuera de esta etapa; el estado de firma se gestiona manualmente en el CRM.');
+    block('Información del documento', [
+      ['Datos técnicos', 'Corresponden a la información registrada al generar esta versión.'],
+      ['Equipos físicos', 'La asignación de equipos se consulta en el registro de inventario.'],
+      ['Firma', 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'],
+    ]);
     doc.end();
 
     return finished;

@@ -16,6 +16,7 @@ import { Modal, StatusBadge } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { ContractDocuments } from './ContractDocuments';
 import { PlanChangeHistory } from './PlanChangeHistory';
+import { HistoricalG3Closure } from './HistoricalG3Closure';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
 
@@ -231,7 +232,7 @@ export function CustomerServiceManagementModal({
         {permissions.manageContracts && <ContractDocuments idContrato={contract.idContrato} canGenerate={permissions.generateDigitalContract} />}
 
         <section className="customer-service-history">
-          <header><Wrench size={18} /><h3>Información de instalación</h3>{installationSource && <span>Fuente: {installationSource}</span>}</header>
+          <header><Wrench size={18} /><h3>Información de instalación guardada en G8</h3>{installationSource && <span>Origen: {installationSource}</span>}</header>
           <dl className="customer-readonly-details">
             <div><dt>Técnico instalador</dt><dd>{installationTechnician}</dd></div>
             <div><dt>Fecha instalación</dt><dd>{installation?.fechaCompletada
@@ -249,6 +250,9 @@ export function CustomerServiceManagementModal({
           </dl>
           {service.integracionG1?.ultimoErrorSanitizado && <p className="inline-status">{service.integracionG1.ultimoErrorSanitizado}</p>}
         </section>
+
+        {open && installation?.fuente === 'G3' && installation.estado === 'COMPLETADA'
+          && <HistoricalG3Closure key={service.idServicio} idServicio={service.idServicio} />}
 
         <section className="customer-service-history">
           <header><ClipboardList size={18} /><h3>Equipos instalados</h3><span>Fuente: G1</span></header>

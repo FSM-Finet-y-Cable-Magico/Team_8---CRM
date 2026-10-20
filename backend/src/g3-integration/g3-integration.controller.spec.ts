@@ -1,7 +1,30 @@
 import { BadRequestException } from '@nestjs/common';
+import { GUARDS_METADATA, HEADERS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { ACCESS_ROLES } from '../common/permissions';
 import { G3CanonicalWebhookController, G3IntegrationController } from './g3-integration.controller';
 
 const closure = { process: jest.fn().mockResolvedValue({ duplicate: false }) };
+
+describe('ruta autenticada de lectura histórica', () => {
+  it('usa GET, JWT, roles de consulta y no-store sin llamar al processor', async () => {
+    const installations = { historicalClosureForService: jest.fn().mockResolvedValue({ estadoConsulta: 'DISPONIBLE' }) };
+    const processor = { process: jest.fn() };
+    const controller = new G3IntegrationController(installations as never, processor as never);
+    const route = controller.historicalClosure;
+    expect(Reflect.getMetadata(PATH_METADATA, route)).toBe('services/:id/historical-closure');
+    expect(Reflect.getMetadata(METHOD_METADATA, route)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(GUARDS_METADATA, route)).toEqual([JwtAuthGuard, RolesGuard]);
+    expect(Reflect.getMetadata('roles', route)).toEqual(ACCESS_ROLES.VIEW_CORE_DATA);
+    expect(Reflect.getMetadata(HEADERS_METADATA, route)).toContainEqual({ name: 'Cache-Control', value: 'no-store' });
+    const user = { idUsuario: 5, idEmpresa: 2, roles: ['Comercial'] };
+    await controller.historicalClosure(50, user as never);
+    expect(installations.historicalClosureForService).toHaveBeenCalledWith(50, user);
+    expect(processor.process).not.toHaveBeenCalled();
+  });
+});
 
 describe('webhook G3 canónico y alias', () => {
   beforeEach(() => closure.process.mockClear());
