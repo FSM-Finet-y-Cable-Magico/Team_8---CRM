@@ -30,6 +30,12 @@ export class G2IntegrationController {
     return this.integrations.paymentReceipt(idPago, query.id_empresa);
   }
 
+  @Get('payments/:id/tax-document')
+  @IntegrationCompanyScope('query')
+  paymentTaxDocument(@Param('id', ParseIntPipe) idPago: number, @Query() query: G2CompanyQueryDto) {
+    return this.integrations.paymentTaxDocument(idPago, query.id_empresa);
+  }
+
   @Post('tickets/:idTicket/wifi-result')
   @IntegrationCompanyScope('body')
   wifiResult(@Param('idTicket', ParseIntPipe) idTicket: number, @Body() dto: G2WifiResultDto) {

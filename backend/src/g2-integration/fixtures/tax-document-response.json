@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": {
+    "id_pago": 9001,
+    "estado": "GENERADO",
+    "tipo_documento": "BOLETA",
+    "folio": "123456",
+    "fecha_emision": "2026-10-02",
+    "email_estado": "ENVIADO",
+    "documento_url": "https://www.facturacion.cl/sistema/descargar.php?id=ejemplo"
+  }
+}

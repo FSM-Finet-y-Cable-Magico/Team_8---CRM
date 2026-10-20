@@ -1,0 +1,10 @@
+{
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "id_empresa": 1,
+  "id_factura": 101,
+  "monto": 14990,
+  "fecha_pago": "2026-10-02T18:15:00Z",
+  "codigo_autorizacion": "AUTH-987654",
+  "codigo_transaccion": "PORTAL-20261002-000001",
+  "pasarela": "PORTAL_G2"
+}
