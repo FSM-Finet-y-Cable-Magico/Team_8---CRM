@@ -37,6 +37,7 @@ export type UserRow = {
 };
 
 export type Prospect = {
+  requiereRevisionComercial?: boolean;
   idProspecto: number;
   idCliente: number | null;
   rut: string | null;

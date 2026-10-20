@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -64,7 +65,7 @@ export class ProspectsService {
   async list(currentUser: AuthUser, scope = 'consolidado') {
     const companyScope = this.companyScope(currentUser, scope);
 
-    return this.prisma.prospecto.findMany({
+    const prospects = await this.prisma.prospecto.findMany({
       where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
@@ -77,6 +78,7 @@ export class ProspectsService {
           },
         },
         contratos: {
+          where: companyScope,
           select: {
             idContrato: true,
             estado: true,
@@ -87,25 +89,48 @@ export class ProspectsService {
         },
       },
     });
+    return prospects.map((prospect) => ({
+      ...prospect,
+      requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
+        || (!([...PIPELINE_STATUSES.slice(0, 6), null].includes(prospect.estadoPipeline))
+          && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
+            && [PENDING_SIGNATURE_PIPELINE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
+    }));
   }
 
   async listPendingActivation(currentUser: AuthUser, scope = 'consolidado') {
     const companyScope = this.companyScope(currentUser, scope);
+    const companies = companyScope.idEmpresa === undefined
+      ? await this.prisma.empresa.findMany({ select: { idEmpresa: true } })
+      : [{ idEmpresa: companyScope.idEmpresa }];
 
-    return this.prisma.prospecto.findMany({
-      where: pendingActivationWhere(companyScope),
+    const prospects = await this.prisma.prospecto.findMany({
+      where: { OR: companies.map(({ idEmpresa }) => pendingActivationWhere({ idEmpresa })) },
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
         empresa: true,
         contratos: {
-          where: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } },
+          where: {
+            ...companyScope,
+            estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] },
+            servicios: { none: { estadoOperativo: { notIn: ['Pendiente Instalacion', 'Instalacion Programada'] } } },
+          },
           include: { plan: true },
           orderBy: { fechaFirmaManual: 'desc' },
-          take: 1,
         },
       },
     });
+    return prospects.map((prospect) => ({
+      ...prospect,
+      contratos: prospect.contratos
+        .filter((contract) => contract.idEmpresa === prospect.idEmpresa)
+        .slice(0, 1)
+        .map((contract) => ({
+          ...contract,
+          plan: contract.plan?.idEmpresa === prospect.idEmpresa ? contract.plan : null,
+        })),
+    }));
   }
   async create(dto: CreateProspectDto, currentUser: AuthUser) {
     const rutResult = validateRut(dto.rut);
@@ -195,18 +220,17 @@ export class ProspectsService {
     const currentStatus = prospect.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
 
     this.validatePipelineTransition(currentStatus, nextStatus);
+    await this.assertManualCommercialChange(prospect);
 
     const isReactivation = currentStatus === LOST_PIPELINE_STATUS;
-    const conversionData = this.conversionData(nextStatus, prospect.fechaCreacion);
     const updated = await this.prisma.prospecto.update({
-      where: { idProspecto },
+      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
       data: {
         estadoPipeline: nextStatus,
         motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
-        ...conversionData,
       },
       include: { empresa: true },
-    });
+    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -214,7 +238,7 @@ export class ProspectsService {
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
       valorAnterior: { estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida },
-      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida, ...conversionData },
+      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
     });
 
     return updated;
@@ -455,9 +479,13 @@ export class ProspectsService {
 
   async recordLoss(idProspecto: number, dto: RecordLossDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    await this.assertManualCommercialChange(prospect);
+    if (![...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline)) {
+      throw new BadRequestException('La perdida comercial no puede cancelar contratos o instalaciones; requiere revision');
+    }
 
     const updated = await this.prisma.prospecto.update({
-      where: { idProspecto },
+      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
       data: {
         estadoPipeline: LOST_PIPELINE_STATUS,
         motivoPerdida: dto.motivo,
@@ -466,7 +494,7 @@ export class ProspectsService {
         idUsuarioPerdida: currentUser.idUsuario,
       },
       include: { empresa: true },
-    });
+    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -1147,6 +1175,7 @@ export class ProspectsService {
   }
 
   private async getProspectOrThrow(idProspecto: number, currentUser: AuthUser) {
+    this.companyScope(currentUser, 'consolidado');
     const prospect = await this.prisma.prospecto.findUnique({
       where: { idProspecto },
     });
@@ -1163,12 +1192,19 @@ export class ProspectsService {
   }
 
   private validatePipelineTransition(currentStatus: string, nextStatus: string) {
-    if (!PIPELINE_STATUSES.includes(nextStatus)) {
-      throw new BadRequestException('Estado fuera de la secuencia permitida');
+    const manualStatuses = PIPELINE_STATUSES.slice(0, 3);
+    if (!manualStatuses.includes(nextStatus)) {
+      throw new BadRequestException('Esta etapa requiere su operacion autorizada; no se permite mediante el pipeline manual');
     }
 
     if (currentStatus === LOST_PIPELINE_STATUS) {
+      if (nextStatus !== INITIAL_PIPELINE_STATUS) {
+        throw new BadRequestException('Un prospecto perdido solo puede reactivarse como Prospecto Nuevo');
+      }
       return;
+    }
+    if (!manualStatuses.includes(currentStatus)) {
+      throw new BadRequestException('El estado actual requiere una operacion especializada o revision historica');
     }
 
     const currentIndex = this.statusIndex(currentStatus);
@@ -1194,18 +1230,35 @@ export class ProspectsService {
     return 'Internet';
   }
 
-  private conversionData(nextStatus: string, fechaCreacion: Date | null) {
-    if (![EXTERNAL_CONTRACT_PIPELINE_STATUS, 'Servicio Activo'].includes(nextStatus) || !fechaCreacion) {
-      return {};
-    }
-
-    const now = new Date();
-    const millisecondsPerDay = 1000 * 60 * 60 * 24;
-
+  private manualChangeWhere(idProspecto: number, estadoPipeline: string | null, idEmpresa: number | null): Prisma.ProspectoWhereUniqueInput {
     return {
-      fechaConversion: now,
-      tiempoConversionDias: Math.max(0, Math.ceil((now.getTime() - fechaCreacion.getTime()) / millisecondsPerDay)),
+      idProspecto,
+      idEmpresa,
+      estadoPipeline,
+      idCliente: null,
+      contratos: {
+        none: { estado: { notIn: ['Baja', 'Anulado'] } },
+      },
     };
+  }
+
+  private async assertManualCommercialChange(prospect: { idProspecto: number; idCliente: number | null }) {
+    if (prospect.idCliente != null || await this.prisma.contrato.findFirst({
+      where: {
+        idProspecto: prospect.idProspecto,
+        estado: { notIn: ['Baja', 'Anulado'] },
+      },
+      select: { idContrato: true },
+    })) {
+      throw new BadRequestException('El prospecto tiene relaciones comerciales; utilice la operacion contractual correspondiente');
+    }
+  }
+
+  private rethrowConcurrentChange(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      throw new ConflictException('El prospecto cambio durante la operacion; vuelva a consultar su estado');
+    }
+    throw error;
   }
 
   private parseOptionalDate(value: string | undefined, fieldName: string) {

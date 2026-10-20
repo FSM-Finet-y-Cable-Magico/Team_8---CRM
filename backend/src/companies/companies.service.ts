@@ -20,8 +20,7 @@ export class CompaniesService {
     const customerFilter = this.buildCustomerCompanyFilter(effectiveScope);
     const companyFilter = this.buildCompanyFilter(effectiveScope);
     const activeProspectFilter = activeProspectWhere(companyFilter);
-    const pendingActivationFilter = pendingActivationWhere(companyFilter);
-    const activeCustomerFilter = activeCustomerWhere(customerFilter);
+    const activeCustomerFilter = activeCustomerWhere(customerFilter, companyFilter);
     const companiesFilter = 'idEmpresa' in companyFilter ? companyFilter : {};
     const today = todayDateOnly();
     const monthStart = parseDateOnly(`${today.slice(0, 8)}01`);
@@ -31,10 +30,13 @@ export class CompaniesService {
       throw new BadRequestException('No se pudo calcular el periodo operativo');
     }
 
+    const empresas = await this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } });
+    // Match prospect and contract within each company even in the consolidated view.
+    const pendingActivationFilter = { OR: empresas.map(({ idEmpresa }) => pendingActivationWhere({ idEmpresa })) };
+
     const [
       prospectos,
       pendientesActivacion,
-      empresas,
       instalacionesPendientes,
       ticketsAbiertos,
       clientesMorosos,
@@ -53,7 +55,6 @@ export class CompaniesService {
     ] = await Promise.all([
       this.prisma.prospecto.count({ where: activeProspectFilter }),
       this.prisma.prospecto.count({ where: pendingActivationFilter }),
-      this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } }),
       this.prisma.ordenTrabajo.count({
         where: {
           ...companyFilter,
@@ -68,7 +69,9 @@ export class CompaniesService {
         where: {
           AND: [
             customerFilter,
-            { estado: { in: ['Moroso', 'Suspendido'] } },
+            'idEmpresa' in companyFilter
+              ? { contratos: { some: { ...companyFilter, estado: { in: ['Moroso', 'Suspendido'] } } } }
+              : { estado: { in: ['Moroso', 'Suspendido'] } },
           ],
         },
       }),
@@ -184,7 +187,7 @@ export class CompaniesService {
           idCliente: contract.idCliente,
           cliente: contract.cliente?.nombreCompleto ?? 'Cliente sin nombre',
           rut: contract.cliente?.rut ?? null,
-          plan: contract.plan?.nombreComercial ?? null,
+          plan: contract.plan?.idEmpresa === contract.idEmpresa ? contract.plan?.nombreComercial ?? null : null,
           estado: contract.estado,
           fechaVencimiento: dueDate.toISOString().slice(0, 10),
           diasRestantes: daysUntilDue,
@@ -225,8 +228,8 @@ export class CompaniesService {
         idCambioPlan: change.idCambioPlan,
         idContrato: change.idContrato,
         cliente: change.cliente?.nombreCompleto ?? 'Cliente sin nombre',
-        planAnterior: change.planAnterior?.nombreComercial ?? null,
-        planNuevo: change.planNuevo.nombreComercial,
+        planAnterior: change.planAnterior?.idEmpresa === change.idEmpresa ? change.planAnterior?.nombreComercial ?? null : null,
+        planNuevo: change.planNuevo.idEmpresa === change.idEmpresa ? change.planNuevo.nombreComercial : 'Plan no disponible',
         fechaRegistro: change.fechaRegistro,
         fechaEfectiva: change.fechaEfectiva,
         estadoCambio: change.estadoCambio,

@@ -48,7 +48,6 @@ describe('CompaniesService', () => {
         AND: [
           { idEmpresa: 1 },
           { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
-          { clasificacionComercial: 'PROSPECTO' },
           { idCliente: null },
           { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
         ],
@@ -60,7 +59,6 @@ describe('CompaniesService', () => {
           AND: [
             { idEmpresa: 1 },
             { OR: [{ estadoPipeline: null }, { estadoPipeline: { not: 'Perdido' } }] },
-          { clasificacionComercial: 'PROSPECTO' },
             { idCliente: null },
             { contratos: { none: { estado: { in: ['Firmado', 'Activo', 'Suspendido', 'Moroso'] } } } },
           ],
@@ -76,9 +74,15 @@ describe('CompaniesService', () => {
               { contratos: { some: { idEmpresa: 1 } } },
             ],
           },
-          { servicios: { some: { estadoOperativo: 'Activo' } } },
+          { servicios: { some: { idEmpresa: 1, estadoOperativo: 'Activo' } } },
         ],
       },
+    });
+    expect(prisma.cliente.count).toHaveBeenNthCalledWith(1, {
+      where: { AND: [
+        { OR: [{ idEmpresa: 1 }, { contratos: { some: { idEmpresa: 1 } } }] },
+        { contratos: { some: { idEmpresa: 1, estado: { in: ['Moroso', 'Suspendido'] } } } },
+      ] },
     });
     expect(prisma.empresa.findMany).toHaveBeenCalledWith({
       where: { idEmpresa: 1 },
@@ -90,5 +94,36 @@ describe('CompaniesService', () => {
     const service = new CompaniesService({} as PrismaService);
 
     await expect(service.summary({ ...commercial, idEmpresa: null })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    { user: { ...commercial, idEmpresa: 2 }, scope: '1', expected: { idEmpresa: 2 } },
+    { user: { ...commercial, roles: ['Administrador'] }, scope: '2', expected: { idEmpresa: 2 } },
+    { user: { ...commercial, roles: ['Administrador'] }, scope: 'consolidado', expected: {} },
+  ])('limita servicios y consultas anidadas con scope $scope y rol $user.roles', async ({ user, scope, expected }) => {
+    const count = () => jest.fn().mockResolvedValue(0);
+    const rows = () => jest.fn().mockResolvedValue([]);
+    const prisma = {
+      cliente: { count: count() }, prospecto: { count: count(), groupBy: rows() },
+      empresa: { findMany: rows() }, ordenTrabajo: { count: count() },
+      ticket: { count: count(), findMany: rows() }, unidadEquipo: { count: count() },
+      servicioContratado: { count: count() }, contrato: { count: count(), findMany: rows() },
+      solicitudCliente: { count: count() }, historialCambioPlan: { findMany: rows() },
+      categoriaFalla: { findMany: rows() },
+    };
+    const service = new CompaniesService(prisma as unknown as PrismaService);
+    await service.summary(user, scope);
+    expect(prisma.cliente.count).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { AND: expect.arrayContaining([
+        { servicios: { some: { ...expected, estadoOperativo: 'Activo' } } },
+      ]) },
+    }));
+    expect(prisma.servicioContratado.count).toHaveBeenCalledWith({
+      where: { ...expected, estadoOperativo: 'Activo' },
+    });
+    expect(prisma.contrato.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { ...expected, estado: { in: ['Activo', 'Moroso', 'Suspendido'] } },
+    }));
+    expect(prisma.historialCambioPlan.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expected }));
   });
 });

@@ -201,7 +201,7 @@ export function ProspectsPanel({
                 <tr key={prospect.idProspecto}>
                   <td>{prospect.rut}</td>
                   <td>{prospect.nombreCompleto}</td>
-                  <td>{prospect.estadoPipeline}</td>
+                  <td>{prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline}</td>
                   <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
                   <td>

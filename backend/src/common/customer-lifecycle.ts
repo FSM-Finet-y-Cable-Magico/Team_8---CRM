@@ -16,7 +16,8 @@ export function activeProspectWhere(
           { estadoPipeline: { not: LOST_PROSPECT_PIPELINE_STATUS } },
         ],
       },
-      { clasificacionComercial: 'PROSPECTO' },
+      // Historical labels are not evidence of conversion. Keep unlinked records
+      // visible for review rather than silently dropping them from both lists.
       { idCliente: null },
       { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
     ],
@@ -25,9 +26,10 @@ export function activeProspectWhere(
 
 export function activeCustomerWhere(
   companyScope: Prisma.ClienteWhereInput,
+  serviceScope: Prisma.ServicioContratadoWhereInput,
 ): Prisma.ClienteWhereInput {
   return {
-    AND: [companyScope, { servicios: { some: { estadoOperativo: ACTIVE_CUSTOMER_STATUS } } }],
+    AND: [companyScope, { servicios: { some: { ...serviceScope, estadoOperativo: ACTIVE_CUSTOMER_STATUS } } }],
   };
 }
 
@@ -61,14 +63,24 @@ export function resolveCustomerLifecycleStatus(input: {
 }
 
 export function pendingActivationWhere(
-  companyScope: Prisma.ProspectoWhereInput,
+  companyScope: { idEmpresa: number },
 ): Prisma.ProspectoWhereInput {
   return {
     AND: [
       companyScope,
-      { clasificacionComercial: 'PROSPECTO' },
-      { idCliente: null },
-      { contratos: { some: { estado: { in: SIGNED_CONTRACT_STATES } } } },
+      {
+        contratos: {
+          some: {
+            ...companyScope,
+            estado: { in: SIGNED_CONTRACT_STATES },
+            // An existing customer may be awaiting activation of another contract.
+            // Established, suspended or retired services are not pending activations.
+            servicios: {
+              none: { estadoOperativo: { notIn: ['Pendiente Instalacion', 'Instalacion Programada'] } },
+            },
+          },
+        },
+      },
     ],
   };
 }

@@ -63,10 +63,11 @@ export function ProspectWorkflowPanel({
   }, [availablePlanIds]);
 
   const currentStatus = prospect.estadoPipeline ?? 'Prospecto Nuevo';
-  const isFactible = FACTIBLE_STATUSES.includes(currentStatus);
+  const requiresReview = prospect.requiereRevisionComercial === true;
+  const isFactible = !requiresReview && FACTIBLE_STATUSES.includes(currentStatus);
   const isNoFactible = currentStatus === 'No Factible';
-  const isQuoted = QUOTED_STATUSES.includes(currentStatus);
-  const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
+  const isQuoted = !requiresReview && QUOTED_STATUSES.includes(currentStatus);
+  const isFinal = requiresReview || FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(pendingContract);
   const planOptions = plans.filter((plan) =>
@@ -168,8 +169,11 @@ export function ProspectWorkflowPanel({
             <h3>{prospect.nombreCompleto}</h3>
             <p>{prospect.rut ?? 'RUT no registrado'}</p>
           </div>
-          <StatusBadge value={prospect.estadoPipeline} />
+          <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : prospect.estadoPipeline} />
         </header>
+        {requiresReview && (
+          <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
+        )}
         <dl className="prospect-overview-data">
           <div>
             <dt>Teléfono</dt>
@@ -302,7 +306,7 @@ export function ProspectWorkflowPanel({
         )}
       </div>
 
-        {pendingContract && permissions.manageContracts && (
+        {pendingContract && permissions.manageContracts && !requiresReview && (
           <section className="prospect-action-card prospect-action-card-contract">
             <header className="prospect-action-header"><div><h4>Confirmar firma de contrato</h4><p>Al confirmar, la persona pasa a Pendiente de activacion. No se crea cliente ni servicio todavia.</p></div></header>
             <button type="button" onClick={() => void runAction(() => api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}), 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Confirmar firma</button>
