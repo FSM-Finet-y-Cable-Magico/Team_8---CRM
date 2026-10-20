@@ -15,7 +15,7 @@ async function setup(enabled=true,ready=true) {
   const env=new ConfigService({FACTURACION_CL_INTEGRATION_ENABLED:String(enabled),FACTURACION_CL_DELIVERY_ENABLED:'true',FACTURACION_CL_COMPANIES:JSON.stringify([{idEmpresa:2,alias:'CM',environment:'sandbox',enabled:true}]),FACTURACION_CL_PROFILES:JSON.stringify([profile]),FACTURACION_CL_CM_SANDBOX_CREDENTIALS:JSON.stringify({usuario:'FAKE',rut:'66666666-6',clave:'FAKE'})});
   const config=new FacturacionClPaymentConfig(env,new FacturacionClConfigService(env));
   const job={...context,documento:Buffer.from('FAKE'),tipoDte:39,formato:1,folioEsperado:'0',policyVersion:'PER_PAYMENT_V1',profileHash:config.profileHash(config.profile(2)!),estado:'PENDIENTE',email:context.receiver.email,nombreCliente:context.receiver.name};
-  const record={idIntencion:'FAKE',idEmpresa:2,idPago:7,estado:'GENERADO',tipoDte:39,folio:'20',artefactoUrl:null,artefactoEstado:'PENDIENTE',emailEstado:'PENDIENTE',emailIntentos:0,fechaProximoEmail:null as Date|null,ultimoErrorEmail:null as string|null};
+  const record={idIntencion:'FAKE',idEmpresa:2,idPago:7,estado:'GENERADO',tipoDte:39,folio:'20',artefactoUrl:null as string|null,artefactoEstado:'PENDIENTE',emailEstado:'PENDIENTE',emailIntentos:0,fechaProximoEmail:null as Date|null,ultimoErrorEmail:null as string|null};
   const prisma={$queryRaw:jest.fn().mockResolvedValue([{ready}]),pago:{findUnique:jest.fn().mockResolvedValue({idCliente:3,factura:{contrato:{idEmpresa:2,idCliente:3,cliente:{idEmpresa:2}}}})},taxPaymentJob:{create:jest.fn(),findUnique:jest.fn().mockResolvedValue(job),findFirst:jest.fn().mockResolvedValue(job),findMany:jest.fn().mockResolvedValue([]),update:jest.fn()},documentoTributarioExterno:{count:jest.fn().mockResolvedValue(0)},
     taxEmissionIntent:{findUnique:jest.fn().mockResolvedValue(null),findMany:jest.fn().mockImplementation(async()=>['PENDIENTE','NO_CONFIGURADO','REINTENTO_PENDIENTE'].includes(record.emailEstado)?[{...record}]:[]),findFirst:jest.fn().mockImplementation(async()=>({...record})),update:jest.fn(),updateMany:jest.fn().mockImplementation(async args=>{
       if(args.where.fechaEmailInicio || args.where.estado==='EN_PROCESO')return{count:0};
@@ -175,5 +175,62 @@ describe('FacturacionCl payment pipeline (fake provider, no emissions)',()=>{
     prisma.taxEmissionIntent.findUnique.mockResolvedValue({...record,fingerprint:input.fingerprint,emailEstado:'ENVIADO'} as never);
     await expect(issuer.reconcileEmail(7,input,admin)).rejects.toThrow('La identidad');
     expect(database.$transaction).not.toHaveBeenCalled();expect(mail.sendTaxDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe('Explicit recovery of expired artifact links (fake provider only)',()=>{
+  const expired='https://www.facturacion.cl/plano/descargar.php?fixture=EXPIRED';
+  const renewed='https://www.facturacion.cl/plano/descargar.php?fixture=RENEWED';
+  const operator={idUsuario:7,idEmpresa:2,email:null,nombreCompleto:'QA',roles:['Comercial']};
+  it.each(['ENVIADO','SIMULADO','EN_PROCESO','RESULTADO_INDETERMINADO','SIN_DESTINATARIO'])('refreshes PDF after email state %s without sending or issuing',async emailEstado=>{
+    const {issuer,prisma,record,mail}=await setup();
+    record.artefactoUrl=expired;record.artefactoEstado='DISPONIBLE';record.emailEstado=emailEstado;
+    prisma.taxEmissionIntent.findUnique.mockImplementation(async()=>({...record}) as never);
+    const emission=jest.spyOn(issuer.intents,'execute');
+    const getLink=jest.spyOn(issuer.artifacts,'getLink').mockResolvedValue(renewed);
+    const download=jest.spyOn(issuer.artifacts,'downloadPdf').mockResolvedValue(Buffer.from('%PDF-RENEWED'));
+    await issuer.recoverArtifacts(7,operator);
+    expect(getLink).toHaveBeenCalledWith(2,39,'20');expect(download).toHaveBeenCalledWith(renewed);
+    expect(prisma.taxEmissionIntent.update).toHaveBeenCalledWith({where:{idIntencion:'FAKE'},data:{artefactoUrl:renewed,artefactoEstado:'PENDIENTE'}});
+    expect(prisma.taxEmissionIntent.update).toHaveBeenCalledWith({where:{idIntencion:'FAKE'},data:{artefactoEstado:'DISPONIBLE'}});
+    expect(record).toMatchObject({estado:'GENERADO',folio:'20',emailEstado});
+    expect(mail.sendTaxDocument).not.toHaveBeenCalled();expect(emission).not.toHaveBeenCalled();
+  });
+  it('marks a failed refresh against the observed link without overwriting fiscal or email states',async()=>{
+    const {issuer,prisma,record,mail}=await setup();
+    record.artefactoUrl=expired;record.artefactoEstado='DISPONIBLE';record.emailEstado='ENVIADO';
+    prisma.taxEmissionIntent.findUnique.mockImplementation(async()=>({...record}) as never);
+    const emission=jest.spyOn(issuer.intents,'execute');
+    jest.spyOn(issuer.artifacts,'getLink').mockRejectedValue(new Error('FAKE_PRIVATE_PROVIDER_RESPONSE'));
+    const download=jest.spyOn(issuer.artifacts,'downloadPdf');
+    await issuer.recoverArtifacts(7,operator);
+    expect(prisma.taxEmissionIntent.updateMany).toHaveBeenCalledWith({where:{idIntencion:'FAKE',idEmpresa:2,estado:'GENERADO',artefactoUrl:expired},data:{artefactoEstado:'FALLIDO'}});
+    expect(prisma.taxEmissionIntent.update).not.toHaveBeenCalled();expect(download).not.toHaveBeenCalled();
+    expect(record).toMatchObject({estado:'GENERADO',emailEstado:'ENVIADO'});
+    expect(mail.sendTaxDocument).not.toHaveBeenCalled();expect(emission).not.toHaveBeenCalled();
+  });
+  it('rejects a non-PDF refresh while preserving the generated DTE and sent email',async()=>{
+    const {issuer,prisma,record,mail}=await setup();
+    record.artefactoUrl=expired;record.artefactoEstado='DISPONIBLE';record.emailEstado='ENVIADO';
+    prisma.taxEmissionIntent.findUnique.mockImplementation(async()=>({...record}) as never);
+    const emission=jest.spyOn(issuer.intents,'execute');
+    jest.spyOn(issuer.artifacts,'getLink').mockResolvedValue(renewed);
+    jest.spyOn(issuer.artifacts,'downloadPdf').mockRejectedValue(new Error('ARTIFACT_NOT_PDF'));
+    await issuer.recoverArtifacts(7,operator);
+    expect(prisma.taxEmissionIntent.update).toHaveBeenCalledWith({where:{idIntencion:'FAKE'},data:{artefactoEstado:'FALLIDO'}});
+    expect(record).toMatchObject({estado:'GENERADO',emailEstado:'ENVIADO'});
+    expect(mail.sendTaxDocument).not.toHaveBeenCalled();expect(emission).not.toHaveBeenCalled();
+  });
+  it('two explicit recoveries of a pending email still send once and never issue',async()=>{
+    const {issuer,prisma,record,mail}=await setup();
+    record.artefactoUrl=expired;record.artefactoEstado='DISPONIBLE';
+    prisma.taxEmissionIntent.findUnique.mockImplementation(async()=>({...record}) as never);
+    const emission=jest.spyOn(issuer.intents,'execute');
+    const getLink=jest.spyOn(issuer.artifacts,'getLink').mockResolvedValue(renewed);
+    jest.spyOn(issuer.artifacts,'downloadPdf').mockResolvedValue(Buffer.from('%PDF-RENEWED'));
+    await issuer.recoverArtifacts(7,operator);await issuer.recoverArtifacts(7,operator);
+    expect(getLink).toHaveBeenCalledTimes(2);expect(mail.sendTaxDocument).toHaveBeenCalledTimes(1);
+    expect(mail.isConfigured).toHaveBeenCalledWith(2);expect(mail.sendTaxDocument).toHaveBeenCalledWith(expect.objectContaining({idEmpresa:2}));
+    expect(record.emailEstado).toBe('ENVIADO');expect(emission).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,39 @@
 # SMTP y correo automático - cierre técnico local
 
+## SMTP por empresa — 2026-10-20
+
+La selección por empresa está implementada y verificada en `SecurityRealiseMatrizQA`; el usuario autorizó publicar este avance técnico el 2026-10-20. Ver el checkpoint de Facturación.cl para el alcance y los pendientes externos. La prueba externa FiNet DEMO con PDF del 15-10 y la prueba simple de Cable Mágico del 19-10 tienen recepción confirmada; esta revisión del 20-10 solo ejecutó SMTP local/ficticio. La introducción del 04-10 que sigue es histórica.
+
+Contrato actual:
+
+- `SMTP_COMPANIES` es un JSON de pares idEmpresa/alias. Para ambas empresas: `[{"idEmpresa":1,"alias":"FINET"},{"idEmpresa":2,"alias":"CABLE_MAGICO"}]`. Se rechazan JSON inválido, ids/aliases duplicados, ids no numéricos y campos adicionales.
+- Cada empresa utiliza únicamente `SMTP_FINET_*` o `SMTP_CABLE_MAGICO_*`. No hereda host, usuario, password, remitente ni relajaciones TLS globales. El id procede del trabajo tributario persistido o del prospecto autorizado, no del formulario del correo.
+- Un envío con idEmpresa requiere su entrada y host propios. Falta de mapa, host o empresa => NO_CONFIGURADO, sin conectarse a un SMTP ajeno. Con mapa no vacío también se rechazan envíos sin idEmpresa. El SMTP global solo conserva las comprobaciones antiguas sin empresa y sin mapa, para compatibilidad del verificador.
+- El nombre y pie del correo corresponden al FROM_NAME seleccionado. TLS/STARTTLS obligatorio fuera de QA loopback, certificado validado y autenticación permanecen intactos. Reintentos y conciliación incierta no cambian; un fallo de correo no cambia el pago ni emite otro documento.
+
+### Configuración privada manual
+
+Editar únicamente el archivo ya existente `.env.smtp-private` desde la raíz del repositorio (Ctrl+O si no aparece en el buscador del IDE). No crear otro archivo. Añadir el mapa de ambas empresas y completar, para cada prefijo, HOST, PORT, SECURE, STARTTLS, REJECT_UNAUTHORIZED, USER, PASSWORD, FROM, FROM_NAME y TIMEOUT_MS. Los ejemplos versionados de raíz/backend muestran todos esos campos con credenciales vacías.
+
+Verificar primero a qué empresa corresponde la configuración global antigua; sus valores deben copiarse manualmente al prefijo de esa misma empresa. No reutilizar la cuenta de una empresa para la otra. Para Gmail 587: SECURE=false, STARTTLS=true y REJECT_UNAUTHORIZED=true; usar la contraseña de aplicación solo en el privado. No incluirla en comandos, capturas, Git ni VITE. La nueva cuenta de Cable Mágico se probó solo en memoria y no quedó guardada por esta revisión.
+
+El verificador existente admite `--company 1` o `--company 2`. Después de compilar, desde la raíz:
+
+```powershell
+node --env-file=.env.smtp-private backend/scripts/check-smtp.cjs --company 1
+node --env-file=.env.smtp-private backend/scripts/check-smtp.cjs --company 2
+```
+
+Esos comandos verifican TLS/autenticación sin enviar DATA. `--send-test-to` solo debe utilizarse con destinatario y envío autorizados. No se ejecutaron contra cuentas externas en este cierre.
+
+Los dos compose locales existentes transmiten mapa y variables prefijadas por interpolación. Se validó su configuración usando dos secretos sintéticos, sin arrancar servicios. Al iniciarlos más adelante, cargar explícitamente los privados con --env-file; no imprimir `docker compose config` con secretos resueltos. Para validar estructura usar `config --quiet`. El compose Railway lee su env_file propio: este cierre no lo modifica ni lo ejecuta. Los flags persistentes de emisión y entrega tributaria permanecen false.
+
+### Evidencia local
+
+42 pruebas MailService PASS: incluye dos SMTP con STARTTLS, autenticación, adjuntos PDF separados, firma sin FiNet para Cable Mágico, selección de cotizaciones y rechazo del respaldo global incluso con mapa vacío. Las 16 pruebas nuevas complementan las 26 existentes de protocolo/seguridad. Las dos pruebas dependientes del reloj de Cobranza pasan con reloj Jest controlado, sin cambios en BillingService.
+
+Regresión total: 793 PASS, 0 FAIL y 8 pruebas opt-in de base omitidas; build/lint backend y Prisma validate/generate PASS. Junto al módulo G2 del PR #51, en el contenedor temporal: 259 PASS y build/lint PASS. El entorno no tenía red ni credenciales externas. Pendiente: completar el privado manualmente, coordinar Responsable 1 y acreditar PDFs corporativos/envíos autorizados de las cuentas empresariales propias. Ver la matriz completa en el checkpoint de Facturación.cl.
+
 Fecha: 2026-10-04. Rama: `feat/i3-facturacion-cl`. Base de continuación: `db5093ee7f2f268a183487b5b17794254c04ace5`.
 
 El envío automático y su recuperación quedaron implementados y verificados en Docker localhost. **La cuenta SMTP externa sigue pendiente**: el usuario pidió avanzar todo lo posible y publicar la rama, sin aportar servidor/cuenta. Este resultado no acredita entrega a una casilla externa ni habilita producción fiscal o G3.

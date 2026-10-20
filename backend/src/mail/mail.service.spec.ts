@@ -164,3 +164,81 @@ describe('SMTP configuration gates',()=>{
     for(const override of [{NODE_ENV:'production'},{SMTP_HOST:'smtp.example.invalid'},{SMTP_USER:'qa',SMTP_PASSWORD:'FAKE'}])expect(()=>smtpSettings(new ConfigService({...values,...override}))).toThrow('SMTP_CONFIG_INVALID');
   });
 });
+
+
+describe('SMTP company routing',()=>{
+  const map = JSON.stringify([{idEmpresa:1,alias:'FINET'},{idEmpresa:2,alias:'CABLE_MAGICO'}]);
+  const scoped = (alias:string, values:Record<string,string>) => Object.fromEntries(
+    Object.entries(values).map(([key,value])=>[key.startsWith('SMTP_') ? `SMTP_${alias}_${key.slice(5)}` : key,value]));
+  it('delivers each PDF from its own SMTP account, with no FiNet signature in Cable Magico',async()=>{
+    const finet=await fakeSmtp({mode:'starttls',auth:true}), cable=await fakeSmtp({mode:'starttls',auth:true});
+    try {
+      const config=new ConfigService({SMTP_COMPANIES:map,
+        ...scoped('FINET',{...finet.values,SMTP_FROM:'finet@example.invalid',SMTP_FROM_NAME:'FiNet'}),
+        ...scoped('CABLE_MAGICO',{...cable.values,SMTP_FROM:'cable@example.invalid',SMTP_FROM_NAME:'Cable Magico Litoral'})});
+      const service=new MailService(config);service.onModuleInit();
+      expect(await service.sendTaxDocument({...tax,idEmpresa:1})).toMatchObject({status:'sent'});
+      expect(await service.sendTaxDocument({...tax,idEmpresa:2})).toMatchObject({status:'sent'});
+      expect(finet.messages).toHaveLength(1);expect(cable.messages).toHaveLength(1);
+      expect(finet.messages[0]).toContain('From: FiNet <finet@example.invalid>');
+      expect(cable.messages[0]).toContain('From: Cable Magico Litoral <cable@example.invalid>');
+      expect(cable.messages[0]).not.toContain('FiNet');
+      for(const server of [finet,cable]) {
+        expect(server.authEncrypted).toEqual([true,true]);
+        expect(server.messages[0]).toContain('Content-Type: application/pdf');
+        expect(server.messages[0]).toContain(tax.pdf.toString('base64'));
+      }
+    }finally{await finet.close();await cable.close();}
+  });
+  it('verifies the selected company without sending DATA',async()=>{
+    const server=await fakeSmtp({mode:'starttls',auth:true});
+    try{
+      const service=new MailService(new ConfigService({SMTP_COMPANIES:JSON.stringify([{idEmpresa:2,alias:'CABLE_MAGICO'}]),...scoped('CABLE_MAGICO',server.values)}));
+      expect(await service.verifyConnection(2)).toMatchObject({status:'ready',authenticated:true});
+      expect(server.messages).toHaveLength(0);expect(server.commands).not.toContain('DATA');
+    }finally{await server.close();}
+  });
+  it.each([undefined,1,3])('never uses global credentials for an absent or unknown company %s',async idEmpresa=>{
+    const server=await fakeSmtp({mode:'starttls',auth:true});
+    try{
+      const service=new MailService(new ConfigService({...server.values,SMTP_COMPANIES:JSON.stringify([{idEmpresa:2,alias:'CABLE_MAGICO'}]),...scoped('CABLE_MAGICO',server.values)}));
+      expect(service.isConfigured(idEmpresa)).toBe(false);
+      expect(await service.verifyConnection(idEmpresa)).toEqual({status:'not_configured'});
+      expect(await service.sendTaxDocument({...tax,idEmpresa})).toEqual({status:'not_configured'});
+      expect(server.commands).toHaveLength(0);
+    }finally{await server.close();}
+  });
+  it.each([1,2])('never routes automatic company %s through legacy global SMTP without a mapping',async idEmpresa=>{
+    const server=await fakeSmtp({mode:'starttls',auth:true});
+    try{
+      const config=new ConfigService({...server.values,SMTP_COMPANIES:'[]'});
+      const service=new MailService(config);
+      expect(service.isConfigured(idEmpresa)).toBe(false);expect(smtpSettings(config,idEmpresa)).toBeNull();
+      expect(await service.sendTaxDocument({...tax,idEmpresa})).toEqual({status:'not_configured'});
+      expect(server.commands).toHaveLength(0);
+    }finally{await server.close();}
+  });
+  it('does not borrow a global host, password or TLS relaxation for a selected company',()=>{
+    const base={SMTP_COMPANIES:JSON.stringify([{idEmpresa:2,alias:'CABLE_MAGICO'}]),SMTP_HOST:'smtp.example.invalid',SMTP_PASSWORD:'SYNTHETIC_GLOBAL_ONLY',
+      SMTP_CABLE_MAGICO_FROM:'cable@example.invalid'};
+    expect(smtpSettings(new ConfigService(base),2)).toBeNull();
+    expect(()=>smtpSettings(new ConfigService({...base,SMTP_CABLE_MAGICO_HOST:'smtp.example.invalid',SMTP_CABLE_MAGICO_USER:'cable@example.invalid'}),2)).toThrow('SMTP_CONFIG_INVALID');
+    expect(()=>smtpSettings(new ConfigService({...base,SMTP_ALLOW_INSECURE_LOCAL:'true',SMTP_CABLE_MAGICO_HOST:'127.0.0.1',SMTP_CABLE_MAGICO_STARTTLS:'false'}),2)).toThrow('SMTP_CONFIG_INVALID');
+  });
+  it.each(['{', '{}', '[{"idEmpresa":"2","alias":"CABLE_MAGICO"}]', '[{"idEmpresa":2,"alias":"bad-alias"}]',
+    '[{"idEmpresa":2,"alias":"CABLE_MAGICO","password":"FAKE"}]',
+    '[{"idEmpresa":2,"alias":"A"},{"idEmpresa":2,"alias":"B"}]',
+    '[{"idEmpresa":1,"alias":"A"},{"idEmpresa":2,"alias":"A"}]'])('rejects ambiguous or malformed company maps %s',raw=>{
+      const service=new MailService(new ConfigService({SMTP_COMPANIES:raw}));
+      expect(()=>service.onModuleInit()).toThrow('SMTP_CONFIG_INVALID');
+  });
+  it('routes quotations using the same explicit company identity',async()=>{
+    const server=await fakeSmtp({mode:'starttls',auth:true});
+    try{
+      const service=new MailService(new ConfigService({SMTP_COMPANIES:JSON.stringify([{idEmpresa:2,alias:'CABLE_MAGICO'}]),
+        ...scoped('CABLE_MAGICO',{...server.values,SMTP_FROM_NAME:'Cable Magico Litoral'})}));
+      expect(await service.sendQuote({idEmpresa:2,to:tax.to,prospectName:'QA',companyName:'Cable Magico',pdf:tax.pdf,filename:'cotizacion-2.pdf'})).toMatchObject({status:'sent'});
+      expect(server.messages[0]).not.toContain('FiNet');expect(server.messages).toHaveLength(1);
+    }finally{await server.close();}
+  });
+});

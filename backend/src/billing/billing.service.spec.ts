@@ -261,6 +261,8 @@ describe('BillingService lifecycle de pago', () => {
 });
 
 describe('BillingService avisos y suspensión', () => {
+  beforeEach(() => { jest.useFakeTimers({ now: new Date('2026-10-08T15:00:00Z') }); });
+  afterEach(() => { jest.useRealTimers(); });
   it('persists WhatsApp and commercial event before dispatch, and transport failure never undoes them',async()=>{
     const events:string[]=[];
     const tx={cliente:{findUnique:jest.fn().mockResolvedValue({idCliente:10,idEmpresa:1,telefono:'+56912345678',nombreCompleto:'QA'})},

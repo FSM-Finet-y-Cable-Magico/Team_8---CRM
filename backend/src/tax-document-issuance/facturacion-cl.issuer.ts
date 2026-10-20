@@ -179,21 +179,22 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     return {state:record.estado,idIntencion:record.idIntencion,folio:record.folio};
   }
 
-  private async finishArtifactsAndDelivery(job:TaxPaymentJob, idIntencion:string, explicitEmailRetry=false) {
+  private async finishArtifactsAndDelivery(job:TaxPaymentJob, idIntencion:string, explicitEmailRetry=false, refreshArtifact=false) {
     const record=await this.prisma.taxEmissionIntent.findFirst({ where:{idIntencion,idEmpresa:job.idEmpresa,estado:'GENERADO'} });
     if (!record?.folio) return;
     let link=record.artefactoUrl;
-    if (!link || record.artefactoEstado==='FALLIDO') {
+    // Explicit recovery renews the existing folio link even after email delivery.
+    if (refreshArtifact || !link || record.artefactoEstado==='FALLIDO') {
       try { link=await this.artifacts.getLink(job.idEmpresa,record.tipoDte,record.folio);
         await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoUrl:link,artefactoEstado:'PENDIENTE'}});
-      } catch { await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,artefactoUrl:null},data:{artefactoEstado:'FALLIDO'}}); return; }
+      } catch { await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,idEmpresa:job.idEmpresa,estado:'GENERADO',artefactoUrl:record.artefactoUrl},data:{artefactoEstado:'FALLIDO'}}); return; }
     }
-    if (record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','SIMULADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
+    if (!refreshArtifact && record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','SIMULADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
     let pdf:Buffer;
     try { pdf=await this.artifacts.downloadPdf(link);
       await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoEstado:'DISPONIBLE'}});
     } catch { await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoEstado:'FALLIDO'}}); return; }
-    if (!this.config.deliveryEnabled() || !this.mail.isConfigured()) {
+    if (!this.config.deliveryEnabled() || !this.mail.isConfigured(job.idEmpresa)) {
       await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:{in:['PENDIENTE','NO_CONFIGURADO']}},data:{emailEstado:'NO_CONFIGURADO'}}); return;
     }
     if (!job.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(job.email)) {
@@ -208,7 +209,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       data:{emailEstado:'EN_PROCESO',fechaEmailInicio:new Date(),emailIntentos:{increment:1},fechaProximoEmail:null,ultimoErrorEmail:null}});
     if (!claimed.count) return;
     try {
-      const result=await this.mail.sendTaxDocument({to:job.email,customerName:job.nombreCliente,tipoDte:record.tipoDte,folio:record.folio,idPago:job.idPago,pdf,filename:`dte-${record.tipoDte}-${record.folio}.pdf`,deliveryKey:`tax:${record.idIntencion}`});
+      const result=await this.mail.sendTaxDocument({idEmpresa:job.idEmpresa,to:job.email,customerName:job.nombreCliente,tipoDte:record.tipoDte,folio:record.folio,idPago:job.idPago,pdf,filename:`dte-${record.tipoDte}-${record.folio}.pdf`,deliveryKey:`tax:${record.idIntencion}`});
       await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:'EN_PROCESO'},data:{emailEstado:result.status==='sent' ? 'ENVIADO' : result.status==='simulated' ? 'SIMULADO' : 'NO_CONFIGURADO'}});
     } catch (error) {
       const attempts = record.emailIntentos + 1;
@@ -231,8 +232,9 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       const companyIds=this.config.base.snapshot().companies.filter(c=>c.enabled && c.environment==='sandbox').map(c=>c.idEmpresa);
       const jobs=await this.prisma.taxPaymentJob.findMany({where:{estado:'PENDIENTE',idEmpresa:{in:companyIds}},orderBy:{fechaCreacion:'asc'},take:10});
       for (const job of jobs) { try { await this.processPayment(job.idPago); } catch { /* Persisted work remains; no raw errors/PII logged. */ } }
-      if (this.config.deliveryEnabled() && this.mail.isConfigured()) {
-        const pending = await this.prisma.taxEmissionIntent.findMany({where:{idEmpresa:{in:companyIds},ambiente:'sandbox',estado:'GENERADO',
+      const deliveryCompanyIds = companyIds.filter(idEmpresa => this.mail.isConfigured(idEmpresa));
+      if (this.config.deliveryEnabled() && deliveryCompanyIds.length) {
+        const pending = await this.prisma.taxEmissionIntent.findMany({where:{idEmpresa:{in:deliveryCompanyIds},ambiente:'sandbox',estado:'GENERADO',
           idPago:{not:null},artefactoEstado:'DISPONIBLE',emailEstado:{in:['PENDIENTE','NO_CONFIGURADO','REINTENTO_PENDIENTE']},
           emailIntentos:{lt:MAX_EMAIL_ATTEMPTS},OR:[{fechaProximoEmail:null},{fechaProximoEmail:{lte:new Date()}}]},
           orderBy:{fechaActualizacion:'asc'},take:10});
@@ -344,7 +346,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     const job=await this.prisma.taxPaymentJob.findFirst({where:{idPago,idEmpresa}});
     const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
     if (!job || record?.estado!=='GENERADO') throw new BadRequestException('El documento no esta confirmado como generado');
-    await this.finishArtifactsAndDelivery(job,record.idIntencion,true);
+    await this.finishArtifactsAndDelivery(job,record.idIntencion,true,true);
     return this.paymentState(idPago,user);
   }
   /** An operator checks SMTP logs/inbox. This operation itself never sends mail or emits a DTE. */
