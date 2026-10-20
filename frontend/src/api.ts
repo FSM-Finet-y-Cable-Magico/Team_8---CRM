@@ -99,6 +99,23 @@ export type InstallAvailability = {
   mensaje: string;
 };
 
+export type G3HistoricalClosure = {
+  fuente: 'G3_CONSULTA_TEMPORAL';
+  persistido: false;
+  consultadoEn: string;
+  estadoConsulta: 'DISPONIBLE' | 'NO_DISPONIBLE' | 'NO_VALIDADO';
+  mensaje: string;
+  datos: {
+    fechaCompletada: string | null;
+    idTecnicoG3: number | null;
+    potenciaOpticaDbm: number | null;
+    resultadoLlamada: string | null;
+    resueltoRemotamente: boolean | null;
+    cantidadMateriales: number | null;
+    cantidadEquiposInformados: number | null;
+  } | null;
+};
+
 export type G3InstallationTracking = {
   idIntegracion: number;
   idEmpresa: number;

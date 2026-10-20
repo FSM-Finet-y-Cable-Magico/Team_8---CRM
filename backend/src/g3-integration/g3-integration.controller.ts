@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -38,6 +38,14 @@ export class G3IntegrationController {
   @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
   detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.installations.detail(id, user);
+  }
+
+  @Get('services/:id/historical-closure')
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
+  historicalClosure(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.installations.historicalClosureForService(id, user);
   }
 
   @Get('prospects/:id/installation')

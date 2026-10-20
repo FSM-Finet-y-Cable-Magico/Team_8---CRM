@@ -7,6 +7,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { G3ClosureProcessor } from './g3-closure.processor';
+import { historicalClosureData, HistoricalClosureView, numericWorkOrderId, positiveId } from './g3-historical-closure';
 import { RequestG3InstallationDto } from './g3-integration.dto';
 import {
   G3ClosurePayload,
@@ -231,6 +232,42 @@ export class InstallationIntegrationService {
       orderBy: { fechaSolicitud: 'desc' },
     });
     return tracking ? this.toView(tracking) : null;
+  }
+
+  async historicalClosureForService(idServicio: number, currentUser: AuthUser): Promise<HistoricalClosureView> {
+    const service = await this.prisma.servicioContratado.findUnique({ where: { idServicio } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+    this.assertCompanyAccess(service.idEmpresa, currentUser);
+    const view = (estadoConsulta: HistoricalClosureView['estadoConsulta'], mensaje: string,
+      datos: HistoricalClosureView['datos'] = null): HistoricalClosureView => ({
+      fuente: 'G3_CONSULTA_TEMPORAL', persistido: false, consultadoEn: new Date().toISOString(),
+      estadoConsulta, mensaje, datos,
+    });
+    if (!positiveId(service.idEmpresa) || !positiveId(service.idContrato)) {
+      return view('NO_DISPONIBLE', 'El servicio no tiene referencias suficientes para consultar el cierre.');
+    }
+    const tracking = await this.prisma.integracionInstalacionG3.findFirst({
+      where: { idServicio, idEmpresa: service.idEmpresa, idContrato: service.idContrato, estadoIntegracion: 'COMPLETADA' },
+      orderBy: [{ fechaCierreProcesado: 'desc' }, { idIntegracion: 'desc' }],
+    });
+    if (!tracking || tracking.idEmpresa !== service.idEmpresa || tracking.idContrato !== service.idContrato
+      || tracking.idServicio !== service.idServicio || tracking.idCliente !== service.idCliente
+      || tracking.estadoIntegracion !== 'COMPLETADA' || !tracking.fechaCierreProcesado
+      || numericWorkOrderId(tracking.idOtG3) === null || !positiveId(tracking.idProspecto)
+      || !positiveId(tracking.idPlan) || !tracking.requestId || !tracking.traceId) {
+      return view('NO_DISPONIBLE', 'No hay un cierre G3 confirmado con referencias completas para este servicio.');
+    }
+    // Deliberately independent of detail/reconcile: no tracking, events, audit or activation writes.
+    // The historical plan is the tracking's plan, which may differ from a later commercial plan change.
+    try {
+      const response = await this.client.getWorkOrderClosure(tracking.idOtG3!, tracking.idEmpresa);
+      const datos = historicalClosureData(response.data, tracking);
+      if (!datos) return view('NO_VALIDADO', 'G3 no entregó todas las referencias coincidentes del cierre. No se muestran datos técnicos.');
+      return view('DISPONIBLE', 'Consulta temporal de G3; no modifica los datos guardados ni el estado confirmado en G8.', datos);
+    } catch {
+      // Never expose a remote response/error body, or turn a transient failure into a business-state change.
+      return view('NO_DISPONIBLE', 'No se pudo consultar el cierre en G3. La instalación confirmada en G8 no cambia.');
+    }
   }
 
   private async send(
