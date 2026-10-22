@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { G3ClosureProcessor } from './g3-closure.processor';
+import { sha256Payload } from './g3-integration.utils';
 
 function setup(idEmpresa = 1) {
   const tracking: any = {
@@ -10,6 +11,13 @@ function setup(idEmpresa = 1) {
     ultimoErrorSanitizado: null, payloadHash: 'a'.repeat(64), payloadSnapshot: {}, fechaCierreProcesado: null,
     createdAt: new Date(), updatedAt: new Date(),
   };
+  tracking.payloadSnapshot = {
+    request_id: tracking.requestId, trace_id: tracking.traceId,
+    id_empresa: idEmpresa, id_prospecto: 10, id_contrato: 20, id_plan: 7,
+    persona: { rut: '12345678-5', nombre_completo: 'Prueba', telefono: '+56912345678' },
+    direccion: { direccion_completa: 'Direccion de prueba', comuna: 'Comuna de prueba' },
+  };
+  tracking.payloadHash = sha256Payload(tracking.payloadSnapshot);
   let event: any = null;
   const events = {
     findUnique: jest.fn().mockImplementation(() => Promise.resolve(event)),
@@ -51,10 +59,159 @@ function setup(idEmpresa = 1) {
     equipos_instalados: [{ numero_serie: 'ONT-001' }],
     equipos_retirados: [],
   };
-  return { processor, prisma, tx, activation, audit, g1, tracking, completed };
+  return { processor, prisma, tx, activation, audit, g1, tracking, completed,
+    getEvent: () => event, setEvent: (value: unknown) => { event = value; } };
 }
 
 describe('G3ClosureProcessor approval-only', () => {
+  it('trackingHint no permite un request_id diferente en reconciliacion', async () => {
+    const { processor, completed, activation, prisma, g1 } = setup();
+    await expect(processor.process({ ...completed, request_id: 'otra-solicitud' }, 'RECONCILIACION', 1))
+      .rejects.toThrow('request_id');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(activation.activate).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
+  it.each(['requestId', 'traceId', 'idEmpresa', 'idContrato', 'idProspecto', 'idPlan', 'idOtG3'])
+    ('revalida %s del tracking despues del lock existente', async (field) => {
+      const { processor, completed, tracking, tx, activation, g1 } = setup();
+      tx.$queryRaw.mockImplementationOnce(async () => {
+        tracking[field] = typeof tracking[field] === 'number' ? 99 : 'otro';
+        return [{ id_integracion: 1 }];
+      });
+      await expect(processor.process(completed, 'WEBHOOK')).rejects.toBeInstanceOf(BadRequestException);
+      expect(activation.activate).not.toHaveBeenCalled();
+      expect(tx.integracionEventoEntrante.create).not.toHaveBeenCalled();
+      expect(g1.afterG3Completion).not.toHaveBeenCalled();
+    });
+
+  it.each(['antes', 'despues'])('rechaza snapshot alterado %s del bloqueo', async (moment) => {
+    const { processor, completed, tracking, tx, activation, g1 } = setup();
+    const alter = () => { tracking.payloadSnapshot.id_plan = 99; };
+    if (moment === 'antes') alter();
+    else tx.$queryRaw.mockImplementationOnce(async () => { alter(); return [{ id_integracion: 1 }]; });
+    await expect(processor.process(completed, 'WEBHOOK')).rejects.toThrow('snapshot');
+    expect(activation.activate).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
+  it('no reactiva un historico completado sin evidencia de evento', async () => {
+    const { processor, completed, tracking, activation, g1 } = setup();
+    tracking.estadoIntegracion = 'COMPLETADA';
+    tracking.fechaCierreProcesado = new Date();
+    await expect(processor.process(completed, 'RECONCILIACION', 1)).rejects.toBeInstanceOf(ConflictException);
+    expect(activation.activate).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
+  it('un evento historico identico sigue siendo duplicate aunque el snapshot antiguo no sea completo', async () => {
+    const { processor, completed, tracking, activation, g1 } = setup();
+    await processor.process(completed, 'WEBHOOK');
+    tracking.payloadSnapshot = {};
+    await expect(processor.process(completed, 'RECONCILIACION')).resolves.toMatchObject({ duplicate: true });
+    expect(activation.activate).toHaveBeenCalledTimes(1);
+    expect(g1.afterG3Completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplica un cierre que aparece mientras se esperaba el lock', async () => {
+    const { processor, completed, tx, activation, g1 } = setup();
+    tx.$queryRaw.mockImplementationOnce(async () => {
+      await tx.integracionEventoEntrante.create({ data: { payloadHash: sha256Payload(completed), result: { activated: true } } });
+      return [{ id_integracion: 1 }];
+    });
+    await expect(processor.process(completed, 'WEBHOOK')).resolves.toMatchObject({ duplicate: true });
+    expect(activation.activate).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
+  it('dos cierres concurrentes se serializan por el lock simulado y activan una sola vez', async () => {
+    const { processor, completed, prisma, tx, activation, g1 } = setup();
+    let tail = Promise.resolve();
+    prisma.$transaction.mockImplementation(async (callback) => {
+      let release!: () => void;
+      const previous = tail;
+      tail = new Promise<void>((resolve) => { release = resolve; });
+      try {
+        return await callback({ ...tx, $queryRaw: async () => { await previous; return [{ id_integracion: 1 }]; } });
+      } finally {
+        release();
+      }
+    });
+    const results = await Promise.all([
+      processor.process(completed, 'WEBHOOK'), processor.process(completed, 'RECONCILIACION', 1),
+    ]);
+    expect(results.filter((result) => result.duplicate)).toHaveLength(1);
+    expect(activation.activate).toHaveBeenCalledTimes(1);
+    expect(tx.integracionEventoEntrante.create).toHaveBeenCalledTimes(1);
+    expect(g1.afterG3Completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('un cierre concurrente con hash diferente mantiene el conflicto', async () => {
+    const { processor, completed, tx, activation, g1 } = setup();
+    tx.$queryRaw.mockImplementationOnce(async () => {
+      await tx.integracionEventoEntrante.create({ data: { payloadHash: 'otro-hash', result: {} } });
+      return [{ id_integracion: 1 }];
+    });
+    await expect(processor.process(completed, 'WEBHOOK')).rejects.toBeInstanceOf(ConflictException);
+    expect(activation.activate).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
+  it.each(['evento', 'commit'])('un fallo de %s no sale hacia G1 ni confirma el resultado (transaccion simulada)', async (failure) => {
+    const { processor, completed, tracking, tx, prisma, activation, audit, g1, getEvent, setEvent } = setup();
+    const before = structuredClone(tracking);
+    const eventBefore = structuredClone(getEvent());
+    prisma.$transaction.mockImplementationOnce(async (callback) => {
+      try {
+        const result = await callback(tx);
+        if (failure === 'commit') throw new Error('Fallo de commit simulado');
+        return result;
+      } catch (error) {
+        Object.assign(tracking, before);
+        setEvent(eventBefore);
+        throw error;
+      }
+    });
+    if (failure === 'evento') tx.integracionEventoEntrante.create.mockRejectedValueOnce(new Error('Fallo de evento simulado'));
+    await expect(processor.process(completed, 'WEBHOOK')).rejects.toThrow('simulado');
+    expect(activation.activate).toHaveBeenCalledTimes(1);
+    expect(tracking).toEqual(before);
+    expect(getEvent()).toEqual(eventBefore);
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('espera la confirmacion de la transaccion antes de cualquier comunicacion G1', async () => {
+    const { processor, completed, prisma, tx, g1 } = setup();
+    let commit!: () => void;
+    let prepared!: () => void;
+    const pendingCommit = new Promise<void>((resolve) => { commit = resolve; });
+    const preparedTransaction = new Promise<void>((resolve) => { prepared = resolve; });
+    prisma.$transaction.mockImplementationOnce(async (callback) => {
+      const result = await callback(tx);
+      prepared();
+      await pendingCommit;
+      return result;
+    });
+    const processing = processor.process(completed, 'WEBHOOK');
+    await preparedTransaction;
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+    commit();
+    await processing;
+    expect(g1.afterG3Completion).toHaveBeenCalledTimes(1);
+  });
+
+  it('una inelegibilidad comercial no se convierte en exito approval-only ni en llamada G1', async () => {
+    const { processor, completed, activation, tracking, tx, g1 } = setup();
+    activation.activate.mockRejectedValueOnce(new BadRequestException('El estado del contrato no permite activar la instalacion'));
+    await expect(processor.process(completed, 'WEBHOOK')).rejects.toBeInstanceOf(BadRequestException);
+    expect(tracking.estadoIntegracion).toBe('ENVIADA');
+    expect(tx.integracionEventoEntrante.create).not.toHaveBeenCalled();
+    expect(tx.integracionInstalacionG3.update).not.toHaveBeenCalled();
+    expect(g1.afterG3Completion).not.toHaveBeenCalled();
+  });
+
   it('configura espera y timeout solo en la transaccion atomica del cierre', async () => {
     const { processor, prisma, completed } = setup();
 

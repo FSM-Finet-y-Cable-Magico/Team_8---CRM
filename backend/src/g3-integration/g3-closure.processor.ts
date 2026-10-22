@@ -7,6 +7,7 @@ import { G1ActivationService } from '../g1-integration/g1-activation.service';
 import { G3ClosurePayload, G3ClosureSource } from './g3-integration.types';
 import {
   externalWorkOrderId,
+  installationSnapshot,
   sha256Payload,
 } from './g3-integration.utils';
 
@@ -39,9 +40,13 @@ export class G3ClosureProcessor {
       }
       return { duplicate: true, result: existing.result, tracking };
     }
+    installationSnapshot(tracking);
 
     const processed = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id_integracion FROM integracion_instalacion_g3 WHERE id_integracion = ${tracking.idIntegracion} FOR UPDATE`;
+      const current = await tx.integracionInstalacionG3.findUnique({ where: { idIntegracion: tracking.idIntegracion } });
+      if (!current) throw new NotFoundException('Tracking de instalacion no encontrado');
+      this.validateCorrelations(current, record);
       const currentEvent = await tx.integracionEventoEntrante.findUnique({
         where: { idIntegracion_eventType: { idIntegracion: tracking.idIntegracion, eventType } },
       });
@@ -52,8 +57,10 @@ export class G3ClosureProcessor {
         return { duplicate: true, result: currentEvent.result };
       }
 
-      const current = await tx.integracionInstalacionG3.findUnique({ where: { idIntegracion: tracking.idIntegracion } });
-      if (!current) throw new NotFoundException('Tracking de instalacion no encontrado');
+      if (current.fechaCierreProcesado || current.estadoIntegracion === 'COMPLETADA') {
+        throw new ConflictException('La instalacion ya fue completada y requiere revision de su evidencia historica');
+      }
+      installationSnapshot(current);
 
       const activation = await this.activationService.activate(
         tx,
@@ -155,6 +162,9 @@ export class G3ClosureProcessor {
     tracking: Awaited<ReturnType<G3ClosureProcessor['resolveTracking']>>,
     payload: Record<string, unknown>,
   ) {
+    if (payload.request_id !== tracking.requestId) {
+      throw new BadRequestException('La correlacion request_id no corresponde al tracking');
+    }
     const checks: Array<[string, number | null]> = [
       ['id_empresa', tracking.idEmpresa],
       ['id_prospecto', tracking.idProspecto],

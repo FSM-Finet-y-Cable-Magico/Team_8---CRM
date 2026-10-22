@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { IntegracionInstalacionG3, Prisma } from '@prisma/client';
 import { serviceTypeFromPlan } from '../common/service-type';
 import { canActivateService } from '../services/service-activation.policy';
-import { G3InstallationPayload } from './g3-integration.types';
+import { validateRut } from '../rut/rut.util';
+import { installationSnapshot } from './g3-integration.utils';
 
 @Injectable()
 export class InstallationActivationService {
@@ -11,6 +12,7 @@ export class InstallationActivationService {
     tracking: IntegracionInstalacionG3,
     technicalResult: unknown,
   ) {
+    const payload = installationSnapshot(tracking);
     if (!canActivateService({
       intent: 'INSTALLATION_COMPLETION',
       targetStatus: 'Activo',
@@ -27,23 +29,55 @@ export class InstallationActivationService {
     if (contract.idEmpresa !== tracking.idEmpresa || contract.plan.idEmpresa !== tracking.idEmpresa) {
       throw new BadRequestException('El contrato o plan no corresponde a la empresa del tracking');
     }
-    if (tracking.idProspecto && contract.idProspecto !== tracking.idProspecto) {
+    if (contract.idPlan !== tracking.idPlan || contract.plan.idPlan !== tracking.idPlan) {
+      throw new BadRequestException('El plan del contrato no corresponde al tracking');
+    }
+    if (!['Firmado', 'Activo'].includes(contract.estado)) {
+      throw new BadRequestException('El estado del contrato no permite activar la instalacion');
+    }
+    if (!contract.prospecto || contract.idProspecto !== tracking.idProspecto
+      || contract.prospecto.idProspecto !== tracking.idProspecto
+      || contract.prospecto.idEmpresa !== tracking.idEmpresa) {
       throw new BadRequestException('El contrato no corresponde al prospecto del tracking');
     }
 
-    const payload = tracking.payloadSnapshot as G3InstallationPayload;
     const now = new Date();
-    let customer = tracking.idCliente
-      ? await tx.cliente.findUnique({ where: { idCliente: tracking.idCliente } })
-      : contract.idCliente
-        ? await tx.cliente.findUnique({ where: { idCliente: contract.idCliente } })
-        : contract.prospecto?.idCliente
-          ? await tx.cliente.findUnique({ where: { idCliente: contract.prospecto.idCliente } })
-          : null;
+    const references = [tracking.idCliente, contract.prospecto.idCliente];
+    if (references.some((id) => id != null && id !== contract.idCliente)) {
+      throw new BadRequestException('Las referencias de cliente no corresponden al contrato objetivo');
+    }
+    let customer = contract.idCliente != null
+      ? await tx.cliente.findUnique({ where: { idCliente: contract.idCliente } })
+      : null;
+    if (contract.idCliente != null && (!customer || customer.idCliente !== contract.idCliente)) {
+      throw new BadRequestException('El cliente vinculado al contrato no existe');
+    }
+    const identity = validateRut(payload.persona.rut);
+    if (!identity.valid || identity.normalized !== payload.persona.rut
+      || (contract.prospecto.rut && validateRut(contract.prospecto.rut).normalized !== identity.normalized)
+      || (customer && validateRut(customer.rut ?? '').normalized !== identity.normalized)) {
+      throw new BadRequestException('La identidad del cliente no corresponde a la solicitud');
+    }
+    if (!customer && await tx.cliente.findUnique({ where: { rut: payload.persona.rut } })) {
+      throw new ConflictException('La identidad existente requiere vinculacion contractual explicita');
+    }
 
-    if (!customer) customer = await tx.cliente.findUnique({ where: { rut: payload.persona.rut } });
-    if (customer && customer.idEmpresa !== tracking.idEmpresa) {
-      throw new ConflictException('El RUT ya pertenece a un cliente de otra empresa');
+    // Do not select an arbitrary service or hide a historic Baja to create a replacement.
+    const candidates = tracking.idServicio != null
+      ? [await tx.servicioContratado.findUnique({ where: { idServicio: tracking.idServicio } })]
+      : await tx.servicioContratado.findMany({
+        where: { idContrato: contract.idContrato }, orderBy: { idServicio: 'asc' }, take: 2,
+      });
+    if (candidates.length > 1 || (tracking.idServicio != null && !candidates[0])) {
+      throw new BadRequestException('No se puede identificar un servicio objetivo unico');
+    }
+    let service = candidates[0] ?? null;
+    if (service && (service.idCliente !== customer?.idCliente || service.idEmpresa !== tracking.idEmpresa
+      || service.idContrato !== contract.idContrato)) {
+      throw new BadRequestException('El servicio pendiente no corresponde al contrato, cliente y empresa de la instalacion');
+    }
+    if (service && !['Pendiente', 'Pendiente Instalacion', 'Instalacion Programada'].includes(service.estadoOperativo)) {
+      throw new BadRequestException('El estado del servicio no permite activar la instalacion');
     }
     if (!customer) {
       customer = await tx.cliente.create({
@@ -56,11 +90,6 @@ export class InstallationActivationService {
           estado: 'Activo',
           origenContacto: contract.prospecto?.origenContacto,
         },
-      });
-    } else if (customer.estado !== 'Activo') {
-      customer = await tx.cliente.update({
-        where: { idCliente: customer.idCliente },
-        data: { estado: 'Activo' },
       });
     }
 
@@ -84,23 +113,16 @@ export class InstallationActivationService {
       });
     }
 
-    let service = tracking.idServicio
-      ? await tx.servicioContratado.findUnique({ where: { idServicio: tracking.idServicio } })
-      : await tx.servicioContratado.findFirst({
-        where: { idContrato: contract.idContrato, idEmpresa: tracking.idEmpresa, estadoOperativo: { not: 'Baja' } },
-        orderBy: { idServicio: 'asc' },
-      });
-    if (service && (service.idCliente !== customer.idCliente || service.idEmpresa !== tracking.idEmpresa)) {
-      throw new BadRequestException('El servicio pendiente no corresponde al cliente y empresa de la instalacion');
-    }
-
     const technicalData = this.mergeTechnicalData(service?.datosTecnicos, technicalResult, tracking);
     if (service) {
       service = await tx.servicioContratado.update({
-        where: { idServicio: service.idServicio },
+        where: {
+          idServicio: service.idServicio, idContrato: contract.idContrato,
+          idEmpresa: tracking.idEmpresa, idCliente: customer.idCliente,
+          estadoOperativo: service.estadoOperativo,
+        },
         data: {
           idDireccion: address.idDireccion,
-          idContrato: contract.idContrato,
           estadoOperativo: 'Activo',
           fechaActivacion: service.fechaActivacion ?? now,
           datosTecnicos: technicalData,
@@ -125,19 +147,22 @@ export class InstallationActivationService {
     }
 
     await tx.contrato.update({
-      where: { idContrato: contract.idContrato },
+      where: {
+        idContrato: contract.idContrato, idEmpresa: tracking.idEmpresa, idPlan: tracking.idPlan,
+        idProspecto: tracking.idProspecto, idCliente: contract.idCliente, estado: contract.estado,
+      },
       data: { idCliente: customer.idCliente, estado: 'Activo' },
     });
 
     if (contract.prospecto) {
-      if (contract.prospecto.idEmpresa !== tracking.idEmpresa) {
-        throw new BadRequestException('El prospecto no corresponde a la empresa del tracking');
-      }
       const conversionDays = contract.prospecto.fechaCreacion
         ? Math.max(0, Math.ceil((now.getTime() - contract.prospecto.fechaCreacion.getTime()) / 86_400_000))
         : null;
       await tx.prospecto.update({
-        where: { idProspecto: contract.prospecto.idProspecto },
+        where: {
+          idProspecto: contract.prospecto.idProspecto, idEmpresa: tracking.idEmpresa,
+          idCliente: contract.prospecto.idCliente,
+        },
         data: {
           idCliente: customer.idCliente,
           estadoPipeline: 'Servicio Activo',
