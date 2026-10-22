@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { G3IntegrationError } from './g3-integration.types';
 import { InstallationIntegrationService } from './installation-integration.service';
+import { InstallationActivationService } from './installation-activation.service';
 
 const user = { idUsuario: 5, idEmpresa: 1, email: 'test@example.invalid', nombreCompleto: 'Usuario Test', roles: ['Comercial'] };
 
@@ -44,8 +45,9 @@ function setup() {
   const advisoryLock = jest.fn();
   const lockTails = new Map<string, Promise<void>>();
   const prisma = {
+    cliente: { findUnique: jest.fn().mockResolvedValue(null) },
     contrato: { findFirst: jest.fn().mockResolvedValue(contract), findUnique: jest.fn().mockResolvedValue(contract) },
-    servicioContratado: { findUnique: jest.fn().mockResolvedValue(null) },
+    servicioContratado: { findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
     prospecto: { findUnique: jest.fn().mockResolvedValue(contract.prospecto), update: jest.fn().mockResolvedValue({}) },
     integracionInstalacionG3: integration,
@@ -53,6 +55,10 @@ function setup() {
       let release: (() => void) | undefined;
       const transaction = {
         ...tx,
+        contrato: prisma.contrato,
+        cliente: prisma.cliente,
+        servicioContratado: prisma.servicioContratado,
+        cotizacion: prisma.cotizacion,
         $executeRaw: async (strings: TemplateStringsArray, namespace: number, idContrato: number) => {
           advisoryLock(strings, namespace, idContrato);
           const key = `${namespace}:${idContrato}`;
@@ -84,10 +90,219 @@ function setup() {
     getWorkOrder: jest.fn(), getWorkOrderClosure: jest.fn(),
   };
   const service = new InstallationIntegrationService(prisma as never, audit as never, closure as never, client as never);
-  return { service, prisma, audit, closure, client, contract, advisoryLock, getStored: () => stored, setStored: (value: any) => { stored = value; } };
+  return { service, prisma, tx, audit, closure, client, contract, advisoryLock, getStored: () => stored, setStored: (value: any) => { stored = value; } };
 }
 
+function withSharedPendingService() {
+  const context = setup();
+  const customer = { idCliente: 30, idEmpresa: 2, rut: context.contract.prospecto.rut, estado: 'Moroso', direcciones: [] };
+  Object.assign(context.contract, { idCliente: 30, cliente: customer });
+  Object.assign(context.contract.prospecto, { idCliente: 30 });
+  const pending = { idServicio: 50, idCliente: 30, idEmpresa: 1, idContrato: 20,
+    estadoOperativo: 'Pendiente Instalacion', cliente: customer,
+    direccion: { idDireccion: 40, idCliente: 30 }, datosTecnicos: null, fechaActivacion: null };
+  context.prisma.servicioContratado.findUnique.mockResolvedValue(pending);
+  context.prisma.servicioContratado.findMany.mockResolvedValue([pending]);
+  return { ...context, customer, pending };
+}
+
+function assertNoRequestEffects(context: ReturnType<typeof setup>) {
+  expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+  expect(context.prisma.integracionInstalacionG3.update).not.toHaveBeenCalled();
+  expect(context.tx.prospecto.update).not.toHaveBeenCalled();
+  expect(context.prisma.prospecto.update).not.toHaveBeenCalled();
+  expect(context.client.createInstallation).not.toHaveBeenCalled();
+  expect(context.audit.record).not.toHaveBeenCalled();
+}
+
+describe('Validacion previa de servicios antes de solicitar G3', () => {
+  it.each(['Suspendido', 'Moroso', 'Baja', 'Activo', 'Desconocido'])
+    ('rechaza servicio explicito %s sin tracking, pipeline ni HTTP', async (estado) => {
+      const context = withSharedPendingService();
+      context.pending.estadoOperativo = estado;
+      await expect(context.service.requestInstallation({ idContrato: 20, idServicio: 50 }, user))
+        .rejects.toThrow('estado del servicio');
+      assertNoRequestEffects(context);
+    });
+
+  it('rechaza tambien un servicio suspendido cuando solo se proporciona el contrato', async () => {
+    const context = withSharedPendingService();
+    context.pending.estadoOperativo = 'Suspendido';
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('estado del servicio');
+    assertNoRequestEffects(context);
+  });
+
+  it('Baja historica mas pendiente sin idServicio exige referencia explicita antes de enviar', async () => {
+    const context = withSharedPendingService();
+    context.prisma.servicioContratado.findMany.mockResolvedValue([
+      { ...context.pending, idServicio: 49, estadoOperativo: 'Baja' }, context.pending,
+    ]);
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('Indica idServicio');
+    expect(context.prisma.servicioContratado.findMany).toHaveBeenCalledWith({
+      where: { idContrato: 20 }, orderBy: { idServicio: 'asc' }, take: 2,
+    });
+    assertNoRequestEffects(context);
+  });
+
+  it.each(['Pendiente', 'Pendiente Instalacion', 'Instalacion Programada'])
+    ('servicio explicito %s con Baja historica pasa solicitud y activacion conservando cliente compartido', async (estado) => {
+      const context = withSharedPendingService();
+      context.pending.estadoOperativo = estado;
+      context.prisma.servicioContratado.findMany.mockResolvedValue([
+        { ...context.pending, idServicio: 49, estadoOperativo: 'Baja' }, context.pending,
+      ]);
+      await context.service.requestInstallation({ idContrato: 20, idServicio: 50 }, user);
+      expect(context.getStored()).toMatchObject({ idServicio: 50, idCliente: 30, idEmpresa: 1 });
+      expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+      const activationTx = {
+        contrato: { findUnique: context.prisma.contrato.findUnique, update: jest.fn().mockResolvedValue({}) },
+        cliente: { findUnique: jest.fn().mockResolvedValue(context.customer), update: jest.fn(), create: jest.fn() },
+        direccionServicio: { findFirst: jest.fn().mockResolvedValue({ idDireccion: 40 }), create: jest.fn() },
+        servicioContratado: { ...context.prisma.servicioContratado,
+          update: jest.fn().mockResolvedValue({ ...context.pending, estadoOperativo: 'Activo' }), create: jest.fn() },
+        prospecto: { update: jest.fn().mockResolvedValue({}) },
+      };
+      await expect(new InstallationActivationService().activate(activationTx as never, context.getStored(), {}))
+        .resolves.toMatchObject({ idCliente: 30, idServicio: 50 });
+      expect(context.prisma.servicioContratado.findMany).not.toHaveBeenCalled();
+      expect(activationTx.servicioContratado.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ idServicio: 50, idContrato: 20 }),
+      }));
+      expect(activationTx.cliente.update).not.toHaveBeenCalled();
+      expect(activationTx.cliente.create).not.toHaveBeenCalled();
+      expect(context.customer).toMatchObject({ idEmpresa: 2, estado: 'Moroso' });
+    });
+
+  it('contrato firmado sin servicio sigue creando una solicitud valida', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idContrato: 20 }, user);
+    expect(context.prisma.servicioContratado.findMany).toHaveBeenCalled();
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    expect(context.tx.prospecto.update).toHaveBeenCalledTimes(1);
+    expect(context.getStored().idServicio).toBeUndefined();
+  });
+
+  it('un unico servicio pendiente sin id explicito conserva el flujo autorizado', async () => {
+    const context = withSharedPendingService();
+    await context.service.requestInstallation({ idContrato: 20 }, user);
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    expect(context.getStored()).toMatchObject({ idCliente: 30, idEmpresa: 1 });
+  });
+
+  it.each(['idEmpresa', 'idContrato', 'idCliente'])('rechaza candidato implicito con %s inconsistente sin efectos', async (field) => {
+    const context = withSharedPendingService();
+    context.prisma.servicioContratado.findMany.mockResolvedValue([{ ...context.pending, [field]: 99 }]);
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('no corresponde');
+    assertNoRequestEffects(context);
+  });
+
+  it('relee el estado del servicio tras el bloqueo antes de escribir', async () => {
+    const context = withSharedPendingService();
+    context.advisoryLock.mockImplementationOnce(() => { context.pending.estadoOperativo = 'Suspendido'; });
+    await expect(context.service.requestInstallation({ idServicio: 50 }, user)).rejects.toThrow('estado del servicio');
+    expect(context.prisma.servicioContratado.findUnique).toHaveBeenCalledTimes(2);
+    assertNoRequestEffects(context);
+  });
+
+  it('no reaplica la prevalidacion de solicitudes nuevas a un tracking existente o a su retry', async () => {
+    const context = withSharedPendingService();
+    const first: any = await context.service.requestInstallation({ idServicio: 50 }, user);
+    const originalPayload = context.client.createInstallation.mock.calls[0][0];
+    context.pending.estadoOperativo = 'Suspendido';
+    await expect(context.service.requestInstallation({ idServicio: 50 }, user))
+      .resolves.toMatchObject({ idIntegracion: first.idIntegracion, requestId: first.requestId });
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    await context.service.retry(first.idIntegracion, user);
+    expect(context.prisma.integracionInstalacionG3.create).toHaveBeenCalledTimes(1);
+    expect(context.tx.prospecto.update).toHaveBeenCalledTimes(1);
+    expect(context.client.createInstallation.mock.calls[1][0]).toEqual(originalPayload);
+  });
+});
+
 describe('Etapa 3 - solicitud y reconciliacion G3', () => {
+  it.each([[1, 2], [2, 1]])('solicita para empresa %s con cliente principal de empresa %s y contrato explicito', async (target, principal) => {
+    const context = setup();
+    const contract = context.contract as any;
+    contract.idEmpresa = contract.plan.idEmpresa = contract.prospecto.idEmpresa = target;
+    contract.idCliente = contract.prospecto.idCliente = 30;
+    contract.cliente = { idCliente: 30, idEmpresa: principal, rut: contract.prospecto.rut, estado: 'Moroso', direcciones: [] };
+    context.client.createInstallation.mockResolvedValue({ status: 201, durationMs: 1, data: { id_ot: 901, estado: 'PENDIENTE', id_empresa: target } });
+    await context.service.requestInstallation({ idContrato: 20 }, { ...user, idEmpresa: target });
+    expect(context.getStored()).toMatchObject({ idEmpresa: target, idCliente: 30, idContrato: 20 });
+    expect(context.client.createInstallation.mock.calls[0][0]).toMatchObject({ id_empresa: target, id_contrato: 20 });
+    expect(contract.cliente).toMatchObject({ idEmpresa: principal, estado: 'Moroso' });
+  });
+
+  it('no usa coincidencia de RUT para vincular automaticamente un cliente', async () => {
+    const context = setup();
+    context.prisma.cliente.findUnique.mockResolvedValue({ idCliente: 30, idEmpresa: 1 });
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('vinculacion contractual explicita');
+    expect(context.prisma.$transaction).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+
+  it.each(['prospecto', 'clienteInexistente', 'clienteDistinto', 'rut'])('rechaza identidad inconsistente en %s', async (reference) => {
+    const context = setup();
+    const contract = context.contract as any;
+    contract.idCliente = 30;
+    contract.cliente = { idCliente: 30, idEmpresa: 2, rut: contract.prospecto.rut, direcciones: [] };
+    if (reference === 'prospecto') contract.prospecto.idCliente = 99;
+    if (reference === 'clienteInexistente') contract.cliente = null;
+    if (reference === 'clienteDistinto') contract.cliente.idCliente = 99;
+    if (reference === 'rut') contract.cliente.rut = '11111111-1';
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+  });
+
+  it('no toma el domicilio global de otra relacion como domicilio de instalacion', async () => {
+    const context = setup();
+    const contract = context.contract as any;
+    contract.idCliente = contract.prospecto.idCliente = 30;
+    contract.cliente = { idCliente: 30, idEmpresa: 2, rut: contract.prospecto.rut,
+      direcciones: [{ direccionCompleta: 'Domicilio no atribuido', comuna: 'Otra comuna', esPrincipal: true }] };
+    contract.direccionInstalacion = contract.prospecto.direccion = null;
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('direccion completa');
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+
+  it('revalida el contrato despues del advisory lock y no envia si se suspendio', async () => {
+    const context = setup();
+    context.advisoryLock.mockImplementationOnce(() => { context.contract.estado = 'Suspendido'; });
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('firmado');
+    expect(context.prisma.contrato.findUnique).toHaveBeenCalledTimes(2);
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+
+  it.each(['idEmpresa', 'idPlan', 'idProspecto', 'idCliente'])('no devuelve un tracking existente con %s incompatible', async (field) => {
+    const context = setup();
+    await context.service.requestInstallation({ idContrato: 20 }, user);
+    context.setStored({ ...context.getStored(), [field]: 99 });
+    context.client.createInstallation.mockClear();
+    context.prisma.integracionInstalacionG3.create.mockClear();
+    await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['contrato', 'empresa', 'cliente', 'direccion'])('no solicita un servicio con %s ajeno', async (reference) => {
+    const context = setup();
+    const contract = context.contract as any;
+    contract.idCliente = contract.prospecto.idCliente = 30;
+    contract.cliente = { idCliente: 30, idEmpresa: 2, rut: contract.prospecto.rut, direcciones: [] };
+    const serviceRow = { idServicio: 50, idContrato: 20, idEmpresa: 1, idCliente: 30,
+      cliente: contract.cliente, direccion: { idCliente: 30 } };
+    if (reference === 'contrato') serviceRow.idContrato = 21;
+    if (reference === 'empresa') serviceRow.idEmpresa = 2;
+    if (reference === 'cliente') serviceRow.idCliente = 99;
+    if (reference === 'direccion') serviceRow.direccion.idCliente = 99;
+    context.prisma.servicioContratado.findUnique.mockResolvedValue(serviceRow);
+    await expect(context.service.requestInstallation({ idContrato: 20, idServicio: 50 }, user)).rejects.toThrow();
+    expect(context.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+  });
+
   it('1. instalacion valida invoca POST G3 mediante el adapter', async () => {
     const { service, client } = setup(); await service.requestInstallation({ idProspecto: 10 }, user);
     expect(client.createInstallation).toHaveBeenCalledTimes(1);

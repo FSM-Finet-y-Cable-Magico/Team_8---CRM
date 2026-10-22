@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
-import { G3PresentationState, G3_WORK_ORDER_STATES, G3WorkOrderState } from './g3-integration.types';
+import { BadRequestException } from '@nestjs/common';
+import { IntegracionInstalacionG3 } from '@prisma/client';
+import { G3InstallationPayload, G3PresentationState, G3_WORK_ORDER_STATES, G3WorkOrderState } from './g3-integration.types';
 
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortValue);
@@ -19,6 +21,20 @@ export function stableJson(value: unknown) {
 
 export function sha256Payload(value: unknown) {
   return createHash('sha256').update(stableJson(value), 'utf8').digest('hex');
+}
+
+// Validate persisted G8 evidence; this does not change the G3 wire contract.
+export function installationSnapshot(tracking: IntegracionInstalacionG3): G3InstallationPayload {
+  const payload = tracking.payloadSnapshot as G3InstallationPayload | null;
+  if (!payload || sha256Payload(payload) !== tracking.payloadHash
+    || payload.request_id !== tracking.requestId || payload.trace_id !== tracking.traceId
+    || payload.id_empresa !== tracking.idEmpresa || payload.id_contrato !== tracking.idContrato
+    || payload.id_prospecto !== tracking.idProspecto || payload.id_plan !== tracking.idPlan
+    || !payload.persona?.rut || !payload.persona.nombre_completo || !payload.persona.telefono
+    || !payload.direccion?.direccion_completa || !payload.direccion.comuna) {
+    throw new BadRequestException('El snapshot persistido no corresponde a la solicitud original');
+  }
+  return payload;
 }
 
 export function normalizeG3State(value: unknown): {

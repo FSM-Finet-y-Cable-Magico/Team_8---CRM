@@ -17,7 +17,7 @@ import {
   G3WorkOrderResponse,
   G3_INTEGRATION_CLIENT,
 } from './g3-integration.types';
-import { externalWorkOrderCode, externalWorkOrderId, normalizeG3State, sha256Payload } from './g3-integration.utils';
+import { externalWorkOrderCode, externalWorkOrderId, installationSnapshot, normalizeG3State, sha256Payload } from './g3-integration.utils';
 
 const ACTIVE_REQUEST_STATES = [
   'PENDIENTE_ENVIO',
@@ -40,20 +40,56 @@ export class InstallationIntegrationService {
   ) {}
 
   async requestInstallation(dto: RequestG3InstallationDto, currentUser: AuthUser) {
-    const context = await this.resolveContext(dto, currentUser);
+    const initialContext = await this.resolveContext(dto, currentUser);
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(
         CAST(${G3_INSTALLATION_LOCK_NAMESPACE} AS integer),
-        CAST(${context.contract.idContrato} AS integer)
+        CAST(${initialContext.contract.idContrato} AS integer)
       )`;
       const existing = await tx.integracionInstalacionG3.findFirst({
         where: {
-          idContrato: context.contract.idContrato,
+          idContrato: initialContext.contract.idContrato,
           estadoIntegracion: { in: ACTIVE_REQUEST_STATES },
         },
         orderBy: { fechaSolicitud: 'desc' },
       });
-      if (existing) return { tracking: existing, created: false as const };
+      if (existing) {
+        this.assertCompanyAccess(existing.idEmpresa, currentUser);
+        if (existing.idEmpresa !== initialContext.idEmpresa
+          || existing.idProspecto !== initialContext.prospect.idProspecto
+          || existing.idPlan !== initialContext.plan.idPlan
+          || (existing.idCliente != null && initialContext.customer?.idCliente !== existing.idCliente)
+          || (initialContext.service && existing.idServicio !== initialContext.service.idServicio)) {
+          throw new BadRequestException('El tracking existente no corresponde a las relaciones del contrato objetivo');
+        }
+        return { tracking: existing, created: false as const };
+      }
+
+      const context = await this.resolveContext(dto, currentUser, tx);
+      if (context.contract.idContrato !== initialContext.contract.idContrato) {
+        throw new BadRequestException('El contrato objetivo cambio durante la solicitud');
+      }
+
+      // Match the closure's service eligibility before creating any new request.
+      // Existing requests above and retries keep their original idempotent flow.
+      const candidates = context.service
+        ? [context.service]
+        : await tx.servicioContratado.findMany({
+          where: { idContrato: context.contract.idContrato },
+          orderBy: { idServicio: 'asc' }, take: 2,
+        });
+      if (candidates.length > 1) {
+        throw new BadRequestException('Indica idServicio: el contrato tiene varios servicios y requiere una referencia explicita');
+      }
+      const targetService = candidates[0];
+      if (targetService && (targetService.idCliente !== context.customer?.idCliente
+        || targetService.idEmpresa !== context.idEmpresa
+        || targetService.idContrato !== context.contract.idContrato)) {
+        throw new BadRequestException('El servicio pendiente no corresponde al contrato, cliente y empresa de la instalacion');
+      }
+      if (targetService && !['Pendiente', 'Pendiente Instalacion', 'Instalacion Programada'].includes(targetService.estadoOperativo)) {
+        throw new BadRequestException('El estado del servicio no permite solicitar la instalacion');
+      }
 
       const requestId = randomUUID();
       const traceId = randomUUID();
@@ -101,10 +137,7 @@ export class InstallationIntegrationService {
     if (tracking.estadoIntegracion === 'FALLIDA_DEFINITIVA') {
       throw new BadRequestException('El error requiere corregir el origen antes de crear una nueva solicitud');
     }
-    const payload = tracking.payloadSnapshot as G3InstallationPayload;
-    if (sha256Payload(payload) !== tracking.payloadHash || payload.request_id !== tracking.requestId) {
-      throw new BadRequestException('El payload persistido no coincide con la solicitud original');
-    }
+    installationSnapshot(tracking);
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'REINTENTAR_INSTALACION_G3',
@@ -340,12 +373,16 @@ export class InstallationIntegrationService {
     }
   }
 
-  private async resolveContext(dto: RequestG3InstallationDto, currentUser: AuthUser) {
+  private async resolveContext(
+    dto: RequestG3InstallationDto,
+    currentUser: AuthUser,
+    db: Pick<Prisma.TransactionClient, 'contrato' | 'servicioContratado' | 'cotizacion' | 'cliente'> = this.prisma,
+  ) {
     if (!dto.idProspecto && !dto.idContrato && !dto.idServicio) {
       throw new BadRequestException('Indica prospecto, contrato o servicio para solicitar la instalacion');
     }
     const service = dto.idServicio
-      ? await this.prisma.servicioContratado.findUnique({
+      ? await db.servicioContratado.findUnique({
         where: { idServicio: dto.idServicio },
         include: { cliente: { include: { direcciones: true } }, direccion: true },
       })
@@ -354,12 +391,12 @@ export class InstallationIntegrationService {
 
     const contractId = dto.idContrato ?? service?.idContrato;
     const contract = contractId
-      ? await this.prisma.contrato.findUnique({
+      ? await db.contrato.findUnique({
         where: { idContrato: contractId },
         include: { plan: true, prospecto: true, cliente: { include: { direcciones: true } } },
       })
       : dto.idProspecto
-        ? await this.prisma.contrato.findFirst({
+        ? await db.contrato.findFirst({
           where: { idProspecto: dto.idProspecto, estado: { in: ['Firmado', 'Activo'] } },
           include: { plan: true, prospecto: true, cliente: { include: { direcciones: true } } },
           orderBy: { idContrato: 'desc' },
@@ -384,11 +421,22 @@ export class InstallationIntegrationService {
     if (!contract.plan || !contract.idPlan) throw new BadRequestException('El contrato no tiene un plan valido');
     if (contract.plan.idEmpresa !== idEmpresa
       || (contract.prospecto && contract.prospecto.idEmpresa !== idEmpresa)
-      || (service && service.idEmpresa !== idEmpresa)
-      || (contract.cliente && contract.cliente.idEmpresa !== idEmpresa)) {
+      || (service && service.idEmpresa !== idEmpresa)) {
       throw new BadRequestException('La instalacion contiene referencias cruzadas entre empresas');
     }
-    const feasible = await this.prisma.cotizacion.findFirst({
+    if (contract.plan.idPlan !== contract.idPlan || contract.prospecto.idProspecto !== contract.idProspecto) {
+      throw new BadRequestException('Las referencias de plan o prospecto no corresponden al contrato');
+    }
+    const customer = contract.cliente;
+    if ((contract.idCliente != null && (!customer || customer.idCliente !== contract.idCliente))
+      || (customer && customer.idCliente !== contract.idCliente)
+      || [contract.prospecto.idCliente, service?.idCliente, service?.cliente?.idCliente]
+        .some((id) => id != null && id !== contract.idCliente)
+      || (service && (!customer || service.direccion?.idCliente != null
+        && service.direccion.idCliente !== customer.idCliente))) {
+      throw new BadRequestException('Las referencias de cliente no corresponden al contrato objetivo');
+    }
+    const feasible = await db.cotizacion.findFirst({
       where: {
         idProspecto: contract.prospecto.idProspecto,
         idPlan: contract.idPlan,
@@ -398,21 +446,23 @@ export class InstallationIntegrationService {
     if (!feasible) throw new BadRequestException('La instalacion requiere factibilidad verificada para el plan contratado');
 
     const prospect = contract.prospecto;
-    const customer = contract.cliente ?? service?.cliente ?? null;
     const rutResult = validateRut(prospect?.rut ?? customer?.rut ?? '');
     if (!rutResult.valid || !rutResult.normalized) throw new BadRequestException(rutResult.reason ?? 'RUT invalido');
+    if (customer && validateRut(customer.rut ?? '').normalized !== rutResult.normalized) {
+      throw new BadRequestException('La identidad del cliente no corresponde al prospecto');
+    }
+    if (!customer && await db.cliente.findUnique({ where: { rut: rutResult.normalized } })) {
+      throw new BadRequestException('La identidad existente requiere vinculacion contractual explicita');
+    }
     const name = prospect?.nombreCompleto?.trim() || customer?.nombreCompleto?.trim();
     if (!name) throw new BadRequestException('La instalacion requiere nombre completo');
     const phone = this.normalizePhone(prospect?.telefono ?? customer?.telefono);
     const address = contract.direccionInstalacion?.trim()
       || prospect?.direccion?.trim()
-      || service?.direccion?.direccionCompleta?.trim()
-      || customer?.direcciones.find((item) => item.esPrincipal)?.direccionCompleta?.trim()
-      || customer?.direcciones[0]?.direccionCompleta?.trim();
+      || service?.direccion?.direccionCompleta?.trim();
     const comuna = contract.comunaInstalacion?.trim()
       || prospect?.comuna?.trim()
-      || service?.direccion?.comuna?.trim()
-      || customer?.direcciones.find((item) => item.direccionCompleta === address)?.comuna?.trim();
+      || service?.direccion?.comuna?.trim();
     if (!address) throw new BadRequestException('La instalacion requiere direccion completa');
     if (!comuna) throw new BadRequestException('La instalacion requiere comuna');
     return { idEmpresa, contract, plan: contract.plan, prospect, customer, service, rut: rutResult.normalized, name, phone, address, comuna };
