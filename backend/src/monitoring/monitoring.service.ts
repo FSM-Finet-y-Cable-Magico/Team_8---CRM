@@ -2,6 +2,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { DemoMeasurementDto } from './dto/demo-measurement.dto';
@@ -15,20 +16,21 @@ export class MonitoringService {
 
   async customerStatus(idCliente: number, currentUser: AuthUser) {
     const customer = await this.getCustomerOrThrow(idCliente, currentUser);
-    const services = await this.prisma.servicioContratado.findMany({
-      where: { idCliente },
+    const services = companyResponse(await this.prisma.servicioContratado.findMany({
+      where: { idCliente, ...(!isAdministrator(currentUser.roles) ? { idEmpresa: currentUser.idEmpresa! } : {}) },
       include: {
         contrato: { include: { plan: true } },
         direccion: true,
         equipos: { orderBy: { idUnidad: 'desc' } },
       },
       orderBy: { fechaCreacion: 'desc' },
-    });
+    }), currentUser);
     const equipmentIds = [...new Set(services.flatMap((service) => service.equipos.map((unit) => unit.idUnidad)))];
-    const latest = await this.latestMeasurement(idCliente, equipmentIds);
+    const latest = await this.latestMeasurement(idCliente, equipmentIds, isAdministrator(currentUser.roles));
 
     return this.statusPayload({
       subject: { tipo: 'cliente', idCliente, nombre: customer.nombreCompleto },
+      currentUser,
       latest,
       equipmentIds,
       services,
@@ -51,14 +53,16 @@ export class MonitoringService {
     }
 
     this.assertCompanyAccess(service.idEmpresa, currentUser);
-    const equipmentIds = service.equipos.map((unit) => unit.idUnidad);
+    const visibleService = companyResponse(service, currentUser);
+    const equipmentIds = visibleService.equipos.map((unit) => unit.idUnidad);
     const latest = await this.latestMeasurement(service.idCliente, equipmentIds);
 
     return this.statusPayload({
       subject: { tipo: 'servicio', idServicio, idCliente: service.idCliente },
+      currentUser,
       latest,
       equipmentIds,
-      services: [service],
+      services: [visibleService],
     });
   }
 
@@ -74,6 +78,7 @@ export class MonitoringService {
 
     return this.statusPayload({
       subject: { tipo: 'equipo', idUnidad, numeroSerie: unit.numeroSerie },
+      currentUser,
       latest,
       equipmentIds: [unit.idUnidad],
       services: [],
@@ -82,7 +87,9 @@ export class MonitoringService {
 
   async customerHistory(idCliente: number, currentUser: AuthUser) {
     await this.getCustomerOrThrow(idCliente, currentUser);
-    const units = await this.prisma.unidadEquipo.findMany({ where: { idClienteInstalado: idCliente } });
+    const units = companyResponse(await this.prisma.unidadEquipo.findMany({
+      where: { idClienteInstalado: idCliente, ...(!isAdministrator(currentUser.roles) ? { idEmpresa: currentUser.idEmpresa! } : {}) },
+    }), currentUser);
     const equipmentIds = units.map((unit) => unit.idUnidad);
 
     if (!equipmentIds.length) {
@@ -155,8 +162,8 @@ export class MonitoringService {
     }
 
     const canAccess = isAdministrator(currentUser.roles) ||
-      customer.idEmpresa === currentUser.idEmpresa ||
-      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
+      Boolean(currentUser.idEmpresa && (customer.idEmpresa === currentUser.idEmpresa ||
+      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)));
 
     if (!canAccess) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
@@ -165,43 +172,40 @@ export class MonitoringService {
     return customer;
   }
 
-  private async latestMeasurement(idCliente: number | undefined, equipmentIds: number[]) {
-    const filters: Prisma.MonitoreoOntWhereInput[] = [];
-
-    if (idCliente) {
-      filters.push({ idCliente });
-    }
-
-    if (equipmentIds.length) {
-      filters.push({ idUnidad: { in: equipmentIds } });
-    }
-
-    if (!filters.length) {
-      return null;
-    }
-
+  private async latestMeasurement(idCliente: number | undefined, equipmentIds: number[], consolidatedCustomer = false) {
+    // Customer identity alone cannot attribute a measurement to a company.
+    if (!equipmentIds.length && !consolidatedCustomer) return null;
     return this.prisma.monitoreoOnt.findFirst({
-      where: { OR: filters },
+      where: consolidatedCustomer
+        ? { OR: [{ idCliente }, { idUnidad: { in: equipmentIds } }] }
+        : { idUnidad: { in: equipmentIds }, ...(idCliente ? { OR: [{ idCliente }, { idCliente: null }] } : {}) },
       orderBy: { timestampMedicion: 'desc' },
     });
   }
 
   private async statusPayload(input: {
     subject: Record<string, unknown>;
+    currentUser: AuthUser;
     latest: Awaited<ReturnType<MonitoringService['latestMeasurement']>>;
     equipmentIds: number[];
     services: unknown[];
   }) {
-    const latest = input.latest;
+    let latest = input.latest;
+    const restricted = !isAdministrator(input.currentUser.roles);
+    if (restricted && (!latest?.idUnidad || !input.equipmentIds.includes(latest.idUnidad))) latest = null;
     const recentHours = Number(this.configService.get<string>('MONITORING_RECENT_HOURS') ?? 24);
     const recentLimit = new Date(Date.now() - recentHours * 60 * 60 * 1000);
-    const isRecent = Boolean(latest?.timestampMedicion && latest.timestampMedicion >= recentLimit);
-    const unit = latest?.idUnidad
+    let unit = latest?.idUnidad
       ? await this.prisma.unidadEquipo.findUnique({ where: { idUnidad: latest.idUnidad } })
       : null;
-    const cajaNap = latest?.idCajaNap
+    if (restricted && unit?.idEmpresa !== input.currentUser.idEmpresa) {
+      latest = null;
+      unit = null;
+    }
+    const nap = latest?.idCajaNap
       ? await this.prisma.cajaNap.findUnique({ where: { idCajaNap: latest.idCajaNap } })
       : null;
+    const cajaNap = nap && (!restricted || nap.idEmpresa === input.currentUser.idEmpresa) ? nap : null;
     const history = input.equipmentIds.length
       ? await this.prisma.historialConexionOnt.findMany({
           where: { idUnidad: { in: input.equipmentIds } },
@@ -210,6 +214,7 @@ export class MonitoringService {
         })
       : [];
 
+    const isRecent = Boolean(latest?.timestampMedicion && latest.timestampMedicion >= recentLimit);
     return {
       subject: input.subject,
       estadoConexion: isRecent ? latest?.estadoConexion ?? 'Con dato reciente' : 'Sin dato reciente',
@@ -224,7 +229,7 @@ export class MonitoringService {
         idMonitoreo: latest.idMonitoreo.toString(),
         idUnidad: latest.idUnidad,
         idCliente: latest.idCliente,
-        idCajaNap: latest.idCajaNap,
+        idCajaNap: cajaNap?.idCajaNap ?? null,
         potenciaActualDbm: latest.potenciaActualDbm ? Number(latest.potenciaActualDbm) : null,
         timestampMedicion: latest.timestampMedicion,
         estadoConexion: latest.estadoConexion,

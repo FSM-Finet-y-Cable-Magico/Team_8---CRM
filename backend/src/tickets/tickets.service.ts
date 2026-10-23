@@ -1,6 +1,7 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
 import { generateWorkOrderCode } from '../common/work-order-code';
 import { PrismaService } from '../prisma/prisma.service';
@@ -41,10 +42,11 @@ export class TicketsService {
       categoryIds.length ? this.prisma.categoriaFalla.findMany({ where: { idCategoria: { in: categoryIds } } }) : [],
       ticketIds.length
         ? this.prisma.ordenTrabajo.findMany({
-            where: { idTicket: { in: ticketIds } },
+            where: { idTicket: { in: ticketIds }, ...this.companyScope(currentUser, scope) },
             orderBy: { fechaCreacion: 'desc' },
             select: {
               idOt: true,
+              idEmpresa: true,
               idTicket: true,
               idCliente: true,
               idServicio: true,
@@ -73,7 +75,7 @@ export class TicketsService {
       workOrdersByTicket.set(order.idTicket, current);
     }
 
-    return tickets.map((ticket) => {
+    return companyResponse(tickets.map((ticket) => {
       const ticketWorkOrders = workOrdersByTicket.get(ticket.idTicket) ?? [];
 
       return {
@@ -84,7 +86,7 @@ export class TicketsService {
         hasOpenWorkOrder: ticketWorkOrders.some((order) => order.estado !== 'Completada'),
         observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
       };
-    });
+    }), currentUser);
   }
 
   async create(dto: CreateTicketDto, currentUser: AuthUser) {
@@ -94,19 +96,26 @@ export class TicketsService {
       throw new BadRequestException(rut.reason ?? 'RUT invalido');
     }
 
-    const cliente = await this.prisma.cliente.findUnique({ where: { rut: rut.normalized } });
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { rut: rut.normalized },
+      include: { contratos: { select: { idEmpresa: true } }, servicios: { select: { idEmpresa: true } } },
+    });
 
     if (!cliente) {
       throw new BadRequestException('El RUT no corresponde a un cliente existente');
     }
 
-    if (!isAdministrator(currentUser.roles) && cliente.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa ||
+      (cliente.idEmpresa !== currentUser.idEmpresa &&
+        !cliente.contratos.some(c => c.idEmpresa === currentUser.idEmpresa) &&
+        !cliente.servicios.some(s => s.idEmpresa === currentUser.idEmpresa)))) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
     return this.createForCustomer(cliente.idCliente, dto, {
       idUsuario: currentUser.idUsuario,
       idUsuarioAsignado: currentUser.idUsuario,
+      idEmpresa: isAdministrator(currentUser.roles) ? undefined : currentUser.idEmpresa!,
       accion: 'CREAR_TICKET',
       origen: dto.origen ?? 'CRM',
     });
@@ -431,7 +440,7 @@ export class TicketsService {
   private async createForCustomer(
     idCliente: number,
     dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
-    options: { idUsuario: number | null; idUsuarioAsignado: number | null; accion: string; origen: string },
+    options: { idEmpresa?: number; idUsuario: number | null; idUsuarioAsignado: number | null; accion: string; origen: string },
   ) {
     const cliente = await this.prisma.cliente.findUnique({ where: { idCliente } });
 
@@ -446,7 +455,10 @@ export class TicketsService {
     }
 
     const servicio = dto.idServicio
-      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } })
+      ? await this.prisma.servicioContratado.findUnique({
+          where: { idServicio: dto.idServicio },
+          include: { contrato: true },
+        })
       : null;
 
     if (dto.idServicio && !servicio) {
@@ -457,10 +469,29 @@ export class TicketsService {
       throw new BadRequestException('El servicio contratado no corresponde al cliente seleccionado');
     }
 
+    if (options.idEmpresa !== undefined && servicio && servicio.idEmpresa !== options.idEmpresa) {
+      throw new BadRequestException('El servicio contratado no pertenece a tu empresa');
+    }
+
+    const idEmpresa = options.idEmpresa ?? servicio?.idEmpresa ?? cliente.idEmpresa;
+    if (!idEmpresa) {
+      throw new BadRequestException('El ticket requiere una empresa asociada');
+    }
+
+    // Validate attribution, not financial eligibility: a suspended or delinquent
+    // customer must still be able to request support for their own contract.
+    const contrato = servicio
+      ? servicio.contrato
+      : await this.prisma.contrato.findFirst({ where: { idCliente, idEmpresa } });
+    if (!contrato || contrato.idCliente !== idCliente || contrato.idEmpresa !== idEmpresa ||
+      (servicio && contrato.idContrato !== servicio.idContrato)) {
+      throw new BadRequestException('El ticket requiere un contrato vinculado al cliente y empresa seleccionados');
+    }
+
     const ticket = await this.prisma.ticket.create({
       data: {
         idCliente: cliente.idCliente,
-        idEmpresa: servicio?.idEmpresa ?? cliente.idEmpresa,
+        idEmpresa,
         idServicio: servicio?.idServicio,
         idUsuarioAsignado: options.idUsuarioAsignado,
         idCategoria: dto.idCategoria,
@@ -498,7 +529,7 @@ export class TicketsService {
       throw new NotFoundException('Ticket no encontrado');
     }
 
-    if (!isAdministrator(currentUser.roles) && ticket.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa || ticket.idEmpresa !== currentUser.idEmpresa)) {
       throw new BadRequestException('El ticket no pertenece a tu empresa');
     }
 
