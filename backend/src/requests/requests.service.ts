@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCustomerRequestDto } from './dto/create-customer-request.dto';
@@ -12,7 +13,7 @@ const REQUEST_INCLUDE = {
   cliente: true,
   servicio: { include: { contrato: { include: { plan: true } }, direccion: true } },
   empresa: true,
-  usuarioRegistro: { select: { idUsuario: true, nombreCompleto: true, email: true } },
+  usuarioRegistro: { select: { idUsuario: true, idEmpresa: true, nombreCompleto: true, email: true } },
 } satisfies Prisma.SolicitudClienteInclude;
 
 const CLOSED_REQUEST_STATES = ['Cerrada', 'No Factible', 'Cancelada'];
@@ -24,24 +25,24 @@ export class RequestsService {
     private readonly auditService: AuditService,
   ) {}
 
-  list(currentUser: AuthUser, scope = 'consolidado') {
-    return this.prisma.solicitudCliente.findMany({
+  async list(currentUser: AuthUser, scope = 'consolidado') {
+    return companyResponse(await this.prisma.solicitudCliente.findMany({
       where: this.companyScope(currentUser, scope),
       include: REQUEST_INCLUDE,
       orderBy: { fechaCreacion: 'desc' },
       take: 150,
-    });
+    }), currentUser);
   }
 
   async listByCustomer(idCliente: number, currentUser: AuthUser) {
     await this.getCustomerOrThrow(idCliente, currentUser);
 
-    return this.prisma.solicitudCliente.findMany({
+    return companyResponse(await this.prisma.solicitudCliente.findMany({
       where: { idCliente, ...this.companyScope(currentUser, 'consolidado') },
       include: REQUEST_INCLUDE,
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
-    });
+    }), currentUser);
   }
 
   async create(dto: CreateCustomerRequestDto, currentUser: AuthUser) {
@@ -88,12 +89,12 @@ export class RequestsService {
       },
     });
 
-    return created;
+    return companyResponse(created, currentUser);
   }
 
   async updateStatus(idSolicitud: number, dto: UpdateRequestStatusDto, currentUser: AuthUser) {
     const request = await this.getRequestOrThrow(idSolicitud, currentUser);
-    if (request.estado === dto.estado && (dto.observaciones === undefined || (dto.observaciones.trim() || null) === request.observaciones)) return request;
+    if (request.estado === dto.estado && (dto.observaciones === undefined || (dto.observaciones.trim() || null) === request.observaciones)) return companyResponse(request, currentUser);
     if (CLOSED_REQUEST_STATES.includes(request.estado)) {
       throw new BadRequestException('La solicitud está cerrada; registra una nueva solicitud para continuar');
     }
@@ -119,7 +120,7 @@ export class RequestsService {
       valorNuevo: { estado: updated.estado, observaciones: updated.observaciones },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   async updateFeasibility(idSolicitud: number, dto: UpdateRequestFeasibilityDto, currentUser: AuthUser) {
@@ -156,7 +157,7 @@ export class RequestsService {
       },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   private async resolveContext(dto: CreateCustomerRequestDto, currentUser: AuthUser) {
@@ -240,8 +241,8 @@ export class RequestsService {
 
     if (
       !isAdministrator(currentUser.roles) &&
-      customer.idEmpresa !== currentUser.idEmpresa &&
-      !customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)
+      (!currentUser.idEmpresa || (customer.idEmpresa !== currentUser.idEmpresa &&
+      !customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)))
     ) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }

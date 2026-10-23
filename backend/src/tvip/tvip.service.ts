@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -15,15 +16,13 @@ export class TvipService {
   ) {}
 
   async generateForContract(idContrato: number, currentUser: AuthUser) {
-    const contract = await this.getEligibleContract(idContrato);
-    this.assertCompanyAccess(contract.idEmpresa, currentUser);
+    const contract = await this.getEligibleContract(idContrato, currentUser);
 
     return this.upsertCredential(contract, currentUser.idUsuario, 'GENERAR_CREDENCIALES_TVIP');
   }
 
   async regenerateForContract(idContrato: number, currentUser: AuthUser) {
-    const contract = await this.getEligibleContract(idContrato);
-    this.assertCompanyAccess(contract.idEmpresa, currentUser);
+    const contract = await this.getEligibleContract(idContrato, currentUser);
 
     return this.upsertCredential(contract, currentUser.idUsuario, 'REGENERAR_CREDENCIALES_TVIP');
   }
@@ -39,22 +38,22 @@ export class TvipService {
     }
 
     const canAccess = isAdministrator(currentUser.roles) ||
-      customer.idEmpresa === currentUser.idEmpresa ||
-      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
+      Boolean(currentUser.idEmpresa && (customer.idEmpresa === currentUser.idEmpresa ||
+      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)));
 
     if (!canAccess) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
-    return this.listForCustomer(idCliente);
+    return this.listForCustomer(idCliente, currentUser);
   }
 
-  async listForCustomer(idCliente: number) {
-    const contracts = await this.prisma.contrato.findMany({
-      where: { idCliente },
+  private async listForCustomer(idCliente: number, currentUser: AuthUser) {
+    const contracts = companyResponse(await this.prisma.contrato.findMany({
+      where: { idCliente, ...(!isAdministrator(currentUser.roles) ? { idEmpresa: currentUser.idEmpresa! } : {}) },
       include: { plan: true },
       orderBy: { fechaInicio: 'desc' },
-    });
+    }), currentUser);
     const contractIds = contracts.map((contract) => contract.idContrato);
     const credentials = contractIds.length
       ? await this.prisma.credencialesTvip.findMany({ where: { idContrato: { in: contractIds } } })
@@ -84,7 +83,7 @@ export class TvipService {
       });
   }
 
-  private async getEligibleContract(idContrato: number) {
+  private async getEligibleContract(idContrato: number, currentUser: AuthUser) {
     const contract = await this.prisma.contrato.findUnique({
       where: { idContrato },
       include: { plan: true, cliente: true },
@@ -94,7 +93,8 @@ export class TvipService {
       throw new NotFoundException('Contrato no encontrado');
     }
 
-    if (!this.contractIncludesTv(contract)) {
+    this.assertCompanyAccess(contract.idEmpresa, currentUser);
+    if (!this.contractIncludesTv(companyResponse(contract, currentUser))) {
       throw new BadRequestException('El plan del contrato no incluye TV IP');
     }
 
