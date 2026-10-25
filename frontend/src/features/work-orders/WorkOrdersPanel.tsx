@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { CircleCheckBig, ClipboardList, Wrench } from 'lucide-react';
-import { api, apiErrorMessage, type WorkOrder } from '../../api';
+import { type WorkOrder } from '../../api';
 import {
   formatConnectionType,
   formatDateOnly,
@@ -10,41 +10,13 @@ import {
 } from '../../lib';
 import { HistoryBox, Modal, StatusBadge } from '../../shared/components';
 
-export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; onChanged: () => void }) {
+export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState({
-    potenciaOpticaDbm: '',
-    observaciones: '',
-    estadoFinalServicio: 'Activo',
-    numeroSerie: '',
-    modelo: '',
-    macAddress: '',
-    puertoOlt: '',
-    modalidadAsignacion: 'Propiedad empresa',
-    valorArriendoMensual: '',
-  });
-  const [status, setStatus] = useState('');
-
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
   const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
   const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
   const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
-
-  useEffect(() => {
-    setForm({
-      potenciaOpticaDbm: '',
-      observaciones: '',
-      estadoFinalServicio: 'Activo',
-      numeroSerie: '',
-      modelo: '',
-      macAddress: '',
-      puertoOlt: '',
-      modalidadAsignacion: 'Propiedad empresa',
-      valorArriendoMensual: '',
-    });
-    setStatus('');
-  }, [selectedId]);
 
   function ownerLabel(order: WorkOrder) {
     if (order.prospecto?.idProspecto) {
@@ -91,29 +63,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
           : 'OTR';
 
     return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
-  }
-
-  async function completeRepair() {
-    if (!selectedOrder) {
-      return;
-    }
-
-    if (form.observaciones.trim().length < 3) {
-      setStatus('Ingresa las observaciones de cierre de la orden.');
-      return;
-    }
-
-    try {
-      const { data } = await api.patch(`/work-orders/${selectedOrder.idOt}/complete-repair`, {
-        potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
-        observaciones: form.observaciones.trim(),
-        estadoFinalServicio: form.estadoFinalServicio,
-      });
-      setStatus(`Orden completada y ticket ${data.ticket?.codigoSeguimiento ?? data.ticket?.idTicket ?? ''} resuelto.`);
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
   }
 
   return (
@@ -271,56 +220,15 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Cierre de trabajo técnico'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Trabajo técnico administrado por G3'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'La orden ya fue completada y el ticket asociado quedó actualizado.'
-                        : 'Registra el cierre de la visita para resolver el ticket asociado.'}
+                        ? 'Esta orden consta completada; sus datos históricos se conservan sin modificaciones.'
+                        : 'El cierre tecnico corresponde a G3. Las observaciones y el seguimiento comercial se registran en Tickets.'}
                     </p>
                   </div>
                 </div>
-                <div className="workflow-grid work-order-technical-grid">
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Potencia óptica</span>
-                    <span className="work-order-measurement">
-                      <input
-                        aria-label="Potencia óptica en dBm"
-                        type="number"
-                        step="0.01"
-                        placeholder="-19.50"
-                        value={form.potenciaOpticaDbm}
-                        onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-                      />
-                      <span>dBm</span>
-                    </span>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Estado final del servicio</span>
-                    <select
-                      value={form.estadoFinalServicio}
-                      onChange={(event) => setForm({ ...form, estadoFinalServicio: event.target.value })}
-                    >
-                      <option value="Activo">Activo</option>
-                      <option value="En Mantencion">En Mantención</option>
-                    </select>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Observaciones de cierre</span>
-                    <textarea
-                      placeholder="Describe el diagnóstico y las acciones realizadas"
-                      value={form.observaciones}
-                      onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
-                    />
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  className="work-order-complete-button"
-                  disabled={selectedOrderIsCompleted}
-                  onClick={completeRepair}
-                >
-                  Completar orden y resolver ticket
-                </button>
+                <p className="inline-status">Consulta historica de solo lectura. La derivacion y recepcion del cierre de reparaciones requieren un contrato ratificado con G3; no hay cierre tecnico local.</p>
               </section>
             ) : (
               <div className="work-order-information">
@@ -333,7 +241,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 </div>
               </div>
             )}
-            {status && <p className="inline-status">{status}</p>}
           </div>
         ) : (
           <p className="inline-status">Selecciona una orden de trabajo para gestionarla.</p>
