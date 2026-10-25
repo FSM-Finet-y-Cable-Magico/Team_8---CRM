@@ -38,10 +38,18 @@ describe('Etapa 4 - garantías comerciales CU-85', () => {
     await expect(service.create({ ...baseDto, fechaTermino: '2026-09-25' }, comercial)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('rechaza cliente de otra empresa sin filtrar datos', async () => {
+  it('permite identidad compartida con servicio y contrato propios sin reasignar empresa', async () => {
     const { service, prisma } = setup();
     prisma.cliente.findUnique.mockResolvedValue({ idCliente: 10, idEmpresa: 2 });
-    await expect(service.create(baseDto, comercial)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.create(baseDto, comercial)).resolves.toMatchObject({ idCliente: 10, idEmpresa: 1 });
+    expect(prisma.cliente).not.toHaveProperty('update');
+  });
+
+  it('rechaza relaciones de otra empresa aunque el cliente sea compartido', async () => {
+    const { service, prisma, rows } = setup();
+    prisma.contrato.findUnique.mockResolvedValue({ idContrato: 30, idEmpresa: 2, idCliente: 10, estado: 'Activo' });
+    await expect(service.create(baseDto, comercial)).rejects.toThrow();
+    expect(rows).toHaveLength(0);
   });
 
   it('rechaza servicio inexistente', async () => {

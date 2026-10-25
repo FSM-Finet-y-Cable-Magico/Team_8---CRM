@@ -51,7 +51,7 @@ export class CommercialControlBookService {
     this.assertViewer(user);
     const idEmpresa = this.queryCompany(requestedCompany, user);
     const customer = await this.prisma.cliente.findFirst({
-      where: { idCliente, idEmpresa },
+      where: { idCliente, OR: [{ idEmpresa }, { contratos: { some: { idEmpresa } } }] },
       select: {
         idCliente: true,
         contratos: { where: { idEmpresa }, select: {
@@ -198,8 +198,6 @@ export class CommercialControlBookService {
   async registerEvent(dto: CommercialEventDto, user: AuthUser) {
     this.assertWriter(user);
     const customer = await this.customer(dto.idCliente);
-    const companyId = this.requireCompany(customer.idEmpresa);
-    this.assertCompany(companyId, user);
     const [service, contract, invoice] = await Promise.all([
       dto.idServicio ? this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } }) : null,
       dto.idContrato ? this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } }) : null,
@@ -209,6 +207,7 @@ export class CommercialControlBookService {
     if (service && dto.idContrato && service.idContrato !== dto.idContrato) throw new BadRequestException('El servicio no corresponde al contrato');
     if (invoice && dto.idContrato && invoice.idContrato !== dto.idContrato) throw new BadRequestException('La factura no corresponde al contrato');
     if (invoice && service && service.idContrato !== invoice.idContrato) throw new BadRequestException('El servicio no corresponde a la factura');
+    const companyId = await this.operationCompany(customer, user, contract ? contract.idEmpresa : invoice ? invoice.contrato?.idEmpresa ?? null : service?.idEmpresa);
     this.assertRelated(customer.idCliente, companyId, service, contract, invoice);
 
     if (dto.tipo === 'ULTIMO_AVISO_CORTE') {
@@ -242,7 +241,7 @@ export class CommercialControlBookService {
     const invoice = await this.debtInvoice(dto.idFactura);
     const customer = invoice.contrato?.cliente;
     if (!customer || customer.idCliente !== dto.idCliente) throw new BadRequestException('La factura no corresponde al cliente');
-    const companyId = this.requireCompany(invoice.contrato?.idEmpresa ?? customer.idEmpresa);
+    const companyId = this.requireCompany(invoice.contrato?.idEmpresa);
     this.assertCompany(companyId, user);
     if (dto.idContrato && dto.idContrato !== invoice.idContrato) throw new BadRequestException('El contrato no corresponde a la factura');
     if (dto.idServicio) {
@@ -279,10 +278,14 @@ export class CommercialControlBookService {
     if (!isAdministrator(user.roles)) throw new ForbiddenException('Solo un administrador puede aprobar convenios');
     const agreement = await this.prisma.convenioPago.findUnique({
       where: { idConvenio },
-      include: { factura: { include: { pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } } },
+      include: { factura: { include: { contrato: true, pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } } },
     });
     if (!agreement) throw new NotFoundException('Convenio no encontrado');
     this.assertCompany(agreement.idEmpresa, user);
+    if (agreement.factura?.idFactura !== agreement.idFactura || agreement.factura?.contrato?.idEmpresa !== agreement.idEmpresa
+      || agreement.factura?.contrato?.idCliente !== agreement.idCliente || (agreement.idContrato !== null && agreement.idContrato !== agreement.factura?.idContrato)) {
+      throw new BadRequestException('El convenio no corresponde a la factura, cliente o empresa');
+    }
     if (agreement.estado !== 'PENDIENTE') throw new BadRequestException('Solo se pueden aprobar convenios pendientes');
     if (!agreement.factura || CLOSED_INVOICE_STATES.includes(agreement.factura.estado) || !this.invoiceStatus(agreement.factura).saldoPendiente || Number(agreement.montoComprometido) > this.invoiceStatus(agreement.factura).saldoPendiente!) {
       throw new BadRequestException('El convenio ya no tiene deuda vigente para aprobar');
@@ -297,7 +300,7 @@ export class CommercialControlBookService {
     const invoice = await this.debtInvoice(dto.idFactura);
     const customer = invoice.contrato?.cliente;
     if (!customer) throw new BadRequestException('La factura no tiene cliente');
-    const companyId = this.requireCompany(invoice.contrato?.idEmpresa ?? customer.idEmpresa);
+    const companyId = this.requireCompany(invoice.contrato?.idEmpresa);
     this.assertCompany(companyId, user);
     if (!dto.motivo.trim()) throw new BadRequestException('El motivo de la prórroga es obligatorio');
     const newDate = this.dateOnly(dto.nuevaFecha, 'nuevaFecha');
@@ -312,11 +315,11 @@ export class CommercialControlBookService {
     this.assertWriter(user);
     if (!dto.justificacion.trim()) throw new BadRequestException('La justificación es obligatoria');
     const customer = await this.customer(dto.idCliente);
-    const companyId = this.requireCompany(customer.idEmpresa);
-    this.assertCompany(companyId, user);
     if (dto.tipoCambio === 'DIA_PAGO') {
       if (!dto.idContrato) throw new BadRequestException('El cambio de día requiere contrato');
       const contract = await this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } });
+      const companyId = this.requireCompany(contract?.idEmpresa);
+      this.assertCompany(companyId, user);
       if (!contract || contract.idCliente !== customer.idCliente || contract.idEmpresa !== companyId) throw new BadRequestException('Contrato incompatible con el cliente o empresa');
       const newDay = Number(dto.valorNuevo);
       if (!Number.isInteger(newDay) || newDay < 1 || newDay > 28) throw new BadRequestException('El día de pago debe estar entre 1 y 28');
@@ -331,6 +334,8 @@ export class CommercialControlBookService {
 
     if (!dto.idFactura) throw new BadRequestException('La fecha comprometida requiere factura');
     const invoice = await this.debtInvoice(dto.idFactura);
+    const companyId = this.requireCompany(invoice.contrato?.idEmpresa);
+    this.assertCompany(companyId, user);
     if ((dto.idContrato && dto.idContrato !== invoice.idContrato) || invoice.contrato?.cliente?.idCliente !== customer.idCliente || invoice.contrato.idEmpresa !== companyId) throw new BadRequestException('Factura incompatible con el cliente o empresa');
     const newDate = this.dateOnly(dto.valorNuevo, 'valorNuevo');
     const currentDate = invoice.prorrogasPago[0]?.nuevaFecha ?? invoice.fechaLimitePago;
@@ -347,14 +352,13 @@ export class CommercialControlBookService {
   async createAdditionalCharge(dto: CreateAdditionalChargeDto, user: AuthUser) {
     this.assertWriter(user);
     const customer = await this.customer(dto.idCliente);
-    const companyId = this.requireCompany(customer.idEmpresa);
-    this.assertCompany(companyId, user);
     const [contract, service] = await Promise.all([
       dto.idContrato ? this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } }) : null,
       dto.idServicio ? this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } }) : null,
     ]);
     if ((dto.idServicio && !service) || (dto.idContrato && !contract)) throw new NotFoundException('La relación indicada no existe');
     if (service && dto.idContrato && service.idContrato !== dto.idContrato) throw new BadRequestException('El servicio no corresponde al contrato');
+    const companyId = await this.operationCompany(customer, user, contract ? contract.idEmpresa : service?.idEmpresa);
     this.assertRelated(customer.idCliente, companyId, service, contract, null);
     const charge = await this.prisma.cargoAdicional.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: contract?.idContrato, idServicio: service?.idServicio, tipo: dto.tipo, monto: dto.monto, fecha: this.dateOnly(dto.fecha, 'fecha'), estado: 'PENDIENTE_FACTURACION', afectaSaldo: false, observacion: dto.observacion?.trim() || null, idUsuarioResponsable: user.idUsuario } });
     await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_CARGO_ADICIONAL', entidadAfectada: 'cargo_adicional', idEntidadAfectada: charge.idCargo, valorNuevo: { idCliente: customer.idCliente, tipo: dto.tipo, monto: dto.monto, estado: charge.estado, afectaSaldo: false } });
@@ -384,7 +388,7 @@ export class CommercialControlBookService {
     const today = this.dateOnly(todayDateOnly(), 'hoy');
     const limit = new Date(today); limit.setUTCDate(limit.getUTCDate() + horizon);
     const invoices = await this.prisma.factura.findMany({
-      where: { estado: { notIn: CLOSED_INVOICE_STATES }, fechaLimitePago: { lte: limit }, ...(company ? { contrato: { is: { idEmpresa: company, cliente: { is: { idEmpresa: company } } } } } : {}) },
+      where: { estado: { notIn: CLOSED_INVOICE_STATES }, fechaLimitePago: { lte: limit }, ...(company ? { contrato: { is: { idEmpresa: company } } } : {}) },
       include: { pagos: true, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 }, contrato: { include: { cliente: true, plan: true } } },
       orderBy: { fechaLimitePago: 'asc' }, take: 500,
     });
@@ -402,9 +406,8 @@ export class CommercialControlBookService {
   private async loadRows(query: ControlBookQueryDto, user: AuthUser) {
     const company = this.queryCompany(query.idEmpresa, user);
     const customers = await this.prisma.cliente.findMany({
-      where: { idEmpresa: company },
+      where: { OR: [{ idEmpresa: company }, { contratos: { some: { idEmpresa: company } } }] },
       include: {
-        direcciones: { orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }] },
         servicios: { where: { idEmpresa: company }, include: { direccion: true, zonaPago: true }, orderBy: { idServicio: 'asc' } },
         eventosGestionComercial: { where: { idEmpresa: company }, include: { responsable: { select: { nombreCompleto: true } } }, orderBy: [{ fecha: 'desc' }, { idEvento: 'desc' }] },
         cargosAdicionales: { where: { idEmpresa: company, estado: 'PENDIENTE_FACTURACION' } },
@@ -451,8 +454,8 @@ export class CommercialControlBookService {
       const charges = customer.cargosAdicionales.filter((charge) => contract ? charge.idContrato === contract.idContrato : service ? charge.idContrato === null && charge.idServicio === service.idServicio : charge.idContrato === null && charge.idServicio === null);
       return {
         rowId: invoice ? `${customer.idCliente}-${contract!.idContrato}-${invoice.idFactura}` : `${customer.idCliente}-${contract?.idContrato ?? 'sin-contrato'}-${service?.idServicio ?? 'sin-servicio'}-sin-factura`,
-        idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
-        telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract?.direccionInstalacion ?? customer.direcciones[0]?.direccionCompleta ?? null,
+        idEmpresa: company, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
+        telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract?.direccionInstalacion ?? null,
         idServicio: service?.idServicio ?? null, serviciosRelacionados: services.map((item) => item.idServicio), estadoServicio: service?.estadoOperativo ?? (services.length > 1 ? 'Múltiples servicios' : null),
         idContrato: contract?.idContrato ?? null, numeroContrato: contract ? contract.numeroContratoExterno ?? String(contract.idContrato) : null, idPlan: contract?.idPlan ?? null,
         plan: contract?.plan?.nombreComercial ?? null, nombrePlan: contract?.plan?.nombreComercial ?? null,
@@ -523,7 +526,22 @@ export class CommercialControlBookService {
   }
 
   private debtInvoice(idFactura: number) {
-    return this.prisma.factura.findUnique({ where: { idFactura }, include: { pagos: true, contrato: { include: { cliente: true } }, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } }).then((invoice) => { if (!invoice) throw new NotFoundException('Factura no encontrada'); if (CLOSED_INVOICE_STATES.includes(invoice.estado) || !this.invoiceStatus(invoice).saldoPendiente) throw new BadRequestException('La factura no tiene deuda vigente'); return invoice; });
+    return this.prisma.factura.findUnique({ where: { idFactura }, include: { pagos: true, contrato: { include: { cliente: true } }, prorrogasPago: { where: { estado: { in: ACTIVE_EXTENSION_STATES } }, orderBy: { nuevaFecha: 'desc' }, take: 1 } } }).then((invoice) => {
+      if (!invoice) throw new NotFoundException('Factura no encontrada');
+      if (!invoice.contrato?.idEmpresa || !invoice.contrato.cliente || invoice.contrato.idCliente !== invoice.contrato.cliente.idCliente || invoice.idContrato !== invoice.contrato.idContrato) throw new BadRequestException('Factura sin relación contractual válida');
+      if (CLOSED_INVOICE_STATES.includes(invoice.estado) || !this.invoiceStatus(invoice).saldoPendiente) throw new BadRequestException('La factura no tiene deuda vigente');
+      return invoice;
+    });
+  }
+
+  private async operationCompany(customer: { idCliente: number; idEmpresa: number | null }, user: AuthUser, relatedCompany?: number | null) {
+    const company = this.requireCompany(relatedCompany === undefined ? (isAdministrator(user.roles) ? customer.idEmpresa : user.idEmpresa) : relatedCompany);
+    this.assertCompany(company, user);
+    if (relatedCompany === undefined && customer.idEmpresa !== company) {
+      const contract = await this.prisma.contrato.findFirst({ where: { idCliente: customer.idCliente, idEmpresa: company }, select: { idContrato: true } });
+      if (!contract) throw new ForbiddenException('El cliente no tiene contrato en esta empresa');
+    }
+    return company;
   }
 
   private async customer(idCliente: number) {

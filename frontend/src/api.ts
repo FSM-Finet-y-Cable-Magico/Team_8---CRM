@@ -446,7 +446,7 @@ export type BillingOverview = {
       nombreCompleto: string;
       telefono: string | null;
       email: string | null;
-      estado: string;
+      estado: string | null;
       empresa: string | null;
     };
     contrato: {

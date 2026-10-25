@@ -105,7 +105,8 @@ export class G2IntegrationService {
     const contract = payment?.factura?.contrato;
     const customer = contract?.cliente;
     if (!payment || !contract || !customer) throw new NotFoundException('Pago o cliente asociado no encontrado');
-    if (contract.idEmpresa !== idEmpresa || customer.idEmpresa !== idEmpresa || payment.idCliente !== customer.idCliente) {
+    if (contract.idEmpresa !== idEmpresa || contract.idCliente !== customer.idCliente || payment.idCliente !== customer.idCliente
+      || payment.idFactura !== payment.factura?.idFactura || payment.factura?.idContrato !== contract.idContrato) {
       throw new NotFoundException('Pago o cliente asociado no encontrado');
     }
     return payment;
