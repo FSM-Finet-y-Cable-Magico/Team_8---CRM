@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
@@ -75,7 +76,7 @@ export class ServicesService {
       include: SERVICE_INCLUDE,
     });
 
-    return this.withInstallationContext(services);
+    return this.withInstallationContext(companyResponse(services, currentUser));
   }
 
   async detail(idServicio: number, currentUser: AuthUser) {
@@ -91,11 +92,16 @@ export class ServicesService {
       take: 40,
     });
 
-    const [enrichedService] = await this.withInstallationContext([service]);
+    const [enrichedService] = await this.withInstallationContext(companyResponse([service], currentUser));
 
     return {
       ...enrichedService,
-      auditoria: auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() })),
+      // Cross-entity JSON snapshots may contain unscoped customer data.
+      auditoria: isAdministrator(currentUser.roles)
+        ? auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() }))
+        : auditoria.filter(row => row.entidadAfectada === 'servicio_contratado' && row.idEntidadAfectada === idServicio)
+          .map(row => ({ idLog: row.idLog.toString(), accion: row.accion, fechaHora: row.fechaHora,
+            entidadAfectada: row.entidadAfectada, idEntidadAfectada: row.idEntidadAfectada })),
     };
   }
 
@@ -154,7 +160,7 @@ export class ServicesService {
 
     await this.reconcileCustomerStatus(created.idCliente);
 
-    return created;
+    return companyResponse(created, currentUser);
   }
 
   async ensureInstallationServiceForContract(idContrato: number, currentUser: AuthUser) {
@@ -170,7 +176,8 @@ export class ServicesService {
       throw new NotFoundException('Contrato o cliente no encontrado');
     }
 
-    const idEmpresa = contract.idEmpresa ?? contract.cliente.idEmpresa;
+    // A customer's primary company cannot authorize an unattributed contract.
+    const idEmpresa = contract.idEmpresa ?? (isAdministrator(currentUser.roles) ? contract.cliente.idEmpresa : null);
 
     if (!this.canAccessCompany(idEmpresa, currentUser)) {
       throw new BadRequestException('El contrato no pertenece a tu empresa');
@@ -190,7 +197,8 @@ export class ServicesService {
     });
 
     if (existing) {
-      return existing;
+      this.assertServiceCompany(existing.idEmpresa, currentUser);
+      return companyResponse(existing, currentUser);
     }
 
     const tipoServicio = serviceTypeFromPlan(contract.plan?.tipoPlan);
@@ -236,7 +244,7 @@ export class ServicesService {
 
     await this.reconcileCustomerStatus(created.idCliente);
 
-    return created;
+    return companyResponse(created, currentUser);
   }
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
@@ -312,14 +320,19 @@ export class ServicesService {
       },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   async deactivate(idServicio: number, dto: DeactivateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
 
     if (service.estadoOperativo === 'Baja') {
-      return service;
+      return companyResponse(service, currentUser);
+    }
+
+    if (service.idContrato && (!service.contrato ||
+      service.contrato.idEmpresa !== service.idEmpresa || service.contrato.idCliente !== service.idCliente)) {
+      throw new BadRequestException('El contrato asociado no corresponde al cliente y empresa del servicio');
     }
 
     const observation = dto.observacion?.trim() || null;
@@ -369,7 +382,7 @@ export class ServicesService {
       },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   async attachEquipment(idServicio: number, dto: AttachEquipmentDto, currentUser: AuthUser) {
@@ -608,8 +621,8 @@ export class ServicesService {
     }
 
     const canAccess = isAdministrator(currentUser.roles) ||
-      customer.idEmpresa === currentUser.idEmpresa ||
-      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
+      Boolean(currentUser.idEmpresa && (customer.idEmpresa === currentUser.idEmpresa ||
+      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)));
 
     if (!canAccess) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
@@ -720,7 +733,11 @@ export class ServicesService {
   }
 
   private canAccessCompany(idEmpresa: number | null, currentUser: AuthUser) {
-    return isAdministrator(currentUser.roles) || idEmpresa === currentUser.idEmpresa;
+    return isAdministrator(currentUser.roles) || Boolean(currentUser.idEmpresa && idEmpresa === currentUser.idEmpresa);
+  }
+
+  private assertServiceCompany(idEmpresa: number | null, currentUser: AuthUser) {
+    if (!this.canAccessCompany(idEmpresa, currentUser)) throw new BadRequestException('El servicio no pertenece a tu empresa');
   }
 
   private async withInstallationContext(services: ServiceWithRelations[]) {

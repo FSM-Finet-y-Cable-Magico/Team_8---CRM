@@ -13,6 +13,16 @@ const comercial: AuthUser = {
 };
 
 describe('ServicesService', () => {
+  it('no usa la empresa principal del cliente para autorizar un contrato sin empresa', async () => {
+    const prisma = { contrato: { findUnique: jest.fn().mockResolvedValue({
+      idContrato: 30, idCliente: 10, idEmpresa: null, cliente: { idCliente: 10, idEmpresa: 1 }, estado: 'Firmado',
+    }) }, servicioContratado: { create: jest.fn(), findFirst: jest.fn() } };
+    const service = new ServicesService(prisma as unknown as PrismaService, { record: jest.fn() } as unknown as AuditService);
+    await expect(service.ensureInstallationServiceForContract(30, comercial)).rejects.toThrow('empresa');
+    expect(prisma.servicioContratado.findFirst).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
+  });
+
   function serviceContextSetup({
     g3 = [],
     g1 = [],
@@ -38,7 +48,7 @@ describe('ServicesService', () => {
       fechaCreacion: new Date('2026-10-07T00:00:00.000Z'),
       cliente: { idCliente: 34 },
       empresa: { idEmpresa: 1 },
-      contrato: { idContrato: 22, plan: { idPlan: 1 } },
+      contrato: { idContrato: 22, idEmpresa: 1, plan: { idPlan: 1, idEmpresa: 1 } },
       direccion: null,
       zonaPago: null,
       equipos: [],
@@ -97,7 +107,7 @@ describe('ServicesService', () => {
     const completedAt = new Date('2025-05-10T12:00:00.000Z');
     const context = serviceContextSetup({
       localOrders: [{
-        idOt: 8, idTecnico: 9, tipoOt: 'Instalacion', estado: 'Completada',
+        idOt: 8, idEmpresa: 1, idTecnico: 9, tipoOt: 'Instalacion', estado: 'Completada',
         codigoSeguimiento: 'OT-INS-000008', fechaCompletada: completedAt,
         fechaCreacion: new Date('2025-05-01T00:00:00.000Z'),
       }],
@@ -293,8 +303,8 @@ describe('ServicesService', () => {
       idServicio: 56, idCliente: 10, idEmpresa: 1, idContrato: 30, idDireccion: 7, idZonaPago: null,
       tipoServicio: 'Internet + Television', estadoOperativo: 'Pendiente Instalacion',
       cliente: { idCliente: 10 }, empresa: { idEmpresa: 1 },
-      contrato: { idContrato: 30, estado: 'Firmado', plan: { idPlan: 7 } },
-      direccion: { idDireccion: 7, direccionCompleta: 'Av. Siempre Viva 405' }, zonaPago: null,
+      contrato: { idContrato: 30, idEmpresa: 1, estado: 'Firmado', plan: { idPlan: 7, idEmpresa: 1 } },
+      direccion: { idDireccion: 7, idCliente: 10, direccionCompleta: 'Av. Siempre Viva 405' }, zonaPago: null,
       equipos: [], tickets: [], ordenes: [], solicitudes: [], observaciones: null, datosTecnicos: null, fechaCreacion: new Date(),
     };
     const prisma = {
@@ -308,7 +318,7 @@ describe('ServicesService', () => {
 
     const result = await service.ensureInstallationServiceForContract(30, comercial);
 
-    expect(result).toBe(created);
+    expect(result).toEqual(created);
     expect(prisma.servicioContratado.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ idContrato: 30, tipoServicio: 'Internet + Television', estadoOperativo: 'Pendiente Instalacion' }),
     }));
