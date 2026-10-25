@@ -9,7 +9,6 @@ export function TicketsPanel({
   tickets,
   categories,
   permissions,
-  users = [],
   onChanged,
 }: {
   tickets: Ticket[];
@@ -31,14 +30,6 @@ export function TicketsPanel({
     estadoFinalServicio: 'Activo',
     observaciones: '',
   });
-  const [workOrderForm, setWorkOrderForm] = useState({
-    tipoOt: 'Reparacion',
-    idTecnico: '',
-    fechaProgramada: '',
-    horaVisita: '',
-    prioridad: '',
-    observaciones: '',
-  });
   const [technicalNote, setTechnicalNote] = useState('');
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
@@ -52,7 +43,6 @@ export function TicketsPanel({
     selectedTicket?.hasOpenWorkOrder
       || (associatedWorkOrder && associatedWorkOrder.estado !== 'Completada'),
   );
-  const ticketIsClosed = ['Resuelto', 'Cerrado'].includes(selectedTicket?.estado ?? '');
   const directClosureBlocked = hasOpenWorkOrder && ['Resuelto', 'Cerrado'].includes(ticketStatus);
 
   useEffect(() => {
@@ -60,14 +50,6 @@ export function TicketsPanel({
       setCategoryId(String(selectedTicket.idCategoria));
       setPriority(selectedTicket.prioridad);
       setTicketStatus(selectedTicket.estado);
-      setWorkOrderForm({
-        tipoOt: 'Reparacion',
-        idTecnico: '',
-        fechaProgramada: '',
-        horaVisita: '',
-        prioridad: selectedTicket.prioridad,
-        observaciones: '',
-      });
       setTechnicalNote('');
     }
   }, [selectedTicket?.idTicket]);
@@ -288,94 +270,13 @@ export function TicketsPanel({
                     <p><strong>Tipo:</strong> {formatWorkOrderValue(associatedWorkOrder.tipoOt)}</p>
                     <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(associatedWorkOrder.estado)} /></p>
                     {hasOpenWorkOrder && (
-                      <p className="alert">El cierre debe realizarse desde la orden de trabajo asociada.</p>
+                      <p className="alert">La OT no consta completada. Su cierre corresponde a G3; puedes continuar registrando observaciones en el ticket.</p>
                     )}
-                  </div>
-                ) : permissions.classifyTickets && !ticketIsClosed ? (
-                  <div className="workflow-grid">
-                    <label>
-                      Tipo de orden
-                      <select
-                        value={workOrderForm.tipoOt}
-                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, tipoOt: event.target.value })}
-                      >
-                        <option value="Reparacion">Reparación</option>
-                        <option value="Soporte">Soporte</option>
-                      </select>
-                    </label>
-                    {users.length > 0 && (
-                      <label>
-                        Técnico asignado
-                        <select
-                          value={workOrderForm.idTecnico}
-                          onChange={(event) => setWorkOrderForm({ ...workOrderForm, idTecnico: event.target.value })}
-                        >
-                          <option value="">Sin asignar</option>
-                          {users.map((user) => (
-                            <option key={user.idUsuario} value={user.idUsuario}>
-                              {user.nombreCompleto}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                    <label>
-                      Fecha de visita
-                      <input
-                        type="date"
-                        value={workOrderForm.fechaProgramada}
-                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, fechaProgramada: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      Hora de visita
-                      <input
-                        type="time"
-                        value={workOrderForm.horaVisita}
-                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, horaVisita: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      Prioridad
-                      <select
-                        value={workOrderForm.prioridad || selectedTicket.prioridad}
-                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, prioridad: event.target.value })}
-                      >
-                        <option value="Alta">Alta</option>
-                        <option value="Media">Media</option>
-                        <option value="Baja">Baja</option>
-                      </select>
-                    </label>
-                    <label>
-                      Observaciones para terreno
-                      <textarea
-                        value={workOrderForm.observaciones}
-                        onChange={(event) => setWorkOrderForm({ ...workOrderForm, observaciones: event.target.value })}
-                        placeholder="Indicaciones para la visita técnica"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(
-                          () => api.post(`/tickets/${selectedTicket.idTicket}/work-order`, {
-                            tipoOt: workOrderForm.tipoOt,
-                            idTecnico: workOrderForm.idTecnico ? Number(workOrderForm.idTecnico) : undefined,
-                            fechaProgramada: workOrderForm.fechaProgramada || undefined,
-                            horaVisita: workOrderForm.horaVisita || undefined,
-                            prioridad: workOrderForm.prioridad || selectedTicket.prioridad,
-                            observaciones: workOrderForm.observaciones.trim() || undefined,
-                          }),
-                          'Orden de trabajo generada',
-                        )
-                      }
-                    >
-                      Generar orden de trabajo
-                    </button>
                   </div>
                 ) : (
-                  <p className="inline-status">Este ticket no requiere una nueva orden de trabajo.</p>
+                  <p className="inline-status">No hay una OT historica asociada.</p>
                 )}
+                <p className="inline-status">G3 administra las ordenes tecnicas. La derivacion de reparaciones y soporte esta pendiente de ratificacion; no se crean ni cierran OT desde Tickets.</p>
               </section>
               {(permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) ? (
                 <div className="workflow-grid">
@@ -432,7 +333,7 @@ export function TicketsPanel({
                     </select>
                     <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
                     {directClosureBlocked && (
-                      <p className="alert">El cierre debe realizarse desde la orden de trabajo asociada.</p>
+                      <p className="alert">La OT no consta completada. Su cierre corresponde a G3; puedes continuar registrando observaciones en el ticket.</p>
                     )}
                     <button
                       type="button"
@@ -449,7 +350,8 @@ export function TicketsPanel({
                   </label>}
 
                   {permissions.diagnoseTickets && <label>
-                    Diagnóstico técnico
+                    Diagnóstico técnico del ticket
+                    <p className="inline-status">El estado informado es una observación técnica: no modifica el estado financiero del cliente, el contrato ni el servicio. Registrar el diagnóstico resuelve solo el ticket.</p>
                     <input
                       placeholder="Causa raíz"
                       value={diagnosis.causaRaiz}
@@ -466,6 +368,7 @@ export function TicketsPanel({
                       onChange={(event) => setDiagnosis({ ...diagnosis, accionesRealizadas: event.target.value })}
                     />
                     <select
+                      aria-label="Estado observado en el diagnostico"
                       value={diagnosis.estadoFinalServicio}
                       onChange={(event) => setDiagnosis({ ...diagnosis, estadoFinalServicio: event.target.value })}
                     >
@@ -473,7 +376,7 @@ export function TicketsPanel({
                       <option value="En Mantencion">En Mantencion</option>
                     </select>
                     {hasOpenWorkOrder && (
-                      <p className="alert">Este ticket tiene una OT pendiente. Registra el cierre desde Órdenes de Trabajo.</p>
+                      <p className="alert">Este ticket tiene una OT pendiente. Su cierre técnico corresponde a G3 y la integración de reparaciones está pendiente de ratificación. Puedes registrar observaciones sin resolver el ticket.</p>
                     )}
                     <button
                       type="button"

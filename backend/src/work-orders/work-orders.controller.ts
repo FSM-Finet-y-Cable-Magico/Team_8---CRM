@@ -51,6 +51,7 @@ export class WorkOrdersController {
     @Body() dto: CompleteRepairOrderDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.workOrdersService.completeRepair(id, dto, user);
+    void id; void dto;
+    return this.ownership.rejectG3Write(user, 'PATCH /api/work-orders/:id/complete-repair');
   }
 }
