@@ -270,9 +270,22 @@ export class BillingService {
         }, include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } });
         const pendingOverdue = otherInvoices.some(row => invoiceBalance(row).diasAtraso > 0);
         if (!pendingOverdue) {
+          const g3CandidateIds = contract.servicios
+            .filter(service => service.idEmpresa === contract.idEmpresa && service.estadoOperativo === 'Suspendido' && service.ordenes.length === 0)
+            .map(service => service.idServicio);
+          // Read the authoritative persisted closure in this financial transaction, never technical metadata.
+          const g3Closures = g3CandidateIds.length ? await tx.integracionInstalacionG3.findMany({
+            where: {
+              idEmpresa: contract.idEmpresa, idContrato: contract.idContrato,
+              idServicio: { in: g3CandidateIds }, estadoIntegracion: 'COMPLETADA',
+              estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null },
+            },
+            select: { idServicio: true },
+          }) : [];
+          const g3InstalledServices = new Set(g3Closures.map(closure => closure.idServicio));
           reactivatedServiceIds = contract.servicios.filter(service => service.idEmpresa === contract.idEmpresa && canActivateService({
             intent: 'COMMERCIAL_PAYMENT_REACTIVATION', targetStatus: 'Activo', currentStatus: service.estadoOperativo,
-            contractStatus: contract.estado, installationCompleted: service.ordenes.length > 0,
+            contractStatus: contract.estado, installationCompleted: service.ordenes.length > 0 || g3InstalledServices.has(service.idServicio),
             historicalImport: customer.importadoMasivo === true || this.isHistoricalService(service.datosTecnicos, service.fechaCreacion), serviceExists: true,
           })).map(service => service.idServicio);
           if (reactivatedServiceIds.length || contract.estado === 'Moroso') {

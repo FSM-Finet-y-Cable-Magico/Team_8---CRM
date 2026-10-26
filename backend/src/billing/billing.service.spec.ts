@@ -79,6 +79,7 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
     contrato: { update: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     cliente: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     servicioContratado: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([]) },
   };
   const prisma = {
     $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
@@ -91,6 +92,132 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
   );
   return { service, prisma, tx, audit };
 }
+
+describe('P0-04 reactivacion por evidencia G3 persistida', () => {
+  const closure = (overrides: Record<string, unknown> = {}) => ({
+    idEmpresa: 1, idContrato: 30, idServicio: 55, estadoIntegracion: 'COMPLETADA',
+    estadoOtG3: 'COMPLETADA', fechaCierreProcesado: new Date('2026-10-01T12:00:00Z'), ...overrides,
+  });
+  const setup = (rows = [closure()]) => {
+    const current = invoice(); current.contrato.servicios[0].ordenes = [];
+    const ctx = harness(current);
+    // Apply the actual query filters to stored rows, including negative correlations.
+    ctx.tx.integracionInstalacionG3.findMany.mockImplementation(async ({ where }) => rows.filter(row =>
+      row.idEmpresa === where.idEmpresa && row.idContrato === where.idContrato
+      && where.idServicio.in.includes(row.idServicio) && row.estadoIntegracion === where.estadoIntegracion
+      && row.estadoOtG3 === where.estadoOtG3 && row.fechaCierreProcesado !== where.fechaCierreProcesado.not,
+    ).map(row => ({ idServicio: row.idServicio })));
+    return { ...ctx, current };
+  };
+
+  it('reactiva sin OT local solo los servicios con cierre correlacionado, en una consulta tx', async () => {
+    const { service, tx, prisma, current, audit } = setup();
+    current.contrato.servicios.push({ ...current.contrato.servicios[0], idServicio: 56 });
+    const result = await service.registerPayment(paymentDto, commercial);
+    expect(result.reactivatedServiceIds).toEqual([55]);
+    expect(tx.integracionInstalacionG3.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.integracionInstalacionG3.findMany).toHaveBeenCalledWith({ where: {
+      idEmpresa: 1, idContrato: 30, idServicio: { in: [55, 56] }, estadoIntegracion: 'COMPLETADA',
+      estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null },
+    }, select: { idServicio: true } });
+    expect(prisma).not.toHaveProperty('integracionInstalacionG3');
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+    expect(tx.servicioContratado.updateMany).toHaveBeenCalledWith({
+      where: { idServicio: { in: [55] }, idContrato: 30, idEmpresa: 1, estadoOperativo: 'Suspendido' }, data: { estadoOperativo: 'Activo' },
+    });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'REACTIVAR_SERVICIO_POR_PAGO' }), tx);
+  });
+
+  it('metadata G3 sin tracking no demuestra instalacion', async () => {
+    const { service, tx, current } = setup([]);
+    Object.assign(current.contrato.servicios[0], { datosTecnicos: { fuenteInstalacion: 'G3', idOtG3: 'QA' } });
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+    expect(tx.contrato.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['otra empresa', { idEmpresa: 2 }], ['otro contrato', { idContrato: 31 }],
+    ['otro servicio', { idServicio: 56 }], ['sin servicio', { idServicio: null }],
+    ['integracion en seguimiento', { estadoIntegracion: 'EN_SEGUIMIENTO' }],
+    ['OT no completada', { estadoOtG3: 'EN_PROGRESO' }],
+    ['sin fecha procesada', { fechaCierreProcesado: null }],
+  ])('rechaza evidencia de %s', async (_name, overrides) => {
+    const { service, tx } = setup([closure(overrides)]);
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+    expect(tx.contrato.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['Pendiente Instalacion', 'Pendiente', 'Baja', 'Activo'])('no activa servicio %s aunque exista cierre G3', async estadoOperativo => {
+    const { service, tx, current } = setup();
+    current.contrato.servicios[0].estadoOperativo = estadoOperativo;
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.integracionInstalacionG3.findMany).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['Firmado', 'Activo', 'Baja'])('la politica impide reactivar con contrato %s incluso con cierre G3 valido', async estado => {
+    const { service, tx, current } = setup(); current.contrato.estado = estado;
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+    expect(tx.contrato.update).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2])('cliente compartido con empresa principal %s conserva aislamiento y estado global', async primary => {
+    const { service, tx, current } = setup([closure(), closure({ idEmpresa: 2, idServicio: 56 })]);
+    current.contrato.cliente.idEmpresa = primary;
+    current.contrato.servicios.push({ ...current.contrato.servicios[0], idEmpresa: 2, idServicio: 56 });
+    tx.contrato.findFirst.mockResolvedValue({ idContrato: 99 } as never);
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([55]);
+    expect(tx.integracionInstalacionG3.findMany.mock.calls[0][0].where.idServicio.in).toEqual([55]);
+    expect(tx.servicioContratado.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { idServicio: { in: [55] }, idContrato: 30, idEmpresa: 1, estadoOperativo: 'Suspendido' },
+    }));
+    expect(tx.cliente.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('pago parcial no consulta G3 ni reactiva', async () => {
+    const { service, tx } = setup();
+    expect((await service.registerPayment({ ...paymentDto, monto: 5000 }, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.integracionInstalacionG3.findMany).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('otra factura vencida impide consultar G3 y reactivar', async () => {
+    const { service, tx } = setup(); tx.factura.findMany.mockResolvedValue([invoice()]);
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([]);
+    expect(tx.integracionInstalacionG3.findMany).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['importado', 'fecha historica', 'origen historico'])('preserva excepcion historica valida: %s', async origin => {
+    const { service, current } = setup([]);
+    if (origin === 'importado') current.contrato.cliente.importadoMasivo = true;
+    if (origin === 'fecha historica') current.contrato.servicios[0].fechaCreacion = new Date('2020-01-01');
+    if (origin === 'origen historico') Object.assign(current.contrato.servicios[0], { datosTecnicos: { origen: 'historico' } });
+    expect((await service.registerPayment(paymentDto, commercial)).reactivatedServiceIds).toEqual([55]);
+  });
+
+  it('fallo de lectura G3 revierte pago/factura simulados y evita efectos post-commit', async () => {
+    const { tx, prisma, audit } = setup();
+    let persisted = { pagos: 0, estado: 'Pendiente' };
+    tx.pago.create.mockImplementation(async () => { persisted.pagos++; return { idPago: 101, monto: new Prisma.Decimal(20000) }; });
+    tx.factura.update.mockImplementation(async () => { persisted.estado = 'Pagada'; return {} as never; });
+    prisma.$transaction.mockImplementation(async callback => {
+      const before = { ...persisted };
+      try { return await callback(tx); } catch (error) { persisted = before; throw error; }
+    });
+    tx.integracionInstalacionG3.findMany.mockRejectedValue(new Error('QA_READ_FAILURE'));
+    const issuer = { getReadiness: jest.fn(), enqueuePayment: jest.fn(), processPayment: jest.fn() };
+    const service = new BillingService(prisma as never, audit as never, new ConfigService(), issuer);
+    await expect(service.registerPayment(paymentDto, commercial)).rejects.toThrow('QA_READ_FAILURE');
+    expect(persisted).toEqual({ pagos: 0, estado: 'Pendiente' });
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+    expect(issuer.enqueuePayment).not.toHaveBeenCalled();
+    expect(issuer.processPayment).not.toHaveBeenCalled();
+  });
+});
 
 describe('BillingService lifecycle de pago', () => {
   it('persists tax work inside the transaction, then dispatches after commit; provider failure preserves payment', async()=>{
