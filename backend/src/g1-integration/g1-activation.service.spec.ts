@@ -12,6 +12,17 @@ function setup() {
       return Promise.resolve(stored);
     }),
     findUnique: jest.fn().mockImplementation(() => Promise.resolve(stored ? { ...stored, cliente: { rut: '12.345.678-5' } } : null)),
+    findUniqueOrThrow: jest.fn().mockImplementation(() => Promise.resolve(structuredClone(stored))),
+    updateMany: jest.fn().mockImplementation(({ where, data }) => {
+      if (where.intentos !== undefined && where.intentos !== stored.intentos) return Promise.resolve({ count: 0 });
+      const state = where.estadoIntegracion;
+      if (typeof state === 'string' && state !== stored.estadoIntegracion
+        || state?.not === stored.estadoIntegracion || state?.notIn?.includes(stored.estadoIntegracion)
+        || where.ultimoIntento && +where.ultimoIntento !== +stored.ultimoIntento
+        || where.OR && stored.estadoIntegracion === 'ENVIANDO' && stored.ultimoIntento >= where.OR[1].ultimoIntento.lt) return Promise.resolve({ count: 0 });
+      stored = { ...stored, ...data, intentos: data.intentos ? stored.intentos + data.intentos.increment : stored.intentos };
+      return Promise.resolve({ count: 1 });
+    }),
     update: jest.fn(({ data }) => {
       const increment = data.intentos?.increment ?? 0;
       stored = { ...stored, ...data, intentos: (stored.intentos ?? 0) + increment };
@@ -21,8 +32,14 @@ function setup() {
   };
   const prisma = {
     cliente: { findUnique: jest.fn().mockResolvedValue({ idCliente: 30, idEmpresa: 1, rut: '12.345.678-5' }) },
+    contrato: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1, idCliente: 30 }) },
+    servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1, idCliente: 30, idContrato: 20 }) },
     integracionActivacionG1: activations,
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    logAuditoria: { findFirst: jest.fn().mockResolvedValue(null) },
+    $transaction: jest.fn(),
   };
+  prisma.$transaction.mockImplementation(callback => callback(prisma));
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const client = {
     configured: jest.fn().mockReturnValue(true),
@@ -115,8 +132,8 @@ describe('Etapa 4 - activación G1 post G3', () => {
         resultado: 'PENDIENTE_SINCRONIZACION_G1',
         codigo: 'G1_EQUIPMENT_ASSOCIATION_PENDING',
       }),
-    }));
-    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTIVACION_G1_COMPLETADA' }));
+    }), expect.any(Object));
+    expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTIVACION_G1_COMPLETADA' }), expect.any(Object));
     const firstPayload = structuredClone(client.sendActivation.mock.calls[0][0]);
     await service.retry(getStored().idIntegracion, user);
     expect(client.sendActivation.mock.calls[1][0]).toEqual(firstPayload);
@@ -184,7 +201,7 @@ describe('Etapa 4 - activación G1 post G3', () => {
     expect(getStored().estadoIntegracion).toBe('ERROR_G1');
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
       valorNuevo: expect.objectContaining({ statusHttp: status, codigo: code, resultado: 'ERROR_G1' }),
-    }));
+    }), expect.any(Object));
   });
 
   it('timeout no revierte el lifecycle G8 y retry reutiliza event_id', async () => {
@@ -251,6 +268,24 @@ describe('Etapa 4 - activación G1 post G3', () => {
 });
 
 describe('Contrato G1 global', () => {
+  it('sin RUT conserva tracking con error explicito, sin perder silenciosamente el trabajo', async () => {
+    const s = setup();
+    s.prisma.cliente.findUnique.mockResolvedValue({ idCliente: 30, idEmpresa: 1, rut: '' });
+    await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);
+    expect(s.getStored()).toMatchObject({ estadoIntegracion: 'ERROR_G1', ultimoErrorSanitizado: 'G1_RUT_REQUIRED' });
+    expect(s.getStored().payloadSnapshot.rut_cliente).toBe('');
+    expect(s.client.sendActivation).not.toHaveBeenCalled();
+  });
+
+  it('rechaza tracking G1 de otra empresa incluso si el hash y evento coinciden', async () => {
+    const s = setup();
+    await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);
+    s.getStored().idEmpresa = 2;
+    await expect(s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure))
+      .rejects.toThrow('G1_EXISTING_PAYLOAD_CONFLICT');
+    expect(s.client.sendActivation).toHaveBeenCalledTimes(1);
+  });
+
   it.each([901, '901'])('normaliza OT real %s a entero', async id => {
     const s = setup(); s.closure.id_ot = id;
     await s.service.afterG3Completion(s.tracking, { idCliente: 30, idServicio: 50 }, s.closure);

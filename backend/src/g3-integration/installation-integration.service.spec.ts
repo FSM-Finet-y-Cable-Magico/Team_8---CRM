@@ -80,7 +80,7 @@ function setup() {
     ordenTrabajo: { create: jest.fn() },
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const closure = { process: jest.fn().mockResolvedValue({ duplicate: false }) };
+  const closure = { process: jest.fn().mockResolvedValue({ duplicate: false }), recoverPostClosure: jest.fn().mockResolvedValue({ duplicate: true }) };
   const client = {
     configured: jest.fn().mockReturnValue(true),
     createInstallation: jest.fn().mockResolvedValue({
@@ -534,6 +534,25 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     expect(result).toMatchObject({ estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', estadoPresentacion: 'COMPLETADA' });
     expect(context.prisma.prospecto.update).not.toHaveBeenCalled();
   });
+  it('recupera efectos de un cierre confirmado sin consultar G3 ni activar de nuevo', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    Object.assign(context.getStored(), { estadoIntegracion: 'COMPLETADA', fechaCierreProcesado: new Date() });
+    await context.service.reconcile(1, user);
+    expect(context.closure.recoverPostClosure).toHaveBeenCalledWith(1);
+    expect(context.closure.process).not.toHaveBeenCalled();
+    expect(context.client.getWorkOrderClosure).not.toHaveBeenCalled();
+  });
+
+  it('rechaza recuperacion de otra empresa antes de leer evidencia o llamar G3', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    Object.assign(context.getStored(), { idEmpresa: 2, estadoIntegracion: 'COMPLETADA', fechaCierreProcesado: new Date() });
+    await expect(context.service.reconcile(1, { ...user, idEmpresa: 1, roles: ['Comercial'] })).rejects.toThrow();
+    expect(context.closure.recoverPostClosure).not.toHaveBeenCalled();
+    expect(context.client.getWorkOrderClosure).not.toHaveBeenCalled();
+  });
+
   it('40. reconciliacion GET de cierre sin estado usa el processor común como COMPLETADA', async () => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
     const tracking = context.getStored();
