@@ -1,0 +1,868 @@
+{
+  "status": "QA_PASS",
+  "startedAt": "2026-10-26T14:20:56.052Z",
+  "head": "552f4280f99b9f8ce2c96c8f1572c4655ee0fea0",
+  "scenarios": [
+    {
+      "name": "01 rollback real del evento",
+      "status": "PASS",
+      "ms": 1503,
+      "injectedFailures": {
+        "event": 1,
+        "audit": 0
+      },
+      "before": {
+        "ids": {
+          "tracking": 1,
+          "company": 1,
+          "contract": 1,
+          "customer": null,
+          "service": null,
+          "eventId": "g8-g1-activation-85166d44-08e1-47e2-9c6b-a0fea84dd49f"
+        },
+        "rows": {
+          "customersTotal": 0,
+          "services": 0,
+          "events": 0,
+          "g1": 0,
+          "auditsG3": 0,
+          "auditsG1": 0
+        },
+        "states": {
+          "tracking": "ENVIADA",
+          "contract": "Firmado",
+          "customer": null,
+          "prospect": "Contrato Firmado",
+          "prospectCustomer": null,
+          "contractCustomer": null,
+          "services": [],
+          "g1": null,
+          "auditG3": null,
+          "g1Marker": null
+        },
+        "attempts": 0,
+        "sends": 0,
+        "simulatedEffects": 0,
+        "payloadHashes": [],
+        "duplicateResponses": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 1,
+          "company": 1,
+          "contract": 1,
+          "customer": null,
+          "service": null,
+          "eventId": "g8-g1-activation-85166d44-08e1-47e2-9c6b-a0fea84dd49f"
+        },
+        "rows": {
+          "customersTotal": 0,
+          "services": 0,
+          "events": 0,
+          "g1": 0,
+          "auditsG3": 0,
+          "auditsG1": 0
+        },
+        "states": {
+          "tracking": "ENVIADA",
+          "contract": "Firmado",
+          "customer": null,
+          "prospect": "Contrato Firmado",
+          "prospectCustomer": null,
+          "contractCustomer": null,
+          "services": [],
+          "g1": null,
+          "auditG3": null,
+          "g1Marker": null
+        },
+        "attempts": 0,
+        "sends": 0,
+        "simulatedEffects": 0,
+        "payloadHashes": [],
+        "duplicateResponses": 0
+      },
+      "worker": {
+        "ok": false,
+        "activationCalls": 1,
+        "error": "PrismaClientUnknownRequestError",
+        "status": null,
+        "exitCode": 0,
+        "signal": null,
+        "backendPid": 8232,
+        "processPid": 33304
+      }
+    },
+    {
+      "name": "02 caida antes de G1 y reinicio",
+      "status": "PASS",
+      "ms": 2865,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 0
+      },
+      "committed": {
+        "ids": {
+          "tracking": 2,
+          "company": 1,
+          "contract": 2,
+          "customer": 2,
+          "service": 2,
+          "eventId": "g8-g1-activation-44a89ee7-23e0-454b-819c-4a0a738ed6a8"
+        },
+        "rows": {
+          "customersTotal": 1,
+          "services": 1,
+          "events": 1,
+          "g1": 0,
+          "auditsG3": 2,
+          "auditsG1": 0
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 2,
+          "contractCustomer": 2,
+          "services": [
+            "Activo"
+          ],
+          "g1": null,
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "PENDIENTE_CREACION"
+          }
+        },
+        "attempts": 0,
+        "sends": 0,
+        "simulatedEffects": 0,
+        "payloadHashes": [],
+        "duplicateResponses": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 2,
+          "company": 1,
+          "contract": 2,
+          "customer": 2,
+          "service": 2,
+          "eventId": "g8-g1-activation-44a89ee7-23e0-454b-819c-4a0a738ed6a8"
+        },
+        "rows": {
+          "customersTotal": 1,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 2,
+          "contractCustomer": 2,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 1
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "25a107f6625fadd3502cfcd8374a66fe279064c4be40b8caff05c7fc94408c16"
+        ],
+        "duplicateResponses": 0
+      },
+      "workers": [
+        {
+          "exitCode": 73,
+          "signal": null,
+          "backendPid": 38608,
+          "processPid": 15412
+        },
+        {
+          "ok": true,
+          "activationCalls": 0,
+          "state": null,
+          "postClosure": {
+            "audit": "COMPLETADA",
+            "g1": {
+              "state": "COMPLETADA",
+              "auditPending": false,
+              "idIntegracion": 1
+            }
+          },
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 3220,
+          "processPid": 2160
+        }
+      ]
+    },
+    {
+      "name": "03 segunda auditoria G3 revierte ambas",
+      "status": "PASS",
+      "ms": 2911,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 1
+      },
+      "pending": {
+        "ids": {
+          "tracking": 3,
+          "company": 1,
+          "contract": 3,
+          "customer": 3,
+          "service": 3,
+          "eventId": "g8-g1-activation-84c381c8-21d0-40f9-88d1-b37b620f64e5"
+        },
+        "rows": {
+          "customersTotal": 2,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 0,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 3,
+          "contractCustomer": 3,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "PENDIENTE",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 2
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "3f166b4b51c48905fbc8bd8204646549602b1c1284aed335b8b7bf1e27f7cf28"
+        ],
+        "duplicateResponses": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 3,
+          "company": 1,
+          "contract": 3,
+          "customer": 3,
+          "service": 3,
+          "eventId": "g8-g1-activation-84c381c8-21d0-40f9-88d1-b37b620f64e5"
+        },
+        "rows": {
+          "customersTotal": 2,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 3,
+          "contractCustomer": 3,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 2
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "3f166b4b51c48905fbc8bd8204646549602b1c1284aed335b8b7bf1e27f7cf28"
+        ],
+        "duplicateResponses": 0
+      }
+    },
+    {
+      "name": "04 recuperaciones concurrentes independientes",
+      "status": "PASS",
+      "ms": 3113,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 4,
+          "company": 1,
+          "contract": 4,
+          "customer": 4,
+          "service": 4,
+          "eventId": "g8-g1-activation-c2cd988c-012d-44f9-9bc0-fc3b14db752d"
+        },
+        "rows": {
+          "customersTotal": 3,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 4,
+          "contractCustomer": 4,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 3
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "be3f2a516d9ea5eaf16e9e98fad39a66976109e45ad463fe20f0234dffbb1212"
+        ],
+        "duplicateResponses": 0
+      },
+      "workers": [
+        {
+          "ok": true,
+          "activationCalls": 0,
+          "state": null,
+          "postClosure": {
+            "audit": "COMPLETADA",
+            "g1": {
+              "state": "COMPLETADA",
+              "auditPending": false,
+              "idIntegracion": 3
+            }
+          },
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 22372,
+          "processPid": 36524
+        },
+        {
+          "ok": true,
+          "activationCalls": 0,
+          "state": null,
+          "postClosure": {
+            "audit": "COMPLETADA",
+            "g1": {
+              "state": "PENDIENTE_CREACION"
+            }
+          },
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 33636,
+          "processPid": 33108
+        }
+      ]
+    },
+    {
+      "name": "05 G1 confirmado y caida local sin reenvio",
+      "status": "PASS",
+      "ms": 3069,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 1
+      },
+      "pending": {
+        "ids": {
+          "tracking": 5,
+          "company": 1,
+          "contract": 5,
+          "customer": 5,
+          "service": 5,
+          "eventId": "g8-g1-activation-6dcd61c4-1c8d-4f8b-8f35-3dc1368f5298"
+        },
+        "rows": {
+          "customersTotal": 4,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 0
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 5,
+          "contractCustomer": 5,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "PENDIENTE_CREACION"
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "0823d3a7cbef242ca07387c121828d05f17dcd259b6a93a210a0a1c54a2cc831"
+        ],
+        "duplicateResponses": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 5,
+          "company": 1,
+          "contract": 5,
+          "customer": 5,
+          "service": 5,
+          "eventId": "g8-g1-activation-6dcd61c4-1c8d-4f8b-8f35-3dc1368f5298"
+        },
+        "rows": {
+          "customersTotal": 4,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 5,
+          "contractCustomer": 5,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 5
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "0823d3a7cbef242ca07387c121828d05f17dcd259b6a93a210a0a1c54a2cc831"
+        ],
+        "duplicateResponses": 0
+      },
+      "workers": [
+        {
+          "exitCode": 74,
+          "signal": null,
+          "backendPid": 11952,
+          "processPid": 13572
+        },
+        {
+          "ok": true,
+          "activationCalls": 0,
+          "state": null,
+          "postClosure": {
+            "audit": "COMPLETADA",
+            "g1": {
+              "state": "COMPLETADA",
+              "auditPending": false,
+              "idIntegracion": 5
+            }
+          },
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 7060,
+          "processPid": 9524
+        }
+      ]
+    },
+    {
+      "name": "06 respuesta HTTP tardia no degrada resultado posterior",
+      "status": "PASS",
+      "ms": 3091,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 6,
+          "company": 1,
+          "contract": 6,
+          "customer": 6,
+          "service": 6,
+          "eventId": "g8-g1-activation-4019dadb-1938-4cf6-824c-daabd6da19e7"
+        },
+        "rows": {
+          "customersTotal": 5,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 2
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 6,
+          "contractCustomer": 6,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 6
+          }
+        },
+        "attempts": 2,
+        "sends": 2,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "fef6f9352eb4c8674da7e605d30053aca4c778942b77010adfa81f55b9bd2d33",
+          "fef6f9352eb4c8674da7e605d30053aca4c778942b77010adfa81f55b9bd2d33"
+        ],
+        "duplicateResponses": 0
+      },
+      "workers": [
+        {
+          "ok": true,
+          "activationCalls": 1,
+          "state": null,
+          "postClosure": null,
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 27120,
+          "processPid": 31024
+        },
+        {
+          "ok": true,
+          "activationCalls": 0,
+          "state": "COMPLETADA",
+          "postClosure": null,
+          "exitCode": 0,
+          "signal": null,
+          "backendPid": 37924,
+          "processPid": 7648
+        }
+      ]
+    },
+    {
+      "name": "07 empresas y cliente compartido",
+      "status": "PASS",
+      "ms": 7193,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 0
+      },
+      "denied": {
+        "ok": false,
+        "activationCalls": 0,
+        "error": "ForbiddenException",
+        "status": 403,
+        "exitCode": 0,
+        "signal": null,
+        "backendPid": 28912,
+        "processPid": 27132
+      },
+      "inconsistent": {
+        "ids": {
+          "tracking": 8,
+          "company": 2,
+          "contract": 8,
+          "customer": 7,
+          "service": 8,
+          "eventId": "g8-g1-activation-15f2b3c0-3833-4c6b-909e-c9a4402db413"
+        },
+        "rows": {
+          "customersTotal": 7,
+          "services": 1,
+          "events": 1,
+          "g1": 0,
+          "auditsG3": 2,
+          "auditsG1": 0
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Moroso",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 7,
+          "contractCustomer": 7,
+          "services": [
+            "Activo"
+          ],
+          "g1": null,
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "ERROR_REQUIERE_REVISION"
+          }
+        },
+        "attempts": 0,
+        "sends": 0,
+        "simulatedEffects": 0,
+        "payloadHashes": [],
+        "duplicateResponses": 0
+      },
+      "companies": [
+        {
+          "ids": {
+            "tracking": 7,
+            "company": 1,
+            "contract": 7,
+            "customer": 7,
+            "service": 7,
+            "eventId": "g8-g1-activation-0dcbbb76-2aec-4460-88e8-0ba2cde6f988"
+          },
+          "rows": {
+            "customersTotal": 7,
+            "services": 1,
+            "events": 1,
+            "g1": 1,
+            "auditsG3": 2,
+            "auditsG1": 2
+          },
+          "states": {
+            "tracking": "COMPLETADA",
+            "contract": "Activo",
+            "customer": "Moroso",
+            "prospect": "Servicio Activo",
+            "prospectCustomer": 7,
+            "contractCustomer": 7,
+            "services": [
+              "Activo"
+            ],
+            "g1": "COMPLETADA",
+            "auditG3": "COMPLETADA",
+            "g1Marker": {
+              "state": "COMPLETADA",
+              "auditPending": false,
+              "idIntegracion": 7
+            }
+          },
+          "attempts": 1,
+          "sends": 1,
+          "simulatedEffects": 1,
+          "payloadHashes": [
+            "535b6cc043cbbacb5c5545bd2a9b30dce3437703f058c8d3253fcfc10fdc348e"
+          ],
+          "duplicateResponses": 0
+        },
+        {
+          "ids": {
+            "tracking": 8,
+            "company": 2,
+            "contract": 8,
+            "customer": 7,
+            "service": 8,
+            "eventId": "g8-g1-activation-15f2b3c0-3833-4c6b-909e-c9a4402db413"
+          },
+          "rows": {
+            "customersTotal": 7,
+            "services": 1,
+            "events": 1,
+            "g1": 1,
+            "auditsG3": 2,
+            "auditsG1": 2
+          },
+          "states": {
+            "tracking": "COMPLETADA",
+            "contract": "Activo",
+            "customer": "Moroso",
+            "prospect": "Servicio Activo",
+            "prospectCustomer": 7,
+            "contractCustomer": 7,
+            "services": [
+              "Activo"
+            ],
+            "g1": "COMPLETADA",
+            "auditG3": "COMPLETADA",
+            "g1Marker": {
+              "state": "COMPLETADA",
+              "auditPending": false,
+              "idIntegracion": 8
+            }
+          },
+          "attempts": 1,
+          "sends": 1,
+          "simulatedEffects": 1,
+          "payloadHashes": [
+            "00ead318729b5836a7d16f965c7c6dfb8d1cbd8a7530f6a0027b64192fb74355"
+          ],
+          "duplicateResponses": 0
+        }
+      ]
+    },
+    {
+      "name": "08 idempotencia G1 simulado tras ACK perdido",
+      "status": "PASS",
+      "ms": 4483,
+      "injectedFailures": {
+        "event": 0,
+        "audit": 0
+      },
+      "pending": {
+        "ids": {
+          "tracking": 9,
+          "company": 1,
+          "contract": 9,
+          "customer": 9,
+          "service": 9,
+          "eventId": "g8-g1-activation-1b0fb7f0-6eee-48bc-9cef-ce99997859ae"
+        },
+        "rows": {
+          "customersTotal": 8,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 1
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 9,
+          "contractCustomer": 9,
+          "services": [
+            "Activo"
+          ],
+          "g1": "PENDIENTE_SINCRONIZACION_G1",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "PENDIENTE_SINCRONIZACION_G1",
+            "auditPending": false,
+            "idIntegracion": 9
+          }
+        },
+        "attempts": 1,
+        "sends": 1,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "1a6099f9c86292d410dde328e8f76257ce354fe518e2027b807fbaa03be62db1"
+        ],
+        "duplicateResponses": 0
+      },
+      "after": {
+        "ids": {
+          "tracking": 9,
+          "company": 1,
+          "contract": 9,
+          "customer": 9,
+          "service": 9,
+          "eventId": "g8-g1-activation-1b0fb7f0-6eee-48bc-9cef-ce99997859ae"
+        },
+        "rows": {
+          "customersTotal": 8,
+          "services": 1,
+          "events": 1,
+          "g1": 1,
+          "auditsG3": 2,
+          "auditsG1": 3
+        },
+        "states": {
+          "tracking": "COMPLETADA",
+          "contract": "Activo",
+          "customer": "Activo",
+          "prospect": "Servicio Activo",
+          "prospectCustomer": 9,
+          "contractCustomer": 9,
+          "services": [
+            "Activo"
+          ],
+          "g1": "COMPLETADA",
+          "auditG3": "COMPLETADA",
+          "g1Marker": {
+            "state": "COMPLETADA",
+            "auditPending": false,
+            "idIntegracion": 9
+          }
+        },
+        "attempts": 2,
+        "sends": 2,
+        "simulatedEffects": 1,
+        "payloadHashes": [
+          "1a6099f9c86292d410dde328e8f76257ce354fe518e2027b807fbaa03be62db1",
+          "1a6099f9c86292d410dde328e8f76257ce354fe518e2027b807fbaa03be62db1"
+        ],
+        "duplicateResponses": 1
+      },
+      "worker": {
+        "ok": true,
+        "activationCalls": 0,
+        "state": "COMPLETADA",
+        "postClosure": null,
+        "exitCode": 0,
+        "signal": null,
+        "backendPid": 27804,
+        "processPid": 36012
+      }
+    }
+  ],
+  "productionAccess": false,
+  "realProviderAccess": false,
+  "cleanup": true,
+  "environment": {
+    "engine": "postgres (PostgreSQL) 18.6",
+    "version": "PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit",
+    "host": "127.0.0.1/32",
+    "port": 49182,
+    "database": "p005_qa_5d5659a98aaf4e1f9bbe87fa36c56564",
+    "runId": "5d5659a9-8aaf-4e1f-9bbe-87fa36c56564",
+    "temporaryDataDirectory": "C:\\Users\\Manguera\\AppData\\Local\\Temp\\finet-p005-qa-ZT8U7o\\data",
+    "primaryBackendPid": 22640,
+    "dockerUsed": false,
+    "connectionLimitPerWorker": 1,
+    "simulatedG1": "http://127.0.0.1:52295"
+  },
+  "canonicalSha256": "f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa",
+  "finalRows": {
+    "companies": 2,
+    "customers": 8,
+    "contracts": 9,
+    "services": 8,
+    "trackingsG3": 9,
+    "events": 8,
+    "trackingsG1": 8,
+    "audits": 33,
+    "localHttpRequests": 10,
+    "simulatedEffects": 8
+  },
+  "finishedAt": "2026-10-26T14:21:34.309Z"
+}
