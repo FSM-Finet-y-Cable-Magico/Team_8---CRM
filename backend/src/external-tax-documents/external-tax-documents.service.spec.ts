@@ -28,7 +28,7 @@ function setup() {
   const prisma = {
     empresa: { findUnique: jest.fn(({ where }) => Promise.resolve([1, 2].includes(where.idEmpresa) ? { idEmpresa: where.idEmpresa } : null)) },
     cliente: { findUnique: jest.fn().mockResolvedValue(null) },
-    contrato: { findUnique: jest.fn().mockResolvedValue(null) },
+    contrato: { findUnique: jest.fn().mockResolvedValue(null), findFirst: jest.fn().mockResolvedValue(null) },
     factura: { findUnique: jest.fn().mockResolvedValue(null), create: untouched.facturaCreate },
     pago: { create: untouched.pagoCreate },
     cargoAdicional: { findUnique: jest.fn().mockResolvedValue(null), update: untouched.cargoUpdate },
@@ -141,7 +141,32 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
   it('rechaza cliente de otra empresa', async () => {
     const { service, prisma } = setup();
     prisma.cliente.findUnique.mockResolvedValue({ idCliente: 10, idEmpresa: 2 });
-    await expect(service.create({ ...baseDto, idCliente: 10 }, admin)).rejects.toThrow('cliente pertenece a otra empresa');
+    await expect(service.create({ ...baseDto, idCliente: 10 }, admin)).rejects.toThrow('cliente no tiene contrato en esta empresa');
+  });
+
+  it('acepta documento de cliente compartido respaldado por contrato propio', async () => {
+    const { service, prisma, rows } = setup();
+    prisma.cliente.findUnique.mockResolvedValue({ idCliente: 10, idEmpresa: 2 });
+    prisma.contrato.findUnique.mockResolvedValue({ idContrato: 20, idEmpresa: 1, idCliente: 10 });
+    await expect(service.create({ ...baseDto, idCliente: 10, idContrato: 20 }, admin)).resolves.toMatchObject({ idEmpresa: 1, idCliente: 10 });
+    expect(rows).toHaveLength(1);
+    expect(prisma.cliente).not.toHaveProperty('update');
+  });
+
+  it('sin referencia explícita exige relación contractual en la empresa del documento', async () => {
+    const { service, prisma } = setup();
+    prisma.cliente.findUnique.mockResolvedValue({ idCliente: 10, idEmpresa: 2 });
+    prisma.contrato.findFirst.mockResolvedValue({ idContrato: 20 });
+    await expect(service.create({ ...baseDto, idCliente: 10 }, admin)).resolves.toMatchObject({ idEmpresa: 1 });
+    expect(prisma.contrato.findFirst).toHaveBeenCalledWith({ where: { idCliente: 10, idEmpresa: 1 }, select: { idContrato: true } });
+  });
+
+  it('una factura propia no autoriza vincular un cliente distinto', async () => {
+    const { service, prisma, rows } = setup();
+    prisma.cliente.findUnique.mockResolvedValue({ idCliente: 10, idEmpresa: 2 });
+    prisma.factura.findUnique.mockResolvedValue({ idFactura: 30, idContrato: 20, contrato: { idEmpresa: 1, idCliente: 99 } });
+    await expect(service.create({ ...baseDto, idCliente: 10, idFactura: 30 }, admin)).rejects.toThrow('no corresponde al cliente');
+    expect(rows).toHaveLength(0);
   });
 
   it('rechaza contrato de otra empresa', async () => {

@@ -36,18 +36,10 @@ export class BillingService {
     const cutDays = this.cutDays();
     const scheduledCuts = rows.filter((row) => row.diasAtraso >= cutDays);
     const companyFilter = this.companyScope(currentUser, scope);
-    const notificationCustomerIds = companyFilter.idEmpresa
-      ? await this.prisma.cliente.findMany({
-          where: {
-            idEmpresa: companyFilter.idEmpresa,
-          },
-          select: { idCliente: true },
-        })
-      : [];
     const notifications = await this.prisma.logNotificacion.findMany({
       select: {idNotificacion:true,idCliente:true,idPlantilla:true,canal:true,fechaEnvio:true,estadoEnvio:true},
       where: companyFilter.idEmpresa
-        ? { idCliente: { in: notificationCustomerIds.map((customer) => customer.idCliente) } }
+        ? { idEmpresa: companyFilter.idEmpresa }
         : {},
       orderBy: { fechaEnvio: 'desc' },
       take: 50,
@@ -80,12 +72,14 @@ export class BillingService {
       let updatedContracts = 0, updatedCustomers = 0;
       const affected = new Map<number, number>();
       for (const contract of contracts) {
-        if (!contract.idEmpresa || contract.cliente?.idEmpresa !== contract.idEmpresa) continue;
+        if (!contract.idEmpresa || !contract.cliente || contract.cliente.idCliente !== contract.idCliente) continue;
         const state = contract.facturas.some(invoice => invoiceBalance(invoice).diasAtraso > 0) ? 'Moroso' : 'Activo';
         if (contract.estado !== state) {
           await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { estado: state } }); updatedContracts++;
         }
-        affected.set(contract.cliente.idCliente, contract.idEmpresa);
+        if (await this.canUpdateGlobalCustomer(tx, contract.cliente, contract.idEmpresa)) {
+          affected.set(contract.cliente.idCliente, contract.idEmpresa);
+        }
       }
       for (const [idCliente, idEmpresa] of affected) {
         const debts = await tx.factura.findMany({ where: { contrato: { is: { idCliente, idEmpresa } }, estado: { notIn: CLOSED_INVOICE_STATES } },
@@ -108,33 +102,37 @@ export class BillingService {
     const result = await this.billingTransaction(async tx => {
       const customer = await tx.cliente.findUnique({ where: { idCliente: dto.idCliente } });
       if (!customer) throw new NotFoundException('Cliente no encontrado');
-      this.assertCompanyAccess(customer.idEmpresa, currentUser);
-      if (!customer.idEmpresa) throw new BadRequestException('El cliente no tiene empresa');
       const invoice = dto.idFactura ? await tx.factura.findUnique({
         where: { idFactura: dto.idFactura }, include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, contrato: true },
       }) : null;
-      if (dto.idFactura && (!invoice || invoice.contrato?.idCliente !== customer.idCliente || invoice.contrato.idEmpresa !== customer.idEmpresa)) {
+      if (dto.idFactura && (!invoice || invoice.contrato?.idCliente !== customer.idCliente || !invoice.contrato.idEmpresa)) {
         throw new BadRequestException('La factura no corresponde al cliente y empresa');
+      }
+      const idEmpresa = invoice?.contrato?.idEmpresa ?? (isAdministrator(currentUser.roles) ? customer.idEmpresa : currentUser.idEmpresa);
+      if (!idEmpresa) throw new BadRequestException('Debe indicar una factura con empresa');
+      this.assertCompanyAccess(idEmpresa, currentUser);
+      if (!invoice && customer.idEmpresa !== idEmpresa && !await tx.contrato.findFirst({ where: { idCliente: customer.idCliente, idEmpresa }, select: { idContrato: true } })) {
+        throw new BadRequestException('El cliente no tiene contrato en esta empresa');
       }
       if (invoice && !invoiceBalance(invoice).aceptaPagos) throw new BadRequestException('La factura no tiene saldo cobrable');
       if (dto.tipo === 'Ultimo aviso' && (!invoice || invoiceBalance(invoice).diasAtraso === 0)) {
         throw new BadRequestException('El último aviso requiere una factura vencida con saldo');
       }
-      const template = await this.notificationTemplate(dto.tipo, customer.idEmpresa, tx);
+      const template = await this.notificationTemplate(dto.tipo, idEmpresa, tx);
       const type:TemplateKey=dto.tipo==='Preventiva'?'AVISO_PREVENTIVO':'ULTIMO_AVISO_CORTE';
       const external=this.notificationMode()==='provider';
       if(external && !this.messaging)throw new BadRequestException('El proveedor de notificaciones no esta disponible');
       const status = this.notificationMode() === 'disabled' ? 'Desactivado' : 'Simulado';
-      const prepared = external ? await this.messaging!.enqueue(tx,{idEmpresa:customer.idEmpresa,idCliente:customer.idCliente,
-        destinationPhone:customer.telefono ?? '',templateKey:type,locale:this.messaging!.config.company(customer.idEmpresa)?.templates[type]?.locale ?? '',
+      const prepared = external ? await this.messaging!.enqueue(tx,{idEmpresa,idCliente:customer.idCliente,
+        destinationPhone:customer.telefono ?? '',templateKey:type,locale:this.messaging!.config.company(idEmpresa)?.templates[type]?.locale ?? '',
         variables:{customer_name:customer.nombreCompleto,invoice_id:invoice ? String(invoice.idFactura) : '',balance:invoice ? String(invoiceBalance(invoice).saldo) : ''},correlationId},template.idPlantilla) : null;
       const notification = prepared?.notification ?? await tx.logNotificacion.create({ select:{idNotificacion:true,estadoEnvio:true},data: {
-        idCliente: customer.idCliente, idPlantilla: template.idPlantilla, canal: template.canal, fechaEnvio: new Date(), estadoEnvio: status,
+        idEmpresa, idCliente: customer.idCliente, idPlantilla: template.idPlantilla, canal: template.canal, fechaEnvio: new Date(), estadoEnvio: status,
       } });
       if(prepared?.duplicate)return {idNotificacion:notification.idNotificacion.toString(),estadoEnvio:notification.estadoEnvio,plantilla:template};
       // Functional commercial event is distinct from the technical audit entry.
       const event = await tx.eventoGestionComercial.create({ data: {
-        idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idContrato: invoice?.idContrato,
+        idEmpresa, idCliente: customer.idCliente, idContrato: invoice?.idContrato,
         idFactura: invoice?.idFactura, tipo: dto.tipo === 'Preventiva' ? 'AVISO_PREVENTIVO' : 'ULTIMO_AVISO_CORTE',
         canal: external ? 'WHATSAPP' : 'OTRO', fecha: new Date(), estadoGestion: 'REGISTRADO',
         observacion: `Aviso ${(notification.estadoEnvio ?? status).toLowerCase()}; no acredita entrega externa.`, idUsuarioResponsable: currentUser.idUsuario,
@@ -142,7 +140,7 @@ export class BillingService {
       await this.auditService.record({
         idUsuario: currentUser.idUsuario, accion: dto.tipo === 'Preventiva' ? 'ENVIAR_AVISO_COBRO_PREVENTIVO' : 'ENVIAR_ULTIMO_AVISO_CORTE',
         entidadAfectada: 'evento_gestion_comercial', idEntidadAfectada: event.idEvento,
-        valorNuevo: { idEmpresa: customer.idEmpresa, idCliente: customer.idCliente, idFactura: dto.idFactura ?? null,
+        valorNuevo: { idEmpresa, idCliente: customer.idCliente, idFactura: dto.idFactura ?? null,
           idNotificacion: notification.idNotificacion.toString(), tipo: dto.tipo, modo: this.notificationMode(), estadoEnvio: notification.estadoEnvio ?? status },
       }, tx);
       return { idNotificacion: notification.idNotificacion.toString(), estadoEnvio:notification.estadoEnvio, plantilla: template };
@@ -161,12 +159,12 @@ export class BillingService {
       } });
       if (!contract?.cliente) throw new NotFoundException('Contrato no encontrado');
       this.assertCompanyAccess(contract.idEmpresa, currentUser);
-      if (!contract.idEmpresa || contract.cliente.idEmpresa !== contract.idEmpresa) throw new BadRequestException('Cliente y contrato deben pertenecer a la misma empresa');
+      if (!contract.idEmpresa || contract.cliente.idCliente !== contract.idCliente) throw new BadRequestException('Cliente y contrato no corresponden');
       if (!['Activo', 'Moroso', 'Suspendido'].includes(contract.estado)) throw new BadRequestException('El estado del contrato no permite suspensión comercial');
       const overdue = contract.facturas.filter(invoice => invoiceBalance(invoice).diasAtraso >= this.cutDays());
       if (!overdue.length) throw new BadRequestException('No existen facturas con saldo que cumplan los días de corte');
       const result = await tx.contrato.update({ where: { idContrato }, data: { estado: 'Suspendido', fechaSuspension: this.todayDate() } });
-      await tx.cliente.updateMany({ where: { idCliente: contract.cliente.idCliente, idEmpresa: contract.idEmpresa, estado: { not: 'Baja' } }, data: { estado: 'Suspendido' } });
+      if (await this.canUpdateGlobalCustomer(tx, contract.cliente, contract.idEmpresa)) await tx.cliente.updateMany({ where: { idCliente: contract.cliente.idCliente, idEmpresa: contract.idEmpresa, estado: { not: 'Baja' } }, data: { estado: 'Suspendido' } });
       await tx.servicioContratado.updateMany({ where: { idContrato, idEmpresa: contract.idEmpresa, estadoOperativo: 'Activo' }, data: { estadoOperativo: 'Suspendido' } });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario, accion: 'SUSPENDER_SERVICIO_NO_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
@@ -219,7 +217,7 @@ export class BillingService {
       } else {
         this.assertCompanyAccess(contract.idEmpresa, currentUser);
       }
-      if (!contract.idEmpresa || customer.idEmpresa !== contract.idEmpresa) throw new BadRequestException('Cliente y contrato deben pertenecer a la misma empresa');
+      if (!contract.idEmpresa || customer.idCliente !== contract.idCliente || invoice.idContrato !== contract.idContrato) throw new BadRequestException('Cliente, contrato y factura no corresponden');
       if (integration && dto.codigoTransaccion) {
         const existing = await tx.pago.findUnique({
           where: { codigoTransaccion: dto.codigoTransaccion.trim() },
@@ -287,7 +285,7 @@ export class BillingService {
           const otherSuspended = await tx.contrato.findFirst({ where: {
             idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: 'Suspendido',
           }, select: { idContrato: true } });
-          if (!otherSuspended && (reactivatedServiceIds.length || customer.estado === 'Moroso')) await tx.cliente.updateMany({
+          if (!otherSuspended && (reactivatedServiceIds.length || customer.estado === 'Moroso') && await this.canUpdateGlobalCustomer(tx, customer, contract.idEmpresa)) await tx.cliente.updateMany({
             where: { idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: { in: ['Moroso', 'Suspendido'] } }, data: { estado: 'Activo' },
           });
         }
@@ -319,6 +317,16 @@ export class BillingService {
     try { taxDocument = await this.taxIssuer.processPayment(result.payment.idPago); }
     catch { taxDocument = { state:'PENDIENTE', code:'TAX_POST_COMMIT_PROCESSING_PENDING' }; }
     return { ...result, taxDocument };
+  }
+
+  // A company-scoped debt decision cannot resolve a shared global financial state.
+  private async canUpdateGlobalCustomer(tx: Prisma.TransactionClient, customer: { idCliente: number; idEmpresa: number | null }, idEmpresa: number) {
+    if (customer.idEmpresa !== idEmpresa) return false;
+    const otherContext = await tx.contrato.findFirst({
+      where: { idCliente: customer.idCliente, OR: [{ idEmpresa: { not: idEmpresa } }, { idEmpresa: null }] },
+      select: { idContrato: true },
+    });
+    return !otherContext;
   }
 
   private async billingTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -534,7 +542,7 @@ export class BillingService {
           });
 
     return invoices
-      .filter((invoice) => invoice.contrato?.cliente && invoice.contrato.idEmpresa === invoice.contrato.cliente.idEmpresa && invoiceBalance(invoice).diasAtraso > 0)
+      .filter((invoice) => invoice.contrato?.cliente && invoice.contrato.idEmpresa && invoice.contrato.idCliente === invoice.contrato.cliente.idCliente && invoiceBalance(invoice).diasAtraso > 0)
       .map((invoice) => {
         const cliente = invoice.contrato?.cliente;
         const contrato = invoice.contrato;
@@ -559,8 +567,8 @@ export class BillingService {
             nombreCompleto: cliente.nombreCompleto,
             telefono: cliente.telefono,
             email: cliente.email,
-            estado: cliente.estado,
-            empresa: cliente.empresa?.nombre ?? null,
+            estado: isAdministrator(currentUser.roles) ? cliente.estado : null,
+            empresa: cliente.idEmpresa === contrato.idEmpresa ? cliente.empresa?.nombre ?? null : null,
           },
           contrato: {
             idContrato: contrato.idContrato,

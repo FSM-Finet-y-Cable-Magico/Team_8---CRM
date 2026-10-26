@@ -124,8 +124,8 @@ describe('contrato G8 ↔ G2 (respuesta complementaria del 02-10-2026)', () => {
     it('una boleta emitida produce la respuesta de referencia', async () => {
       const expected = fixture('tax-document-response.json');
       const prisma = {
-        pago: { findUnique: jest.fn().mockResolvedValue({ idPago: 9001, idCliente: 123,
-          factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 123, idEmpresa: 1 } } } }) },
+        pago: { findUnique: jest.fn().mockResolvedValue({ idPago: 9001, idCliente: 123, idFactura: 101,
+          factura: { idFactura: 101, idContrato: 20, contrato: { idContrato: 20, idCliente: 123, idEmpresa: 1, cliente: { idCliente: 123, idEmpresa: 1 } } } }) },
         taxPaymentJob: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1, estado: 'PROCESADO' }) },
         taxEmissionIntent: { findMany: jest.fn().mockResolvedValue([{ ambiente: 'production', estado: 'GENERADO', tipoDte: 39, folio: '123456',
           fechaEnvio: new Date('2026-10-02T18:20:00Z'), emailEstado: 'ENVIADO', artefactoUrl: expected.data.documento_url, artefactoEstado: 'DISPONIBLE' }]) },

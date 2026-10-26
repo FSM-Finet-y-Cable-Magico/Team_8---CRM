@@ -229,7 +229,6 @@ export class ExternalTaxDocumentsService {
       ids.idCargoAdicional ? this.prisma.cargoAdicional.findUnique({ where: { idCargo: ids.idCargoAdicional }, select: { idCargo: true, idEmpresa: true, idCliente: true, idContrato: true } }) : null,
     ]);
     if (ids.idCliente && !customer) throw new NotFoundException('Cliente no encontrado');
-    if (customer?.idEmpresa !== undefined && customer.idEmpresa !== idEmpresa) throw new BadRequestException('El cliente pertenece a otra empresa');
     if (ids.idContrato && !contract) throw new NotFoundException('Contrato no encontrado');
     if (contract && contract.idEmpresa !== idEmpresa) throw new BadRequestException('El contrato pertenece a otra empresa');
     if (contract && ids.idCliente && contract.idCliente !== ids.idCliente) throw new BadRequestException('El contrato no corresponde al cliente');
@@ -237,10 +236,15 @@ export class ExternalTaxDocumentsService {
     if (invoice && invoice.contrato?.idEmpresa !== idEmpresa) throw new BadRequestException('La factura pertenece a otra empresa o no tiene contrato válido');
     if (invoice && ids.idContrato && invoice.idContrato !== ids.idContrato) throw new BadRequestException('La factura no corresponde al contrato');
     if (invoice && ids.idCliente && invoice.contrato?.idCliente !== ids.idCliente) throw new BadRequestException('La factura no corresponde al cliente');
+    if (customer && customer.idEmpresa !== idEmpresa && !contract && !invoice) {
+      const relationship = await this.prisma.contrato.findFirst({ where: { idCliente: customer.idCliente, idEmpresa }, select: { idContrato: true } });
+      if (!relationship) throw new BadRequestException('El cliente no tiene contrato en esta empresa');
+    }
     if (ids.idCargoAdicional && !charge) throw new NotFoundException('Cargo adicional no encontrado');
     if (charge && charge.idEmpresa !== idEmpresa) throw new BadRequestException('El cargo adicional pertenece a otra empresa');
     if (charge && ids.idCliente && charge.idCliente !== ids.idCliente) throw new BadRequestException('El cargo adicional no corresponde al cliente');
     if (charge && ids.idContrato && charge.idContrato !== ids.idContrato) throw new BadRequestException('El cargo adicional no corresponde al contrato');
+    if (charge && invoice && (charge.idContrato !== invoice.idContrato || charge.idCliente !== invoice.contrato?.idCliente)) throw new BadRequestException('El cargo adicional no corresponde a la factura');
   }
 
   private validateMoney(values: MoneyFields) {

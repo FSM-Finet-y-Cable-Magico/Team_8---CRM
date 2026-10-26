@@ -64,7 +64,6 @@ export class BillingReadService {
       idEmpresa,
       ...(identity?.idContrato ? { idContrato: identity.idContrato } : {}),
       cliente: { is: {
-        idEmpresa,
         ...(identity?.idCliente ? { idCliente: identity.idCliente } : {}),
         ...(identity?.rut ? { rut: identity.rut } : {}),
       } },
@@ -101,14 +100,14 @@ export class BillingReadService {
 
   private async detailForScope(idFactura: number, idEmpresa?: number) {
     const row = await this.prisma.factura.findFirst({
-      where: { idFactura, ...(idEmpresa ? { contrato: { is: { idEmpresa, cliente: { is: { idEmpresa } } } } } : {}) },
+      where: { idFactura, ...(idEmpresa ? { contrato: { is: { idEmpresa } } } : {}) },
       include: INVOICE_INCLUDE,
     });
     if (!row) throw new NotFoundException('Factura no encontrada en este alcance');
     const company = row.contrato?.idEmpresa;
     const customer = row.contrato?.idCliente;
     // Orphan/inconsistent legacy rows remain visible to admins, but expose no related domain data.
-    if (!company || !customer || row.contrato?.cliente?.idEmpresa !== company) return { ...this.present(row), convenios: [], prorrogas: [], cargos: [], cambios: [], eventos: [] };
+    if (!company || !customer || row.contrato?.cliente?.idCliente !== customer) return { ...this.present(row), convenios: [], prorrogas: [], cargos: [], cambios: [], eventos: [] };
     const scopeFilter = { idEmpresa: company, idCliente: customer };
     const [convenios, prorrogas, cargos, cambios, eventos] = await Promise.all([
       this.prisma.convenioPago.findMany({ where: { ...scopeFilter, idFactura }, include: { cuotas: { orderBy: { numero: 'asc' } } }, orderBy: { idConvenio: 'desc' } }),
@@ -122,7 +121,7 @@ export class BillingReadService {
 
   private present(row: Prisma.FacturaGetPayload<{ include: typeof INVOICE_INCLUDE }>) {
     const { prorrogasPago: _extensions, ...invoice } = row;
-    const consistent = row.contrato?.idEmpresa && row.contrato.cliente?.idEmpresa === row.contrato.idEmpresa;
+    const consistent = row.contrato?.idEmpresa && row.contrato.idCliente && row.contrato.idCliente === row.contrato.cliente?.idCliente;
     const balance = invoiceBalance(row);
     return { ...invoice, ...balance, aceptaPagos: Boolean(consistent) && balance.aceptaPagos };
   }

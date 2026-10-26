@@ -31,7 +31,9 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   const [form, setForm] = useState(customerForm);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const idEmpresa = scope !== 'consolidado' && Number.isInteger(Number(scope)) ? Number(scope) : writeCompanyId;
-  const companyCustomers = useMemo(() => customers.filter((customer) => customer.idEmpresa === idEmpresa), [customers, idEmpresa]);
+  const companyCustomers = useMemo(() => customers
+    .filter(customer => customer.idEmpresa === idEmpresa || customer.contratos?.some(contract => contract.idEmpresa === idEmpresa))
+    .map(customer => ({ ...customer, contratos: customer.contratos?.filter(contract => contract.idEmpresa === idEmpresa) })), [customers, idEmpresa]);
   const selectedCustomer = companyCustomers.find((customer) => String(customer.idCliente) === form.idCliente);
   const filterCustomer = companyCustomers.find((customer) => String(customer.idCliente) === (fixedCustomerId ? String(fixedCustomerId) : filters.idCliente));
 

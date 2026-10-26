@@ -264,7 +264,7 @@ describe('integración S2S G2', () => {
     const { service, prisma } = setup();
     prisma.pago.findUnique.mockResolvedValue({
       idPago: 3, idCliente: 10, comprobanteEstado: 'GENERADO', comprobantePdfUrl: 'https://files.example.test/r/3.pdf',
-      factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
+      idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
     });
     await expect(service.paymentReceipt(3, 1)).resolves.toMatchObject({ comprobante_estado: 'GENERADO', redirect_url: 'https://files.example.test/r/3.pdf' });
   });
@@ -273,7 +273,7 @@ describe('integración S2S G2', () => {
     const { service, prisma } = setup();
     prisma.pago.findUnique.mockResolvedValue({
       idPago: 3, idCliente: 10, comprobanteEstado: 'PENDIENTE', comprobantePdfUrl: null,
-      factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
+      idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
     });
     await expect(service.paymentReceipt(3, 1)).resolves.toEqual({
       id_pago: 3, id_cliente: 10, comprobante_estado: 'PENDIENTE', disponible: false,
@@ -284,7 +284,7 @@ describe('integración S2S G2', () => {
     const { service, prisma } = setup();
     prisma.pago.findUnique.mockResolvedValue({
       idPago: 3, idCliente: 10, comprobanteEstado: 'FALLIDO', comprobantePdfUrl: 'https://files.example.test/r/3.pdf',
-      factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
+      idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
     });
     await expect(service.paymentReceipt(3, 1)).resolves.toEqual({
       id_pago: 3, id_cliente: 10, comprobante_estado: 'FALLIDO', disponible: false,
@@ -295,13 +295,13 @@ describe('integración S2S G2', () => {
     const { service, prisma } = setup();
     prisma.pago.findUnique.mockResolvedValue({
       idPago: 3, idCliente: 10, comprobanteEstado: 'PENDIENTE', comprobantePdfUrl: null,
-      factura: { contrato: { idEmpresa: 2, cliente: { idCliente: 10, idEmpresa: 2 } } },
+      idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 2, cliente: { idCliente: 10, idEmpresa: 2 } } },
     });
     await expect(service.paymentReceipt(3, 1)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   describe('documento tributario del pago (§10)', () => {
-    const payment = { idPago: 3, idCliente: 10, factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } } };
+    const payment = { idPago: 3, idCliente: 10, idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } } };
     const intent = {
       ambiente: 'production', estado: 'GENERADO', tipoDte: 39, folio: '123456', fechaEnvio: new Date('2026-10-02T18:20:00Z'),
       emailEstado: 'ENVIADO', artefactoUrl: 'https://www.facturacion.cl/sistema/descargar.php?id=abc', artefactoEstado: 'DISPONIBLE',
@@ -365,7 +365,7 @@ describe('integración S2S G2', () => {
     const { service, prisma } = setup();
     prisma.pago.findUnique.mockResolvedValue({
       idPago: 3, idCliente: 10, comprobanteEstado: 'GENERADO', comprobantePdfUrl: 'http://localhost/tmp/3.pdf',
-      factura: { contrato: { idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
+      idFactura: 80, factura: { idFactura: 80, idContrato: 30, contrato: { idContrato: 30, idCliente: 10, idEmpresa: 1, cliente: { idCliente: 10, idEmpresa: 1 } } },
     });
     await expect(service.paymentReceipt(3, 1)).rejects.toBeInstanceOf(BadRequestException);
   });

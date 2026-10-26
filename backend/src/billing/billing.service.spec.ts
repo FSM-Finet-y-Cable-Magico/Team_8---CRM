@@ -282,6 +282,44 @@ describe('BillingService lifecycle de pago', () => {
 });
 
 describe('BillingService avisos y suspensión', () => {
+  it('aviso de factura compartida usa empresa contractual en plantilla, log y evento', async () => {
+    const current = invoice();
+    current.contrato.idEmpresa = 2;
+    const notifications: any[] = [];
+    const events: any[] = [];
+    const tx = {
+      cliente: { findUnique: jest.fn().mockResolvedValue(current.contrato.cliente) },
+      factura: { findUnique: jest.fn().mockResolvedValue(current) },
+      plantillaNotificacion: { findFirst: jest.fn().mockResolvedValue({ idPlantilla: 5, idEmpresa: 2, canal: 'Sistema' }) },
+      logNotificacion: { create: jest.fn(async ({ data }) => { const row = { idNotificacion: 1n, ...data }; notifications.push(row); return row; }) },
+      eventoGestionComercial: { create: jest.fn(async ({ data }) => { const row = { idEvento: 1, ...data }; events.push(row); return row; }) },
+    };
+    const prisma = { $transaction: jest.fn(async (work: any) => work(tx)) };
+    const service = new BillingService(prisma as never, { record: jest.fn() } as never, new ConfigService({ BILLING_NOTIFICATION_MODE: 'mock' }));
+    await service.sendNotification({ idCliente: 10, idFactura: 80, tipo: 'Preventiva' }, { ...commercial, idEmpresa: 2 });
+    expect(notifications).toEqual([expect.objectContaining({ idEmpresa: 2, idCliente: 10, estadoEnvio: 'Simulado' })]);
+    expect(events).toEqual([expect.objectContaining({ idEmpresa: 2, idCliente: 10, idContrato: 30, idFactura: 80 })]);
+    expect(tx.plantillaNotificacion.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ idEmpresa: 2 }) }));
+    await expect(service.sendNotification({ idCliente: 10, idFactura: 80, tipo: 'Preventiva' }, commercial)).rejects.toThrow('no pertenece');
+    expect(notifications).toHaveLength(1);
+    expect(tx.cliente).not.toHaveProperty('update');
+  });
+
+  it('overview filtra notificaciones por atribución empresarial, no por identidad global', async () => {
+    const rows = [{ idNotificacion: 1n, idEmpresa: 1, idCliente: 10 }, { idNotificacion: 2n, idEmpresa: 2, idCliente: 10 }, { idNotificacion: 3n, idEmpresa: null, idCliente: 10 }];
+    const current = invoice(); current.contrato.idEmpresa = 2;
+    const prisma = {
+      factura: { findMany: jest.fn().mockResolvedValue([current]) },
+      logNotificacion: { findMany: jest.fn(async ({ where }) => rows.filter(n => where.idEmpresa === undefined || n.idEmpresa === where.idEmpresa)) },
+    };
+    const service = new BillingService(prisma as never, {} as never, new ConfigService());
+    const result = await service.overview({ ...commercial, idEmpresa: 2 });
+    expect(result.notificaciones.map(n => n.idNotificacion)).toEqual(['2']);
+    expect(result.morosos[0].cliente).toMatchObject({ estado: null, empresa: null });
+    const consolidated = await service.overview({ ...commercial, roles: ['Administrador'] });
+    expect(consolidated.notificaciones).toHaveLength(3);
+    expect(consolidated.morosos[0].cliente.estado).toBe('Suspendido');
+  });
   it('persists WhatsApp and commercial event before dispatch, and transport failure never undoes them',async()=>{
     const events:string[]=[];
     const tx={cliente:{findUnique:jest.fn().mockResolvedValue({idCliente:10,idEmpresa:1,telefono:'+56912345678',nombreCompleto:'QA'})},

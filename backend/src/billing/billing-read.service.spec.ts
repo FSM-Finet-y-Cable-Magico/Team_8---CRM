@@ -16,7 +16,7 @@ const row = {
 };
 
 describe('BillingReadService', () => {
-  it('fuerza empresa y cliente de la misma empresa en el listado', async () => {
+  it('fuerza empresa contractual sin excluir identidades compartidas', async () => {
     const prisma = {
       factura: { findMany: jest.fn().mockResolvedValue([row]), count: jest.fn().mockResolvedValue(1) },
       $transaction: jest.fn(async (items: Array<Promise<unknown>>) => Promise.all(items)),
@@ -25,7 +25,7 @@ describe('BillingReadService', () => {
     const result = await service.invoices({ scope: 'consolidado', page: 1, pageSize: 20 }, commercial);
     expect(result.items[0]).toMatchObject({ saldo: 7500, aceptaPagos: true });
     expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } } },
+      where: { contrato: { is: { idEmpresa: 1, cliente: { is: {} } } } },
     }));
   });
 
@@ -48,13 +48,13 @@ describe('BillingReadService', () => {
       aceptaPagos: true,
     });
     expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1, rut: '11111111-1' } } } } },
+      where: { contrato: { is: { idEmpresa: 1, cliente: { is: { rut: '11111111-1' } } } } },
     }));
   });
 
   it.each([
-    [{ idCliente: 3 }, 1, { idEmpresa: 1, cliente: { is: { idEmpresa: 1, idCliente: 3 } } }],
-    [{ idContrato: 4 }, 2, { idEmpresa: 2, idContrato: 4, cliente: { is: { idEmpresa: 2 } } }],
+    [{ idCliente: 3 }, 1, { idEmpresa: 1, cliente: { is: { idCliente: 3 } } }],
+    [{ idContrato: 4 }, 2, { idEmpresa: 2, idContrato: 4, cliente: { is: {} } }],
   ])('mantiene aislamiento por empresa con identificadores exactos', async (identity, idEmpresa, contractScope) => {
     const prisma = {
       factura: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
@@ -88,7 +88,7 @@ describe('BillingReadService', () => {
     const service = new BillingReadService(prisma as unknown as PrismaService);
     await expect(service.detail(8, commercial)).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.factura.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } } }),
+      where: expect.objectContaining({ contrato: { is: { idEmpresa: 1 } } }),
     }));
     await expect(service.detail(8, { ...commercial, roles: ['Terreno'] })).rejects.toBeInstanceOf(ForbiddenException);
   });

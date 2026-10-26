@@ -65,6 +65,60 @@ function customerFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('P0-03 gestiones sobre identidad compartida', () => {
+  const shared = () => {
+    const invoice = invoiceFixture();
+    invoice.contrato.cliente.idEmpresa = 2;
+    return harness(invoice);
+  };
+
+  it('Libro Control conserva la empresa contractual y no usa dirección global sin atribución', async () => {
+    const { service, prisma } = shared();
+    const rows = await service.list({ page: 1, pageSize: 30 }, commercial);
+    expect(rows.items[0]).toMatchObject({ idEmpresa: 1, idCliente: 10, idContrato: 20, idFactura: 30 });
+    expect(prisma.cliente.findMany.mock.calls[0][0].include).not.toHaveProperty('direcciones');
+    expect(prisma.cliente).not.toHaveProperty('update');
+  });
+
+  it('registra convenio y prórroga en la empresa de la factura', async () => {
+    const { service, prisma } = shared();
+    await service.createAgreement({ idCliente: 10, idFactura: 30, idContrato: 20, montoComprometido: 6000,
+      cantidadCuotas: 1, condiciones: 'QA local', fechaInicio: '2027-01-01', cuotas: [{ numero: 1, monto: 6000, fechaVencimiento: '2027-02-01' }] }, commercial);
+    await service.createExtension({ idFactura: 30, nuevaFecha: '2027-02-01', motivo: 'QA local' }, commercial);
+    expect(prisma.convenioPago.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idEmpresa: 1, idCliente: 10, idContrato: 20, idFactura: 30 }) }));
+    expect(prisma.prorrogaPago.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idEmpresa: 1, idCliente: 10 }) }));
+  });
+
+  it('cambia condiciones solo del contrato legítimo y rechaza empresa ajena', async () => {
+    const { service, prisma } = shared();
+    const dto = { idCliente: 10, idContrato: 20, tipoCambio: 'DIA_PAGO' as const, valorNuevo: '15', justificacion: 'QA local' };
+    await service.changePaymentCondition(dto, commercial);
+    expect(prisma.contrato.update).toHaveBeenCalledWith({ where: { idContrato: 20 }, data: { diaVencimiento: 15 } });
+    await expect(service.changePaymentCondition(dto, { ...commercial, idEmpresa: 2 })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.contrato.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('gestión y cargo usan la empresa contractual, sin reasignar identidad', async () => {
+    const { service, prisma } = shared();
+    await service.registerEvent({ idCliente: 10, idContrato: 20, tipo: 'CONTACTO_CLIENTE', canal: 'TELEFONO', fecha: '2026-10-25T12:00:00Z' }, commercial);
+    await service.createAdditionalCharge({ idCliente: 10, idContrato: 20, tipo: 'OTRO', monto: 1000, fecha: '2026-10-25' }, commercial);
+    expect(prisma.eventoGestionComercial.create).toHaveBeenCalledWith({ data: expect.objectContaining({ idEmpresa: 1, idCliente: 10, idContrato: 20 }) });
+    expect(prisma.cargoAdicional.create).toHaveBeenCalledWith({ data: expect.objectContaining({ idEmpresa: 1, idCliente: 10, idContrato: 20 }) });
+    expect(prisma.cliente).not.toHaveProperty('update');
+  });
+
+  it('rechaza factura inconsistente y convenio asociado a otra empresa sin escribir', async () => {
+    const { service, prisma } = shared();
+    const invalid = invoiceFixture(); invalid.contrato.idCliente = 99;
+    prisma.factura.findUnique.mockResolvedValue(invalid);
+    await expect(service.createExtension({ idFactura: 30, nuevaFecha: '2027-02-01', motivo: 'QA' }, commercial)).rejects.toThrow('relación contractual');
+    expect(prisma.prorrogaPago.create).not.toHaveBeenCalled();
+    prisma.convenioPago.findUnique.mockResolvedValue({ idConvenio: 1, idEmpresa: 2, idCliente: 10, idFactura: 30, idContrato: 20, estado: 'PENDIENTE', factura: invoiceFixture() });
+    await expect(service.approveAgreement(1, admin)).rejects.toThrow('no corresponde');
+    expect(prisma.convenioPago.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('Libro de control con todos los clientes', () => {
   it('mantiene cifras de empresa al filtrar y cuenta clientes y facturas una vez aunque tengan varios servicios', async () => {
     const { service, prisma } = harness();
@@ -179,7 +233,7 @@ describe('Historial del cliente en el libro de control', () => {
     prisma.cliente.findFirst.mockResolvedValue(emptyHistory());
     expect(await service.customerHistory(10, 1, support)).toEqual({ idCliente: 10, invoices: [], movements: [] });
     const request = prisma.cliente.findFirst.mock.calls.at(-1)?.[0];
-    expect(request.where).toEqual({ idCliente: 10, idEmpresa: 1 });
+    expect(request.where).toEqual({ idCliente: 10, OR: [{ idEmpresa: 1 }, { contratos: { some: { idEmpresa: 1 } } }] });
     for (const relation of ['contratos', 'eventosGestionComercial', 'conveniosPago', 'prorrogasPago', 'cambiosCondicionPago', 'cargosAdicionales']) {
       expect(request.select[relation].where).toMatchObject({ idEmpresa: 1 });
     }
@@ -236,7 +290,7 @@ describe('CommercialControlBookService', () => {
   it('aplica alcance multiempresa y rechaza orden arbitrario', async () => {
     const { service, prisma } = harness();
     await service.list({ page: 1, pageSize: 30, idEmpresa: 1 }, commercial);
-    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1 },
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { OR: [{ idEmpresa: 1 }, { contratos: { some: { idEmpresa: 1 } } }] },
       include: expect.objectContaining({ contratos: expect.objectContaining({ where: { idEmpresa: 1 } }), servicios: expect.objectContaining({ where: { idEmpresa: 1 } }) }) }));
     await expect(service.list({ page: 1, pageSize: 30, idEmpresa: 2 }, commercial)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(service.list({ page: 1, pageSize: 30, sort: 'DROP TABLE' } as never, commercial)).rejects.toBeInstanceOf(BadRequestException);
@@ -246,7 +300,7 @@ describe('CommercialControlBookService', () => {
   it('mantiene una empresa concreta para administrador y exige selección si no tiene empresa', async () => {
     const ownCompany = harness();
     await ownCompany.service.list({ page: 1, pageSize: 30 }, admin);
-    expect(ownCompany.prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1 } }));
+    expect(ownCompany.prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { OR: [{ idEmpresa: 1 }, { contratos: { some: { idEmpresa: 1 } } }] } }));
     await expect(harness().service.list(
       { page: 1, pageSize: 30 },
       { ...admin, idEmpresa: null },
@@ -313,10 +367,10 @@ describe('CommercialControlBookService', () => {
 
   it('solo administrador aprueba convenio', async () => {
     const { service, prisma } = harness();
-    prisma.convenioPago.findUnique.mockResolvedValue({ idConvenio: 1, idEmpresa: 1, estado: 'PENDIENTE', factura: invoiceFixture() }); prisma.convenioPago.update.mockResolvedValue({ idConvenio: 1, estado: 'APROBADO', cuotas: [] });
+    prisma.convenioPago.findUnique.mockResolvedValue({ idConvenio: 1, idEmpresa: 1, idCliente: 10, idContrato: 20, idFactura: 30, estado: 'PENDIENTE', factura: invoiceFixture() }); prisma.convenioPago.update.mockResolvedValue({ idConvenio: 1, estado: 'APROBADO', cuotas: [] });
     await expect(service.approveAgreement(1, commercial)).rejects.toBeInstanceOf(ForbiddenException);
     expect((await service.approveAgreement(1, admin)).estado).toBe('APROBADO');
-    prisma.convenioPago.findUnique.mockResolvedValue({ idConvenio: 2, idEmpresa: 1, estado: 'PENDIENTE', factura: invoiceFixture({ pagos: [{ idPago: 3, monto: new Prisma.Decimal(10000), fechaPago: new Date('2026-09-25'), pasarela: 'Transferencia', codigoTransaccion: 'TX-3' }] }) });
+    prisma.convenioPago.findUnique.mockResolvedValue({ idConvenio: 2, idEmpresa: 1, idCliente: 10, idContrato: 20, idFactura: 30, estado: 'PENDIENTE', factura: invoiceFixture({ pagos: [{ idPago: 3, monto: new Prisma.Decimal(10000), fechaPago: new Date('2026-09-25'), pasarela: 'Transferencia', codigoTransaccion: 'TX-3' }] }) });
     await expect(service.approveAgreement(2, admin)).rejects.toThrow('deuda vigente');
   });
 });
@@ -396,7 +450,7 @@ describe('CommercialControlBookService - reglas complementarias', () => {
     expect(result.items.map((item) => item.diasRestantes)).toEqual(expect.arrayContaining([3, -2]));
     expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        contrato: { is: { idEmpresa: 1, cliente: { is: { idEmpresa: 1 } } } },
+        contrato: { is: { idEmpresa: 1 } },
         fechaLimitePago: expect.objectContaining({ lte: expect.any(Date) }),
       }),
     }));

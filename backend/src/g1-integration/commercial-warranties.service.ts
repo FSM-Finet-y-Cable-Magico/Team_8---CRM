@@ -93,7 +93,7 @@ export class CommercialWarrantiesService {
       this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } }),
       this.prisma.contrato.findUnique({ where: { idContrato: dto.idContrato } }),
     ]);
-    if (!customer || customer.idEmpresa !== idEmpresa) throw new NotFoundException('Cliente no encontrado.');
+    if (!customer) throw new NotFoundException('Cliente no encontrado.');
     if (!service || service.idEmpresa !== idEmpresa || service.idCliente !== customer.idCliente) {
       throw new NotFoundException('Servicio no encontrado.');
     }
