@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InstallationActivationService } from './installation-activation.service';
 import { G1ActivationService } from '../g1-integration/g1-activation.service';
 import { G3ClosurePayload, G3ClosureSource } from './g3-integration.types';
+import { closureResult, PostClosureWork, publicClosureResult, validatePostClosure } from './post-closure-work';
 import {
   externalWorkOrderId,
   installationSnapshot,
@@ -38,7 +39,8 @@ export class G3ClosureProcessor {
       if (existing.payloadHash !== payloadHash) {
         throw new ConflictException('El cierre G3 ya fue recibido con un payload diferente');
       }
-      return { duplicate: true, result: existing.result, tracking };
+      await this.recoverPostClosure(tracking.idIntegracion);
+      return { duplicate: true, result: publicClosureResult(existing.result), tracking };
     }
     installationSnapshot(tracking);
 
@@ -60,7 +62,7 @@ export class G3ClosureProcessor {
       if (current.fechaCierreProcesado || current.estadoIntegracion === 'COMPLETADA') {
         throw new ConflictException('La instalacion ya fue completada y requiere revision de su evidencia historica');
       }
-      installationSnapshot(current);
+      const requestSnapshot = installationSnapshot(current);
 
       const activation = await this.activationService.activate(
         tx,
@@ -90,6 +92,24 @@ export class G3ClosureProcessor {
         idCliente: activation?.idCliente ?? null,
         idServicio: activation?.idServicio ?? null,
       };
+      const series = [...new Set((record.equipos_instalados as Array<Record<string, unknown>>)
+        .map(item => item?.numero_serie ?? item?.numeroSerie ?? item?.serial)
+        .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+        .map(value => value.trim()))];
+      const descriptor: PostClosureWork['descriptor'] = {
+        idIntegracion: current.idIntegracion, requestId: current.requestId, closureHash: payloadHash, source,
+        idProspecto: requestSnapshot.id_prospecto, idPlan: current.idPlan,
+        payload: {
+          event_id: `g8-g1-activation-${current.requestId}`, trace_id: current.traceId,
+          id_empresa: current.idEmpresa, id_ot: Number(record.id_ot),
+          id_cliente: updated.idCliente!, id_servicio: updated.idServicio!, id_contrato: current.idContrato,
+          rut_cliente: requestSnapshot.persona.rut, equipos: series.map(numero_serie => ({ numero_serie })),
+        },
+      };
+      const postClosure: PostClosureWork = {
+        version: 1, descriptor, descriptorHash: sha256Payload(descriptor), audit: 'PENDIENTE',
+        g1: { state: 'PENDIENTE_CREACION' },
+      };
       await tx.integracionEventoEntrante.create({
         data: {
           idIntegracion: current.idIntegracion,
@@ -97,7 +117,7 @@ export class G3ClosureProcessor {
           eventType,
           externalReference: current.requestId,
           payloadHash,
-          result: eventResult,
+          result: { ...eventResult, postClosure } as unknown as Prisma.InputJsonValue,
         },
       });
       return { duplicate: false, result: eventResult, tracking: updated };
@@ -106,48 +126,81 @@ export class G3ClosureProcessor {
       timeout: 20_000,
     });
 
-    if (!processed.duplicate) {
-      await this.auditService.record({
-        accion: source === 'WEBHOOK' ? 'RECIBIR_CIERRE_G3' : 'RECONCILIAR_CIERRE_G3',
-        entidadAfectada: 'integracion_instalacion_g3',
-        idEntidadAfectada: tracking.idIntegracion,
-        valorNuevo: {
-          requestId: tracking.requestId,
-          traceId: tracking.traceId,
-          idEmpresa: tracking.idEmpresa,
-          idOtG3: externalWorkOrderId(record) ?? tracking.idOtG3,
-          estado: 'COMPLETADA',
-          estadoOriginalG3: null,
-        },
+    await this.recoverPostClosure(tracking.idIntegracion);
+    // Preserve the webhook response contract; recovery details are available only on local reconcile.
+    return { ...processed, result: publicClosureResult(processed.result) };
+  }
+
+  /** Called by identical webhooks or the already company-authorized reconcile path. No initial activation. */
+  async recoverPostClosure(idIntegracion: number) {
+    const initial = await this.postClosureContext(this.prisma, idIntegracion);
+    if (!initial.work) return { duplicate: true, tracking: initial.tracking,
+      result: publicClosureResult(initial.event?.result), postClosure: { state: 'REQUIERE_EVIDENCIA_HISTORICA' } };
+
+    // Each independent task commits its own progress. A failed audit must not prevent creation of G1 tracking.
+    try {
+      await this.lockedPostClosure(idIntegracion, async (tx, context) => {
+        if (!context.work || context.work.audit === 'COMPLETADA') return;
+        await this.auditService.record({
+          accion: context.work.descriptor.source === 'WEBHOOK' ? 'RECIBIR_CIERRE_G3' : 'RECONCILIAR_CIERRE_G3',
+          entidadAfectada: 'integracion_instalacion_g3', idEntidadAfectada: idIntegracion,
+          valorNuevo: { requestId: context.tracking.requestId, traceId: context.tracking.traceId,
+            idEmpresa: context.tracking.idEmpresa, idOtG3: context.tracking.idOtG3, estado: 'COMPLETADA', estadoOriginalG3: null },
+        }, tx);
+        await this.auditService.record({ accion: 'ACTIVAR_SERVICIO_DESDE_G3', entidadAfectada: 'integracion_instalacion_g3',
+          idEntidadAfectada: idIntegracion, valorNuevo: publicClosureResult(context.event!.result) as Prisma.InputJsonValue }, tx);
+        context.work.audit = 'COMPLETADA';
+        await this.savePostClosure(tx, context);
       });
-      await this.auditStatus(tracking.idIntegracion, processed.result);
-    }
+    } catch { /* Durable audit=PENDIENTE; retry does not repeat the commercial activation. */ }
 
-    const activationResult = processed.result && typeof processed.result === 'object' && !Array.isArray(processed.result)
-      ? processed.result as Record<string, unknown>
-      : {};
-    if (
-      !processed.duplicate &&
-      activationResult.activated === true &&
-      typeof activationResult.idCliente === 'number' &&
-      typeof activationResult.idServicio === 'number' &&
-      this.g1Activation
-    ) {
+    if (initial.work.g1.state !== 'COMPLETADA' || initial.work.g1.auditPending) {
+      let outcome: PostClosureWork['g1'] = { state: 'PENDIENTE_CREACION' };
       try {
-        await this.g1Activation.afterG3Completion(
-          tracking,
-          { idCliente: activationResult.idCliente, idServicio: activationResult.idServicio },
-          record,
-        );
-      } catch {
-        console.error('No se pudo registrar el tracking de activación G1 después del commit G8', {
-          idIntegracionG3: tracking.idIntegracion,
-          idEmpresa: tracking.idEmpresa,
-        });
+        if (this.g1Activation) {
+          const payload = initial.work.descriptor.payload;
+          const record = await this.g1Activation.afterG3Completion(initial.tracking,
+            { idCliente: payload.id_cliente, idServicio: payload.id_servicio },
+            { id_ot: payload.id_ot, equipos_instalados: payload.equipos }, payload);
+          outcome = { state: record.estadoIntegracion, idIntegracion: record.idIntegracion,
+            auditPending: !('auditPending' in record) || record.auditPending !== false };
+        }
+      } catch (error) {
+        outcome = { state: error instanceof ConflictException ? 'ERROR_REQUIERE_REVISION' : 'PENDIENTE_CREACION' };
       }
+      try {
+        await this.lockedPostClosure(idIntegracion, async (tx, context) => {
+          if (!context.work) return;
+          // A delayed worker cannot demote a confirmed outcome/progress marker.
+          if (context.work.g1.state === 'COMPLETADA' && (outcome.state !== 'COMPLETADA' || !context.work.g1.auditPending)) return;
+          context.work.g1 = outcome;
+          await this.savePostClosure(tx, context);
+        });
+      } catch { /* G1's own durable record is recovered by its deterministic eventId. */ }
     }
+    const latest = await this.postClosureContext(this.prisma, idIntegracion);
+    return { duplicate: true, tracking: latest.tracking, result: publicClosureResult(latest.event?.result),
+      postClosure: { audit: latest.work?.audit, g1: latest.work?.g1 } };
+  }
 
-    return processed;
+  private async postClosureContext(tx: Prisma.TransactionClient, idIntegracion: number) {
+    const tracking = await tx.integracionInstalacionG3.findUnique({ where: { idIntegracion } });
+    if (!tracking) throw new NotFoundException('Tracking de instalacion no encontrado');
+    const event = await tx.integracionEventoEntrante.findUnique({ where: { idIntegracion_eventType: { idIntegracion, eventType: 'WORK_ORDER_COMPLETADA' } } });
+    const work = event ? validatePostClosure(event.result, event.payloadHash, tracking) : null;
+    return { tracking, event, work };
+  }
+
+  private lockedPostClosure(id: number, work: (tx: Prisma.TransactionClient, context: Awaited<ReturnType<G3ClosureProcessor['postClosureContext']>>) => Promise<void>) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id_integracion FROM integracion_instalacion_g3 WHERE id_integracion = ${id} FOR UPDATE`;
+      await work(tx, await this.postClosureContext(tx, id));
+    });
+  }
+
+  private savePostClosure(tx: Prisma.TransactionClient, context: Awaited<ReturnType<G3ClosureProcessor['postClosureContext']>>) {
+    return tx.integracionEventoEntrante.update({ where: { idEvento: context.event!.idEvento },
+      data: { result: { ...closureResult(context.event!.result), postClosure: context.work } as unknown as Prisma.InputJsonValue } });
   }
 
   private async resolveTracking(payload: Record<string, unknown>) {
@@ -256,12 +309,4 @@ export class G3ClosureProcessor {
     return result;
   }
 
-  private async auditStatus(idIntegracion: number, result: unknown) {
-    await this.auditService.record({
-      accion: 'ACTIVAR_SERVICIO_DESDE_G3',
-      entidadAfectada: 'integracion_instalacion_g3',
-      idEntidadAfectada: idIntegracion,
-      valorNuevo: result as Prisma.InputJsonValue,
-    });
-  }
 }

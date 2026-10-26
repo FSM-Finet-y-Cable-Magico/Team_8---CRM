@@ -20,7 +20,11 @@ function setup(idEmpresa = 1) {
   tracking.payloadHash = sha256Payload(tracking.payloadSnapshot);
   let event: any = null;
   const events = {
-    findUnique: jest.fn().mockImplementation(() => Promise.resolve(event)),
+    findUnique: jest.fn().mockImplementation(() => Promise.resolve(structuredClone(event))),
+    update: jest.fn().mockImplementation(({ data }) => {
+      event = { ...event, ...structuredClone(data) };
+      return Promise.resolve(structuredClone(event));
+    }),
     create: jest.fn().mockImplementation(({ data }) => {
       event = { idEvento: 1, ...data, processedAt: new Date() };
       return Promise.resolve(event);
@@ -46,7 +50,7 @@ function setup(idEmpresa = 1) {
     activate: jest.fn().mockResolvedValue({ idCliente: 30, idDireccion: 40, idServicio: 50, fechaActivacion: new Date() }),
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const g1 = { afterG3Completion: jest.fn().mockResolvedValue(undefined) };
+  const g1 = { afterG3Completion: jest.fn().mockResolvedValue({ idIntegracion: 1, estadoIntegracion: 'COMPLETADA', auditPending: false }) };
   const processor = new G3ClosureProcessor(prisma as never, activation as never, audit as never, g1 as never);
   const completed = {
     id_ot: 901,
@@ -144,7 +148,8 @@ describe('G3ClosureProcessor approval-only', () => {
     expect(results.filter((result) => result.duplicate)).toHaveLength(1);
     expect(activation.activate).toHaveBeenCalledTimes(1);
     expect(tx.integracionEventoEntrante.create).toHaveBeenCalledTimes(1);
-    expect(g1.afterG3Completion).toHaveBeenCalledTimes(1);
+    // Both recoveries can reach G1; its unique event + send lease serialize the actual POST.
+    expect(g1.afterG3Completion).toHaveBeenCalled();
   });
 
   it('un cierre concurrente con hash diferente mantiene el conflicto', async () => {
@@ -217,11 +222,12 @@ describe('G3ClosureProcessor approval-only', () => {
 
     await processor.process(completed, 'WEBHOOK');
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(1, expect.any(Function), {
       maxWait: 10_000,
       timeout: 20_000,
     });
+    expect(prisma.$transaction.mock.calls.slice(1).every(args => args.length === 1)).toBe(true);
   });
 
   it('un fallo dentro de la activacion no confirma tracking, evento, auditoria ni G1', async () => {
@@ -296,6 +302,7 @@ describe('G3ClosureProcessor approval-only', () => {
       expect.any(Object),
       { idCliente: 30, idServicio: 50 },
       expect.not.objectContaining({ estado: expect.anything() }),
+      expect.objectContaining({ event_id: expect.stringContaining('g8-g1-activation-'), id_empresa: 1, id_ot: 901 }),
     );
   });
 
@@ -306,7 +313,9 @@ describe('G3ClosureProcessor approval-only', () => {
     await expect(processor.process(completed, 'WEBHOOK')).resolves.toMatchObject({ duplicate: false });
     expect(activation.activate).toHaveBeenCalledTimes(1);
     expect(tracking.estadoIntegracion).toBe('COMPLETADA');
-    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('G1'), expect.objectContaining({ idEmpresa: 1 }));
+    expect(errorLog).not.toHaveBeenCalled();
+    await expect(processor.recoverPostClosure(1)).resolves.toMatchObject({ postClosure: { g1: { state: 'COMPLETADA' } } });
+    expect(activation.activate).toHaveBeenCalledTimes(1);
     errorLog.mockRestore();
   });
 

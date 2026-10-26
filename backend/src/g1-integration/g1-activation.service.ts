@@ -1,10 +1,11 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { IntegracionInstalacionG3, Prisma } from '@prisma/client';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { IntegracionActivacionG1, IntegracionInstalacionG3, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { sha256Payload } from '../g3-integration/g3-integration.utils';
 import { PrismaService } from '../prisma/prisma.service';
+import { DurableG1Payload } from '../g3-integration/post-closure-work';
 import {
   G1ActivationPayload,
   G1_INVENTORY_CLIENT,
@@ -29,9 +30,9 @@ export class G1ActivationService {
     tracking: IntegracionInstalacionG3,
     activation: G8ActivationResult,
     closure: Record<string, unknown>,
+    persistedPayload?: DurableG1Payload,
   ) {
-    const customer = await this.prisma.cliente.findUnique({ where: { idCliente: activation.idCliente } });
-    if (!customer?.rut) return;
+    const customer = persistedPayload ? null : await this.prisma.cliente.findUnique({ where: { idCliente: activation.idCliente } });
 
     const series = this.extractSeries(closure);
     const eventId = `g8-g1-activation-${tracking.requestId}`;
@@ -42,12 +43,18 @@ export class G1ActivationService {
       id_empresa: tracking.idEmpresa,
       id_ot: idOtG3,
       id_cliente: activation.idCliente,
-      rut_cliente: customer.rut,
+      rut_cliente: customer?.rut ?? '',
       id_servicio: activation.idServicio,
       id_contrato: tracking.idContrato,
     };
-    const state = idOtG3 === null ? 'ERROR_G1' : series.length === 0 ? 'PENDIENTE_DATOS_EQUIPO_G1' : 'PENDIENTE_ENVIO';
-    const payload = { ...basePayload, equipos: series.map((numero_serie) => ({ numero_serie })) };
+    const payload = persistedPayload ?? { ...basePayload, equipos: series.map((numero_serie) => ({ numero_serie })) };
+    if (payload.event_id !== eventId || payload.trace_id !== tracking.traceId || payload.id_empresa !== tracking.idEmpresa
+      || payload.id_cliente !== activation.idCliente || payload.id_servicio !== activation.idServicio
+      || payload.id_contrato !== tracking.idContrato || payload.id_ot !== idOtG3) throw new ConflictException('G1_PAYLOAD_CORRELATION_INVALID');
+    await this.validateRelations(payload);
+    const payloadSeries = payload.equipos.map(e => e.numero_serie);
+    const missing = !payload.rut_cliente ? 'G1_RUT_REQUIRED' : idOtG3 === null ? 'G1_ID_OT_REQUIRED' : null;
+    const state = missing ? 'ERROR_G1' : payloadSeries.length === 0 ? 'PENDIENTE_DATOS_EQUIPO_G1' : 'PENDIENTE_ENVIO';
     const record = await this.prisma.integracionActivacionG1.upsert({
       where: { eventId },
       create: {
@@ -56,23 +63,30 @@ export class G1ActivationService {
         idServicio: activation.idServicio,
         idContrato: tracking.idContrato,
         idOtG3: idOtG3 === null ? '' : String(idOtG3),
-        numeroSerie: series[0] ?? null,
-        numerosSerie: series,
+        numeroSerie: payloadSeries[0] ?? null,
+        numerosSerie: payloadSeries,
         eventId,
         traceId: tracking.traceId,
         estadoIntegracion: state,
         payloadHash: sha256Payload(payload),
         payloadSnapshot: payload as Prisma.InputJsonValue,
-        ultimoErrorSanitizado: idOtG3 === null ? 'G1_ID_OT_REQUIRED: pendiente identificador numerico positivo real de G3.' : null,
+        ultimoErrorSanitizado: missing,
       },
       update: {},
     });
 
-    if (record.estadoIntegracion === 'COMPLETADA') return record;
-    if (state !== 'PENDIENTE_ENVIO') {
-      await this.auditPending(record.idIntegracion, state, payload);
-      return record;
+    if (record.payloadHash !== sha256Payload(payload) || sha256Payload(record.payloadSnapshot) !== record.payloadHash
+      || record.idEmpresa !== payload.id_empresa || record.idCliente !== payload.id_cliente
+      || record.idServicio !== payload.id_servicio || record.idContrato !== payload.id_contrato
+      || record.traceId !== payload.trace_id || record.idOtG3 !== (payload.id_ot === null ? '' : String(payload.id_ot))) {
+      throw new ConflictException('G1_EXISTING_PAYLOAD_CONFLICT');
     }
+    if (record.estadoIntegracion === 'COMPLETADA') return this.withOutcomeAudit(record, false);
+    if (state !== 'PENDIENTE_ENVIO') {
+      return this.withOutcomeAudit(record, false);
+    }
+    // Duplicate closures recover creation/initial send, not an automatic resend of an attempted event.
+    if (persistedPayload && record.intentos > 0) return this.withOutcomeAudit(record, false);
     return this.dispatch(record.idIntegracion, false);
   }
 
@@ -90,10 +104,21 @@ export class G1ActivationService {
       where: { idIntegracion },
     });
     if (!record) throw new NotFoundException('Tracking de activación G1 no encontrado.');
-    if (record.estadoIntegracion === 'COMPLETADA') return record;
-    const reject = (code: string) => this.prisma.integracionActivacionG1.update({
-      where: { idIntegracion }, data: { estadoIntegracion: 'ERROR_G1', ultimoErrorSanitizado: code },
-    });
+    if (record.estadoIntegracion === 'COMPLETADA') return this.withOutcomeAudit(record, retry);
+    // Recheck after upsert: another worker may already have attempted this event.
+    if (!retry && record.intentos > 0) return this.withOutcomeAudit(record, false);
+    // Preserve the previous outcome's audit before a new attempt can replace it.
+    if (record.intentos > 0 && record.estadoIntegracion !== 'ENVIANDO') {
+      const previous = await this.withOutcomeAudit(record, retry);
+      if (previous.auditPending) return previous;
+    }
+    const reject = async (code: string) => {
+      await this.prisma.integracionActivacionG1.updateMany({
+        where: { idIntegracion, estadoIntegracion: { notIn: ['COMPLETADA', 'ENVIANDO'] } },
+        data: { estadoIntegracion: 'ERROR_G1', ultimoErrorSanitizado: code },
+      });
+      return this.prisma.integracionActivacionG1.findUniqueOrThrow({ where: { idIntegracion } });
+    };
     if (this.positiveWorkOrderId(record.idOtG3) === null) return reject('G1_ID_OT_REQUIRED');
     const series = record.numerosSerie.length ? record.numerosSerie : record.numeroSerie ? [record.numeroSerie] : [];
     if (!series.length) return record;
@@ -108,11 +133,19 @@ export class G1ActivationService {
       || !Array.isArray(payload.equipos) || JSON.stringify(payload.equipos.map(e => e.numero_serie)) !== JSON.stringify(series)) {
       return reject('G1_PAYLOAD_SNAPSHOT_INCONSISTENT');
     }
+    if (!payload.rut_cliente) return reject('G1_RUT_REQUIRED');
+    await this.validateRelations(payload);
     const now = new Date();
-    await this.prisma.integracionActivacionG1.update({
-      where: { idIntegracion },
+    // A durable lease prevents two workers sending concurrently. Expired leases are recovered by explicit retry.
+    const claimed = await this.prisma.integracionActivacionG1.updateMany({
+      where: { idIntegracion, intentos: record.intentos, estadoIntegracion: { not: 'COMPLETADA' }, OR: [
+        { estadoIntegracion: { not: 'ENVIANDO' } },
+        { ultimoIntento: { lt: new Date(now.getTime() - 300_000) } },
+      ] },
       data: { intentos: { increment: 1 }, ultimoIntento: now, estadoIntegracion: 'ENVIANDO', ultimoErrorSanitizado: null },
     });
+    if (!claimed.count) return this.prisma.integracionActivacionG1.findUniqueOrThrow({ where: { idIntegracion } });
+    const attemptNumber = record.intentos + 1;
 
     try {
       const result = await this.client.sendActivation(payload);
@@ -121,65 +154,80 @@ export class G1ActivationService {
         const state = ['G1_EQUIPMENT_ASSOCIATION_PENDING', 'G1_EQUIPMENT_ASSOCIATION_UNCONFIRMED'].includes(responseIssue)
           ? 'PENDIENTE_SINCRONIZACION_G1'
           : 'ERROR_G1';
-        const updated = await this.prisma.integracionActivacionG1.update({
-          where: { idIntegracion },
-          data: {
+        const updated = await this.saveOutcome(idIntegracion, now, {
             estadoIntegracion: state,
             respuestaEstadoG1: result.data as Prisma.InputJsonValue,
             fechaCompletado: null,
             ultimoErrorSanitizado: responseIssue,
-          },
         });
-        console.warn('Integración G1 aceptada sin asociación funcional confirmada',
+        if (updated.intentos === attemptNumber) console.warn('Integración G1 aceptada sin asociación funcional confirmada',
           this.logContext(record, result.status, result.durationMs, state));
-        await this.audit.record({
-          accion: retry ? 'REINTENTAR_ACTIVACION_G1' : 'ACTIVACION_G1_PENDIENTE',
-          entidadAfectada: 'integracion_activacion_g1',
-          idEntidadAfectada: idIntegracion,
-          valorNuevo: { ...this.auditContext(record), statusHttp: result.status, resultado: state, codigo: responseIssue },
-        });
-        return updated;
+        return this.withOutcomeAudit(updated, retry, result.status, attemptNumber);
       }
-      const updated = await this.prisma.integracionActivacionG1.update({
-        where: { idIntegracion },
-        data: {
+      const updated = await this.saveOutcome(idIntegracion, now, {
           estadoIntegracion: 'COMPLETADA',
           respuestaEstadoG1: result.data as Prisma.InputJsonValue,
           fechaCompletado: new Date(),
           ultimoErrorSanitizado: null,
-        },
       });
-      console.info('Integración G1 completada', this.logContext(record, result.status, result.durationMs, 'COMPLETADA'));
-      await this.audit.record({
-        accion: retry ? 'REINTENTAR_ACTIVACION_G1' : 'ENVIAR_ACTIVACION_G1',
-        entidadAfectada: 'integracion_activacion_g1',
-        idEntidadAfectada: idIntegracion,
-        valorNuevo: { ...this.auditContext(record), statusHttp: result.status, resultado: 'COMPLETADA' },
-      });
-      await this.audit.record({
-        accion: 'ACTIVACION_G1_COMPLETADA',
-        entidadAfectada: 'integracion_activacion_g1',
-        idEntidadAfectada: idIntegracion,
-        valorNuevo: this.auditContext(record),
-      });
-      return updated;
+      if (updated.intentos === attemptNumber) console.info('Integración G1 completada', this.logContext(record, result.status, result.durationMs, 'COMPLETADA'));
+      return this.withOutcomeAudit(updated, retry, result.status, attemptNumber);
     } catch (error) {
       const integrationError = error instanceof G1IntegrationError
         ? error
         : new G1IntegrationError('G1_UNAVAILABLE', null, true, 'No fue posible conectar con G1.');
       const state = integrationError.retryable ? 'PENDIENTE_SINCRONIZACION_G1' : 'ERROR_G1';
-      const updated = await this.prisma.integracionActivacionG1.update({
-        where: { idIntegracion },
-        data: { estadoIntegracion: state, ultimoErrorSanitizado: integrationError.message },
+      const updated = await this.saveOutcome(idIntegracion, now, { estadoIntegracion: state, ultimoErrorSanitizado: integrationError.code });
+      if (updated.intentos === attemptNumber) console.warn('Integración G1 pendiente', this.logContext(record, integrationError.status, null, state));
+      return this.withOutcomeAudit(updated, retry, integrationError.status, attemptNumber);
+    }
+  }
+
+  private async saveOutcome(idIntegracion: number, attempt: Date, data: Prisma.IntegracionActivacionG1UpdateManyMutationInput) {
+    await this.prisma.integracionActivacionG1.updateMany({
+      where: { idIntegracion, estadoIntegracion: 'ENVIANDO', ultimoIntento: attempt }, data,
+    });
+    return this.prisma.integracionActivacionG1.findUniqueOrThrow({ where: { idIntegracion } });
+  }
+
+  private async validateRelations(payload: DurableG1Payload) {
+    const [contract, service] = await Promise.all([
+      this.prisma.contrato.findUnique({ where: { idContrato: payload.id_contrato }, select: { idEmpresa: true, idCliente: true } }),
+      this.prisma.servicioContratado.findUnique({ where: { idServicio: payload.id_servicio }, select: { idEmpresa: true, idContrato: true, idCliente: true } }),
+    ]);
+    if (!contract || !service || contract.idEmpresa !== payload.id_empresa || service.idEmpresa !== payload.id_empresa
+      || contract.idCliente !== payload.id_cliente || service.idCliente !== payload.id_cliente || service.idContrato !== payload.id_contrato) {
+      throw new ConflictException('G1_RELATIONSHIP_INCONSISTENT');
+    }
+  }
+
+  private async withOutcomeAudit(record: IntegracionActivacionG1, retry: boolean, statusHttp: number | null = null, outcomeAttempt?: number) {
+    if (['ENVIANDO', 'PENDIENTE_ENVIO'].includes(record.estadoIntegracion)) return { ...record, auditPending: true };
+    try {
+      // Audit persistence + duplicate detection share a row lock; the confirmed G1 state is already committed.
+      await this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id_integracion FROM integracion_activacion_g1 WHERE id_integracion = ${record.idIntegracion} FOR UPDATE`;
+        record = await tx.integracionActivacionG1.findUniqueOrThrow({ where: { idIntegracion: record.idIntegracion } });
+        // The row may belong to a newer attempt. Its HTTP status cannot be reconstructed from this worker's response.
+        if (outcomeAttempt !== undefined && record.intentos !== outcomeAttempt) statusHttp = null;
+        if (['ENVIANDO', 'PENDIENTE_ENVIO'].includes(record.estadoIntegracion)) throw new Error('G1_OUTCOME_PENDING');
+        const actions = record.estadoIntegracion === 'COMPLETADA'
+          ? [record.intentos > 1 ? 'REINTENTAR_ACTIVACION_G1' : 'ENVIAR_ACTIVACION_G1', 'ACTIVACION_G1_COMPLETADA']
+          : [record.intentos > 1 ? 'REINTENTAR_ACTIVACION_G1' : 'ACTIVACION_G1_PENDIENTE'];
+        for (const accion of actions) {
+          const existing = await tx.logAuditoria.findFirst({ where: {
+            accion, entidadAfectada: 'integracion_activacion_g1', idEntidadAfectada: record.idIntegracion,
+            valorNuevo: { path: ['intento'], equals: record.intentos },
+          }, select: { idLog: true } });
+          if (!existing) await this.audit.record({ accion, entidadAfectada: 'integracion_activacion_g1', idEntidadAfectada: record.idIntegracion,
+            valorNuevo: { ...this.auditContext(record), intento: record.intentos, statusHttp, resultado: record.estadoIntegracion, codigo: record.ultimoErrorSanitizado },
+          }, tx);
+        }
       });
-      console.warn('Integración G1 pendiente', this.logContext(record, integrationError.status, null, state));
-      await this.audit.record({
-        accion: retry ? 'REINTENTAR_ACTIVACION_G1' : 'ACTIVACION_G1_PENDIENTE',
-        entidadAfectada: 'integracion_activacion_g1',
-        idEntidadAfectada: idIntegracion,
-        valorNuevo: { ...this.auditContext(record), statusHttp: integrationError.status, resultado: state, codigo: integrationError.code },
-      });
-      return updated;
+      return { ...record, auditPending: false };
+    } catch {
+      // The durable outcome remains authoritative and allows audit-only recovery without another POST.
+      return { ...record, auditPending: true };
     }
   }
 
@@ -257,22 +305,5 @@ export class G1ActivationService {
     return { ...this.auditContext(record), statusHttp, durationMs, result };
   }
 
-  private auditPending(idIntegracion: number, state: string, payload: Omit<G1ActivationPayload, 'id_ot'> & { id_ot: number | null }) {
-    return this.audit.record({
-      accion: 'ACTIVACION_G1_PENDIENTE',
-      entidadAfectada: 'integracion_activacion_g1',
-      idEntidadAfectada: idIntegracion,
-      valorNuevo: {
-        eventId: payload.event_id,
-        traceId: payload.trace_id,
-        idEmpresa: payload.id_empresa,
-        idCliente: payload.id_cliente,
-        idServicio: payload.id_servicio,
-        idContrato: payload.id_contrato,
-        idOt: payload.id_ot,
-        resultado: state,
-      },
-    });
-  }
 }
 

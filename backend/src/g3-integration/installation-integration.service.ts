@@ -192,6 +192,9 @@ export class InstallationIntegrationService {
 
   async reconcile(idIntegracion: number, currentUser: AuthUser) {
     const tracking = await this.getTrackingOrThrow(idIntegracion, currentUser);
+    if (tracking.estadoIntegracion === 'COMPLETADA' && tracking.fechaCierreProcesado) {
+      return { available: true, result: await this.closureProcessor.recoverPostClosure(idIntegracion) };
+    }
     const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
     if (!externalId) throw new BadRequestException('La solicitud aun no tiene una referencia de OT G3');
     try {
