@@ -41,7 +41,7 @@ describe('Etapa 5 - fronteras de CU-86', () => {
   });
 
   it('la interfaz solo ofrece registro, corrección y anulación de metadata', () => {
-    expect(frontend).toContain('Registrar metadata');
+    expect(frontend).toContain('Registrar documento externo');
     expect(frontend).toContain('Corregir');
     expect(frontend).toContain('Anular');
     expect(frontend).not.toMatch(/Emitir boleta|Emitir factura|Enviar al SII/);

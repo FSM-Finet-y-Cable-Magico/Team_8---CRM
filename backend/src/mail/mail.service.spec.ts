@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { AddressInfo, Socket, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,10 @@ function createEphemeralTlsFixture() {
       ? join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '../../bin/openssl.exe')
       : 'openssl';
     const keyPath = join(directory, 'key.pem'), certPath = join(directory, 'cert.pem');
-    execFileSync(openssl, ['req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes', '-days', '1',
+    // Do not inherit machine-specific OPENSSL_CONF (e.g. a removed psqlODBC installation).
+    const configPath = join(directory, 'openssl.cnf');
+    writeFileSync(configPath, '[req]\ndistinguished_name = dn\n[dn]\n');
+    execFileSync(openssl, ['req', '-config', configPath, '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes', '-days', '1',
       '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
       '-keyout', keyPath, '-out', certPath], { stdio: 'ignore' });
     return { cert: readFileSync(certPath), key: readFileSync(keyPath) };
@@ -25,6 +28,17 @@ function createEphemeralTlsFixture() {
   }
 }
 const { cert, key } = createEphemeralTlsFixture();
+
+it('TLS fixture ignores an unavailable inherited OpenSSL configuration', () => {
+  const previous = process.env.OPENSSL_CONF;
+  try {
+    process.env.OPENSSL_CONF = join(tmpdir(), 'nonexistent-crm-smtp-config', 'openssl.cnf');
+    expect(() => createSecureContext(createEphemeralTlsFixture())).not.toThrow();
+  } finally {
+    if (previous === undefined) delete process.env.OPENSSL_CONF;
+    else process.env.OPENSSL_CONF = previous;
+  }
+});
 
 it('explicit disabled/mock modes never use a configured external SMTP host',async()=>{
   const base={SMTP_HOST:'smtp.example.invalid',SMTP_FROM:'qa@example.invalid',SMTP_USER:'QA',SMTP_PASSWORD:'FAKE'};
