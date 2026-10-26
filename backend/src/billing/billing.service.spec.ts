@@ -409,6 +409,7 @@ describe('BillingService lifecycle de pago', () => {
 });
 
 describe('BillingService avisos y suspensión', () => {
+  afterEach(() => jest.useRealTimers());
   it('aviso de factura compartida usa empresa contractual en plantilla, log y evento', async () => {
     const current = invoice();
     current.contrato.idEmpresa = 2;
@@ -489,8 +490,10 @@ describe('BillingService avisos y suspensión', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ entidadAfectada: 'evento_gestion_comercial' }), tx);
   });
 
-  it('impide último aviso antes del vencimiento efectivo de una prórroga', async () => {
-    const current = invoice({ prorrogasPago: [{ nuevaFecha: new Date('2026-10-10'), estado: 'APROBADA' }] });
+  it.each(['2026-10-01T12:00:00Z', '2035-10-01T12:00:00Z'])('impide último aviso antes del vencimiento efectivo de una prórroga (reloj %s)', async now => {
+    jest.useFakeTimers({ now: new Date(now) });
+    const extensionDue = new Date(Date.now() + 9 * 86_400_000);
+    const current = invoice({ prorrogasPago: [{ nuevaFecha: extensionDue, estado: 'APROBADA' }] });
     const tx = { cliente: { findUnique: jest.fn().mockResolvedValue(current.contrato.cliente) }, factura: { findUnique: jest.fn().mockResolvedValue(current) } };
     const prisma = { $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)) };
     const service = new BillingService(prisma as unknown as PrismaService, { record: jest.fn() } as unknown as AuditService,
@@ -499,8 +502,10 @@ describe('BillingService avisos y suspensión', () => {
     await expect(service.sendNotification({ idCliente: 10, idFactura: 80, tipo: 'Ultimo aviso' }, commercial)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('no suspende mientras una prórroga aprobada mantiene la factura vigente', async () => {
-    const current = invoice({ prorrogasPago: [{ nuevaFecha: new Date('2026-10-10'), estado: 'APROBADA' }] });
+  it.each(['2026-10-01T12:00:00Z', '2035-10-01T12:00:00Z'])('no suspende mientras una prórroga aprobada mantiene la factura vigente (reloj %s)', async now => {
+    jest.useFakeTimers({ now: new Date(now) });
+    const extensionDue = new Date(Date.now() + 9 * 86_400_000);
+    const current = invoice({ prorrogasPago: [{ nuevaFecha: extensionDue, estado: 'APROBADA' }] });
     const contract = { ...current.contrato, facturas: [current] };
     const tx = { contrato: { findUnique: jest.fn().mockResolvedValue(contract), update: jest.fn() }, cliente: { updateMany: jest.fn() },
       servicioContratado: { updateMany: jest.fn() } };
@@ -510,5 +515,7 @@ describe('BillingService avisos y suspensión', () => {
 
     await expect(service.suspendContract(30, commercial)).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.contrato.update).not.toHaveBeenCalled();
+    expect(tx.cliente.updateMany).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
   });
 });

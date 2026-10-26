@@ -5,8 +5,13 @@ import { createHash } from 'node:crypto';
 import { dirname,resolve,relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-const destination=resolve(root,'docs/evidencias/i3-release/2026-10-04');
-const temp=resolve(root,'.codex-review');
+// Allow a new run to keep its evidence separate from the versioned historical report.
+const outputIndex=process.argv.indexOf('--output-dir');
+if(outputIndex>=0 && (!process.argv[outputIndex+1] || process.argv[outputIndex+1].startsWith('--'))) {
+  throw new Error('--output-dir requires a directory');
+}
+const destination=outputIndex>=0 ? resolve(process.argv[outputIndex+1]) : resolve(root,'docs/evidencias/i3-release/2026-10-04');
+const temp=outputIndex>=0 ? resolve(destination,'runner') : resolve(root,'.codex-review');
 const run=process.argv.includes('--run-local');
 const env={...process.env,CRM_INTEGRATION_TESTS:'0',RUN_DB_INTEGRATION:'0',RUN_POSTGRES_INTEGRATION_TESTS:'false',
   FACTURACION_CL_INTEGRATION_ENABLED:'false',FACTURACION_CL_COMPANIES:'[]',FACTURACION_CL_PROFILES:'[]',
@@ -75,5 +80,5 @@ const report={baseSHA:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding
   totals:{pass:cases.filter(c=>c.STATUS==='PASS').length,fail:cases.filter(c=>c.STATUS==='FAIL').length,blocked:cases.filter(c=>c.STATUS==='BLOCKED').length},
   RELEASE_READY:false};
 if(run)writeFileSync(resolve(destination,'local-acceptance.json'),JSON.stringify(report,null,2)+'\n');
-console.log(JSON.stringify({runLocal:run,...report.totals,RELEASE_READY:false,report:run?'docs/evidencias/i3-release/2026-10-04/local-acceptance.json':null}));
+console.log(JSON.stringify({runLocal:run,...report.totals,RELEASE_READY:false,report:run?resolve(destination,'local-acceptance.json'):null}));
 if(cases.some(c=>c.STATUS==='FAIL'))process.exitCode=1;
