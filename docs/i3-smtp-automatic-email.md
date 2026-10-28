@@ -1,5 +1,19 @@
 # SMTP y correo automático - cierre técnico local
 
+## Estado vigente: ambas cuentas SMTP autentican — 2026-10-22
+
+El usuario completó y guardó las credenciales prefijadas en el privado existente. Se completaron únicamente los dos HOST vacíos con smtp.gmail.com, tras comprobar que ambas cuentas eran Gmail y distintas; el resto del archivo, incluidas contraseñas, se conservó. A las 15:50 America/Santiago quedó registrado el resultado de MailService.verifyConnection: FiNet idEmpresa 1 ready/authenticated=true y Cable Mágico idEmpresa 2 ready/authenticated=true, ambos con STARTTLS obligatorio en 587, certificado validado y TLS mínimo 1.2.
+
+Dos verificaciones, cero mensajes. El código actual de configuración/servicio se compiló solo en memoria en un proceso separado dentro de un contenedor existente, usando TypeScript 5.9.3 y Nodemailer 10.0.14 del lock. Solo se transmitieron variables SMTP por stdin; no se crearon archivos, copiaron privados al contenedor, imprimieron valores, reiniciaron servicios o tocaron Railway/bases. El arnés impedía sendMail; no se usó --send-test-to.
+
+Este resultado acredita conexión y autenticación de los bloques locales por empresa. No acredita aceptación de un mensaje, recepción externa, carga de variables en un despliegue ni activación fiscal. Los flags tributarios permanecen false. Queda cargar la configuración privada en el entorno autorizado y resolver los accesos/perfiles fiscales. Las recepciones externas anteriores conservan su fecha y alcance; no se presentan como nuevos envíos. El privado sigue ignorado y no versionado; no hubo commit/push/PR. Los apartados siguientes describen las etapas previas y sus pendientes entonces vigentes.
+
+## Preparación local sin envío — 2026-10-22
+
+Se conservaron las credenciales y la configuración global del privado existente. Se añadieron únicamente las entradas prefijadas faltantes de FINET/CABLE_MAGICO con host, usuario, contraseña y remitente vacíos, sin copiar secretos entre bloques. Completar cada empresa manualmente en .env.smtp-private; mientras no tenga mapa y host propios, su transporte queda no configurado y no usa el global. El archivo sigue ignorado y no versionado.
+
+La preparación productiva del CRM conserva la entrega desactivada. El ensayo de PostgreSQL de esta fecha usó correo simulado y PDF ficticio; no hubo autenticación ni envío SMTP externo nuevo. Las verificaciones locales de MailService y sus protocolos forman parte de la regresión de 826 pruebas PASS. Los dos Compose locales validan con variables ficticias; Railway no se modificó. Ver el estado vigente y los pendientes de activación en i3-facturacion-cl-checkpoint.md. Los apartados fechados anteriores conservan sus evidencias históricas.
+
 ## SMTP por empresa — 2026-10-20
 
 La selección por empresa está implementada y verificada en `SecurityRealiseMatrizQA`; el usuario autorizó publicar este avance técnico el 2026-10-20. Ver el checkpoint de Facturación.cl para el alcance y los pendientes externos. La prueba externa FiNet DEMO con PDF del 15-10 y la prueba simple de Cable Mágico del 19-10 tienen recepción confirmada; esta revisión del 20-10 solo ejecutó SMTP local/ficticio. La introducción del 04-10 que sigue es histórica.

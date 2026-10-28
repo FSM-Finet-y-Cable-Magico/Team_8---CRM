@@ -42,7 +42,7 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
   async claim(record: TaxIntentRecord, claimId: string) {
     const result = await this.prisma.taxEmissionIntent.updateMany({
       where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, fingerprint: record.fingerprint,
-        ambiente: 'sandbox', fechaEnvio: null, OR: [
+        ambiente: record.ambiente, fechaEnvio: null, OR: [
           { estado: 'PENDIENTE', intentos: 0 },
           { estado: 'FALLIDO', ultimoError: 'CONFIRMED_NOT_SENT' },
         ] },
@@ -54,7 +54,7 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
   async beginDispatch(record: TaxIntentRecord, claimId: string) {
     const updated = await this.prisma.taxEmissionIntent.updateMany({
       where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, fingerprint: record.fingerprint,
-        ambiente: 'sandbox', estado: 'EN_PROCESO', intentos: { gte: 1 }, claimId, fechaEnvio: null },
+        ambiente: record.ambiente, estado: 'EN_PROCESO', intentos: { gte: 1 }, claimId, fechaEnvio: null },
       data: { fechaEnvio: new Date() },
     });
     return updated.count === 1;
@@ -67,7 +67,7 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
       throw new Error('TAX_INTENT_COMPLETION_INPUT_INVALID');
     }
     const updated = await this.prisma.taxEmissionIntent.updateMany({
-      where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, estado: 'EN_PROCESO', claimId },
+      where: { idEmpresa: record.idEmpresa, idIntencion: record.idIntencion, ambiente: record.ambiente, fingerprint: record.fingerprint, estado: 'EN_PROCESO', claimId },
       data: { estado: result.estado, folio: result.folio ?? null, ultimoError: result.ultimoError ?? null },
     });
     if (updated.count !== 1) throw new Error('TAX_INTENT_COMPLETION_CONFLICT');
@@ -80,12 +80,12 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
   }
 
   /** Mark stale work for investigation only; never release it for another send. */
-  async quarantineStale(idEmpresa: number, startedBefore: Date) {
-    if (!Number.isSafeInteger(idEmpresa) || idEmpresa < 1 || !Number.isFinite(startedBefore.getTime()) || startedBefore >= new Date()) {
+  async quarantineStale(idEmpresa: number, startedBefore: Date, environment: 'sandbox' | 'production' = 'sandbox') {
+    if (!['sandbox','production'].includes(environment) || !Number.isSafeInteger(idEmpresa) || idEmpresa < 1 || !Number.isFinite(startedBefore.getTime()) || startedBefore >= new Date()) {
       throw new Error('TAX_INTENT_RECOVERY_INPUT_INVALID');
     }
     return this.prisma.taxEmissionIntent.updateMany({
-      where: { idEmpresa, ambiente: 'sandbox', estado: 'EN_PROCESO', fechaInicio: { lt: startedBefore } },
+      where: { idEmpresa, ambiente: environment, estado: 'EN_PROCESO', fechaInicio: { lt: startedBefore } },
       data: { estado: 'RESULTADO_INDETERMINADO', ultimoError: 'RECONCILIATION_REQUIRED' },
     });
   }

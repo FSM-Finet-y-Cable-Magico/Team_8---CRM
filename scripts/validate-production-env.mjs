@@ -49,6 +49,40 @@ export function validateFacturacionClCompanies(raw) {
   } catch { return { configured: true, valid: false, count: 0 }; }
 }
 
+function canonicalRut(value) {
+  if (typeof value !== 'string') return null;
+  const cleaned=value.replace(/[.\s-]/g,'').toUpperCase();
+  if (!/^\d{7,8}[\dK]$/.test(cleaned)) return null;
+  const body=cleaned.slice(0,-1), verifier=cleaned.slice(-1);
+  const sum=[...body].reverse().reduce((total,n,i)=>total+Number(n)*(2+i%6),0), mod=11-sum%11;
+  return verifier===(mod===11?'0':mod===10?'K':String(mod)) ? body+'-'+verifier : null;
+}
+
+// Structural pre-deploy check only; backend and live schema checks remain authoritative.
+export function validateProductionTaxConfig(env) {
+  try {
+    if (String(env.FACTURACION_CL_PRODUCTION_ENABLED??'false').trim().toLowerCase()!=='true') return false;
+    const companies=JSON.parse(env.FACTURACION_CL_COMPANIES??'[]').filter(c=>c.enabled);
+    const profiles=JSON.parse(env.FACTURACION_CL_PROFILES??'[]');
+    if (!Array.isArray(profiles) || !companies.length) return false;
+    return companies.every(c=>{
+      if (c.environment!=='production') return false;
+      const matches=profiles.filter(p=>p.idEmpresa===c.idEmpresa), p=matches[0];
+      if (matches.length!==1 || p.approved!==true || !canonicalRut(p.issuerRut) ||
+          !['BOLETA','FACTURA'].includes(p.defaultDocumentType) ||
+          ![39,41].includes(p.receipt?.tipoDte) || !['utf8','latin1'].includes(p.receipt?.encoding) ||
+          ![1,2,3].includes(p.receipt?.serviceIndicator)) return false;
+      if (p.defaultDocumentType==='FACTURA' && !p.invoice) return false;
+      if (p.invoice && (![33,34].includes(p.invoice.tipoDte) || ![p.invoice.folioFrom,p.invoice.folioTo].every(f=>typeof f==='string'&&/^[1-9]\d{0,9}$/.test(f)) ||
+          BigInt(p.invoice.folioFrom)>BigInt(p.invoice.folioTo) || (p.invoice.tipoDte===33 && (!/^\d{1,2}(\.\d{1,2})?$/.test(p.invoice.vatRate??'') || Number(p.invoice.vatRate)<=0)) || (p.invoice.tipoDte===34 && p.invoice.vatRate!==undefined))) return false;
+      const creds=JSON.parse(env['FACTURACION_CL_'+c.alias+'_PRODUCTION_CREDENTIALS']??'null');
+      return creds && Object.keys(creds).sort().join(',')==='clave,rut,usuario' &&
+        ['usuario','rut','clave'].every(k=>typeof creds[k]==='string'&&creds[k].trim()&&!/[\r\n\0]/.test(creds[k])) &&
+        creds.usuario.trim().toUpperCase()!=='DEMOFE' && canonicalRut(creds.rut)===canonicalRut(p.issuerRut);
+    });
+  } catch { return false; }
+}
+
 export function validateProductionEnv(env) {
   const rows = [], errors = [];
   const add = (name, status, valid = true, reason = '') => {
@@ -98,9 +132,13 @@ export function validateProductionEnv(env) {
 
   const facturacionFlag = String(env.FACTURACION_CL_INTEGRATION_ENABLED ?? 'false').trim().toLowerCase();
   const facturacionFlagValid = facturacionFlag === 'true' || facturacionFlag === 'false';
+  const productionFlag=String(env.FACTURACION_CL_PRODUCTION_ENABLED??'false').trim().toLowerCase();
+  const productionFlagValid=['true','false'].includes(productionFlag);
+  const productionContract=validateFacturacionClCompanies(env.FACTURACION_CL_COMPANIES).valid && validateProductionTaxConfig(env);
+  add('FACTURACION_CL_PRODUCTION_ENABLED', productionFlagValid ? productionFlag : 'invalid', productionFlagValid);
   add('FACTURACION_CL_INTEGRATION_ENABLED', facturacionFlagValid
-    ? (facturacionFlag === 'true' ? 'blocked: pending contract' : 'disabled') : 'invalid',
-  facturacionFlagValid && facturacionFlag === 'false', facturacionFlag === 'true' ? 'PENDING_CONTRACT' : 'INVALID');
+    ? (facturacionFlag === 'true' ? (productionContract ? 'configured: explicit production opt-in' : 'blocked: pending contract') : 'disabled') : 'invalid',
+  facturacionFlagValid && (facturacionFlag === 'false' || productionContract), facturacionFlag === 'true' ? 'PENDING_CONTRACT' : 'INVALID');
   const facturacionCompanies = validateFacturacionClCompanies(env.FACTURACION_CL_COMPANIES);
   add('FACTURACION_CL_COMPANIES', facturacionCompanies.configured
     ? (facturacionCompanies.valid ? `configured (${facturacionCompanies.count})` : 'invalid') : 'not configured (defaults to empty)',

@@ -12,7 +12,7 @@ async function setup() {
   const customer={idCliente:3,idEmpresa:2,rut:'66666666-6',nombreCompleto:'QA',email:'corrected@example.invalid',datosTecnicos:null};
   const contract={idEmpresa:2,idCliente:3,cliente:customer,direccionInstalacion:'QA',comunaInstalacion:'QA',ciudadInstalacion:'QA'};
   const payment={idCliente:3,monto:new Prisma.Decimal(100),factura:{idFactura:5,contrato:contract,folioExterno:null,tipoDocumento:'BOLETA',periodoMes:10,periodoAnio:2026,fechaLimitePago:new Date('2026-10-30')}};
-  const job={idEmpresa:2,idFactura:5,idCliente:3,idPago:7,monto:new Prisma.Decimal(100),estado:'DATOS_REQUERIDOS',profileHash:'old',email:null};
+  const job={idEmpresa:2,ambiente:'sandbox',idFactura:5,idCliente:3,idPago:7,monto:new Prisma.Decimal(100),estado:'DATOS_REQUERIDOS',profileHash:'old',email:null};
   const record={idIntencion:'QA',idEmpresa:2,estado:'GENERADO',emailEstado:'SIN_DESTINATARIO',emailIntentos:0};
   const tx={$queryRaw:jest.fn().mockResolvedValue([{ready:true}]),$executeRaw:jest.fn(),pago:{findUnique:jest.fn().mockResolvedValue(payment)},
     cliente:{findUnique:jest.fn().mockResolvedValue(customer)},documentoTributarioExterno:{count:jest.fn().mockResolvedValue(0)},

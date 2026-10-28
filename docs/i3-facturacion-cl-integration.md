@@ -1,4 +1,137 @@
-# Facturación.cl: emisión por pago en sandbox
+# Facturación.cl: emisión por pago y preparación productiva
+
+## Candidato auditado para publicación — 2026-10-28
+
+Se preparó el commit de producción controlada para SecurityRealiseMatrizQA, con merge a develop posterior y separado. La auditoría encontró y corrigió una ruta de recuperación manual que no comparaba el perfil tributario original del trabajo: ahora un cambio de perfil bloquea recuperación/conciliación antes de consultar un folio de otro emisor. La rotación de credenciales del mismo perfil sigue permitida; ocho casos nuevos cubren ambos ambientes.
+
+Regresión con dependencias exactas en laboratorio sin privados y con red interna: 852 PASS, cero FAIL, nueve omitidas. Build/lint backend, build frontend y Prisma PASS. PostgreSQL temporal: 16 PASS, quince solapados y un caso integrado adicional; cobertura única 853 PASS y ocho omitidas restantes, sin sumarlas dos veces. Migración aplicada únicamente al fixture temporal. Detalles, límites y huella del candidato en el checkpoint.
+
+Perfiles locales completos: ambas empresas con boleta 39, IVA incluido, IndServicio 3 y UTF-8. Los accesos privados no se publican ni se cargan automáticamente desde Git. Los flags y empresas siguen desactivados, Railway intacto. Publicar la preparación no activa emisión, despliega, aplica migraciones compartidas o hace merge. RELEASE_READY continúa false hasta las comprobaciones del entorno final.
+
+## Estado vigente: perfiles completos de FiNet y Cable Mágico — 2026-10-28
+
+El usuario confirmó boletas tipo 39 con IVA incluido e IndServicio 3 para ambas empresas. FACTURACION_CL_PROFILES del privado productivo existente contiene ahora los dos perfiles completos y approved:true: BOLETA, tipoDte 39, serviceIndicator 3, encoding utf8 y RUT normalizado de su propio bloque de API. Se retiraron los borradores obsoletos. No se alteraron las credenciales ni otras variables activas.
+
+Parser del backend, resolutor real de credenciales y validador estructural productivo PASS en memoria. Ambas empresas seleccionan su bloque exclusivamente y rechazan las credenciales de la otra. El constructor real conserva el monto bruto de un ejemplo sintético, usa IndMntNeto=0 y no agrega IVA otra vez; folio automático, sin email al proveedor. Sin nuevos archivos, cambios de código, solicitudes externas o acceso a bases en este cierre. No se presenta como Jest/build/regresión completa.
+
+Los accesos reales ya pasaron login y versión 1.2.8.1 con HTTP 200 para ambas empresas en el recorrido anterior de hoy; las credenciales permanecieron iguales. Los PDF de referencia son ambos de FiNet y no muestran IndServicio: el dato 3 proviene de la confirmación del usuario. Ya no falta ese campo para los perfiles.
+
+Los cuatro flags siguen false y ambas empresas enabled:false. approved:true expresa aprobación del perfil local, no activación ni certificación fiscal. Los perfiles están completos para la preparación; Railway y la emisión permanecen sin activar. Sigue la revisión del candidato/esquema y carga privada en el entorno final antes del despliegue. No se aplicaron migraciones, iniciaron servicios, hicieron commits, push, PR o merges. Detalle actual y alcance de las verificaciones en el primer apartado del checkpoint.
+
+## Actualización vigente de Cable Mágico — 2026-10-28
+
+Cable Mágico (idEmpresa 2) ya autentica mediante el bloque privado corregido por el usuario: POST /login PASS, HTTP 200. El lector real de esta rama consultó GET /wsds/version con su token en memoria: PASS, HTTP 200, versión 1.2.8.1. FiNet queda fuera de esta comprobación y los fallos del 22-10 conservados más abajo son históricos para Cable Mágico.
+
+Se corrigió una incompatibilidad limitada a la lectura de versión. El proveedor devolvió un array con un único string numérico; ahora tanto FacturacionClReadClient como verify-test-api aceptan esa forma además del string documentado y conservan version:array como evidencia. No se aceptan listas ambiguas, valores arbitrarios o HTTP fallidos. No se tocaron controles de emisión ni valores privados.
+
+Dos recorridos reales en total, cada uno con un login y una consulta de versión; el segundo usó el lector del CRM y permitió contrastar el comprobador contra las mismas respuestas en memoria sin conexiones adicionales. Sesenta comprobaciones locales dirigidas PASS (22 del comprobador y 38 del lector real con Node); Jest y build/lint completos no se ejecutaron por falta de dependencias locales y Docker apagado. Los resultados generales del 22-10 son históricos y no equivalen a validar otra vez toda la rama.
+
+No hay perfil fiscal aprobado para Cable Mágico en FACTURACION_CL_PROFILES; los cuatro flags siguen false y no se habilitó emisión. Login PASS no acredita identidad fiscal ni autorización de boletas productivas. Faltan los parámetros aprobados del perfil y la revisión del entorno/esquema final. Cero documentos, correos nuevos o bases consultadas; Railway y los tres privados intactos. Sin nuevos archivos/carpetas, stage, commit, push, merge o PR. Detalle de solicitudes, pruebas y límites en el inicio del checkpoint.
+
+Actualización de diagnóstico del 22-10: una consulta adicional de login por empresa permitió recuperar el mensaje saneado **«Clave de empresa no es valida.»**, HTTP 200 y sin token para ambas. No se cambiaron valores, código ni políticas; cero emisiones. Corresponde confirmar la clave de integración asociada a cada RUT con su administrador/proveedor, sin deducir el ambiente por el nombre de usuario ni cambiar SMTP/Railway. La evidencia y el número de solicitudes están al inicio del checkpoint. Los diagnósticos posteriores de este documento conservan su alcance histórico.
+
+## Aclaración vigente de accesos y activación — 2026-10-22
+
+El usuario confirmó que los bloques guardados son los accesos productivos recibidos. Se registra su declaración sin reclasificarlos como DEMO por el nombre de usuario. El rechazo por DEMOFE de nuestro verificador es una precaución local; no identifica por sí solo el ambiente remoto.
+
+El diagnóstico independiente de solo autenticación con los valores guardados, seguido de la inspección saneada de la forma de respuesta, devolvió para ambas empresas HTTP 200 con error:string y sin token esperado o alternativo. No se consultó versión ni se emitió. Fueron cuatro logins en total, sin otras combinaciones ni reintentos automáticos; no se guardaron cuerpos remotos, valores o tokens. Los privados y flags no se modificaron. Este resultado acredita un fallo del login según el contrato esperado, no su causa ni la naturaleza fiscal de la cuenta.
+
+Antes de otra conexión corresponde confirmar la habilitación REST y el bloque API completo de cada emisor con el administrador/proveedor, o recibir una corrección contractual. No se debilitan controles ni se pide sustituir claves solo por el nombre. SMTP de ambas empresas está verificado y la preparación de código/migración sigue probada localmente. El perfil inicial será de boleta según elección previa; sus parámetros deben confirmarse y no requiere un rango de factura. Procedimiento, consulta sin secretos y pendientes de entrega en [preparación de producción](i3-production-deployment-readiness.md). Railway permanece intacto; sin commit/push/PR.
+
+## Estado vigente: preparación productiva local verificada — 2026-10-22
+
+**Alcance completado: preparar el código y la migración para ambos ambientes, sin datos reales ni activación.** Los apartados posteriores son registros históricos de las etapas anteriores; sus bloqueos absolutos de producción describen el código que existía en esas fechas. El estado vigente es el de este apartado y del checkpoint del 22 de octubre. Preparación local no equivale a despliegue, certificación fiscal ni acceso productivo verificado.
+
+### Código y controles
+
+- Configuración, dispatcher, persistencia y recuperación admiten sandbox y production. Producción exige además FACTURACION_CL_PRODUCTION_ENABLED=true, integración habilitada, empresa habilitada, perfil aprobado, credenciales de su ambiente y esquema compatible. Los valores persistentes de esta PC siguen deshabilitados.
+- Cada empresa usa exclusivamente su bloque PRODUCTION_CREDENTIALS o SANDBOX_CREDENTIALS según el ambiente. No hay fallback entre empresas o ambientes. En producción se exige RUT válido y coincidente con el perfil; se rechaza el usuario DEMO conocido como medida local de seguridad. Un login o READY_PRODUCTION solo acredita la comprobación técnica correspondiente, nunca certificación del emisor.
+- El trabajo conserva su ambiente desde la transacción de pago. Claims, huella, envío, recuperación, consultas de folio y trabajador se delimitan por empresa/ambiente. Cambiar la configuración detiene el procesamiento de trabajos del otro ambiente con ENVIRONMENT_CHANGED; el historial se consulta con el ambiente almacenado. No se transforma un pago anterior para volver a emitirlo.
+- Se conservan PER_PAYMENT_V1, la unicidad del pago, la marca durable previa al procesamiento, el bloqueo de resultados inciertos y la entrega del PDF sin nueva emisión. SMTP mantiene la selección por empresa y la ausencia de fallback global.
+- El validador productivo comprueba estructura y activación explícita; el frontend distingue configuración productiva de pruebas. Los dos Compose locales transmiten las variables y validan con datos sintéticos. docker-compose.railway.yml permanece intacto.
+
+### Migración autorizada y ensayada
+
+El usuario autorizó crear únicamente [la migración 20261022010000_i3_tax_production_preparation](../backend/prisma/migrations/20261022010000_i3_tax_production_preparation/migration.sql) y su carpeta. Se creó y se aplicó exclusivamente en PostgreSQL temporal con datos ficticios. No se editaron migraciones históricas, modelos Prisma ni esquemas compartidos.
+
+~~~sql
+BEGIN;
+ALTER TABLE tax_payment_job DROP CONSTRAINT tax_payment_job_ambiente_check;
+ALTER TABLE tax_payment_job ADD CONSTRAINT tax_job_environment_check
+  CHECK (ambiente IN ('sandbox', 'production'));
+DROP INDEX tax_job_reserved_folio_key;
+CREATE UNIQUE INDEX tax_job_reserved_folio_key
+  ON tax_payment_job (id_empresa, ambiente, tipo_dte, folio_esperado)
+  WHERE folio_esperado <> '0';
+COMMIT;
+~~~
+
+La tabla de intenciones ya admitía ambos ambientes. El cambio conserva id_pago único y las filas sandbox existentes; los folios reservados se distinguen por empresa, ambiente y tipo DTE. La prueba comprobó preservación de la fila anterior, separación de folios y rechazo de duplicados y ambientes desconocidos. El arranque productivo requiere la nueva restricción y el índice válido con las cuatro columnas esperadas. Antes de aplicarlo fuera del laboratorio, el responsable del esquema debe revisar el estado real y las migraciones pendientes; no ejecutar despliegues de migraciones indiscriminadamente.
+
+### Evidencia de esta etapa
+
+Regresión 2026-10-22T18:05:53.706Z (15:05 America/Santiago): **826 PASS, cero FAIL, nueve omitidas**. Build y lint backend, build frontend, Prisma validate/generate y los dos Compose locales PASS. Ensayo adicional con PostgreSQL real temporal: 16 PASS, cero FAIL; quince se solapan con la regresión y uno es el caso integrado opt-in ejecutado por separado. Por tanto, no sumar 826 + 16: quedan ocho casos opt-in ajenos sin ejecutar.
+
+El ensayo integrado utilizó dos empresas ficticias, transporte fiscal simulado, PDF ficticio y correo simulado. Verificó pago → intención → procesamiento → recuperación PDF → entrega, concurrencia/repetición sin duplicar, aislamiento por empresa, timeout incierto sin reenvío y cambio de ambiente sin reprocesar. No es evidencia de emisión tributaria ni de recepción SMTP externa.
+
+Gitleaks sobre el diff y la nueva migración PASS; búsqueda literal de los secretos privados actuales en los archivos versionados y la migración: cero coincidencias. Los tres privados están ignorados y no versionados; no se imprimieron sus valores. Esta revisión no certifica todo el historial Git. Código/configuración/migración actuales coinciden con los 26 archivos probados; detalles y hashes en el checkpoint.
+
+### Comprobación posterior de SMTP, sin mensaje
+
+El 22-10 a las 15:50 America/Santiago quedó registrada la autenticación SMTP de FiNet y Cable Mágico con los bloques privados completados manualmente. Dos conexiones STARTTLS con verificación de certificado y cero mensajes. Solo se completaron los dos HOST Gmail públicos que seguían vacíos; no se cambiaron claves ni se copiaron a fuentes/argumentos. Se ejecutó el código actual de MailService en memoria con Nodemailer 10.0.14, sin cargar el backend completo, bases de datos ni configuración fiscal. Detalles en el inicio del checkpoint.
+
+Los bloques locales están listos para autenticar; el despliegue debe cargar esas variables en el backend autorizado. Esta comprobación no certifica recepción en bandeja ni activa Facturación.cl. Railway sigue intacto por decisión del usuario. Sin nuevos archivos, contenedores, commit, push o PR.
+
+### Activación posterior, fuera de este ensayo
+
+Falta verificar los accesos API propios y el emisor de cada empresa en el ambiente autorizado; aprobar perfiles, DTE/folios y la regla fiscal; cargar en el entorno acordado las variables SMTP prefijadas ya verificadas localmente; revisar y aplicar el esquema en el entorno acordado, y coordinar la integración/consumo G2. Los logos y las muestras corporativas del proveedor conservan sus pendientes externos. La activación y el primer ensayo externo requieren un alcance acordado por separado. No se usaron datos de clientes, Railway, emisiones reales ni correos externos en esta etapa.
+
+La revisión automática rechazó cargar archivos privados desde docker-compose.railway.yml por riesgo de exponer credenciales y por falta de autorización específica para ese archivo. La propuesta no se aplicó. Para revisión futura, consistiría únicamente en añadir al backend, junto al env_file existente, entradas opcionales path/required:false para .env.smtp-private y .env.facturacion-production-private; sin copiarlos a imágenes, mostrarlos, iniciar servicios ni ejecutar SQL. Antes de usar esa vía debe confirmarse dónde se ejecutará Compose y la disponibilidad de los privados allí. Después de revisar la recomendación, el usuario decidió mantener Railway intacto. La propuesta queda fuera del alcance actual; se continúa con los campos privados y las verificaciones locales, sin modificar esa configuración ni el entorno Railway. La matriz de configuración manual vigente está en el checkpoint.
+
+Sin stage, commit, push, PR ni merge en esta etapa; HEAD continúa 3d2c2ed9e93ef77ce266633e8270aeeb1a738c4b en SecurityRealiseMatrizQA.
+
+## Preparación de accesos productivos — 2026-10-22
+
+El usuario confirmó que desea preparar producción y autorizó crear los privados necesarios. Se creó únicamente .env.facturacion-production-private en la raíz, ignorado por Git, fuera de los contextos Docker actuales y con seis campos vacíos: usuario, rut y clave de API de Ambiente Producción para FINET y CABLE_MAGICO. No se copiaron credenciales del chat, SMTP ni sandbox; los privados anteriores se conservaron.
+
+Este archivo prepara una comprobación independiente. No habilita la emisión productiva del CRM: configuración, emisor y persistencia conservan sus bloqueos. Los flags INTEGRATION_ENABLED, DELIVERY_ENABLED y PRODUCTION_PREFLIGHT_ENABLED permanecen false en la plantilla. La comprobación puede habilitarse únicamente en el proceso de verificación una vez completados los campos, sin cambiar flags persistentes de emisión.
+
+La herramienta existente tools/facturacion-cl-sandbox/verify-test-api.mjs admite ahora --production-company 1 o --production-company 2. Carga exclusivamente PRODUCTION_PREFLIGHT_COMPANIES y el secreto PRODUCTION_CREDENTIALS de la empresa seleccionada; nunca toma credenciales SANDBOX o de otra empresa. Solo llama a POST /login y GET /wsds/version con destino fijo, TLS y sin redirects/reintentos. No usa base de datos, folios, /procesar, recuperación de PDF ni SMTP.
+
+El resultado muestra environmentEvidence=OPERATOR_DECLARED, issuerIdentityVerified=false, productionReady=false y cero solicitudes de emisión. Un login correcto prueba autenticación, no la identidad fiscal ni la habilitación de documentos. La cuenta DEMO conocida se rechaza antes de conectar aunque se etiquete como producción. La discrepancia version:array conserva el estado UNEXPECTED_RESPONSE.
+
+Pruebas del verificador: 19 PASS, cero FAIL, incluidas 14 nuevas sobre producción; credenciales ficticias, cero accesos al proveedor. La regresión general y su resultado actual se registran en el checkpoint. Falta que el usuario complete manualmente los accesos productivos y que se confirmen perfil fiscal, DTE/folios, esquema compartido, contrato G2, diseño PDF y alcance de la primera operación real. Este avance no elimina esos requisitos ni declara producción habilitada.
+
+
+
+### Carga manual y comprobación de accesos — 2026-10-22
+
+El usuario confirmó haber guardado los accesos. En los dos bloques se habían reemplazado los nombres de las propiedades JSON por los datos, dejando valores vacíos. Se normalizó únicamente ese formato dentro del mismo privado, conservando exactamente usuario/RUT/clave introducidos; se añadieron comillas externas seguras para dotenv. No se copiaron secretos a otros archivos ni se crearon respaldos.
+
+| Empresa | Resultado de la comprobación sin emisión |
+| --- | --- |
+| FiNet | DEMO_CREDENTIALS_NOT_PRODUCTION. La identidad introducida coincide con la cuenta DEMO conocida; se rechazó antes de conectar. Login y versión no ejecutados. |
+| Cable Mágico | Login FAIL, HTTP 200, sin token válido según el contrato esperado; versión NOT_RUN. No se acredita autenticación ni ambiente fiscal a partir del estado HTTP. |
+
+El preflight se habilitó solamente en el proceso hijo; los tres flags persistentes continúan false. Cero solicitudes de emisión, correos, conexiones a base de datos o Railway; no hubo reintentos ni pruebas con otras combinaciones. No se imprimieron cuerpos remotos, credenciales ni tokens.
+
+Siguiente paso: sustituir manualmente el acceso DEMO de FiNet por el de API de Ambiente Producción y verificar/copiar nuevamente el acceso API de Cable Mágico desde su sección de credenciales. El resultado de Cable Mágico no permite afirmar por sí solo si la causa es la clave, el usuario/RUT, permisos o una discrepancia contractual. Mantener la emisión bloqueada hasta resolver la autenticación y el resto de requisitos productivos. No se desplegó, emitió, hizo commit/push ni creó PR en esta comprobación.
+
+
+
+### Aclaración del DEMO y datos empresariales posteriores — 2026-10-22
+
+El usuario reenvió los dos mensajes del proveedor: contienen el mismo acceso DEMO y el mismo portal de consulta. También aportó razón social, RUT y dirección de ambas empresas y un correo comercial de Cable Mágico. Se validó el dígito verificador de los dos RUT empresariales y se contrastaron en memoria con los campos introducidos; no se guardaron esos datos fiscales ni secretos nuevos en fuentes versionadas.
+
+Se ejecutó una comprobación adicional estrictamente de autenticación/versión, sin emitir:
+- DEMO compartido, usando el privado sandbox existente: login PASS, HTTP 200. Versión HTTP 200, UNEXPECTED_RESPONSE con forma version:array; se conserva la discrepancia contractual.
+- FiNet empresarial: el usuario DEMO combinado con el RUT empresarial sigue rechazado localmente por DEMO_CREDENTIALS_NOT_PRODUCTION, antes de conectar. Este resultado no es un rechazo de contraseña por el proveedor.
+- Cable Mágico empresarial: se descartó únicamente el formato con puntos del RUT, sin modificar el archivo ni la identidad; login FAIL HTTP 200, sin token, versión NOT_RUN. No se probaron otras contraseñas ni combinaciones.
+
+Las credenciales DEMO sí autentican en el servicio. Eso no demuestra acceso productivo a los emisores reales, y reemplazar el RUT del acceso DEMO por el RUT fiscal de una empresa mezcla identidades. Los nombres, domicilios y RUT fiscales permiten preparar la identidad empresarial, pero no reemplazan las credenciales API entregadas para ella.
+
+El manual oficial diferencia acceso API, acceso web y ambientes, y describe el campo Puerto de SOAP para impresión automática; el cliente actual usa REST. No se cambia el protocolo para eludir el resultado de autenticación. Pendiente confirmar con proveedor/administrador el bloque completo de API de Ambiente Producción de cada emisor y su habilitación. Los flags siguen false: cero nuevas emisiones, correos o conexiones a Railway; no se modificaron privados en esta comprobación.
+
 
 ## Preparación de cierre — 2026-10-20
 

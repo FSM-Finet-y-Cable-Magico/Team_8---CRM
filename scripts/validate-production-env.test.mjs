@@ -53,3 +53,26 @@ test('salida nunca imprime valores sensibles', () => {
   const output = lines.join('\n');
   assert.doesNotMatch(output, /secret-database-value|secret-jwt-value/);
 });
+
+
+const syntheticTax=()=>({...base,FACTURACION_CL_INTEGRATION_ENABLED:'true',FACTURACION_CL_PRODUCTION_ENABLED:'true',
+  FACTURACION_CL_COMPANIES:JSON.stringify([{idEmpresa:1,alias:'QA',environment:'production',enabled:true}]),
+  FACTURACION_CL_PROFILES:JSON.stringify([{idEmpresa:1,approved:true,issuerRut:'66666666-6',defaultDocumentType:'BOLETA',
+    receipt:{tipoDte:39,encoding:'utf8',serviceIndicator:3}}]),
+  FACTURACION_CL_QA_PRODUCTION_CREDENTIALS:JSON.stringify({usuario:'SYNTHETIC_ONLY',rut:'66.666.666-6',clave:'SYNTHETIC_ONLY'})});
+test('preparación productiva exige activación explícita, perfil y secreto propios sin conectar',()=>{
+  assert.equal(validateProductionEnv(syntheticTax()).ok,true);
+  for(const overrides of [{FACTURACION_CL_PRODUCTION_ENABLED:'false'},{FACTURACION_CL_PRODUCTION_ENABLED:'invalid'},
+    {FACTURACION_CL_PROFILES:'[]'},{FACTURACION_CL_QA_PRODUCTION_CREDENTIALS:''},
+    {FACTURACION_CL_COMPANIES:JSON.stringify([{idEmpresa:1,alias:'QA',environment:'sandbox',enabled:true}])}]){
+    assert.equal(validateProductionEnv({...syntheticTax(),...overrides}).ok,false);
+  }
+});
+test('preparación productiva rechaza DEMO y RUT de otro emisor y nunca imprime credenciales',()=>{
+  for(const creds of [{usuario:'DEMOFE',rut:'66666666-6',clave:'SYNTHETIC_ONLY'},
+    {usuario:'FAKE',rut:'11111111-1',clave:'SYNTHETIC_ONLY'},{usuario:'FAKE',rut:'1-9',clave:'SYNTHETIC_ONLY'}]){
+    const env={...syntheticTax(),FACTURACION_CL_QA_PRODUCTION_CREDENTIALS:JSON.stringify(creds)},lines=[];
+    assert.equal(main(env,line=>lines.push(line)),1);
+    assert.ok(!lines.join('\n').includes('SYNTHETIC_ONLY'));
+  }
+});
