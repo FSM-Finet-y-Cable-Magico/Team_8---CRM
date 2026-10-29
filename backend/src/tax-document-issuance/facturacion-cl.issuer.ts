@@ -283,12 +283,21 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     return this.config.base.snapshot().companies.find(c=>c.idEmpresa===idEmpresa)?.environment ?? 'sandbox';
   }
   async assertPaymentAccess(idPago:number,user:AuthUser) {
+    const payment = await this.paymentContext(idPago,user);
+    return payment.factura!.contrato!.idEmpresa!;
+  }
+  private async paymentContext(idPago:number,user:AuthUser,db:Pick<Prisma.TransactionClient,'pago'>=this.prisma) {
     if (!isAdministrator(user.roles) && !hasRole(user.roles,'Comercial') && !hasRole(user.roles,'Soporte')) throw new ForbiddenException('Sin permiso de cobranza');
-    const payment=await this.prisma.pago.findUnique({where:{idPago},select:{idCliente:true,factura:{select:{contrato:{select:{idCliente:true,idEmpresa:true,cliente:{select:{idEmpresa:true}}}}}}}});
+    const payment=await db.pago.findUnique({where:{idPago},select:{idPago:true,idFactura:true,idCliente:true,
+      factura:{select:{idFactura:true,idContrato:true,contrato:{select:{idContrato:true,idCliente:true,idEmpresa:true,
+        cliente:{select:{idCliente:true,email:true}}}}}}}});
     const contract=payment?.factura?.contrato;
-    if (!contract?.idEmpresa || contract.cliente?.idEmpresa!==contract.idEmpresa || contract.idCliente!==payment?.idCliente ||
+    // Identity can be shared. Authority comes from the payment's own invoice and contract, never Cliente.idEmpresa or RUT.
+    if (!payment || payment.idPago!==idPago || payment.idFactura!==payment.factura?.idFactura ||
+        !contract?.idEmpresa || payment.factura?.idContrato!==contract.idContrato || !contract.idCliente ||
+        contract.cliente?.idCliente!==contract.idCliente || contract.idCliente!==payment.idCliente ||
         (!isAdministrator(user.roles) && user.idEmpresa!==contract.idEmpresa)) throw new NotFoundException('Pago no encontrado en este alcance');
-    return contract.idEmpresa;
+    return payment;
   }
   async paymentState(idPago:number,user:AuthUser) {
     const idEmpresa=await this.assertPaymentAccess(idPago,user), readiness=this.getReadiness(idEmpresa);
@@ -319,7 +328,8 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       }
       const payment = await tx.pago.findUnique({where:{idPago},include:{factura:{include:{contrato:{include:{cliente:true}}}}}});
       const invoice = payment?.factura, contract = invoice?.contrato, customer = contract?.cliente;
-      if (!payment || !invoice || !contract || !customer || contract.idEmpresa !== idEmpresa || customer.idEmpresa !== idEmpresa ||
+      if (!payment || !invoice || !contract || !customer || contract.idEmpresa !== idEmpresa || contract.idCliente !== customer.idCliente ||
+          payment.idPago !== idPago || payment.idFactura !== invoice.idFactura || invoice.idContrato !== contract.idContrato ||
           payment.idCliente !== customer.idCliente || job.idFactura !== invoice.idFactura || job.idCliente !== customer.idCliente || !payment.monto.eq(job.monto)) {
         throw new BadRequestException('La identidad financiera cambio; requiere revision');
       }
@@ -362,8 +372,12 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       if (!job || job.idEmpresa !== idEmpresa || job.ambiente !== this.environment(idEmpresa) || record?.estado !== 'GENERADO' || record.emailEstado !== 'SIN_DESTINATARIO' || record.emailIntentos !== 0) {
         throw new BadRequestException('Solo se corrige un destinatario faltante sin envios previos');
       }
-      const customer = await tx.cliente.findUnique({where:{idCliente:job.idCliente}});
-      if (customer?.idEmpresa !== idEmpresa || !customer.email || !validSmtpAddress(customer.email)) throw new BadRequestException('Corrige primero el correo del cliente');
+      const payment = await this.paymentContext(idPago,user,tx);
+      const customer = payment.factura!.contrato!.cliente!;
+      if (payment.factura!.contrato!.idEmpresa !== idEmpresa || payment.idFactura !== job.idFactura || customer.idCliente !== job.idCliente) {
+        throw new BadRequestException('La identidad financiera cambio; requiere revision');
+      }
+      if (!customer.email || !validSmtpAddress(customer.email)) throw new BadRequestException('Corrige primero el correo del cliente');
       await tx.taxPaymentJob.update({where:{idPago},data:{email:customer.email}});
       const changed = await tx.taxEmissionIntent.updateMany({where:{idIntencion:record.idIntencion,idEmpresa,emailEstado:'SIN_DESTINATARIO',emailIntentos:0},
         data:{emailEstado:'PENDIENTE',ultimoErrorEmail:null,fechaProximoEmail:null}});

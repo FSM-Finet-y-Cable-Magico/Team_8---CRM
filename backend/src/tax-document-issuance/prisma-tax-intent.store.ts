@@ -10,8 +10,9 @@ export class PrismaTaxIntentStore implements TaxIntentStore {
     try {
       return await this.prisma.$transaction(async tx => {
         const invoice = await tx.factura.findUnique({ where: { idFactura: data.idFactura },
-          select: { contrato: { select: { idEmpresa: true, cliente: { select: { idCliente: true, idEmpresa: true } } } } } });
-        if (invoice?.contrato?.idEmpresa !== data.idEmpresa || invoice.contrato.cliente?.idEmpresa !== data.idEmpresa) {
+          select: { contrato: { select: { idEmpresa: true, idCliente: true, cliente: { select: { idCliente: true } } } } } });
+        if (invoice?.contrato?.idEmpresa !== data.idEmpresa || !invoice.contrato.idCliente ||
+            invoice.contrato.cliente?.idCliente !== invoice.contrato.idCliente) {
           throw new Error('TAX_INTENT_COMPANY_MISMATCH');
         }
         if (data.idPago !== null) {

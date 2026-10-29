@@ -11,7 +11,7 @@ const data: NewTaxIntent = { idEmpresa: 1, idFactura: 10, idPago: 20, ambiente: 
 const record: TaxIntentRecord = { ...data, idIntencion: 'FAKE_UUID', estado: 'PENDIENTE', intentos: 0, claimId: null, folio: null, ultimoError: null };
 function setup() {
   const mock = {
-    factura: { findUnique: jest.fn().mockResolvedValue({ contrato: { idEmpresa: 1, cliente: { idEmpresa: 1, idCliente: 30 } } }) },
+    factura: { findUnique: jest.fn().mockResolvedValue({ contrato: { idEmpresa: 1, idCliente: 30, cliente: { idEmpresa: 1, idCliente: 30 } } }) },
     pago: { findUnique: jest.fn().mockResolvedValue({ idFactura: 10, idCliente: 30 }) },
     taxEmissionIntent: {
       upsert: jest.fn().mockResolvedValue(record), findUnique: jest.fn().mockResolvedValue(record),
@@ -24,6 +24,18 @@ function setup() {
 }
 
 describe('PrismaTaxIntentStore (mock queries, no database migration applied)', () => {
+  it.each([1,2])('prepares a shared identity using contract company %s', async idEmpresa => {
+    const { store, mock } = setup();
+    mock.factura.findUnique.mockResolvedValue({contrato:{idEmpresa,idCliente:30,cliente:{idCliente:30,idEmpresa:idEmpresa===1?2:1}}});
+    await store.prepare({...data,idEmpresa});
+    expect(mock.taxEmissionIntent.upsert).toHaveBeenCalledWith(expect.objectContaining({create:expect.objectContaining({idEmpresa})}));
+  });
+  it('rejects a contract linked to a different customer even for a matching company', async () => {
+    const { store, mock } = setup();
+    mock.factura.findUnique.mockResolvedValue({contrato:{idEmpresa:1,idCliente:30,cliente:{idCliente:31,idEmpresa:1}}});
+    await expect(store.prepare(data)).rejects.toThrow('TAX_INTENT_COMPANY_MISMATCH');
+    expect(mock.taxEmissionIntent.upsert).not.toHaveBeenCalled();
+  });
   it('checks financial ownership in a local Serializable transaction before preserving an intent', async () => {
     const { store, mock } = setup();
     await expect(store.prepare(data)).resolves.toEqual(record);

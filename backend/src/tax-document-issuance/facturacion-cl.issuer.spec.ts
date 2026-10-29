@@ -16,7 +16,7 @@ async function setup(enabled=true,ready=true,production=false,productionReady=tr
   const config=new FacturacionClPaymentConfig(env,new FacturacionClConfigService(env));
   const job={...context,ambiente:production?'production':'sandbox',documento:Buffer.from('FAKE'),tipoDte:39,formato:1,folioEsperado:'0',policyVersion:'PER_PAYMENT_V1',profileHash:config.profileHash(config.profile(2)!),estado:'PENDIENTE',email:context.receiver.email,nombreCliente:context.receiver.name};
   const record={idIntencion:'FAKE',idEmpresa:2,ambiente:production?'production':'sandbox',idPago:7,estado:'GENERADO',tipoDte:39,folio:'20',artefactoUrl:null as string|null,artefactoEstado:'PENDIENTE',emailEstado:'PENDIENTE',emailIntentos:0,fechaProximoEmail:null as Date|null,ultimoErrorEmail:null as string|null};
-  const prisma={$queryRaw:jest.fn().mockResolvedValue([{ready,productionReady}]),$executeRaw:jest.fn(),pago:{findUnique:jest.fn().mockResolvedValue({idCliente:3,factura:{contrato:{idEmpresa:2,idCliente:3,cliente:{idEmpresa:2}}}})},taxPaymentJob:{create:jest.fn(),findUnique:jest.fn().mockResolvedValue(job),findFirst:jest.fn().mockResolvedValue(job),findMany:jest.fn().mockResolvedValue([]),update:jest.fn()},documentoTributarioExterno:{count:jest.fn().mockResolvedValue(0)},
+  const prisma={$queryRaw:jest.fn().mockResolvedValue([{ready,productionReady}]),$executeRaw:jest.fn(),pago:{findUnique:jest.fn().mockResolvedValue({idPago:7,idFactura:5,idCliente:3,factura:{idFactura:5,idContrato:4,contrato:{idContrato:4,idEmpresa:2,idCliente:3,cliente:{idCliente:3,idEmpresa:2}}}})},taxPaymentJob:{create:jest.fn(),findUnique:jest.fn().mockResolvedValue(job),findFirst:jest.fn().mockResolvedValue(job),findMany:jest.fn().mockResolvedValue([]),update:jest.fn()},documentoTributarioExterno:{count:jest.fn().mockResolvedValue(0)},
     taxEmissionIntent:{findUnique:jest.fn().mockResolvedValue(null),findMany:jest.fn().mockImplementation(async()=>['PENDIENTE','NO_CONFIGURADO','REINTENTO_PENDIENTE'].includes(record.emailEstado)?[{...record}]:[]),findFirst:jest.fn().mockImplementation(async()=>({...record})),update:jest.fn(),updateMany:jest.fn().mockImplementation(async args=>{
       if(args.where.fechaEmailInicio || args.where.estado==='EN_PROCESO')return{count:0};
       if(args.data.emailEstado==='EN_PROCESO'){
@@ -36,6 +36,30 @@ async function setup(enabled=true,ready=true,production=false,productionReady=tr
   return{issuer,prisma,config,env,job,record,mail,audit,database};
 }
 describe('FacturacionCl payment pipeline (fake provider, no emissions)',()=>{
+  it.each([1,2])('authorizes a shared customer by contract company %s, not primary company',async idEmpresa=>{
+    const {issuer,prisma}=await setup();
+    prisma.pago.findUnique.mockResolvedValue({idPago:7,idFactura:5,idCliente:3,factura:{idFactura:5,idContrato:4,
+      contrato:{idContrato:4,idEmpresa,idCliente:3,cliente:{idCliente:3,idEmpresa:idEmpresa===1?2:1}}}});
+    for(const role of ['Administrador','Comercial','Soporte']) {
+      const user={idUsuario:7,idEmpresa,roles:[role],email:null,nombreCompleto:'QA'};
+      expect(await issuer.assertPaymentAccess(7,user)).toBe(idEmpresa);
+      if(role==='Administrador')expect(await issuer.assertPaymentAccess(7,{...user,idEmpresa:99})).toBe(idEmpresa);
+      else await expect(issuer.assertPaymentAccess(7,{...user,idEmpresa:idEmpresa===1?2:1})).rejects.toBeInstanceOf(NotFoundException);
+    }
+  });
+  it.each(['payment','invoice','contract','customer','missingCustomer','missingContract','missingPayment'])('rejects inconsistent %s even for administrator before reading tax records',async mismatch=>{
+    const {issuer,prisma}=await setup();
+    const payment={idPago:7,idFactura:5,idCliente:3,factura:{idFactura:5,idContrato:4,contrato:{idContrato:4,idEmpresa:2,idCliente:3,cliente:{idCliente:3,idEmpresa:1}}}};
+    if(mismatch==='payment')payment.idPago=999;
+    if(mismatch==='invoice')payment.idFactura=999;
+    if(mismatch==='contract')payment.factura.idContrato=999;
+    if(mismatch==='customer')payment.idCliente=999;
+    if(mismatch==='missingCustomer')payment.factura.contrato.cliente=null as never;
+    if(mismatch==='missingContract')payment.factura.contrato=null as never;
+    prisma.pago.findUnique.mockResolvedValue(mismatch==='missingPayment'?null:payment);
+    await expect(issuer.paymentState(7,{idUsuario:7,idEmpresa:1,roles:['Administrador'],email:null,nombreCompleto:'QA'})).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.taxPaymentJob.findFirst).not.toHaveBeenCalled();
+  });
   it('default disabled creates no work, and an enabled instance requires migration',async()=>{
     const {issuer,prisma}=await setup(false,false);expect(issuer.getReadiness(2).canIssue).toBe(false);
     await issuer.enqueuePayment(prisma as unknown as Prisma.TransactionClient,context);expect(prisma.taxPaymentJob.create).not.toHaveBeenCalled();
