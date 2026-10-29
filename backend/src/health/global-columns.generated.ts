@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa; no seeds or credentials.
+// Generated from init-global.sql SHA256 52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",

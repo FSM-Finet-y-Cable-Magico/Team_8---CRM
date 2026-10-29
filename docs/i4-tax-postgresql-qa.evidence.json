@@ -1,0 +1,167 @@
+{
+  "startedAt": "2026-10-29T21:59:02.825Z",
+  "status": "QA_PASS",
+  "externalCalls": 0,
+  "productionWrites": 0,
+  "cases": [
+    {
+      "name": "legacy_rejects_production",
+      "status": "PASS"
+    },
+    {
+      "name": "migration_rollback_preserves_history_and_old_constraint",
+      "status": "PASS",
+      "historicalRows": 2
+    },
+    {
+      "name": "migration_preserves_historical_snapshot",
+      "status": "PASS",
+      "historicalRows": 2
+    },
+    {
+      "name": "upgrade_canonical_catalog",
+      "status": "PASS",
+      "catalogStatus": "PASS",
+      "counts": {
+        "tables": 94,
+        "columns": 965,
+        "pk": 94,
+        "fk": 221,
+        "checks": 58,
+        "indexes": 124
+      }
+    },
+    {
+      "name": "upgrade_unique_payment_environment_and_folio",
+      "status": "PASS",
+      "jobs": 3,
+      "paymentUniqueAcrossEnvironments": true
+    },
+    {
+      "name": "upgrade_shared_customer_access_and_financial_integrity",
+      "status": "PASS",
+      "intentions": 2,
+      "primaryCompanyUnchanged": true
+    },
+    {
+      "name": "upgrade_concurrent_claim_and_durable_idempotency",
+      "status": "PASS",
+      "claimsWon": 1,
+      "dispatchClaims": 1,
+      "externalSends": 0,
+      "finalState": "GENERADO"
+    },
+    {
+      "name": "upgrade_generated_folio_scoped_to_company_and_environment",
+      "status": "PASS",
+      "generated": 4
+    },
+    {
+      "name": "upgrade_full_tax_pipeline_fake_transport_both_environments",
+      "status": "PASS",
+      "simulatedEmissions": 4,
+      "simulatedDeliveries": 4,
+      "externalRequests": 0,
+      "duplicateEmissions": 0
+    },
+    {
+      "name": "upgrade_agreement_gap_reproduced_without_repair",
+      "status": "PASS",
+      "invoice": "Pagada",
+      "payments": 2,
+      "installments": [
+        "PENDIENTE",
+        "PENDIENTE"
+      ],
+      "audits": 2,
+      "functionalStatus": "BLOCKED_BUSINESS_DECISION",
+      "historicalRepairs": 0
+    },
+    {
+      "name": "fresh_canonical_catalog",
+      "status": "PASS",
+      "catalogStatus": "PASS",
+      "counts": {
+        "tables": 94,
+        "columns": 965,
+        "pk": 94,
+        "fk": 221,
+        "checks": 58,
+        "indexes": 124
+      }
+    },
+    {
+      "name": "fresh_unique_payment_environment_and_folio",
+      "status": "PASS",
+      "jobs": 3,
+      "paymentUniqueAcrossEnvironments": true
+    },
+    {
+      "name": "fresh_shared_customer_access_and_financial_integrity",
+      "status": "PASS",
+      "intentions": 2,
+      "primaryCompanyUnchanged": true
+    },
+    {
+      "name": "fresh_concurrent_claim_and_durable_idempotency",
+      "status": "PASS",
+      "claimsWon": 1,
+      "dispatchClaims": 1,
+      "externalSends": 0,
+      "finalState": "GENERADO"
+    },
+    {
+      "name": "fresh_generated_folio_scoped_to_company_and_environment",
+      "status": "PASS",
+      "generated": 4
+    },
+    {
+      "name": "fresh_full_tax_pipeline_fake_transport_both_environments",
+      "status": "PASS",
+      "simulatedEmissions": 4,
+      "simulatedDeliveries": 4,
+      "externalRequests": 0,
+      "duplicateEmissions": 0
+    },
+    {
+      "name": "fresh_agreement_gap_reproduced_without_repair",
+      "status": "PASS",
+      "invoice": "Pagada",
+      "payments": 2,
+      "installments": [
+        "PENDIENTE",
+        "PENDIENTE"
+      ],
+      "audits": 2,
+      "functionalStatus": "BLOCKED_BUSINESS_DECISION",
+      "historicalRepairs": 0
+    }
+  ],
+  "runs": [
+    {
+      "mode": "upgrade",
+      "cleanup": true,
+      "runId": "1b4eb3a0-fb28-4273-839e-cc6a2d27db31",
+      "engine": "postgres (PostgreSQL) 18.6",
+      "host": "127.0.0.1/32"
+    },
+    {
+      "mode": "fresh",
+      "cleanup": true,
+      "runId": "401b998a-0276-4a81-9f52-b5433a869e1b",
+      "engine": "postgres (PostgreSQL) 18.6",
+      "host": "127.0.0.1/32"
+    }
+  ],
+  "canonicalSHA256": "52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91",
+  "migrationSHA256": "e06687281f0539207a2271b5351447764c9c84b08917232b6f446026dd74f6cf",
+  "lastPipelineCheck": {
+    "environment": "production",
+    "company": 2,
+    "state": "GENERADO",
+    "code": null,
+    "simulatedEmissions": 4
+  },
+  "agreementsStatus": "BLOCKED_BUSINESS_DECISION",
+  "finishedAt": "2026-10-29T21:59:26.993Z"
+}

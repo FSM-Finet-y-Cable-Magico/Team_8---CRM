@@ -31,7 +31,7 @@ const postgres18Checks = [
 ];
 const postgres18PartialIndexes = [
  {table:'tax_emission_intent',name:'tax_intent_generated_folio_key',observed:"CREATE UNIQUE INDEX tax_intent_generated_folio_key ON public.tax_emission_intent USING btree (id_empresa, ambiente, tipo_dte, folio) WHERE ((estado)::text = 'GENERADO'::text)"},
- {table:'tax_payment_job',name:'tax_job_reserved_folio_key',observed:"CREATE UNIQUE INDEX tax_job_reserved_folio_key ON public.tax_payment_job USING btree (id_empresa, tipo_dte, folio_esperado) WHERE ((folio_esperado)::text <> '0'::text)"},
+ {table:'tax_payment_job',name:'tax_job_reserved_folio_key',observed:"CREATE UNIQUE INDEX tax_job_reserved_folio_key ON public.tax_payment_job USING btree (id_empresa, ambiente, tipo_dte, folio_esperado) WHERE ((folio_esperado)::text <> '0'::text)"},
  {table:'tax_emission_intent',name:'tax_intent_email_pending_idx',observed:"CREATE INDEX tax_intent_email_pending_idx ON public.tax_emission_intent USING btree (id_empresa, email_estado, fecha_proximo_email) WHERE ((estado)::text = 'GENERADO'::text)"},
 ];
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
@@ -46,6 +46,8 @@ test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
  assert.ok(taxJob);
  assert.equal(taxJob.columns.length,18);
  assert.equal(taxJob.checks.length,9);
+ assert.match(taxJob.checks.find(check=>check.name==='tax_job_environment_check').definition,/production/);
+ assert.match(global.indexes.find(index=>index.name==='tax_job_reserved_folio_key').definition,/id_empresa, ambiente, tipo_dte, folio_esperado/);
  assert.equal(global.fks.some(fk=>fk.table==='tax_payment_job'&&fk.columns.includes('id_cliente')),false);
  assert.ok(global.indexes.some(index=>index.name==='tax_job_reserved_folio_key'&&index.unique&&/WHERE folio_esperado <> '0'/.test(index.definition)));
  const notification=global.tables.find(table=>table.name==='log_notificacion');
