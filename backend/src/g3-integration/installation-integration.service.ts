@@ -1,14 +1,15 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
+import { ACCESS_ROLES } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { G3ClosureProcessor } from './g3-closure.processor';
 import { historicalClosureData, HistoricalClosureView, numericWorkOrderId, positiveId } from './g3-historical-closure';
-import { RequestG3InstallationDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, RequestG3InstallationDto } from './g3-integration.dto';
 import {
   G3ClosurePayload,
   G3InstallationPayload,
@@ -240,10 +241,30 @@ export class InstallationIntegrationService {
         });
         return { available: false, tracking: this.toView(updated) };
       }
+      // A GET conflict is not evidence of a conflicting installation POST. Confirm
+      // the pending state and correlation independently; never infer it from 409 alone.
+      if (failure.code === 'G3_CONFLICTO_CONSULTA') {
+        try {
+          const detail = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
+          const state = normalizeG3State(detail.data.estado);
+          if (detail.data.id_empresa === tracking.idEmpresa
+            && String(detail.data.id_ot) === String(externalId)
+            && detail.data.request_id === tracking.requestId && detail.data.trace_id === tracking.traceId
+            && state.known && ['PENDIENTE', 'ASIGNADA', 'EN_CURSO', 'PENDIENTE_CLIENTE_AUSENTE'].includes(state.state)) {
+            const updated = await this.updateNonTerminalTracking(idIntegracion, {
+              fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: 'El cierre G3 aun no esta disponible.',
+            });
+            return { available: false, tracking: this.toView(updated) };
+          }
+        } catch { /* Preserve the original sanitized conflict; no activation or retry. */ }
+      }
       await this.prisma.integracionInstalacionG3.update({
         where: { idIntegracion },
         data: { ultimoErrorSanitizado: failure.message, fechaUltimaSincronizacion: new Date() },
       });
+      if (error instanceof G3IntegrationError) {
+        throw new HttpException({ code: failure.code, message: failure.message }, failure.status ?? 502);
+      }
       throw error;
     }
   }
@@ -376,10 +397,44 @@ export class InstallationIntegrationService {
     }
   }
 
+  async installationRequirements(dto: RequestG3InstallationDto, currentUser: AuthUser) {
+    const context = await this.resolveContext(dto, currentUser, this.prisma, true);
+    return { idContrato: context.contract.idContrato, comunaFaltante: !context.comuna,
+      puedeCompletarComuna: currentUser.roles.some(role => (ACCESS_ROLES.MANAGE_PROSPECTS as readonly string[]).includes(role)) };
+  }
+
+  async completeInstallationData(idContrato: number, dto: CompleteG3InstallationDataDto, currentUser: AuthUser) {
+    if (!currentUser.roles.some(role => (ACCESS_ROLES.MANAGE_PROSPECTS as readonly string[]).includes(role))) {
+      throw new ForbiddenException('La correccion requiere un rol autorizado para gestionar prospectos');
+    }
+    const comuna = dto.comuna.trim();
+    if (!comuna || dto.confirmarMismaDireccion !== true) throw new BadRequestException('Confirma la comuna de la misma direccion contratada');
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(CAST(${G3_INSTALLATION_LOCK_NAMESPACE} AS integer), CAST(${idContrato} AS integer))`;
+      const initial = await this.resolveContext({ idContrato }, currentUser, tx, true);
+      // contractPlan also locks this prospect: a concurrent new contract cannot
+      // appear between the relationship check and the supplemental update.
+      await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${initial.prospect.idProspecto} FOR UPDATE`;
+      const context = await this.resolveContext({ idContrato }, currentUser, tx, true);
+      if (context.comuna) throw new BadRequestException('La comuna ya esta informada; su cambio requiere revision contractual');
+      const otherContract = await tx.contrato.findFirst({ where: { idProspecto: context.prospect.idProspecto, idContrato: { not: idContrato } } });
+      const tracking = await tx.integracionInstalacionG3.findFirst({ where: { idProspecto: context.prospect.idProspecto } });
+      if (otherContract || tracking) throw new BadRequestException('Existen contratos o solicitudes tecnicas que requieren revision antes de completar datos');
+      await tx.prospecto.update({ where: { idProspecto: context.prospect.idProspecto }, data: { comuna } });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'COMPLETAR_COMUNA_INSTALACION', entidadAfectada: 'prospecto',
+        idEntidadAfectada: context.prospect.idProspecto, valorAnterior: { comuna: null },
+        valorNuevo: { comuna, idContrato, idEmpresa: context.idEmpresa, mismaDireccionConfirmada: true, contratoModificado: false },
+      }, tx);
+      return { idContrato, comunaFaltante: false };
+    });
+  }
+
   private async resolveContext(
     dto: RequestG3InstallationDto,
     currentUser: AuthUser,
     db: Pick<Prisma.TransactionClient, 'contrato' | 'servicioContratado' | 'cotizacion' | 'cliente'> = this.prisma,
+    allowMissingComuna = false,
   ) {
     if (!dto.idProspecto && !dto.idContrato && !dto.idServicio) {
       throw new BadRequestException('Indica prospecto, contrato o servicio para solicitar la instalacion');
@@ -467,8 +522,8 @@ export class InstallationIntegrationService {
       || prospect?.comuna?.trim()
       || service?.direccion?.comuna?.trim();
     if (!address) throw new BadRequestException('La instalacion requiere direccion completa');
-    if (!comuna) throw new BadRequestException('La instalacion requiere comuna');
-    return { idEmpresa, contract, plan: contract.plan, prospect, customer, service, rut: rutResult.normalized, name, phone, address, comuna };
+    if (!comuna && !allowMissingComuna) throw new BadRequestException('La instalacion requiere comuna');
+    return { idEmpresa, contract, plan: contract.plan, prospect, customer, service, rut: rutResult.normalized, name, phone, address, comuna: comuna || '' };
   }
 
   private buildPayload(

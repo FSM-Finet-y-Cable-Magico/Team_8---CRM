@@ -71,6 +71,11 @@ export class ProspectsService {
       take: 100,
       include: {
         empresa: true,
+        cotizaciones: {
+          where: { factibilidadVerificada: true, fechaEnvio: { not: null } },
+          select: { idCotizacion: true, idPlan: true, fechaEnvio: true, plan: { select: { idEmpresa: true, activo: true } } },
+          orderBy: { idCotizacion: 'desc' },
+        },
         usuarioComercial: {
           select: {
             nombreCompleto: true,
@@ -91,6 +96,9 @@ export class ProspectsService {
     });
     return prospects.map((prospect) => ({
       ...prospect,
+      cotizaciones: (prospect.cotizaciones ?? [])
+        .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa && quote.plan?.activo !== false)
+        .map(({ idCotizacion, idPlan, fechaEnvio }) => ({ idCotizacion, idPlan, fechaEnvio })),
       requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
         || (!([...PIPELINE_STATUSES.slice(0, 6), null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
@@ -301,32 +309,40 @@ export class ProspectsService {
   async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
-    const updated = await this.prisma.prospecto.update({
-      where: { idProspecto },
-      data: {
-        latitud: dto.ubicacion.latitud,
-        longitud: dto.ubicacion.longitud,
-        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
-        ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
-        ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
-        ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
-      },
-      include: { empresa: true, zonaPago: true },
+    return this.prisma.$transaction(async tx => {
+      // Same row lock as contractPlan: do not race the creation of a contract.
+      await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+      if (await tx.contrato.findFirst({ where: { idProspecto } })) {
+        throw new BadRequestException('La ubicacion contratada requiere revision contractual. Para una comuna ausente utiliza Completar datos de instalacion.');
+      }
+      const previous = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+      const updated = await tx.prospecto.update({
+        where: { idProspecto },
+        data: {
+          latitud: dto.ubicacion.latitud,
+          longitud: dto.ubicacion.longitud,
+          idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+          ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
+          ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
+          ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
+        },
+        include: { empresa: true, zonaPago: true },
+      });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+        entidadAfectada: 'prospecto',
+        idEntidadAfectada: idProspecto,
+        valorAnterior: { latitud: previous.latitud, longitud: previous.longitud, idZonaPago: previous.idZonaPago },
+        valorNuevo: {
+          latitud: updated.latitud,
+          longitud: updated.longitud,
+          idZonaPago: updated.idZonaPago,
+          estadoCobertura: cobertura.estado,
+        },
+      }, tx);
+      return { ...updated, cobertura };
     });
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
-      entidadAfectada: 'prospecto',
-      idEntidadAfectada: idProspecto,
-      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
-      valorNuevo: {
-        latitud: updated.latitud,
-        longitud: updated.longitud,
-        idZonaPago: updated.idZonaPago,
-        estadoCobertura: cobertura.estado,
-      },
-    });
-    return { ...updated, cobertura };
   }
 
   private assertFeasibilityStage(status: string | null) {
@@ -551,6 +567,15 @@ export class ProspectsService {
       throw new BadRequestException('Debe generar una cotizacion factible para el plan antes de confirmar la contratacion');
     }
 
+    if (prospect.latitud == null || prospect.longitud == null) {
+      throw new BadRequestException('El prospecto debe tener una ubicacion valida antes de contratar');
+    }
+    const commercial = await this.coverageService.plansForLocation(prospect.idEmpresa ?? 0,
+      { latitud: prospect.latitud, longitud: prospect.longitud }, currentUser);
+    if (!commercial.coberturaComercial || !commercial.planes.some(plan => plan.idPlan === dto.planId)) {
+      throw new BadRequestException('El plan no esta disponible para la ubicacion del prospecto');
+    }
+
     if (dto.idZonaPago) {
       const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
 
@@ -569,6 +594,8 @@ export class ProspectsService {
     const direccionInstalacion = prospect.direccion?.trim() || undefined;
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize confirmations of the same prospect; a pending contract is reused.
+      await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
       const contractData = {
         idCliente: null,
         idProspecto,
@@ -593,10 +620,14 @@ export class ProspectsService {
       const existingContract = await tx.contrato.findFirst({
         where: {
           idProspecto,
-          estado: { in: [PENDING_SIGNATURE_STATUS, 'Pendiente'] },
+          idEmpresa: prospect.idEmpresa,
         },
         orderBy: { idContrato: 'desc' },
       });
+
+      if (existingContract && ![PENDING_SIGNATURE_STATUS, 'Pendiente'].includes(existingContract.estado ?? '')) {
+        throw new ConflictException('El prospecto ya tiene un contrato confirmado; no se puede duplicar');
+      }
 
       const contrato = existingContract
         ? await tx.contrato.update({

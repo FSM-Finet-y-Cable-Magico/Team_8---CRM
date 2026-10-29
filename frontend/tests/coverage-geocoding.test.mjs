@@ -49,6 +49,7 @@ async function harness(t, { geocode = async () => response(), check = async () =
   const api = {
     get: async (path, options) => {
       calls.push({ path, options });
+      if (path === '/coverage/zones') return { data: [] };
       assert.equal(path, '/coverage/status');
       return { data: { configurado: true, mensaje: 'Selecciona un domicilio' } };
     },
@@ -69,7 +70,7 @@ async function harness(t, { geocode = async () => response(), check = async () =
       maps.push(map);
       return map;
     },
-    tileLayer: () => ({ addTo() {} }),
+    tileLayer: () => ({ addTo() { return this; }, on() { return this; }, off() {} }),
     layerGroup: () => {
       const group = { map: null, addTo(map) { this.map = map; return this; }, clearLayers() { this.map.markers = []; } };
       return group;

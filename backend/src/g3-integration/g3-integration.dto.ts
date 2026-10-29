@@ -1,5 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Equals, IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+
+export class CompleteG3InstallationDataDto {
+  @IsString() @Matches(/\S/) @MaxLength(80) comuna!: string;
+  @Equals(true) confirmarMismaDireccion!: boolean;
+}
 
 export class RequestG3InstallationDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idProspecto?: number;

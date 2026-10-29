@@ -37,6 +37,7 @@ export type UserRow = {
 };
 
 export type Prospect = {
+  cotizaciones?: Array<{ idCotizacion: number; idPlan: number; fechaEnvio: string }>;
   requiereRevisionComercial?: boolean;
   idProspecto: number;
   idCliente: number | null;

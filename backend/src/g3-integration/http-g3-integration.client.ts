@@ -81,7 +81,7 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
         redirect: 'error',
       });
       const body = await this.parseBody(response);
-      if (!response.ok) throw this.httpError(response.status);
+      if (!response.ok) throw this.httpError(response.status, init.method === 'POST');
       return {
         status: response.status,
         data: this.normalizeSuccessBody(body) as T,
@@ -155,7 +155,11 @@ export class HttpG3IntegrationClient implements G3IntegrationClient {
       && Object.prototype.hasOwnProperty.call(body, 'data');
   }
 
-  private httpError(status: number) {
+  private httpError(status: number, installationPost: boolean) {
+    if (status === 409 && !installationPost) {
+      return new G3IntegrationError('G3_CONFLICTO_CONSULTA', 409, false,
+        'G3 no permite consultar la informacion en el estado actual de la orden.');
+    }
     const errors: Record<number, [string, boolean, string]> = {
       400: ['G3_PAYLOAD_INVALIDO', false, 'G3 rechazo los datos de la instalacion.'],
       401: ['G3_NO_AUTORIZADO', false, 'G3 rechazo la credencial de integracion.'],

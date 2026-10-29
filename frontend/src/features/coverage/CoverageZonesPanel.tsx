@@ -37,6 +37,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
   const [addingPoints, setAddingPoints] = useState(true);
   const { message, showMessage: setMessage, clearMessage } = useTransientMessage(5000);
   const [error, setError] = useState('');
+  const [mapWarning, setMapWarning] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [changingStatus, setChangingStatus] = useState<number | null>(null);
@@ -77,9 +78,12 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
   useEffect(() => {
     if (!mapElement.current) return;
     const instance = L.map(mapElement.current, { scrollWheelZoom: true }).setView([-33.57, -70.61], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(instance);
+    const tileTimer = window.setTimeout(() => setMapWarning('La cartografía base no responde. Los polígonos comerciales siguen disponibles; revisa conectividad o permisos CSP.'), 8000);
+    tiles.on('tileerror', () => setMapWarning('No se pudo cargar OpenStreetMap. Revisa conectividad, bloqueos del navegador o CSP; los polígonos no se han modificado.'));
+    tiles.on('tileload', () => { window.clearTimeout(tileTimer); setMapWarning(''); });
     map.current = instance;
     zoneLayers.current = L.layerGroup().addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
@@ -89,7 +93,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     });
     const resize = new ResizeObserver(() => instance.invalidateSize());
     resize.observe(mapElement.current);
-    return () => { resize.disconnect(); instance.remove(); map.current = null; zoneLayers.current = null; };
+    return () => { window.clearTimeout(tileTimer); tiles.off(); resize.disconnect(); instance.remove(); map.current = null; zoneLayers.current = null; };
   }, []);
 
   useEffect(() => {
@@ -244,6 +248,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
         </div>}
         <div className={'coverage-map-stage ' + (editing && addingPoints ? 'is-drawing' : '')}>
           <div ref={mapElement} className="coverage-admin-map" aria-label="Mapa administrativo de cobertura"/>
+          {mapWarning && <p className="coverage-map-warning" role="status">{mapWarning}</p>}
           <div className="coverage-legend" aria-label="Leyenda del mapa"><strong>Zonas</strong><span><i className="general"/>Cobertura</span><span><i className="micro"/>Microzona</span>{editing && <span><i className="draft"/>En edición</span>}</div>
         </div>
       </div>

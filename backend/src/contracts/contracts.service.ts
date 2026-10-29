@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { BadRequestException, Injectable, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
+import { createHash, randomUUID } from 'crypto';
 import { createReadStream, existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, open, unlink } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import PDFDocument from 'pdfkit';
 import { isISO8601 } from 'class-validator';
@@ -39,6 +39,7 @@ const CONTRACT_INCLUDE = {
 @Injectable()
 export class ContractsService {
   private readonly contractsDir = resolve(process.cwd(), 'generated', 'contracts');
+  private readonly logger = new Logger(ContractsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -365,52 +366,67 @@ export class ContractsService {
   }
 
   async generateDigitalContract(idContrato: number, currentUser: AuthUser) {
-    const contract = await this.getContractOrThrow(idContrato, currentUser);
-    return this.prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
-    const latest = await tx.contratoDigital.findFirst({
-      where: { idContrato },
-      orderBy: { version: 'desc' },
-    });
-    const version = (latest?.version ?? 0) + 1;
-    const buffer = await this.renderDigitalContract(contract, version);
-    const hash = createHash('sha256').update(buffer).digest('hex');
-    const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}.pdf`);
-    const fullPath = resolve(process.cwd(), relativePath);
+    // Reject unauthorized callers before taking a lock, then refresh under that lock.
+    await this.getContractOrThrow(idContrato, currentUser);
+    const ownedFile: { fullPath?: string; relativePath?: string } = {};
+    try {
+      return await this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+        const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
+        const latest = await tx.contratoDigital.findFirst({
+          where: { idContrato },
+          orderBy: { version: 'desc' },
+        });
+        const version = (latest?.version ?? 0) + 1;
+        const buffer = await this.renderDigitalContract(contract, version, tx);
+        const hash = createHash('sha256').update(buffer).digest('hex');
+        // A rollback may release the version for another attempt. Never share its filename.
+        const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
+        const fullPath = resolve(process.cwd(), relativePath);
+        await mkdir(dirname(fullPath), { recursive: true });
+        const file = await open(fullPath, 'wx');
+        ownedFile.fullPath = fullPath;
+        ownedFile.relativePath = relativePath;
+        try { await file.writeFile(buffer); }
+        finally { await file.close(); }
 
-    await mkdir(dirname(fullPath), { recursive: true });
-    await writeFile(fullPath, buffer);
-
-    const created = await tx.contratoDigital.create({
-      data: {
-        idContrato,
-        idCliente: contract.idCliente,
-        idEmpresa: contract.idEmpresa,
-        urlDocumento: relativePath.replace(/\\/g, '/'),
-        hashDocumento: hash,
-        estadoFirma: 'Generado',
-        fechaGeneracion: new Date(),
-        idUsuarioGenerador: currentUser.idUsuario,
-        version,
-      },
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'GENERAR_CONTRATO_DIGITAL',
-      entidadAfectada: 'contrato_digital',
-      idEntidadAfectada: created.idContratoDigital,
-      valorNuevo: {
-        idContrato,
-        idCliente: created.idCliente,
-        version,
-        hashDocumento: hash,
-        estadoFirma: created.estadoFirma,
-      },
-    });
-
-    return created;
-    }, { timeout: 20000 });
+        const created = await tx.contratoDigital.create({
+          data: {
+            idContrato,
+            idCliente: contract.idCliente,
+            idEmpresa: contract.idEmpresa,
+            urlDocumento: relativePath,
+            hashDocumento: hash,
+            estadoFirma: 'Generado',
+            fechaGeneracion: new Date(),
+            idUsuarioGenerador: currentUser.idUsuario,
+            version,
+          },
+        });
+        await this.auditService.record({
+          idUsuario: currentUser.idUsuario,
+          accion: 'GENERAR_CONTRATO_DIGITAL',
+          entidadAfectada: 'contrato_digital',
+          idEntidadAfectada: created.idContratoDigital,
+          valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
+        }, tx);
+        return created;
+      }, { timeout: 20000 });
+    } catch (error) {
+      if (ownedFile.fullPath && ownedFile.relativePath) {
+        try {
+          // Outside the ended transaction. Preserve a file if commit succeeded but its ACK was lost.
+          const persisted = await this.prisma.contratoDigital.findFirst({
+            where: { urlDocumento: ownedFile.relativePath }, select: { idContratoDigital: true },
+          });
+          if (!persisted) await unlink(ownedFile.fullPath);
+        } catch {
+          // No safe DB confirmation or failed unlink: retain for inspection, never delete blindly.
+          this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+        }
+      }
+      throw error;
+    }
   }
 
   async downloadDigitalContract(idContrato: number, currentUser: AuthUser, response: Response, version?: number) {
@@ -483,8 +499,8 @@ export class ContractsService {
     return updated;
   }
 
-  private async getContractOrThrow(idContrato: number, currentUser: AuthUser) {
-    const contract = await this.prisma.contrato.findUnique({
+  private async getContractOrThrow(idContrato: number, currentUser: AuthUser, client: Prisma.TransactionClient = this.prisma) {
+    const contract = await client.contrato.findUnique({
       where: { idContrato },
       include: CONTRACT_INCLUDE,
     });
@@ -526,9 +542,9 @@ export class ContractsService {
     }
   }
 
-  private async resolvePlanPrice(idPlan: number, idZonaPago: number | null) {
+  private async resolvePlanPrice(idPlan: number, idZonaPago: number | null, client: Prisma.TransactionClient = this.prisma) {
     if (idZonaPago) {
-      const zonePrice = await this.prisma.planZonaPrecio.findFirst({
+      const zonePrice = await client.planZonaPrecio.findFirst({
         where: { idPlan, idZonaPago, activo: true },
         orderBy: { idPlanZonaPrecio: 'desc' },
       });
@@ -538,7 +554,7 @@ export class ContractsService {
       }
     }
 
-    const plan = await this.prisma.plan.findUnique({ where: { idPlan } });
+    const plan = await client.plan.findUnique({ where: { idPlan } });
     return plan?.precioMensual ?? null;
   }
 
@@ -561,7 +577,7 @@ export class ContractsService {
     } as Prisma.InputJsonObject;
   }
 
-  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number) {
+  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma) {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -570,7 +586,7 @@ export class ContractsService {
       doc.on('error', reject);
     });
 
-    const price = await this.resolvePlanPrice(contract.idPlan ?? 0, contract.idZonaPago);
+    const price = await this.resolvePlanPrice(contract.idPlan ?? 0, contract.idZonaPago, client);
 
     const text = (value: unknown, max = 300): string | null => typeof value === 'string'
       && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value)

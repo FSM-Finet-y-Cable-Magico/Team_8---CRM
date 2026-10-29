@@ -5,6 +5,56 @@ import { InstallationActivationService } from './installation-activation.service
 
 const user = { idUsuario: 5, idEmpresa: 1, email: 'test@example.invalid', nombreCompleto: 'Usuario Test', roles: ['Comercial'] };
 
+describe('P0-07A datos faltantes y consulta de cierre pendiente', () => {
+  const supplement = { comuna: 'Valparaiso', confirmarMismaDireccion: true };
+  function missing() {
+    const c = setup(); c.contract.comunaInstalacion = ''; c.contract.prospecto.comuna = '';
+    c.prisma.contrato.findFirst.mockResolvedValue(null as never);
+    return c;
+  }
+  it('preflight no escribe y falta comuna impide crear tracking', async () => {
+    const c = missing();
+    await expect(c.service.installationRequirements({ idContrato: 20 }, user)).resolves.toMatchObject({ idContrato: 20, comunaFaltante: true, puedeCompletarComuna: true });
+    await expect(c.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('requiere comuna');
+    expect(c.prisma.$transaction).not.toHaveBeenCalled();
+    expect(c.prisma.integracionInstalacionG3.create).not.toHaveBeenCalled();
+    expect(c.client.createInstallation).not.toHaveBeenCalled();
+  });
+  it('completa solo comuna del prospecto, auditada dentro del lock transaccional', async () => {
+    const c = missing(); const original = JSON.stringify(c.contract);
+    await expect(c.service.completeInstallationData(20, supplement, user)).resolves.toMatchObject({ comunaFaltante: false });
+    expect(c.advisoryLock.mock.calls[0].slice(1)).toEqual([20260926, 20]);
+    expect(c.tx.prospecto.update).toHaveBeenCalledWith({ where: { idProspecto: 10 }, data: { comuna: 'Valparaiso' } });
+    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'COMPLETAR_COMUNA_INSTALACION' }), expect.objectContaining({ prospecto: c.tx.prospecto }));
+    expect(JSON.stringify(c.contract)).toBe(original);
+    expect(c.client.createInstallation).not.toHaveBeenCalled();
+  });
+  it.each(['company', 'existing', 'tracking', 'contract', 'confirmation'])('rechaza complemento inseguro: %s', async reason => {
+    const c = missing();
+    if (reason === 'company') c.contract.idEmpresa = 2;
+    if (reason === 'existing') c.contract.comunaInstalacion = 'Otra';
+    if (reason === 'tracking') c.setStored({ idIntegracion: 1 });
+    if (reason === 'contract') c.prisma.contrato.findFirst.mockResolvedValue(c.contract);
+    await expect(c.service.completeInstallationData(20, { ...supplement, confirmarMismaDireccion: reason !== 'confirmation' }, user)).rejects.toThrow();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled(); expect(c.audit.record).not.toHaveBeenCalled();
+  });
+  it('no oculta un fallo de auditoria transaccional', async () => {
+    const c = missing(); c.audit.record.mockRejectedValue(new Error('QA audit failure'));
+    await expect(c.service.completeInstallationData(20, supplement, user)).rejects.toThrow('QA audit failure');
+  });
+  it.each([true, false])('409 de cierre requiere correlacion independiente: %s', async matches => {
+    const c = setup(); await c.service.requestInstallation({ idContrato: 20 }, user);
+    const t = c.getStored(); const snapshot = JSON.stringify(t.payloadSnapshot);
+    c.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_CONFLICTO_CONSULTA', 409, false, 'Conflicto consulta'));
+    c.client.getWorkOrder.mockResolvedValue({ data: { id_ot: 901, id_empresa: 1, request_id: matches ? t.requestId : 'different', trace_id: t.traceId, estado: 'PENDIENTE' } });
+    if (matches) await expect(c.service.reconcile(1, user)).resolves.toMatchObject({ available: false });
+    else await expect(c.service.reconcile(1, user)).rejects.toMatchObject({ status: 409 });
+    expect(JSON.stringify(c.getStored().payloadSnapshot)).toBe(snapshot);
+    expect(c.getStored().estadoIntegracion).toBe('ENVIADA');
+    expect(c.closure.process).not.toHaveBeenCalled(); expect(c.client.createInstallation).toHaveBeenCalledTimes(1);
+  });
+});
+
 function setup() {
   let stored: any = null;
   const contract = {
@@ -60,6 +110,7 @@ function setup() {
         servicioContratado: prisma.servicioContratado,
         cotizacion: prisma.cotizacion,
         $executeRaw: async (strings: TemplateStringsArray, namespace: number, idContrato: number) => {
+          if (!strings.join('').includes('pg_advisory_xact_lock')) return 1;
           advisoryLock(strings, namespace, idContrato);
           const key = `${namespace}:${idContrato}`;
           const previous = lockTails.get(key) ?? Promise.resolve();

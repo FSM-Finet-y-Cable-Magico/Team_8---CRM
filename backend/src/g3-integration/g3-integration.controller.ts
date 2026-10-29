@@ -8,7 +8,7 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
 import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
-import { CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 
@@ -31,6 +31,20 @@ export class G3IntegrationController {
   @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
   retry(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.installations.retry(id, user);
+  }
+
+  @Post('installation-requirements')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ACCESS_ROLES.CREATE_INSTALL_ORDER)
+  requirements(@Body() dto: RequestG3InstallationDto, @CurrentUser() user: AuthUser) {
+    return this.installations.installationRequirements(dto, user);
+  }
+
+  @Patch('contracts/:id/installation-data')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
+  completeData(@Param('id', ParseIntPipe) id: number, @Body() dto: CompleteG3InstallationDataDto, @CurrentUser() user: AuthUser) {
+    return this.installations.completeInstallationData(id, dto, user);
   }
 
   @Get('installations/:id')
