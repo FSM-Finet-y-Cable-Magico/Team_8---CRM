@@ -5,7 +5,7 @@ type TaxStatus = { readiness: { state:string }; job: { estado:string; ultimoErro
   intention: { estado:string; ambiente:string; tipoDte:number; folio:string | null; fingerprint:string; ultimoError:string | null; artefactoUrl:string | null; artefactoEstado:string; emailEstado:string; emailIntentos:number; fechaProximoEmail:string | null } | null };
 const labels:Record<string,string> = { DISABLED:'Emisión deshabilitada', COMPANY_NOT_CONFIGURED:'Empresa sin configuración', COMPANY_DISABLED:'Empresa deshabilitada',
   SIMULADO:'Simulado; no se envió correo',
-  CREDENTIALS_MISSING:'Faltan credenciales de pruebas', MIGRATION_REQUIRED:'Falta preparar la base de datos', READY_SANDBOX:'Ambiente de pruebas',
+  CREDENTIALS_MISSING:'Faltan credenciales API', MIGRATION_REQUIRED:'Falta preparar la base de datos', READY_SANDBOX:'Ambiente de pruebas', READY_PRODUCTION:'Configuración de producción lista', PRODUCTION_NOT_CERTIFIED:'Emisión productiva desactivada',
   PENDIENTE_CONTRATO_FACTURACION_CL:'Falta configuración tributaria', PENDIENTE:'Pendiente', EN_PROCESO:'Procesando', GENERADO:'Generado',
   FALLIDO:'Falló', RESULTADO_INDETERMINADO:'Resultado por verificar', DATOS_REQUERIDOS:'Requiere revisión de datos',
   NO_CONFIGURADO:'Correo sin configurar', SIN_DESTINATARIO:'Sin correo del cliente', ENVIADO:'Enviado', DISPONIBLE:'Disponible', REINTENTO_PENDIENTE:'Reintento programado' };
@@ -39,7 +39,7 @@ export function PaymentTaxDocument({ idPago, canManage, canReconcile = false }: 
     {status && <p role="status">{labels[status.readiness.state] ?? status.readiness.state} · {labels[doc?.estado ?? status.job?.estado ?? 'PENDIENTE'] ?? doc?.estado}</p>}
     {canManage && status?.job?.estado==='DATOS_REQUERIDOS' && !doc && <button type="button" disabled={busy} onClick={()=>setAction('reprepare')}>Preparar con los datos corregidos del cliente</button>}
     {doc && <>
-      <p>{[39,41].includes(doc.tipoDte)?'Boleta':'Factura'} · Folio {doc.folio ?? 'pendiente'} · {doc.ambiente==='sandbox'?'Documento de pruebas':doc.ambiente}</p>
+      <p>{[39,41].includes(doc.tipoDte)?'Boleta':'Factura'} · Folio {doc.folio ?? 'pendiente'} · {doc.ambiente==='sandbox'?'Documento de pruebas':doc.ambiente==='production'?'Documento de producción':doc.ambiente}</p>
       <p>Comprobante: {labels[doc.artefactoEstado] ?? doc.artefactoEstado} · Correo: {labels[doc.emailEstado] ?? doc.emailEstado}</p>
       {doc.fechaProximoEmail && <p>Próximo intento de correo: {new Date(doc.fechaProximoEmail).toLocaleString()}</p>}
       {canManage && doc.emailEstado==='SIN_DESTINATARIO' && <button type="button" disabled={busy} onClick={()=>setAction('recipient')}>Usar el correo corregido del cliente</button>}

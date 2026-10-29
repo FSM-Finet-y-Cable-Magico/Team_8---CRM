@@ -1,4 +1,4 @@
-import { FacturacionClSandboxDispatcher, FacturacionClApprovedTestContract } from './facturacion-cl-sandbox-dispatcher';
+import { FacturacionClDispatcher, FacturacionClSandboxDispatcher, FacturacionClApprovedTestContract } from './facturacion-cl-sandbox-dispatcher';
 import { FacturacionClReadOptions, FacturacionClRequest } from './facturacion-cl-read-client';
 import { TaxIntentRecord, TaxIntentStore, taxIntentFingerprint } from './tax-emission-intent.service';
 
@@ -106,5 +106,38 @@ describe('FacturacionClSandboxDispatcher (fake transport only, no provider calls
     jest.spyOn(next.store, 'beginDispatch').mockRejectedValue(new Error('FAKE_DB_FAILURE'));
     expect(await next.dispatcher.dispatch(requestInput)).toEqual({ state: 'RESULTADO_INDETERMINADO' });
     expect(next.request.mock.calls.map(([url])=>new URL(url).pathname)).toEqual(['/login']);
+  });
+});
+
+
+describe('Production dispatch is still environment-scoped and persistently deduplicated',()=>{
+  function productionSetup(recordEnvironment='production'){
+    const identityProd={...identity,ambiente:'production' as const};
+    const record={...identityProd,idPago:null,idIntencion:'FAKE_UUID',tipoDte:33,formato:2,
+      fingerprint:taxIntentFingerprint(identityProd),folioEsperado:'126',estado:'EN_PROCESO',intentos:1,
+      claimId:'FAKE_OWNER',folio:null,ultimoError:null,ambiente:recordEnvironment};
+    let started=false;
+    const store={find:jest.fn(async()=>record),beginDispatch:jest.fn(async()=>{if(started)return false;started=true;return true;})} as unknown as TaxIntentStore;
+    const request=jest.fn(async(url:string)=>replyProd(url.endsWith('/login')?{token:'FAKE_TOKEN'}:success));
+    const optionsProd={enabled:true,productionEnabled:true,companies:[{idEmpresa:1,enabled:true,environment:'production' as const}],
+      credentials:async()=>({usuario:'SYNTHETIC_USER',rut:'66666666-6',clave:'SYNTHETIC_ONLY'})};
+    const dispatcher=new FacturacionClDispatcher(optionsProd,store,[{...contract,environment:'production'}],true,request);
+    return{dispatcher,request};
+  }
+  const replyProd=(body:unknown)=>({status:200,ok:true,json:async()=>body});
+  it('requires the exact contract environment and refuses a sandbox record before authenticating',async()=>{
+    const {dispatcher,request}=productionSetup('sandbox');
+    expect(dispatcher.canIssue(1,'sandbox')).toBe(false);
+    expect(dispatcher.canIssue(1,'production')).toBe(true);
+    expect(await dispatcher.dispatch(requestInput)).toEqual({state:'FALLIDO',code:'CONFIRMED_NOT_SENT'});
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('keeps the one-way processing marker for concurrent production requests',async()=>{
+    const {dispatcher,request}=productionSetup();
+    const results=await Promise.all([dispatcher.dispatch(requestInput),dispatcher.dispatch(requestInput)]);
+    expect(results.filter(r=>r.state==='GENERADO')).toHaveLength(1);
+    expect(request.mock.calls.filter(([url])=>new URL(url).pathname==='/wsds/procesar')).toHaveLength(1);
+    await dispatcher.dispatch(requestInput);
+    expect(request.mock.calls.filter(([url])=>new URL(url).pathname==='/wsds/procesar')).toHaveLength(1);
   });
 });

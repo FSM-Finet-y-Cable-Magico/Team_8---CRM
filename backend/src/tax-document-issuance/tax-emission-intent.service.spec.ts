@@ -117,11 +117,22 @@ describe('TaxEmissionIntentService (fake dispatcher, no real emission)', () => {
     expect(await service.execute(input())).toMatchObject({ estado: 'EN_PROCESO', intentos: 1 });
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
-  it('rejects unknown policy metadata and production before preparing work', async () => {
+  it('rejects unknown policy metadata and unknown environments before preparing work', async () => {
     const { service, store } = setup();
-    for (const invalid of [{ ...input(), policyVersion: undefined as never }, { ...input(), ambiente: 'production' as never }]) {
+    for (const invalid of [{ ...input(), policyVersion: undefined as never }, { ...input(), ambiente: 'unknown' as never }]) {
       await expect(service.prepare(invalid)).rejects.toThrow('TAX_INTENT_INPUT_INVALID');
     }
     expect(store.records.size).toBe(0);
   });
+});
+
+
+it('passes the persisted production environment to the dispatch gate and fingerprints it separately',async()=>{
+  const store=new MemoryStore(), dispatch=jest.fn().mockResolvedValue(success);
+  const canIssue=jest.fn((idEmpresa:number,environment?:string)=>idEmpresa===1&&environment==='production');
+  const service=new TaxEmissionIntentService(store,{canIssue,dispatch});
+  const prod={...input(),ambiente:'production' as const};
+  expect(await service.execute(prod)).toMatchObject({ambiente:'production',estado:'GENERADO'});
+  expect(canIssue).toHaveBeenCalledWith(1,'production');
+  await service.execute(prod);expect(dispatch).toHaveBeenCalledTimes(1);
 });

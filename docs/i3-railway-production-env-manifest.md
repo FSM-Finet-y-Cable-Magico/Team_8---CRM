@@ -1,5 +1,7 @@
 # Manifiesto de variables Railway — Incremento 3
 
+Actualización de Facturación.cl, SMTP y su relación con G2: 2026-10-22. Es documentación de preparación, no una modificación de Railway. El usuario decidió conservar intactos su configuración, base y servicios. El resto del manifiesto conserva la auditoría original; verificar su vigencia con el responsable antes de un despliegue.
+
 Fecha de auditoría: 2026-09-29. Alcance: servicio backend G8 en Railway y build del frontend. Este documento no contiene valores secretos. `RAILWAY_ACTION` indica la acción humana recomendada; durante esta etapa no se modificó Railway.
 
 Convenciones: **REQUIRED** significa necesario para arrancar o para declarar el despliegue productivo listo. **CONDITIONAL** significa obligatorio solo al habilitar la capacidad asociada. Los defaults corresponden al código actual.
@@ -58,7 +60,7 @@ No existe ni se necesita una segunda credencial HTTP G8 → G1. G1 confirmó el 
 
 ## G2
 
-No hay cliente ni variable runtime G2 en el código actual. WhatsApp/proveedor de notificaciones continúa `PENDIENTE_G2`; los nombres comentados en los ejemplos no constituyen contrato ni deben cargarse en Railway todavía.
+El módulo actual expone operaciones entrantes integrations/g2 protegidas por IntegrationApiKeyGuard y scopes de empresa/grupo; utiliza G8_INTEGRATION_API_KEYS, no una segunda clave inventada de Facturación.cl. El contrato tributario del PR #51 está en develop y aún no está incorporado en esta rama. Su consumo debe verificarse sobre el candidato integrado antes de desplegar; no se hizo merge ni se habilitó G2 aquí. Este apartado no certifica las demás integraciones de mensajería.
 
 ## Billing y monitoreo
 
@@ -69,31 +71,48 @@ No hay cliente ni variable runtime G2 en el código actual. WhatsApp/proveedor d
 |`COMMERCIAL_PLAN_EXPIRY_ALERT_DAYS`|OPTIONAL|NON_SECRET|CommercialControlBook|Ventana alerta planes|entero positivo|`7`|fallback 7|Sí|ninguna|ADD/VERIFY `7`|
 |`MONITORING_RECENT_HOURS`|OPTIONAL|NON_SECRET|MonitoringService|Ventana de dato reciente|número positivo|`24`|fallback seguro|Sí|ninguna|ADD/VERIFY `24`|
 
-## Correo SMTP
+## Correo SMTP por empresa
 
-Todas son condicionales a `SMTP_HOST`. Si host está vacío, el envío queda deshabilitado.
+Estado local al 22-10: FiNet y Cable Mágico autentican correctamente contra Gmail con STARTTLS y certificado validado, sin nuevos mensajes. El despliegue debe recibir las variables en su backend; haberlas completado en esta PC no las configura automáticamente en otro entorno. No se copia el privado a Git, al frontend o a la imagen.
 
-|NAME|REQUIRED / OPTIONAL|SECRET / NON_SECRET|CONSUMER|PURPOSE|FORMAT|DEFAULT|VALIDATION|NEEDED_AT_STARTUP|FEATURE_FLAG_RELATION|RAILWAY_ACTION|
-|---|---|---|---|---|---|---|---|---|---|---|
-|`SMTP_HOST`|OPTIONAL|NON_SECRET|MailService|Servidor SMTP|hostname|vacío|host válido|Sí|actúa como gate|KEEP vacío hasta proveedor|
-|`SMTP_PORT`|CONDITIONAL|NON_SECRET|MailService|Puerto SMTP|entero|`587`|1–65535|Sí|SMTP_HOST|ADD/VERIFY `587`|
-|`SMTP_SECURE`|CONDITIONAL|NON_SECRET|MailService|TLS implícito|boolean|`false`|boolean|Sí|SMTP_HOST|ADD/VERIFY según proveedor|
-|`SMTP_STARTTLS`|CONDITIONAL|NON_SECRET|MailService|Upgrade STARTTLS|boolean|`true`|boolean|Sí|SMTP_HOST|ADD/VERIFY según proveedor|
-|`SMTP_REJECT_UNAUTHORIZED`|CONDITIONAL|NON_SECRET|MailService|Validar certificado|boolean|`true`|mantener true en producción|Sí|SMTP_HOST|ADD `true`|
-|`SMTP_USER`|CONDITIONAL|SECRET|MailService|Usuario SMTP|cadena|vacío|usuario y password juntos|Sí|SMTP_HOST|ADD por canal seguro|
-|`SMTP_PASSWORD`|CONDITIONAL|SECRET|MailService|Clave SMTP|cadena|vacío|usuario y password juntos|Sí|SMTP_HOST|ADD por canal seguro|
-|`SMTP_FROM`|CONDITIONAL|NON_SECRET|MailService|Remitente|email|vacío|email permitido|Sí|SMTP_HOST|ADD según proveedor|
-|`SMTP_FROM_NAME`|OPTIONAL|NON_SECRET|MailService|Nombre remitente|texto|`CRM FiNet`|longitud operativa|Sí|SMTP_HOST|ADD/VERIFY|
-|`SMTP_HELO`|OPTIONAL|NON_SECRET|MailService|Nombre EHLO|hostname|hostname local|hostname aceptado|Sí|SMTP_HOST|ADD solo si proveedor lo requiere|
+| NAME | CONDICIÓN / FORMATO | DEFAULT / CONTROL | ACCIÓN PENDIENTE DEL OPERADOR |
+| --- | --- | --- | --- |
+| MAIL_PROVIDER | smtp / mock / disabled | smtp; usar smtp para correo real | Cargar en el entorno acordado, sin activarlo en esta revisión |
+| SMTP_COMPANIES | JSON de idEmpresa/alias, sin secretos | []; IDs y aliases únicos | Confirmar que el mapa corresponde a las empresas del destino |
+| SMTP_FINET_* / SMTP_CABLE_MAGICO_* | Prefijo exclusivo de cada empresa | Nunca hereda valores globales ni de otra empresa | Cargar cada bloque propio mediante el mecanismo privado del backend |
+| HOST, PORT | Servidor y puerto del prefijo | Host vacío desconfigura; Gmail verificado en 587 | Mantener el servidor confirmado, sin incluir protocolos o claves |
+| SECURE, STARTTLS | TLS implícito / STARTTLS | En 587: false / true | Mantener cifrado obligatorio |
+| REJECT_UNAUTHORIZED | Validación de certificado | true | No desactivar |
+| USER, PASSWORD | Credenciales del prefijo, secretas | Vacías en ejemplos; deben existir juntas | Cargar solo por canal privado, sin comandos compartidos |
+| FROM, FROM_NAME | Remitente autorizado y nombre | Propios del prefijo | Verificar aceptación de mensajes en el alcance aprobado |
+| TIMEOUT_MS, HELO | Tiempo de espera y nombre EHLO | 15000 / crm.local por empresa | Conservar valores válidos |
+| TLS_SERVERNAME, TLS_CA | Overrides opcionales de validación TLS | Sin override | Solo configurar con causa y CA autorizada |
+| ALLOW_INSECURE_LOCAL | Excepción QA loopback sin AUTH | false | Mantener false en producción |
+
+Los nombres completos son, por ejemplo, SMTP_FINET_HOST y SMTP_CABLE_MAGICO_PASSWORD. SMTP_HOST/USER/PASSWORD globales conservan comprobaciones antiguas sin empresa; no sirven como respaldo de un envío con idEmpresa. La autenticación SMTP no demuestra recepción en bandeja. El checker permite verificar sin DATA; --send-test-to requiere destinatario y envío autorizados.
 
 ## Facturacion.cl
 
-|NAME|REQUIRED / OPTIONAL|SECRET / NON_SECRET|CONSUMER|PURPOSE|FORMAT|DEFAULT|VALIDATION|NEEDED_AT_STARTUP|FEATURE_FLAG_RELATION|RAILWAY_ACTION|
-|---|---|---|---|---|---|---|---|---|---|---|
-|`FACTURACION_CL_INTEGRATION_ENABLED`|REQUIRED para RC|NON_SECRET|FacturacionClConfigService y validador|Gate de integración|`true`/`false`|`false`|el validador de producción rechaza `true` mientras falta contrato|Sí|flag principal|ADD `false`|
-|`FACTURACION_CL_COMPANIES`|OPTIONAL|NON_SECRET|FacturacionClConfigService|Mapa multiempresa sin credenciales|JSON `[{idEmpresa,alias,environment,enabled}]`|`[]`|keys exactas, IDs/alias únicos, ambiente sandbox/production|Sí|Facturacion.cl|ADD `[]` o filas con `enabled:false`|
+Estado: código compatible con ambos ambientes preparado y probado localmente; emisión/entrega productivas desactivadas. Los accesos que el usuario declara productivos devolvieron error sin token en el diagnóstico de autenticación; no se acredita aún el emisor. Esta preparación no aplica migraciones ni activa Railway.
 
-No se definen usuario, RUT, clave, token, URL ni formato de DTE en variables porque faltan onboarding y contrato técnico específicos del proyecto. Inventar sus nombres daría una falsa garantía de integración.
+| NAME | CONDICIÓN / CLASIFICACIÓN | FORMATO Y CONTROL | DEFAULT / ACCIÓN |
+| --- | --- | --- | --- |
+| FACTURACION_CL_INTEGRATION_ENABLED | Gate global, no secreto | true/false | false; conservar desactivado durante el alta |
+| FACTURACION_CL_PRODUCTION_ENABLED | Opt-in adicional productivo, no secreto | true/false | false; no es certificación del proveedor |
+| FACTURACION_CL_COMPANIES | Mapa, sin secretos | [{idEmpresa,alias,environment,enabled}]; sandbox/production, IDs/aliases únicos | []; o filas deshabilitadas del ambiente correcto |
+| FACTURACION_CL_PROFILES | Perfil privado confirmado por empresa | [{idEmpresa,approved:true,issuerRut,defaultDocumentType,receipt,invoice?}] | []; no adivinar tipo DTE, indicador de servicio ni folios |
+| FACTURACION_CL_FINET_PRODUCTION_CREDENTIALS | Secreto API FiNet | JSON con usuario/rut/clave; emisor coincidente y RUT válido | Solo backend privado; sin fallback a sandbox u otra empresa |
+| FACTURACION_CL_CABLE_MAGICO_PRODUCTION_CREDENTIALS | Secreto API Cable Mágico | Mismo contrato, identidad propia | Solo backend privado; sin fallback |
+| FACTURACION_CL_FINET_SANDBOX_CREDENTIALS / FACTURACION_CL_CABLE_MAGICO_SANDBOX_CREDENTIALS | Secretos de pruebas | Solo para empresa configurada sandbox | No introducir credenciales productivas aquí |
+| FACTURACION_CL_DELIVERY_ENABLED | Gate independiente del correo de DTE | true/false | false; exige SMTP propio para entregar |
+| FACTURACION_CL_PRODUCTION_PREFLIGHT_ENABLED | Solo herramienta de login/versión | true explícito para ejecutar | false; no es gate de emisión ni debe usarse para activarla |
+| FACTURACION_CL_PRODUCTION_PREFLIGHT_COMPANIES | Mapa independiente del verificador | [{idEmpresa,alias}] | []; no sustituye al mapa runtime |
+
+Para BOLETA, receipt exige tipoDte 39/41, encoding latin1/utf8 y serviceIndicator 1/2/3, según confirmación del responsable. El código usa folio automático del proveedor. Si se habilitan FACTURA 33/34, invoice necesita rango exclusivo folioFrom/folioTo; 33 requiere vatRate positivo y 34 no acepta ese campo. No se inventan valores para completar un perfil.
+
+Antes de activar producción se requiere revisión del esquema y la migración 20261022010000_i3_tax_production_preparation, que conserva la unicidad del pago y separa folios por empresa/ambiente. Solo se ensayó sobre PostgreSQL temporal. Un trabajo ya persistido nunca cambia de ambiente para reemitirse; los resultados inciertos requieren conciliación. El procedimiento y los datos pendientes figuran en i3-production-deployment-readiness.md y el checkpoint de Facturación.cl.
+
+No se requiere modificar docker-compose.railway.yml para documentar estos nombres. Su carga en cualquier entorno real exige la configuración privada apropiada y el flujo de publicación/despliegue acordado; no se realiza en esta etapa. Las credenciales de acceso web no se presentan automáticamente como un bloque API válido. La etiqueta de ambiente tampoco acredita autenticación o identidad fiscal.
 
 ## Frontend y herramientas fuera del runtime backend
 

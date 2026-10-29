@@ -432,7 +432,8 @@ export class ProspectsService {
     let emailDelivery: MailDeliveryResult | { status: 'failed' };
 
     try {
-      emailDelivery = await this.mailService.sendQuote({
+      emailDelivery = prospect.idEmpresa == null ? { status: 'not_configured' } : await this.mailService.sendQuote({
+        idEmpresa: prospect.idEmpresa,
         to: prospect.email,
         prospectName: prospect.nombreCompleto ?? 'Cliente',
         companyName: updatedQuote.prospecto?.empresa?.nombre ?? 'FiNet',
