@@ -71,13 +71,15 @@ export function ProspectWorkflowPanel({
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(pendingContract);
   const planOptions = plans.filter((plan) =>
-    plan.activo !== false && (availablePlanIds === null || availablePlanIds.includes(plan.idPlan)),
+    plan.activo !== false && plan.idEmpresa === prospect.empresa?.idEmpresa && availablePlanIds?.includes(plan.idPlan),
   );
+  const quotedPlanIds = new Set((prospect.cotizaciones ?? []).filter(quote => quote.fechaEnvio).map(quote => quote.idPlan));
+  const contractPlanOptions = planOptions.filter(plan => quotedPlanIds.has(plan.idPlan));
 
   function planOptionLabel(plan: Plan) {
     return `${plan.nombreComercial} - ${plan.empresa?.nombre ?? 'Sin empresa'}`;
   }
-  const isContractConfirmationReady = Boolean(contractPlanId && isQuoted && !isFinal);
+  const isContractConfirmationReady = Boolean(contractPlanOptions.some(plan => plan.idPlan === Number(contractPlanId)) && isQuoted && !isWorkflowLocked);
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
     setStatus('');
@@ -270,7 +272,7 @@ export function ProspectWorkflowPanel({
                 Plan aceptado
                 <select value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>
                   <option value="">Seleccionar plan</option>
-                  {planOptions.map((plan) => (
+                  {contractPlanOptions.map((plan) => (
                     <option key={plan.idPlan} value={plan.idPlan}>
                       {planOptionLabel(plan)}
                     </option>

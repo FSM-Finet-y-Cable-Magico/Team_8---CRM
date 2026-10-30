@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-29",
+  "baseSHA": "a8d2598151c988ef8f4f4a09977fe36167d79f62",
+  "branch": "docs/i4-p0-07-cierre-entrega",
+  "environment": "PostgreSQL QA nuevo y desechable, proveedores HTTP loopback, datos sinteticos",
+  "backend": {
+    "name": "backend-tests",
+    "exitCode": 0,
+    "error": null,
+    "passed": 1277,
+    "failed": 0,
+    "skipped": 8,
+    "suites": 81,
+    "failedSuites": []
+  },
+  "directed": {
+    "name": "directed",
+    "exitCode": 0,
+    "error": null,
+    "passed": 586,
+    "failed": 0,
+    "skipped": 1,
+    "suites": 32,
+    "failedSuites": []
+  },
+  "frontend": {
+    "passed": 54,
+    "failed": 0
+  },
+  "tools": {
+    "passed": 36,
+    "failed": 0
+  },
+  "validation": [
+    {
+      "name": "backend-build",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-tsc",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-vite",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "backend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-generate",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-validate",
+      "exitCode": 0,
+      "error": null
+    }
+  ],
+  "qa": [
+    {
+      "name": "installation",
+      "runId": "ee576758-db37-4ef7-b121-a500abc4cb39",
+      "cleanup": true,
+      "localEvidence": "run-ee576758-db37-4ef7-b121-a500abc4cb39.json",
+      "postgres": "postgres (PostgreSQL) 18.6",
+      "cases": [
+        {
+          "name": "01_comuna_present_accepted",
+          "status": "PASS"
+        },
+        {
+          "name": "02_missing_comuna_no_tracking",
+          "status": "PASS"
+        },
+        {
+          "name": "03_authorized_missing_comuna_without_signed_contract_changes",
+          "status": "PASS"
+        },
+        {
+          "name": "04_two_contracts_distinct_correlations",
+          "status": "PASS"
+        },
+        {
+          "name": "05_identical_retry_immutable_snapshot",
+          "status": "PASS"
+        },
+        {
+          "name": "06_incompatible_request_409_preserved",
+          "status": "PASS"
+        },
+        {
+          "name": "07_pending_detail_and_closure_no_500",
+          "status": "PASS"
+        },
+        {
+          "name": "08_simulated_closures_activate_g8",
+          "status": "PASS"
+        },
+        {
+          "name": "09_g1_correct_service_company_contract_and_distinct_equipment",
+          "status": "PASS"
+        },
+        {
+          "name": "10_recovery_conflicts_preserve_confirmed_evidence",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "coverage",
+      "runId": "c47aa45c-96bc-4599-80b3-7644f037b54d",
+      "cleanup": true,
+      "localEvidence": "run-c47aa45c-96bc-4599-80b3-7644f037b54d.json",
+      "postgres": "postgres (PostgreSQL) 18.6",
+      "cases": [
+        {
+          "name": "company_coverage_and_isolation",
+          "status": "PASS"
+        },
+        {
+          "name": "reject_without_quote_inactive_and_foreign_plan",
+          "status": "PASS"
+        },
+        {
+          "name": "quote_pdf_and_persisted_plan_after_new_login",
+          "status": "PASS"
+        },
+        {
+          "name": "concurrent_confirmation_single_pending_contract",
+          "status": "PASS"
+        },
+        {
+          "name": "outside_coverage_rejected_and_location_updates",
+          "status": "PASS"
+        },
+        {
+          "name": "lost_prospect_rejected",
+          "status": "PASS"
+        },
+        {
+          "name": "zones_prices_and_manual_principal_preserved",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "pdf",
+      "runId": "cab416bc-2eae-42b9-926b-b8e3f85571b5",
+      "cleanup": true,
+      "localEvidence": "pdf-regression-cab416bc-2eae-42b9-926b-b8e3f85571b5.json",
+      "postgres": "PostgreSQL 18 (harness)",
+      "cases": [
+        {
+          "name": "pool_1",
+          "status": "PASS"
+        },
+        {
+          "name": "pool_5",
+          "status": "PASS"
+        },
+        {
+          "name": "consecutive_versions",
+          "status": "PASS"
+        },
+        {
+          "name": "concurrent_independent_connections",
+          "status": "PASS"
+        },
+        {
+          "name": "partial_file_write_failure",
+          "status": "PASS"
+        },
+        {
+          "name": "document_insert_rollback",
+          "status": "PASS"
+        },
+        {
+          "name": "audit_insert_rollback",
+          "status": "PASS"
+        },
+        {
+          "name": "versions_audit_and_historical_download",
+          "status": "PASS"
+        },
+        {
+          "name": "unauthorized_company_no_writes",
+          "status": "PASS"
+        }
+      ]
+    }
+  ],
+  "visualValidationExecutedThisRun": false,
+  "productionWrites": 0,
+  "realProviderCalls": 0,
+  "RAILWAY_USED": false,
+  "ACADEMIC_STATUS": "ACADEMIC_CONDITIONAL",
+  "RELEASE_READY": false
+}

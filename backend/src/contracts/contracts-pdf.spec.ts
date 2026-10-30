@@ -26,17 +26,37 @@ function setup() {
   };
   let latest: any = { version: 3, idContratoDigital: 10, urlDocumento: 'generated/contracts/contrato-87654321-v3.pdf' };
   const digital = {
-    findFirst: jest.fn().mockImplementation(async () => latest),
+    findFirst: jest.fn().mockImplementation(async ({ where }) => where.urlDocumento && where.urlDocumento !== latest.urlDocumento ? null : latest),
     create: jest.fn().mockImplementation(async ({ data }) => { latest = { idContratoDigital: 11, ...data }; return latest; }),
   };
+  const tx = {
+    empresa: { findUnique: jest.fn().mockResolvedValue({ nombre: 'FiNet QA' }) },
+    contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
+    plan: { findUnique: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
+    planZonaPrecio: { findFirst: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
+    contratoDigital: digital, $queryRaw: jest.fn(),
+  };
   const prisma = {
+    empresa: { findUnique: jest.fn().mockResolvedValue({ nombre: 'FiNet QA' }) },
     contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
     plan: { findUnique: jest.fn().mockResolvedValue({ precioMensual: '15990' }) }, contratoDigital: digital,
-    $transaction: jest.fn().mockImplementation(async (callback) => callback({ contratoDigital: digital, $queryRaw: jest.fn() })),
+    $transaction: jest.fn().mockImplementation(async (callback) => {
+      const previous = latest;
+      try { return await callback(tx); } catch (error) { latest = previous; throw error; }
+    }),
   };
-  const service = new ContractsService(prisma as never, { record: jest.fn() } as never, {} as never);
+  const audit = { record: jest.fn() };
+  const service = new ContractsService(prisma as never, audit as never, {} as never);
   const render = () => service['renderDigitalContract'](contract as never, 4);
-  return { contract, prisma, service, render };
+  return { contract, prisma, tx, audit, service, render };
+}
+
+function mockFiles() {
+  jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined);
+  const writes = jest.fn().mockResolvedValue(undefined), closes = jest.fn().mockResolvedValue(undefined);
+  const opens = jest.spyOn(fsPromises, 'open').mockResolvedValue({ writeFile: writes, close: closes } as never);
+  const removes = jest.spyOn(fsPromises, 'unlink').mockResolvedValue(undefined);
+  return { writes, closes, opens, removes };
 }
 
 // Extract text from the real PDFKit content streams (WinAnsi standard fonts), not mocked render calls.
@@ -53,6 +73,21 @@ function pdfText(buffer: Buffer) {
 
 describe('Contenido y conservación de contratos PDF', () => {
   afterEach(() => jest.restoreAllMocks());
+
+  it.each([['Cable Magico QA', 'FiNet QA'], ['FiNet QA', 'Cable Magico QA']])(
+    'identifica la empresa contractual %s aunque la identidad compartida pertenezca a %s', async (contractCompany, mainCompany) => {
+      const ctx = setup(); const files = mockFiles();
+      ctx.contract.idEmpresa = contractCompany === 'Cable Magico QA' ? 2 : 1;
+      ctx.tx.empresa.findUnique.mockResolvedValue({ nombre: contractCompany });
+      ctx.contract.cliente.empresa.nombre = mainCompany;
+      await ctx.service.generateDigitalContract(ctx.contract.idContrato, { ...user, idEmpresa: ctx.contract.idEmpresa });
+      expect(ctx.tx.empresa.findUnique).toHaveBeenCalledWith({ where: { idEmpresa: ctx.contract.idEmpresa }, select: { nombre: true } });
+      expect(ctx.prisma.empresa.findUnique).not.toHaveBeenCalled();
+      const content = pdfText(files.writes.mock.calls[0][0] as Buffer);
+      expect(content).toContain(`Empresa: ${contractCompany}`);
+      expect(content).not.toContain(`Empresa: ${mainCompany}`);
+    },
+  );
 
   it('genera un PDF legible con etiquetas españolas sin identificadores ni payloads', async () => {
     const buffer = await setup().render();
@@ -113,16 +148,72 @@ describe('Contenido y conservación de contratos PDF', () => {
 
   it('crea nuevas versiones y hashes sin escribir ni regenerar versiones previas', async () => {
     const ctx = setup();
-    jest.spyOn(fsPromises, 'mkdir').mockResolvedValue(undefined);
-    const writes = jest.spyOn(fsPromises, 'writeFile').mockResolvedValue();
+    const { writes, opens, closes } = mockFiles();
     const first = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user);
     const second = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user);
     expect([first.version, second.version]).toEqual([4, 5]);
-    expect(writes.mock.calls.map(call => String(call[0]))).toEqual([
-      expect.stringContaining('contrato-87654321-v4.pdf'), expect.stringContaining('contrato-87654321-v5.pdf'),
+    expect(opens.mock.calls.map(call => String(call[0]))).toEqual([
+      expect.stringMatching(/contrato-87654321-v4-[\da-f-]+\.pdf$/), expect.stringMatching(/contrato-87654321-v5-[\da-f-]+\.pdf$/),
     ]);
-    expect(first.hashDocumento).toBe(createHash('sha256').update(writes.mock.calls[0][1] as Buffer).digest('hex'));
-    expect(pdfText(writes.mock.calls[1][1] as Buffer)).toContain('Versión: 5');
+    expect(opens.mock.calls.every(call => call[1] === 'wx')).toBe(true);
+    expect(closes).toHaveBeenCalledTimes(2);
+    expect(first.hashDocumento).toBe(createHash('sha256').update(writes.mock.calls[0][0] as Buffer).digest('hex'));
+    expect(pdfText(writes.mock.calls[1][0] as Buffer)).toContain('Versión: 5');
+  });
+
+  it.each([null, 7])('usa la transacción para precio y auditoría (zona %s)', async zone => {
+    const ctx = setup(); mockFiles(); ctx.contract.idZonaPago = zone as never;
+    await ctx.service.generateDigitalContract(ctx.contract.idContrato, user);
+    expect(ctx.prisma.plan.findUnique).not.toHaveBeenCalled();
+    expect(zone ? ctx.tx.planZonaPrecio.findFirst : ctx.tx.plan.findUnique).toHaveBeenCalled();
+    expect(ctx.tx.contrato.findUnique).toHaveBeenCalledTimes(1);
+    expect(ctx.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'GENERAR_CONTRATO_DIGITAL' }), ctx.tx);
+  });
+
+  it('rechaza empresa ajena antes de lock, archivo y auditoría', async () => {
+    const ctx = setup(); const files = mockFiles();
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, { ...user, idEmpresa: 2 })).rejects.toThrow('empresa');
+    expect(ctx.prisma.$transaction).not.toHaveBeenCalled(); expect(files.opens).not.toHaveBeenCalled(); expect(ctx.audit.record).not.toHaveBeenCalled();
+  });
+
+  it('cierra y elimina únicamente el archivo parcial propio cuando falla la escritura', async () => {
+    const ctx = setup(); const files = mockFiles(); const failure = new Error('disk failure');
+    files.writes.mockRejectedValue(failure);
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
+    expect(files.closes).toHaveBeenCalledTimes(1); expect(ctx.tx.contratoDigital.create).not.toHaveBeenCalled();
+    expect(files.removes).toHaveBeenCalledWith(files.opens.mock.calls[0][0]);
+  });
+
+  it.each(['persistence', 'audit'])('limpia el archivo tras rollback de %s sin consumir versión', async target => {
+    const ctx = setup(); const files = mockFiles(); const failure = new Error(target);
+    if (target === 'persistence') ctx.tx.contratoDigital.create.mockRejectedValueOnce(failure);
+    else ctx.audit.record.mockRejectedValueOnce(failure);
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
+    expect(files.removes).toHaveBeenCalledWith(files.opens.mock.calls[0][0]);
+    const next = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user);
+    expect(next.version).toBe(4);expect(files.opens.mock.calls[0][0]).not.toBe(files.opens.mock.calls[1][0]);
+  });
+
+  it('no elimina un archivo ajeno si falla su apertura exclusiva', async () => {
+    const ctx = setup(); const files = mockFiles(); files.opens.mockRejectedValue(Object.assign(new Error('exists'), { code: 'EEXIST' }));
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toThrow('exists');
+    expect(files.removes).not.toHaveBeenCalled();
+  });
+
+  it('conserva el PDF si la confirmación del commit falla pero existe su registro', async () => {
+    const ctx = setup(); const files = mockFiles(); const failure = new Error('commit acknowledgement lost');
+    ctx.prisma.$transaction.mockImplementation(async callback => { await callback(ctx.tx); throw failure; });
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
+    expect(files.removes).not.toHaveBeenCalled();
+    expect(ctx.prisma.contratoDigital.findFirst).toHaveBeenLastCalledWith({where:{urlDocumento:expect.any(String)},select:{idContratoDigital:true}});
+  });
+
+  it('no interpreta una lectura sin fila como rollback cuando el commit sigue incierto', async () => {
+    const ctx = setup(); const files = mockFiles(); const failure = new Error('commit result unknown');
+    ctx.prisma.$transaction.mockImplementation(async callback => { await callback(ctx.tx); throw failure; });
+    ctx.prisma.contratoDigital.findFirst.mockResolvedValue(null);
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
+    expect(files.removes).not.toHaveBeenCalled();
   });
 
   it('descarga los bytes existentes de una versión histórica sin volver a renderizar', async () => {

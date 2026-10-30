@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
@@ -42,7 +42,14 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   autoGeocode?: boolean;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
-  const [result, setResult] = useState<CoverageResult | null>(null);
+  const [coverage, setResult] = useState<(CoverageResult & { companyId: number }) | null>(null);
+  const result = coverage?.companyId === idEmpresa ? coverage : null;
+  const [zones, setZones] = useState<Array<CoverageZone & { idEmpresa: number; activo: boolean; fechaInicio?: string | null; fechaFin?: string | null }>>([]);
+  const [zonesError, setZonesError] = useState('');
+  const [mapWarning, setMapWarning] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const visibleZones = useMemo(() => zones.filter(zone => zone.idEmpresa === idEmpresa && zone.activo === true && zone.poligonoGeojson
+    && (!zone.fechaInicio || zone.fechaInicio.slice(0, 10) <= today) && (!zone.fechaFin || zone.fechaFin.slice(0, 10) >= today)), [zones, idEmpresa, today]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
@@ -77,10 +84,13 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   useEffect(() => {
     if (!container.current) return;
     const instance = L.map(container.current, { scrollWheelZoom: false }).setView([-33.57, -70.61], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(instance);
+    const tileTimer = window.setTimeout(() => setMapWarning('La cartografía base no responde. Revisa conectividad o permisos CSP; puedes usar las zonas y coordenadas manuales.'), 8000);
+    tiles.on('tileerror', () => setMapWarning('No se pudo cargar la cartografía OpenStreetMap. Revisa conectividad, bloqueos del navegador o CSP. Las coordenadas manuales siguen disponibles.'));
+    tiles.on('tileload', () => { window.clearTimeout(tileTimer); setMapWarning(''); });
     map.current = instance;
     layers.current = L.layerGroup().addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
@@ -90,8 +100,18 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     });
     const resize = new ResizeObserver(() => instance.invalidateSize());
     resize.observe(container.current);
-    return () => { resize.disconnect(); instance.remove(); map.current = null; layers.current = null; };
+    return () => { window.clearTimeout(tileTimer); tiles.off(); resize.disconnect(); instance.remove(); map.current = null; layers.current = null; };
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setZones([]); setZonesError('');
+    if (!idEmpresa) return;
+    void api.get('/coverage/zones', { params: { idEmpresa }, signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted) setZones(data); })
+      .catch(() => { if (!controller.signal.aborted) setZonesError('No se pudieron consultar las zonas comerciales de esta empresa.'); });
+    return () => controller.abort();
+  }, [idEmpresa, retry]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,13 +130,14 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     resultListener.current?.(null);
     setError('');
     setBusy(false);
-    if (!value || !connection || disabled) return;
+    // Reading availability remains valid even when moving the pin is forbidden.
+    if (!value || !connection) return;
     setBusy(true);
     const timer = window.setTimeout(() => {
       void api.post<CoverageResult>('/coverage/check', { idEmpresa, ...value }, { signal: controller.signal })
         .then(({ data }) => {
           if (!controller.signal.aborted) {
-            setResult(data);
+            setResult({ ...data, companyId: idEmpresa });
             resultListener.current?.(data);
           }
         })
@@ -124,7 +145,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
         .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     }, 350);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [idEmpresa, value?.latitud, value?.longitud, connection, disabled]);
+  }, [idEmpresa, value?.latitud, value?.longitud, connection]);
 
   useEffect(() => {
     setCoordinates({ latitud: value ? String(value.latitud) : '', longitud: value ? String(value.longitud) : '' });
@@ -136,22 +157,33 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     group.clearLayers();
     const drawZone = (zone: CoverageZone, options: L.PolylineOptions, label: string) => {
       const positions = zone.poligonoGeojson.coordinates[0].map(position => [position[1], position[0]] as L.LatLngTuple);
-      L.polygon(positions, options).bindTooltip(`${label}: ${zone.nombreZona}`).addTo(group);
+      const tooltip = document.createElement('span');
+      tooltip.textContent = `${label}: ${zone.nombreZona}`;
+      L.polygon(positions, options).bindTooltip(tooltip).addTo(group);
     };
+    for (const zone of visibleZones) drawZone(zone, { color: '#567873', weight: 2, fillOpacity: 0.05,
+      dashArray: zone.tipoZona === 'MICROZONA_COMERCIAL' ? '8 5' : undefined }, 'Zona disponible');
     if (result?.zona) drawZone(result.zona, { color: '#315ea8', weight: 3, fillOpacity: 0.08 }, 'Cobertura general');
     if (result?.microzona) drawZone(result.microzona, { color: '#9a5b13', weight: 3, dashArray: '8 5', fillOpacity: 0.14 }, 'Microzona comercial');
     if (value) {
       L.circleMarker([value.latitud, value.longitud], { radius: 9, color: '#2454b8', fillOpacity: 0.9 })
         .bindTooltip('Domicilio seleccionado').addTo(group);
-      const instance = map.current;
-      instance?.setView([value.latitud, value.longitud], Math.max(instance.getZoom(), 15));
     }
     for (const box of result?.cajas ?? []) {
       const label = document.createElement('span');
       label.textContent = `${box.nombre} - ${box.puertosLibres} puertos libres`;
       L.circleMarker([box.latitud, box.longitud], { radius: 7, color: '#137a4c', fillOpacity: 0.8 }).bindTooltip(label).addTo(group);
     }
-  }, [value?.latitud, value?.longitud, result]);
+  }, [value?.latitud, value?.longitud, result, visibleZones]);
+
+  useEffect(() => {
+    if (value) map.current?.setView([value.latitud, value.longitud], Math.max(map.current.getZoom(), 15));
+  }, [value?.latitud, value?.longitud]);
+
+  function showZones() {
+    const points = visibleZones.flatMap(zone => zone.poligonoGeojson.coordinates[0].map(position => [position[1], position[0]] as L.LatLngTuple));
+    if (points.length) map.current?.fitBounds(L.latLngBounds(points), { padding: [30, 30], maxZoom: 15 });
+  }
 
   function applyCoordinates() {
     const latitud = Number(coordinates.latitud);
@@ -214,6 +246,10 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     <p>Marca o corrige en el mapa el domicilio exacto de {direccion.trim() || 'la direccion ingresada'}.</p>
     <p className="coverage-note">Pin azul: domicilio. Borde continuo: cobertura general. Borde segmentado: microzona. La seleccion manual siempre permanece disponible.</p>
     <div ref={container} className="coverage-map" aria-label="Mapa de ubicacion del domicilio" />
+    {mapWarning && <p className="coverage-map-warning" role="status">{mapWarning}</p>}
+    <button type="button" className="secondary compact" disabled={!visibleZones.length} onClick={showZones}>Ver zonas disponibles</button>
+    {zonesError && <p role="alert">{zonesError}</p>}
+    {visibleZones.length > 0 && <p className="coverage-note">Zonas de esta empresa: {visibleZones.map(zone => zone.nombreZona).join(', ')}. Centrar el mapa no cambia el domicilio.</p>}
     <small>Geocodificación: <a href="https://nominatim.org/" target="_blank" rel="noreferrer">Nominatim</a> / © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.</small>
     {geocodeMessage && <p role="status">{geocodeMessage}</p>}
     <details><summary>Ingresar coordenadas</summary>
@@ -235,7 +271,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       {error && <p role="alert">{error}</p>}
     </div>
     <div className="coverage-actions">
-      <button type="button" className="secondary compact" disabled={disabled || busy} onClick={() => setRetry(retry + 1)}>Volver a consultar</button>
+      <button type="button" className="secondary compact" disabled={busy} onClick={() => setRetry(retry + 1)}>Volver a consultar</button>
       {value && <button type="button" className="secondary compact" disabled={disabled} onClick={() => selectLocation(null)}>Quitar ubicacion</button>}
     </div>
   </section>;

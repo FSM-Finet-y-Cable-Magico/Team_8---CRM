@@ -456,6 +456,7 @@ describe('ProspectsService', () => {
       estado: 'Pendiente firma contrato',
     };
     const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id_prospecto: 20 }]),
       cliente: {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
@@ -501,6 +502,10 @@ describe('ProspectsService', () => {
       {} as CoverageDomainService,
     );
 
+    Object.assign(prospect, { latitud: -33.475, longitud: -70.675 });
+    Object.assign(transaction.prospecto, { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect) });
+    Object.assign(transaction, { plan: prisma.plan, cotizacion: prisma.cotizacion });
+    Object.assign(service['coverageService'], { plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 8 }] }) });
     const result = await service.contractPlan(
       20,
       {

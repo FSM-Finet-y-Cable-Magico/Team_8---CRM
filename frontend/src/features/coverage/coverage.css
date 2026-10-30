@@ -3,6 +3,7 @@
 .coverage-heading, .coverage-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .coverage-heading a, .coverage-note { font-size: 12px; color: #53647e; }
 .coverage-map { height: 290px; width: 100%; border-radius: 10px; z-index: 0; }
+.coverage-map-warning { padding: 10px 12px; border-left: 3px solid #b57513; background: #fff8e9; color: #68470b; font-size: 13px; }
 .coverage-map .leaflet-control-zoom a { color: #334155; text-decoration: none; }
 .coverage-map .leaflet-control-attribution { font-size: 10px; }
 .coverage-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }

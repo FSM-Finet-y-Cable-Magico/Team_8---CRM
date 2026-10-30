@@ -14,6 +14,12 @@ function response(status: number, body: object) {
 
 describe('Etapa 3 - adaptador HTTP G3', () => {
   afterEach(() => jest.restoreAllMocks());
+  it('reserva conflicto request_id al POST y no inventa esa causa en GET', async () => {
+    jest.spyOn(global, 'fetch').mockImplementation(async () => response(409, { success: false }));
+    const client = setup();
+    await expect(client.createInstallation({} as never)).rejects.toMatchObject({ code: 'G3_REQUEST_ID_CONFLICTO', status: 409 });
+    await expect(client.getWorkOrderClosure('901', 2)).rejects.toMatchObject({ code: 'G3_CONFLICTO_CONSULTA', status: 409 });
+  });
   it('envia X-API-KEY solo desde backend y conserva snake_case', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(response(201, { id_ot: 1, estado: 'PENDIENTE' }));
     const client = setup(); await client.createInstallation({ request_id: 'r', trace_id: 't', id_empresa: 1, id_prospecto: 4, id_contrato: 2, id_plan: 3, persona: { rut: '12345678-5', nombre_completo: 'Demo', telefono: '+56912345678' }, direccion: { direccion_completa: 'Calle 1', comuna: 'Valparaiso' } });
@@ -109,7 +115,7 @@ describe('Etapa 3 - adaptador HTTP G3', () => {
     [401, 'G3_NO_AUTORIZADO', false],
     [403, 'G3_SCOPE_EMPRESA_INVALIDO', false],
     [404, 'G3_OT_NO_ENCONTRADA', false],
-    [409, 'G3_REQUEST_ID_CONFLICTO', false],
+    [409, 'G3_CONFLICTO_CONSULTA', false],
     [429, 'G3_RATE_LIMIT', true],
     [500, 'G3_ERROR_SERVIDOR', true],
   ])('mapea HTTP %s sin exponer respuesta sensible', async (status, code, retryable) => {
