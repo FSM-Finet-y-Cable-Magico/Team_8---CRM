@@ -4,12 +4,16 @@ import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { AuthUser } from '../common/auth.types';
+import { Prisma } from '@prisma/client';
 
 const user: AuthUser = { idUsuario: 1, idEmpresa: 1, email: 'qa@example.invalid', nombreCompleto: 'QA', roles: ['Comercial'] };
 function setup() {
   const prospect = { idProspecto: 1, idEmpresa: 1, idCliente: null, rut: '99000001-8', nombreCompleto: 'Prospecto QA', telefono: '+56900000001',
     estadoPipeline: 'Cotizacion Enviada', latitud: -33.475, longitud: -70.675, contratos: [], clasificacionComercial: 'PROSPECTO' };
-  const tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn(), contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
+  const tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn(),
+    plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
+    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
+    contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
   const prisma = { prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
@@ -19,6 +23,29 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it.each([
+    { latitud: -35 }, { direccion: 'Otra direccion' }, { estadoPipeline: 'Perdido' },
+    { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 },
+  ])('rechaza datos que cambiaron antes del lock: %j', async change => {
+    const c = setup();
+    c.tx.prospecto.findUniqueOrThrow.mockResolvedValue({ ...c.prospect, ...change } as typeof c.prospect);
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled(); expect(c.tx.contrato.update).not.toHaveBeenCalled();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled(); expect(c.audit.record).not.toHaveBeenCalled();
+  });
+  it.each(['plan', 'cotizacion'])('revalida %s al adquirir el lock', async kind => {
+    const c = setup();
+    if (kind === 'plan') c.tx.plan.findUnique.mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: false });
+    else c.tx.cotizacion.findFirst.mockResolvedValue(null);
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled(); expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+  });
+  it('no sobrescribe una firma concurrente y devuelve conflicto controlado', async () => {
+    const c = setup(); c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato' });
+    c.tx.contrato.update.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('conditional update lost', { code: 'P2025', clientVersion: '5.22.0' }));
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled(); expect(c.audit.record).not.toHaveBeenCalled();
+  });
   it('bloquea ubicacion contratada bajo el lock del prospecto sin escribir', async () => {
     const c = setup(); c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, estado: 'Firmado' });
     await expect(c.service.updateLocation(1, { ubicacion: { latitud: -33, longitud: -70 }, comuna: 'Otra' }, user)).rejects.toThrow('revision contractual');
@@ -57,7 +84,7 @@ describe('cotizacion persistida y confirmacion segura', () => {
   );
   it('mantiene lock y reutiliza el contrato pendiente sin crear otro', async () => {
     const c = setup();
-    c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' });
+    c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato' });
     c.tx.contrato.update.mockResolvedValue({ idContrato: 10 });
     await c.service.contractPlan(1, { planId: 1 }, user);
     expect(c.tx.$queryRaw).toHaveBeenCalledWith(expect.any(Array), 1);
@@ -65,8 +92,26 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(c.tx.contrato.create).not.toHaveBeenCalled();expect(c.tx.contrato.update).toHaveBeenCalledTimes(1);
   });
   it('rechaza duplicar un contrato ya firmado', async () => {
-    const c = setup();c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, estado: 'Firmado' });
+    const c = setup();c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Firmado' });
     await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toThrow('duplicar');
     expect(c.tx.contrato.create).not.toHaveBeenCalled();expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+  });
+  it('convierte el contrato ocupado por firma en conflicto sin esperar un deadlock', async () => {
+    const c = setup();
+    c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato' });
+    c.tx.$queryRaw.mockResolvedValueOnce([]).mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('lock not available', {
+      code: 'P2010', clientVersion: '5.22.0', meta: { code: '55P03' },
+    }));
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.$queryRaw.mock.calls[1][0].join('')).toContain('FOR UPDATE NOWAIT');
+    expect(c.tx.contrato.update).not.toHaveBeenCalled(); expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+    expect(c.audit.record).not.toHaveBeenCalled();
+  });
+  it('relee el contrato bajo lock y conserva una firma confirmada entre consultas', async () => {
+    const c = setup();
+    c.tx.contrato.findFirst.mockResolvedValueOnce({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato' })
+      .mockResolvedValueOnce({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Firmado' });
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.contrato.update).not.toHaveBeenCalled(); expect(c.tx.prospecto.update).not.toHaveBeenCalled();
   });
 });

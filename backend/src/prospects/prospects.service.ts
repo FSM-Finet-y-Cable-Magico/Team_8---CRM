@@ -597,6 +597,23 @@ export class ProspectsService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Serialize confirmations of the same prospect; a pending contract is reused.
       await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+      const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+      // Coverage was checked outside this transaction. Never use it for a moved
+      // prospect or overwrite a loss/activation committed while acquiring the lock.
+      if (current.idEmpresa !== prospect.idEmpresa || current.idCliente != null
+        || [NOT_FEASIBLE_PIPELINE_STATUS, LOST_PIPELINE_STATUS].includes(current.estadoPipeline ?? '')
+        || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud
+        || current.direccion !== prospect.direccion || current.rut !== prospect.rut
+        || current.nombreCompleto !== prospect.nombreCompleto || current.telefono !== prospect.telefono) {
+        throw new ConflictException('El prospecto cambio durante la confirmacion; vuelve a consultar ubicacion y estado');
+      }
+      const currentPlan = await tx.plan.findUnique({ where: { idPlan: dto.planId } });
+      const currentQuote = await tx.cotizacion.findFirst({
+        where: { idProspecto, idPlan: dto.planId, factibilidadVerificada: true, fechaEnvio: { not: null } },
+      });
+      if (!currentPlan || currentPlan.activo === false || currentPlan.idEmpresa !== current.idEmpresa || !currentQuote) {
+        throw new ConflictException('El plan o la cotizacion cambio durante la confirmacion; vuelve a consultar');
+      }
       const contractData = {
         idCliente: null,
         idProspecto,
@@ -618,7 +635,7 @@ export class ProspectsService {
         ciudadInstalacion: dto.ciudad?.trim() || undefined,
       };
 
-      const existingContract = await tx.contrato.findFirst({
+      let existingContract = await tx.contrato.findFirst({
         where: {
           idProspecto,
           idEmpresa: prospect.idEmpresa,
@@ -626,22 +643,39 @@ export class ProspectsService {
         orderBy: { idContrato: 'desc' },
       });
 
+      if (existingContract) {
+        // Signing locks the contract before updating its prospect. Waiting here
+        // would invert that order and deadlock. Abort safely and let signing finish.
+        try {
+          await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${existingContract.idContrato} FOR UPDATE NOWAIT`;
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' && error.meta?.code === '55P03') {
+            throw new ConflictException('El contrato esta siendo actualizado; vuelve a consultar antes de confirmar');
+          }
+          throw error;
+        }
+        existingContract = await tx.contrato.findFirst({ where: { idContrato: existingContract.idContrato } });
+        if (!existingContract || existingContract.idEmpresa !== current.idEmpresa || existingContract.idProspecto !== idProspecto) {
+          throw new ConflictException('Las relaciones del contrato cambiaron durante la confirmacion');
+        }
+      }
       if (existingContract && ![PENDING_SIGNATURE_STATUS, 'Pendiente'].includes(existingContract.estado ?? '')) {
         throw new ConflictException('El prospecto ya tiene un contrato confirmado; no se puede duplicar');
       }
 
       const contrato = existingContract
         ? await tx.contrato.update({
-            where: { idContrato: existingContract.idContrato },
+            where: { idContrato: existingContract.idContrato, idEmpresa: current.idEmpresa, idProspecto,
+              estado: { in: [PENDING_SIGNATURE_STATUS, 'Pendiente'] } },
             data: contractData,
-          })
+          }).catch((error: unknown) => this.rethrowConcurrentChange(error))
         : await tx.contrato.create({ data: contractData });
 
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
           estadoPipeline: PENDING_SIGNATURE_PIPELINE_STATUS,
-          ...(!prospect.idPlanInteres ? { idPlanInteres: dto.planId } : {}),
+          ...(!current.idPlanInteres ? { idPlanInteres: dto.planId } : {}),
         },
         include: { empresa: true },
       });

@@ -369,6 +369,7 @@ export class ContractsService {
     // Reject unauthorized callers before taking a lock, then refresh under that lock.
     await this.getContractOrThrow(idContrato, currentUser);
     const ownedFile: { fullPath?: string; relativePath?: string } = {};
+    let transactionBodyCompleted = false;
     try {
       return await this.prisma.$transaction(async tx => {
         await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
@@ -410,6 +411,7 @@ export class ContractsService {
           idEntidadAfectada: created.idContratoDigital,
           valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
         }, tx);
+        transactionBodyCompleted = true;
         return created;
       }, { timeout: 20000 });
     } catch (error) {
@@ -419,7 +421,12 @@ export class ContractsService {
           const persisted = await this.prisma.contratoDigital.findFirst({
             where: { urlDocumento: ownedFile.relativePath }, select: { idContratoDigital: true },
           });
-          if (!persisted) await unlink(ownedFile.fullPath);
+          if (!persisted && !transactionBodyCompleted) await unlink(ownedFile.fullPath);
+          else if (!persisted) {
+            // The COMMIT response is uncertain. An immediate empty read does not
+            // prove rollback; retain this attempt's file for explicit inspection.
+            this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+          }
         } catch {
           // No safe DB confirmation or failed unlink: retain for inspection, never delete blindly.
           this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
@@ -578,6 +585,9 @@ export class ContractsService {
   }
 
   private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma) {
+    const company = contract.idEmpresa ? await client.empresa.findUnique({
+      where: { idEmpresa: contract.idEmpresa }, select: { nombre: true },
+    }) : null;
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -636,7 +646,7 @@ export class ContractsService {
     row('Correo electrónico', text(person?.email));
     row('Teléfono', text(person?.telefono, 30));
     section('Condiciones comerciales');
-    row('Empresa', text(person?.empresa?.nombre));
+    row('Empresa', text(company?.nombre));
     row('Plan', text(contract.plan?.nombreComercial));
     row('Velocidad del plan', finite(contract.plan?.velocidadMbps) && contract.plan.velocidadMbps > 0
       ? `${contract.plan.velocidadMbps} Mbps` : null);

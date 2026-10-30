@@ -30,12 +30,14 @@ function setup() {
     create: jest.fn().mockImplementation(async ({ data }) => { latest = { idContratoDigital: 11, ...data }; return latest; }),
   };
   const tx = {
+    empresa: { findUnique: jest.fn().mockResolvedValue({ nombre: 'FiNet QA' }) },
     contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
     plan: { findUnique: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
     planZonaPrecio: { findFirst: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
     contratoDigital: digital, $queryRaw: jest.fn(),
   };
   const prisma = {
+    empresa: { findUnique: jest.fn().mockResolvedValue({ nombre: 'FiNet QA' }) },
     contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
     plan: { findUnique: jest.fn().mockResolvedValue({ precioMensual: '15990' }) }, contratoDigital: digital,
     $transaction: jest.fn().mockImplementation(async (callback) => {
@@ -71,6 +73,21 @@ function pdfText(buffer: Buffer) {
 
 describe('Contenido y conservación de contratos PDF', () => {
   afterEach(() => jest.restoreAllMocks());
+
+  it.each([['Cable Magico QA', 'FiNet QA'], ['FiNet QA', 'Cable Magico QA']])(
+    'identifica la empresa contractual %s aunque la identidad compartida pertenezca a %s', async (contractCompany, mainCompany) => {
+      const ctx = setup(); const files = mockFiles();
+      ctx.contract.idEmpresa = contractCompany === 'Cable Magico QA' ? 2 : 1;
+      ctx.tx.empresa.findUnique.mockResolvedValue({ nombre: contractCompany });
+      ctx.contract.cliente.empresa.nombre = mainCompany;
+      await ctx.service.generateDigitalContract(ctx.contract.idContrato, { ...user, idEmpresa: ctx.contract.idEmpresa });
+      expect(ctx.tx.empresa.findUnique).toHaveBeenCalledWith({ where: { idEmpresa: ctx.contract.idEmpresa }, select: { nombre: true } });
+      expect(ctx.prisma.empresa.findUnique).not.toHaveBeenCalled();
+      const content = pdfText(files.writes.mock.calls[0][0] as Buffer);
+      expect(content).toContain(`Empresa: ${contractCompany}`);
+      expect(content).not.toContain(`Empresa: ${mainCompany}`);
+    },
+  );
 
   it('genera un PDF legible con etiquetas españolas sin identificadores ni payloads', async () => {
     const buffer = await setup().render();
@@ -189,6 +206,14 @@ describe('Contenido y conservación de contratos PDF', () => {
     await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
     expect(files.removes).not.toHaveBeenCalled();
     expect(ctx.prisma.contratoDigital.findFirst).toHaveBeenLastCalledWith({where:{urlDocumento:expect.any(String)},select:{idContratoDigital:true}});
+  });
+
+  it('no interpreta una lectura sin fila como rollback cuando el commit sigue incierto', async () => {
+    const ctx = setup(); const files = mockFiles(); const failure = new Error('commit result unknown');
+    ctx.prisma.$transaction.mockImplementation(async callback => { await callback(ctx.tx); throw failure; });
+    ctx.prisma.contratoDigital.findFirst.mockResolvedValue(null);
+    await expect(ctx.service.generateDigitalContract(ctx.contract.idContrato, user)).rejects.toBe(failure);
+    expect(files.removes).not.toHaveBeenCalled();
   });
 
   it('descarga los bytes existentes de una versión histórica sin volver a renderizar', async () => {
