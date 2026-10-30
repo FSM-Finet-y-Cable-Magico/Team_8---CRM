@@ -1,0 +1,516 @@
+{
+  "date": "2026-10-30",
+  "timezone": "America/Santiago",
+  "pr": 64,
+  "base": "6185c22d8a81897dc9e8878ee89301c2089a91c6",
+  "initialHead": "5b9571a0b1c3bae02bf5dbba8465acae13cdb98c",
+  "testedCodeCommit": "87a263e8fd8933140a809489b566f96439ff1bb5",
+  "note": "Tests ran on the working tree before this commit; source hashes identify the tested content. Documentation-only publication follows.",
+  "sourceSHA256": {
+    "backend/src/contracts/contracts-pdf.spec.ts": "e1e319a7f318080fab12a1e5dd25abcc76d06967113a76a304c0a0ff3d26ae9e",
+    "backend/src/contracts/contracts.service.ts": "fc1c469c927e025725cc441e187739587059615cbd30c6d648c12694b13c9127",
+    "backend/src/prospects/prospects-quote-flow.spec.ts": "95ced0a165b153c83bebd96e423d4a6a78784f0aeb6d11ce5489ac5839346172",
+    "backend/src/prospects/prospects.service.spec.ts": "0f2b9661349323adee18bc6d633d21d755c110647fe77ad034c7d08ff3f881bd",
+    "backend/src/prospects/prospects.service.ts": "2175d34bbf8dc9f1af2df17964d77e449b2e7dcb99ed01bb48cd0bb9a83c8b7a",
+    "scripts/p0-07-contract-concurrency-qa.cjs": "f1b7c2c513fdbb3ecf2cde74c6f40b7b0376bf798e02609b65003e79f7003ccb"
+  },
+  "canonicalSHA256": "52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91",
+  "validation": [
+    {
+      "name": "backend-build",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "backend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "backend-tests",
+      "exitCode": 0,
+      "error": null,
+      "passed": 1372,
+      "failed": 0,
+      "skipped": 9,
+      "suites": 81,
+      "failedSuites": []
+    },
+    {
+      "name": "directed",
+      "exitCode": 0,
+      "error": null,
+      "passed": 1030,
+      "failed": 0,
+      "skipped": 2,
+      "suites": 52,
+      "failedSuites": []
+    },
+    {
+      "name": "frontend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-tests",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-tsc",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-vite",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-generate",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-validate",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-concurrency",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-coverage",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-installation",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-pdf",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-recovery",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-tax",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "regression",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "tools",
+      "exitCode": 0,
+      "error": null
+    }
+  ],
+  "frontend": {
+    "passed": 54,
+    "failed": 0
+  },
+  "tools": {
+    "passed": 82,
+    "failed": 0
+  },
+  "regression": {
+    "passed": 82,
+    "failed": 0
+  },
+  "postgres": {
+    "passed": 54,
+    "failed": 0,
+    "version": "18.6",
+    "runs": [
+      {
+        "name": "qa-tax",
+        "evidenceFile": ".codex-review/tax-qa-290ea045-da41-43ef-b2da-f3547ce4a7d3.json",
+        "evidenceSHA256": "ffa9cb948356e1964dbefc03aac898d99bd69deddea4cb6cd991ba60aae9218d",
+        "status": "PASS",
+        "cases": [
+          {
+            "name": "legacy_rejects_production",
+            "status": "PASS"
+          },
+          {
+            "name": "migration_rollback_preserves_history_and_old_constraint",
+            "status": "PASS"
+          },
+          {
+            "name": "migration_preserves_historical_snapshot",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_canonical_catalog",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_unique_payment_environment_and_folio",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_shared_customer_access_and_financial_integrity",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_concurrent_claim_and_durable_idempotency",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_generated_folio_scoped_to_company_and_environment",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_full_tax_pipeline_fake_transport_both_environments",
+            "status": "PASS"
+          },
+          {
+            "name": "upgrade_agreement_gap_reproduced_without_repair",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_canonical_catalog",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_unique_payment_environment_and_folio",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_shared_customer_access_and_financial_integrity",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_concurrent_claim_and_durable_idempotency",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_generated_folio_scoped_to_company_and_environment",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_full_tax_pipeline_fake_transport_both_environments",
+            "status": "PASS"
+          },
+          {
+            "name": "fresh_agreement_gap_reproduced_without_repair",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": null,
+        "cleanupRuns": [
+          {
+            "cleanup": true
+          },
+          {
+            "cleanup": true
+          }
+        ]
+      },
+      {
+        "name": "qa-pdf",
+        "evidenceFile": "docs/entrega-final/evidencias-qa/pdf-regression-c40cc01b-547b-43b8-baa1-8b0c7381db39.json",
+        "evidenceSHA256": "dfa597c24d38b362a5635e1faa63fcd8445e93fb4536f870a75d0fb497fe49f2",
+        "status": "PASS",
+        "cases": [
+          {
+            "name": "pool_1",
+            "status": "PASS"
+          },
+          {
+            "name": "pool_5",
+            "status": "PASS"
+          },
+          {
+            "name": "consecutive_versions",
+            "status": "PASS"
+          },
+          {
+            "name": "concurrent_independent_connections",
+            "status": "PASS"
+          },
+          {
+            "name": "partial_file_write_failure",
+            "status": "PASS"
+          },
+          {
+            "name": "document_insert_rollback",
+            "status": "PASS"
+          },
+          {
+            "name": "audit_insert_rollback",
+            "status": "PASS"
+          },
+          {
+            "name": "versions_audit_and_historical_download",
+            "status": "PASS"
+          },
+          {
+            "name": "unauthorized_company_no_writes",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": true
+      },
+      {
+        "name": "qa-installation",
+        "evidenceFile": "docs/entrega-final/evidencias-qa/run-45c656d4-7c15-4c48-928d-f6a3f666b706.json",
+        "evidenceSHA256": "f3eb1a22dc7dfbefc006dfea8d85b175bf3a3d102691a1d70e4694ffca17d609",
+        "status": "PASS",
+        "cases": [
+          {
+            "name": "01_comuna_present_accepted",
+            "status": "PASS"
+          },
+          {
+            "name": "02_missing_comuna_no_tracking",
+            "status": "PASS"
+          },
+          {
+            "name": "03_authorized_missing_comuna_without_signed_contract_changes",
+            "status": "PASS"
+          },
+          {
+            "name": "04_two_contracts_distinct_correlations",
+            "status": "PASS"
+          },
+          {
+            "name": "05_identical_retry_immutable_snapshot",
+            "status": "PASS"
+          },
+          {
+            "name": "06_incompatible_request_409_preserved",
+            "status": "PASS"
+          },
+          {
+            "name": "07_pending_detail_and_closure_no_500",
+            "status": "PASS"
+          },
+          {
+            "name": "08_simulated_closures_activate_g8",
+            "status": "PASS"
+          },
+          {
+            "name": "09_g1_correct_service_company_contract_and_distinct_equipment",
+            "status": "PASS"
+          },
+          {
+            "name": "10_recovery_conflicts_preserve_confirmed_evidence",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": true,
+        "rows": {
+          "customers": 3,
+          "services": 4,
+          "events": 2,
+          "payments": 0
+        },
+        "g1Effects": 2
+      },
+      {
+        "name": "qa-coverage",
+        "evidenceFile": "docs/entrega-final/evidencias-qa/run-291d3d52-c648-4ffd-ac2b-e56486cee89f.json",
+        "evidenceSHA256": "1e29cc3daf935692e457d71854622d54c95ae7e38935e4a4c2438fb2320b382b",
+        "status": "PASS",
+        "cases": [
+          {
+            "name": "company_coverage_and_isolation",
+            "status": "PASS"
+          },
+          {
+            "name": "reject_without_quote_inactive_and_foreign_plan",
+            "status": "PASS"
+          },
+          {
+            "name": "quote_pdf_and_persisted_plan_after_new_login",
+            "status": "PASS"
+          },
+          {
+            "name": "concurrent_confirmation_single_pending_contract",
+            "status": "PASS"
+          },
+          {
+            "name": "outside_coverage_rejected_and_location_updates",
+            "status": "PASS"
+          },
+          {
+            "name": "lost_prospect_rejected",
+            "status": "PASS"
+          },
+          {
+            "name": "zones_prices_and_manual_principal_preserved",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": true,
+        "rows": {
+          "customers": 1,
+          "services": 2,
+          "events": 0,
+          "payments": 0
+        },
+        "g1Effects": 0
+      },
+      {
+        "name": "qa-concurrency",
+        "evidenceFile": ".codex-review/contract-concurrency-qa-af6ab5f6-3255-4cc6-b2c4-5981082d4ce0.json",
+        "evidenceSHA256": "8d3bf42fbc8ff783c3f0364cea2487ae9a15fdfdf8618ee12d8d58c20a29000f",
+        "status": "PASS",
+        "cases": [
+          {
+            "name": "location_committed_after_preflight_rejects_stale_contract",
+            "status": "PASS"
+          },
+          {
+            "name": "loss_committed_after_preflight_is_not_overwritten",
+            "status": "PASS"
+          },
+          {
+            "name": "confirmation_during_signature_rejects_without_deadlock",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": true,
+        "concurrentOutcomes": {
+          "realLockContention": true,
+          "outcomes": [
+            {
+              "ok": false,
+              "code": "ConflictException",
+              "status": 409,
+              "deadlock": false
+            },
+            {
+              "ok": true
+            }
+          ]
+        }
+      },
+      {
+        "name": "qa-recovery",
+        "evidenceFile": ".codex-review/pr64-final-20261030/recovery-evidence.json",
+        "evidenceSHA256": "dfecf729e78b71b05165059b1c965f1729fb25c0a4de00d5bb1850682e1b01fd",
+        "status": "QA_PASS",
+        "cases": [
+          {
+            "name": "01 rollback real del evento",
+            "status": "PASS"
+          },
+          {
+            "name": "02 caida antes de G1 y reinicio",
+            "status": "PASS"
+          },
+          {
+            "name": "03 segunda auditoria G3 revierte ambas",
+            "status": "PASS"
+          },
+          {
+            "name": "04 recuperaciones concurrentes independientes",
+            "status": "PASS"
+          },
+          {
+            "name": "05 G1 confirmado y caida local sin reenvio",
+            "status": "PASS"
+          },
+          {
+            "name": "06 respuesta HTTP tardia no degrada resultado posterior",
+            "status": "PASS"
+          },
+          {
+            "name": "07 empresas y cliente compartido",
+            "status": "PASS"
+          },
+          {
+            "name": "08 idempotencia G1 simulado tras ACK perdido",
+            "status": "PASS"
+          }
+        ],
+        "cleanup": true
+      }
+    ]
+  },
+  "omittedBackend": [
+    {
+      "file": "backend/src/tax-document-issuance/prisma-tax-intent.store.spec.ts",
+      "name": "Isolated PostgreSQL production preparation (synthetic data and fake transport) applies the new environment rules without changing old rows and deduplicates the full pipeline for both companies"
+    },
+    {
+      "file": "backend/src/commercial/commercial.integration.spec.ts",
+      "name": "Libro Control comercial en PostgreSQL con rollback persiste relaciones normalizadas y proyecta factura, pago, convenio, prórroga, aviso, cargo e interesado"
+    },
+    {
+      "file": "backend/src/crm.integration.spec.ts",
+      "name": "CRM en PostgreSQL con rollback persiste solicitudes, observaciones, zonas, cambios de plan, versiones PDF y revocación de acceso"
+    },
+    {
+      "file": "backend/src/coverage/coverage.integration.spec.ts",
+      "name": "Prospecto -> ubicacion -> cobertura -> zona -> planes en PostgreSQL persiste coordenadas y resuelve cobertura, microzona y plan con autoridad comercial"
+    },
+    {
+      "file": "backend/src/external-tax-documents/external-tax-documents.postgres.integration.spec.ts",
+      "name": "Etapa 5 - PostgreSQL local la migración creó tabla y constraint de identidad"
+    },
+    {
+      "file": "backend/src/external-tax-documents/external-tax-documents.postgres.integration.spec.ts",
+      "name": "Etapa 5 - PostgreSQL local constraint duplicado opera dentro de empresa y la transacción revierte"
+    },
+    {
+      "file": "backend/src/external-tax-documents/external-tax-documents.postgres.integration.spec.ts",
+      "name": "Etapa 5 - PostgreSQL local FK de empresa rechaza referencia inexistente y revierte"
+    },
+    {
+      "file": "backend/src/external-tax-documents/external-tax-documents.postgres.integration.spec.ts",
+      "name": "Etapa 5 - PostgreSQL local preserva Decimal exacto y rollback de una escritura válida"
+    },
+    {
+      "file": "backend/src/local-db-bootstrap.integration.spec.ts",
+      "name": "bootstrap PostgreSQL local expone el esquema critico, las FK una sola vez y permite consultar con Prisma"
+    }
+  ],
+  "dependencies": {
+    "manifests": [
+      "root",
+      "backend/",
+      "frontend/"
+    ],
+    "versions": {
+      "jest": "30.5.2",
+      "@prisma/client": "5.22.0",
+      "nodemailer": "10.0.14",
+      "csv-parse": "7.0.3",
+      "exceljs": "4.4.0",
+      "exceljsUuid": "11.1.1"
+    },
+    "excel": true,
+    "csv": true
+  },
+  "preservation": {
+    "files": 66,
+    "changed": 0
+  },
+  "security": {
+    "scannedFinalCandidateFiles": 55,
+    "operationalSecretsDetected": 0,
+    "privatePathsIncluded": 0,
+    "scope": "Targeted contextual scan, not a complete historical secret audit"
+  },
+  "externalServicesUsed": false,
+  "sharedDatabaseWrites": 0,
+  "deployed": false,
+  "mergedToDevelop": false,
+  "GO_MERGE_DEVELOP": true,
+  "GO_DEPLOY_VPS": false
+}
