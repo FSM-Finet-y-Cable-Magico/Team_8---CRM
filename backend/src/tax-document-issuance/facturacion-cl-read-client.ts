@@ -1,9 +1,11 @@
+import { validateRut } from '../rut/rut.util';
+
 export type FacturacionClTestCredentials = { usuario: string; rut: string; clave: string };
-export type FacturacionClTestCompany = { idEmpresa: number; enabled: boolean; environment: 'sandbox' };
+export type FacturacionClTestCompany = { idEmpresa: number; enabled: boolean; environment: 'sandbox' | 'production' };
 export type FacturacionClJsonResponse = { status: number; ok: boolean; json(): Promise<unknown> };
 export type FacturacionClRequest = (url: string, options: RequestInit) => Promise<FacturacionClJsonResponse>;
 export type FacturacionClReadOptions = {
-  enabled: boolean; companies: FacturacionClTestCompany[];
+  enabled: boolean; productionEnabled?: boolean; companies: FacturacionClTestCompany[];
   credentials: (idEmpresa: number) => Promise<FacturacionClTestCredentials>;
 };
 
@@ -20,6 +22,7 @@ export class FacturacionClReadClient {
   private readonly tokens = new Map<number, { value: string; expiresAt: number }>();
   private readonly logins = new Map<number, Promise<string>>();
   private readonly enabled: boolean;
+  private readonly productionEnabled: boolean;
   private readonly credentials: (idEmpresa: number) => Promise<FacturacionClTestCredentials>;
 
   constructor(
@@ -28,10 +31,13 @@ export class FacturacionClReadClient {
     private readonly now: () => number = Date.now,
   ) {
     if (typeof options.enabled !== 'boolean' || !Array.isArray(options.companies)) throw new FacturacionClReadError('CONFIGURATION_INVALID');
+    if (options.productionEnabled !== undefined && typeof options.productionEnabled !== 'boolean') throw new FacturacionClReadError('CONFIGURATION_INVALID');
+    this.productionEnabled = options.productionEnabled === true;
     this.enabled = options.enabled;
     this.credentials = options.credentials;
     for (const company of options.companies) {
-      if (!Number.isSafeInteger(company.idEmpresa) || company.idEmpresa < 1 || company.environment !== 'sandbox' ||
+      if (!Number.isSafeInteger(company.idEmpresa) || company.idEmpresa < 1 || !['sandbox','production'].includes(company.environment) ||
+          (company.environment === 'production' && company.enabled && options.enabled && !this.productionEnabled) ||
           typeof company.enabled !== 'boolean' || this.companies.has(company.idEmpresa)) throw new FacturacionClReadError('CONFIGURATION_INVALID');
       this.companies.set(company.idEmpresa, Object.freeze({ ...company }));
     }
@@ -42,8 +48,11 @@ export class FacturacionClReadClient {
     if (!this.companies.get(idEmpresa)?.enabled) throw new FacturacionClReadError('COMPANY_DISABLED_OR_MISSING');
   }
 
+  protected companyEnvironment(idEmpresa: number) { return this.companies.get(idEmpresa)?.environment; }
+
   protected companyEnabled(idEmpresa: number) {
-    return this.enabled && this.companies.get(idEmpresa)?.enabled === true;
+    return this.enabled && this.companies.get(idEmpresa)?.enabled === true &&
+      (this.companyEnvironment(idEmpresa) !== 'production' || this.productionEnabled);
   }
 
   private async login(idEmpresa: number): Promise<string> {
@@ -53,6 +62,11 @@ export class FacturacionClReadClient {
     catch { throw new FacturacionClReadError('TEST_CREDENTIALS_MISSING'); }
     if (!credentials || ![credentials.usuario, credentials.rut, credentials.clave].every(value => typeof value === 'string' && value.trim())) {
       throw new FacturacionClReadError('TEST_CREDENTIALS_MISSING');
+    }
+    if (this.companyEnvironment(idEmpresa) === 'production') {
+      const rut = validateRut(credentials.rut);
+      if (!this.productionEnabled || !rut.valid || credentials.usuario.trim().toUpperCase() === 'DEMOFE') throw new FacturacionClReadError('PRODUCTION_CREDENTIALS_MISSING');
+      credentials = { ...credentials, rut: rut.normalized! };
     }
     let response: FacturacionClJsonResponse;
     try {
@@ -86,7 +100,7 @@ export class FacturacionClReadClient {
 
   async authenticate(idEmpresa: number) {
     await this.token(idEmpresa);
-    return { authenticated: true as const, environment: 'sandbox' as const, idEmpresa };
+    return { authenticated: true as const, environment: this.companyEnvironment(idEmpresa)!, idEmpresa };
   }
 
   /** For the gated subclass only; fixed origin/paths, no token in return values. */
@@ -119,10 +133,15 @@ export class FacturacionClReadClient {
     try { body = await response.json(); }
     catch { throw new FacturacionClReadError('VERSION_INVALID_RESPONSE'); }
     const value = (body as { version?: unknown } | null)?.version;
-    // The real test API returns an array. Preserve the discrepancy until its
-    // element contract has been verified; never stringify arbitrary content.
-    if (Array.isArray(value)) return { state: 'CONTRACT_MISMATCH' as const, responseShape: 'version:array' as const };
-    if (typeof value !== 'string' || !/^[0-9]+(?:\.[0-9]+){1,5}$/.test(value)) throw new FacturacionClReadError('VERSION_INVALID_RESPONSE');
-    return { state: 'VERIFIED' as const, version: value };
+    // Some provider responses wrap the version in one array element. Accept only
+    // a single dotted numeric string, retaining the observed wire format.
+    const version = Array.isArray(value) && value.length === 1 ? value[0] : value;
+    if (typeof version !== 'string' || /[\r\n]/.test(version) || !/^[0-9]+(?:\.[0-9]+){1,5}$/.test(version)) {
+      if (Array.isArray(value)) return { state: 'CONTRACT_MISMATCH' as const, responseShape: 'version:array' as const };
+      throw new FacturacionClReadError('VERSION_INVALID_RESPONSE');
+    }
+    return Array.isArray(value)
+      ? { state: 'VERIFIED' as const, version, responseShape: 'version:array' as const }
+      : { state: 'VERIFIED' as const, version };
   }
 }

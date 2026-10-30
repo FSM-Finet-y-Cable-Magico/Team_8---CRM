@@ -7,15 +7,17 @@ export type FacturacionClApprovedTestContract = {
   allowedDteTypes: Array<33 | 34 | 39 | 41>;
 };
 
-/** Sandbox-only dispatcher with durable claim and one-way processing marker. */
-export class FacturacionClSandboxDispatcher extends FacturacionClReadClient implements TaxEmissionDispatchPort {
-  private readonly contracts = new Map<number, FacturacionClApprovedTestContract>();
+export type FacturacionClApprovedContract = Omit<FacturacionClApprovedTestContract, 'environment'> & { environment: 'sandbox' | 'production' };
+
+/** Environment-scoped dispatcher with durable claim and one-way processing marker. */
+export class FacturacionClDispatcher extends FacturacionClReadClient implements TaxEmissionDispatchPort {
+  private readonly contracts = new Map<number, FacturacionClApprovedContract>();
   private readonly emissionEnabled: boolean;
 
   constructor(
     options: FacturacionClReadOptions,
     private readonly store: TaxIntentStore,
-    contracts: FacturacionClApprovedTestContract[] = [],
+    contracts: FacturacionClApprovedContract[] = [],
     emissionEnabled = false,
     request?: FacturacionClRequest,
   ) {
@@ -23,7 +25,8 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
     if (typeof emissionEnabled !== 'boolean') throw new Error('EMISSION_CONFIGURATION_INVALID');
     this.emissionEnabled = emissionEnabled;
     for (const contract of contracts) {
-      if (contract.environment !== 'sandbox' || !Number.isSafeInteger(contract.idEmpresa) || contract.idEmpresa < 1 ||
+      if (!['sandbox','production'].includes(contract.environment) ||
+          options.companies.some(c => c.idEmpresa === contract.idEmpresa && c.environment !== contract.environment) || !Number.isSafeInteger(contract.idEmpresa) || contract.idEmpresa < 1 ||
           typeof contract.approved !== 'boolean' || typeof contract.policyVersion !== 'string' ||
           !/^[A-Za-z0-9:_-]{1,64}$/.test(contract.policyVersion) || !Array.isArray(contract.allowedDteTypes) || !contract.allowedDteTypes.length ||
           contract.allowedDteTypes.some(type => ![33, 34, 39, 41].includes(type)) || this.contracts.has(contract.idEmpresa)) {
@@ -33,8 +36,10 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
     }
   }
 
-  canIssue(idEmpresa: number) {
-    return this.emissionEnabled && this.companyEnabled(idEmpresa) && this.contracts.get(idEmpresa)?.approved === true;
+  canIssue(idEmpresa: number, environment?: 'sandbox' | 'production') {
+    const contract = this.contracts.get(idEmpresa);
+    return this.emissionEnabled && this.companyEnabled(idEmpresa) && contract?.approved === true &&
+      (environment === undefined || contract.environment === environment);
   }
 
   async dispatch(input: { intentId: string; claimId: string; idEmpresa: number; document: BuiltTaxDocument }): Promise<TaxDispatchResult> {
@@ -42,12 +47,12 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
     const document = { ...input.document, bytes: Buffer.from(input.document.bytes) };
     const contract = this.contracts.get(input.idEmpresa)!;
     const record = await this.store.find(input.idEmpresa, input.intentId);
-    if (record.idEmpresa !== input.idEmpresa || record.ambiente !== 'sandbox' || record.estado !== 'EN_PROCESO' || record.intentos < 1 ||
+    if (record.idEmpresa !== input.idEmpresa || record.ambiente !== contract.environment || record.estado !== 'EN_PROCESO' || record.intentos < 1 ||
         record.claimId !== input.claimId || !input.claimId || record.policyVersion !== contract.policyVersion ||
         !contract.allowedDteTypes.includes(document.tipoDte) || record.tipoDte !== document.tipoDte ||
         record.formato !== document.formato || record.folioEsperado !== document.folio ||
         record.fingerprint !== taxIntentFingerprint({ idEmpresa: record.idEmpresa, idFactura: record.idFactura,
-          idPago: record.idPago ?? undefined, businessKey: record.businessKey, policyVersion: record.policyVersion, ambiente: 'sandbox', document })) {
+          idPago: record.idPago ?? undefined, businessKey: record.businessKey, policyVersion: record.policyVersion, ambiente: contract.environment, document })) {
       return { state: 'FALLIDO', code: 'CONFIRMED_NOT_SENT' };
     }
     // Authentication cannot issue a DTE. A failure here is provably before processing.
@@ -80,5 +85,17 @@ export class FacturacionClSandboxDispatcher extends FacturacionClReadClient impl
       // Any failure after handing off a processing request remains uncertain.
       return { state: 'RESULTADO_INDETERMINADO' };
     }
+  }
+}
+
+
+/** Legacy sandbox entry point must never accept a production contract. */
+export class FacturacionClSandboxDispatcher extends FacturacionClDispatcher {
+  constructor(options: FacturacionClReadOptions, store: TaxIntentStore,
+    contracts: FacturacionClApprovedTestContract[] = [], emissionEnabled = false, request?: FacturacionClRequest) {
+    if (options.companies.some(c => c.environment !== 'sandbox') || contracts.some(c => c.environment !== 'sandbox')) {
+      throw new Error('EMISSION_CONFIGURATION_INVALID');
+    }
+    super(options, store, contracts, emissionEnabled, request);
   }
 }

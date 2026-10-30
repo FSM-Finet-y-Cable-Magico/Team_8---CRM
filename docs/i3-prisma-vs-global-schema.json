@@ -1,5 +1,5 @@
 {
-  "contractHash": "f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa",
+  "contractHash": "52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91",
   "modeledTables": 61,
   "summary": {
     "MATCH": 893,
@@ -16017,7 +16017,7 @@
       "owner": "G8 (coordinar columnas compartidas)",
       "status": "INDEX_MISMATCH",
       "prisma": null,
-      "global": "(id_empresa, tipo_dte, folio_esperado) WHERE folio_esperado <> '0'"
+      "global": "(id_empresa, ambiente, tipo_dte, folio_esperado) WHERE folio_esperado <> '0'"
     },
     {
       "table": "alerta_monitoreo",

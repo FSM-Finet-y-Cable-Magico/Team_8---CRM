@@ -2,13 +2,13 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { createTransport } from 'nodemailer';
-import { MailDeliveryError, smtpSettings, validSmtpAddress } from './smtp.config';
+import { MailDeliveryError, smtpCompanies, smtpSettings, validSmtpAddress } from './smtp.config';
 
 export { MailDeliveryError } from './smtp.config';
-export type QuoteEmail = { to: string; prospectName: string; companyName: string; pdf: Buffer; filename: string };
-export type TaxDocumentEmail = { to: string; customerName: string; tipoDte: number; folio: string; idPago: number; pdf: Buffer; filename: string; deliveryKey?: string };
+export type QuoteEmail = { idEmpresa?: number; to: string; prospectName: string; companyName: string; pdf: Buffer; filename: string };
+export type TaxDocumentEmail = { idEmpresa?: number; to: string; customerName: string; tipoDte: number; folio: string; idPago: number; pdf: Buffer; filename: string; deliveryKey?: string };
 export type MailDeliveryResult = { status: 'sent' | 'not_configured' | 'simulated'; messageId?: string };
-type Message = { to: string; subject: string; text: string; pdf?: Buffer; filename?: string; deliveryKey?: string };
+type Message = { idEmpresa?: number; to: string; subject: string; text: string; pdf?: Buffer; filename?: string; deliveryKey?: string };
 
 @Injectable()
 export class MailService implements OnModuleInit {
@@ -19,13 +19,24 @@ export class MailService implements OnModuleInit {
     if (!['smtp','disabled','mock'].includes(mode)) throw new MailDeliveryError('MAIL_PROVIDER_INVALID',true,false);
     return mode;
   }
-  onModuleInit() { if(this.mode()==='smtp')smtpSettings(this.config); } // No startup network traffic.
-  isConfigured() { return this.mode()==='mock' || this.mode()==='smtp' && smtpSettings(this.config)!==null; }
+  onModuleInit() {
+    if (this.mode() !== 'smtp') return;
+    const companies = smtpCompanies(this.config);
+    if (companies.length) for (const company of companies) smtpSettings(this.config, company.idEmpresa);
+    else smtpSettings(this.config);
+  } // No startup network traffic.
+  isConfigured(idEmpresa?: number) {
+    if (this.mode() === 'disabled') return false;
+    const companies = smtpCompanies(this.config);
+    if ((companies.length || idEmpresa !== undefined) && !companies.some(company => company.idEmpresa === idEmpresa)) return false;
+    return this.mode() === 'mock' || smtpSettings(this.config, idEmpresa) !== null;
+  }
 
-  async verifyConnection() {
+  async verifyConnection(idEmpresa?: number) {
     if(this.mode()==='disabled')return {status:'not_configured' as const};
+    if (!this.isConfigured(idEmpresa)) return {status:'not_configured' as const};
     if(this.mode()==='mock')return {status:'simulated' as const};
-    const settings = smtpSettings(this.config);
+    const settings = smtpSettings(this.config, idEmpresa);
     if (!settings) return { status: 'not_configured' as const };
     const transport = createTransport(settings.options);
     try {
@@ -37,7 +48,7 @@ export class MailService implements OnModuleInit {
 
   sendQuote(message: QuoteEmail): Promise<MailDeliveryResult> {
     return this.sendMessage({ ...message, subject: `Cotizacion de servicio - ${message.companyName}`,
-      text: `Hola ${message.prospectName},\n\nAdjuntamos la cotizacion solicitada para ${message.companyName}.\n\nSaludos,\nCRM FiNet` });
+      text: `Hola ${message.prospectName},\n\nAdjuntamos la cotizacion solicitada para ${message.companyName}.` });
   }
 
   sendTaxDocument(message: TaxDocumentEmail): Promise<MailDeliveryResult> {
@@ -46,23 +57,23 @@ export class MailService implements OnModuleInit {
     }
     const name = [39,41].includes(message.tipoDte) ? 'Boleta' : 'Factura';
     return this.sendMessage({ ...message, subject: `${name} electronica ${message.folio}`,
-      text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.\n\nSaludos,\nCRM FiNet` });
+      text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.` });
   }
 
-  sendTest(to: string) {
-    return this.sendMessage({ to, subject: 'Prueba SMTP del CRM',
+  sendTest(to: string, idEmpresa?: number) {
+    return this.sendMessage({ to, idEmpresa, subject: 'Prueba SMTP del CRM',
       text: 'Mensaje de prueba de la conexion SMTP del CRM. No es un cobro, cotizacion ni documento tributario.' });
   }
 
   private async sendMessage(message: Message): Promise<MailDeliveryResult> {
-    if(this.mode()==='disabled')return {status:'not_configured'};
+    if(this.mode()==='disabled' || !this.isConfigured(message.idEmpresa))return {status:'not_configured'};
     if(this.mode()==='mock') {
       if(!validSmtpAddress(message.to))throw new MailDeliveryError('SMTP_RECIPIENT_INVALID',true,false);
       if(message.pdf && (message.pdf.length>5*1024*1024 || message.pdf.subarray(0,5).toString('ascii')!=='%PDF-' ||
         !/^[a-zA-Z0-9._-]+\.pdf$/.test(message.filename ?? '') || (message.filename?.length ?? 0)>120))throw new MailDeliveryError('TAX_EMAIL_DOCUMENT_INVALID',true,false);
       return {status:'simulated'};
     }
-    const settings = smtpSettings(this.config);
+    const settings = smtpSettings(this.config, message.idEmpresa);
     if (!settings) return { status: 'not_configured' };
     if (!settings.validAddress(message.to)) throw new MailDeliveryError('SMTP_RECIPIENT_INVALID', true, false);
     if (message.pdf && (message.pdf.length > 5*1024*1024 || message.pdf.subarray(0,5).toString('ascii') !== '%PDF-' ||
@@ -79,7 +90,7 @@ export class MailService implements OnModuleInit {
       try {
         const result = await transport.sendMail({
           from: { address: settings.from, name: settings.fromName }, to: { address: message.to, name: '' },
-          envelope: { from: settings.from, to: [message.to] }, subject: message.subject, text: message.text,
+          envelope: { from: settings.from, to: [message.to] }, subject: message.subject, text: `${message.text}\n\nSaludos,\n${settings.fromName}`,
           messageId, disableFileAccess: true, disableUrlAccess: true,
           attachments: message.pdf ? [{ filename: message.filename!, content: message.pdf, contentType: 'application/pdf' }] : [],
         });

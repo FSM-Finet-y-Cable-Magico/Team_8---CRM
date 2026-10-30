@@ -11,7 +11,7 @@ import { validateRut } from '../rut/rut.util';
 import { BuiltTaxDocument, buildInvoiceDocument, buildReceiptDocument, matchesIssuedFolio } from './facturacion-cl-document-builder';
 import { FacturacionClArtifactsClient } from './facturacion-cl-artifacts.client';
 import { FacturacionClPaymentConfig, PAYMENT_TAX_POLICY, PaymentTaxProfile } from './facturacion-cl-payment.config';
-import { FacturacionClSandboxDispatcher } from './facturacion-cl-sandbox-dispatcher';
+import { FacturacionClDispatcher } from './facturacion-cl-sandbox-dispatcher';
 import { PrismaTaxIntentStore } from './prisma-tax-intent.store';
 import { TaxEmissionIntentService, TaxIntentInput } from './tax-emission-intent.service';
 import { PaymentTaxContext, TaxDocumentIssuer, TaxDocumentIssuerReadiness, TaxDocumentIssuerState } from './tax-document-issuer.types';
@@ -21,6 +21,7 @@ const MAX_EMAIL_ATTEMPTS = 3;
 @Injectable()
 export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnModuleDestroy {
   private databaseReady = false;
+  private productionDatabaseReady = false;
   private timer?: ReturnType<typeof setInterval>;
   private draining = false;
   readonly store: PrismaTaxIntentStore;
@@ -31,16 +32,21 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     @Inject(TAX_DOCUMENT_DELIVERY) private readonly mail: TaxDocumentDeliveryPort, private readonly audit: AuditService) {
     this.store = new PrismaTaxIntentStore(prisma);
     const snapshot = config.base.snapshot();
-    const options = { enabled: snapshot.enabled, companies: snapshot.companies.filter(c => c.environment === 'sandbox')
-      .map(c => ({ idEmpresa:c.idEmpresa, enabled:c.enabled, environment:'sandbox' as const })), credentials:async (id:number) => config.credentials(id) };
-    const contracts = config.profiles.map(p => ({ idEmpresa:p.idEmpresa, approved:true, environment:'sandbox' as const,
-      policyVersion:PAYMENT_TAX_POLICY, allowedDteTypes:[p.receipt.tipoDte, ...(p.invoice ? [p.invoice.tipoDte] : [])] }));
-    this.intents = new TaxEmissionIntentService(this.store, new FacturacionClSandboxDispatcher(options,this.store,contracts,snapshot.enabled));
+    const companies = snapshot.companies.filter(c => c.environment === 'sandbox' || snapshot.productionEnabled)
+      .map(c => ({ idEmpresa:c.idEmpresa, enabled:c.enabled, environment:c.environment }));
+    const options = { enabled: snapshot.enabled, productionEnabled: snapshot.productionEnabled, companies,
+      credentials:async (id:number) => config.credentials(id) };
+    const contracts = config.profiles.flatMap(p => {
+      const company = companies.find(c => c.idEmpresa === p.idEmpresa);
+      return company ? [{idEmpresa:p.idEmpresa, approved:true, environment:company.environment,
+        policyVersion:PAYMENT_TAX_POLICY, allowedDteTypes:[p.receipt.tipoDte, ...(p.invoice ? [p.invoice.tipoDte] : [])]}] : [];
+    });
+    this.intents = new TaxEmissionIntentService(this.store, new FacturacionClDispatcher(options,this.store,contracts,snapshot.enabled));
     this.artifacts = new FacturacionClArtifactsClient(options);
   }
 
   async onModuleInit() {
-    const rows = await this.prisma.$queryRaw<Array<{ ready:boolean }>>`SELECT
+    const rows = await this.prisma.$queryRaw<Array<{ ready:boolean; productionReady?:boolean }>>`SELECT
       NOT EXISTS (SELECT 1 FROM (VALUES
         ('tax_payment_job','id_trabajo'),('tax_payment_job','id_empresa'),('tax_payment_job','id_factura'),('tax_payment_job','id_pago'),
         ('tax_payment_job','id_cliente'),('tax_payment_job','monto'),('tax_payment_job','ambiente'),('tax_payment_job','policy_version'),
@@ -60,10 +66,24 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       WHERE c.column_name IS NULL)
       AND EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
         WHERE n.nspname='public' AND t.relname='tax_emission_intent' AND c.conname='tax_intent_email_check'
-          AND position('SIMULADO' in pg_get_constraintdef(c.oid)) > 0) AS ready`;
+          AND position('SIMULADO' in pg_get_constraintdef(c.oid)) > 0) AS ready,
+      EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
+        WHERE n.nspname='public' AND t.relname='tax_payment_job' AND c.conname='tax_job_environment_check'
+          AND c.convalidated AND position('production' in pg_get_constraintdef(c.oid)) > 0
+          AND position('sandbox' in pg_get_constraintdef(c.oid)) > 0)
+      AND EXISTS (SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid=i.indexrelid JOIN pg_namespace n ON n.oid=x.relnamespace
+        WHERE n.nspname='public' AND x.relname='tax_job_reserved_folio_key' AND i.indisunique AND i.indisvalid
+          AND i.indnkeyatts=4 AND pg_get_indexdef(i.indexrelid,1,true)='id_empresa'
+          AND pg_get_indexdef(i.indexrelid,2,true)='ambiente' AND pg_get_indexdef(i.indexrelid,3,true)='tipo_dte'
+          AND pg_get_indexdef(i.indexrelid,4,true)='folio_esperado') AS "productionReady" `;
     this.databaseReady = rows[0]?.ready === true;
+    this.productionDatabaseReady = rows[0]?.productionReady === true;
     if (!this.config.base.snapshot().enabled) return;
     if (!this.databaseReady) throw new Error('FACTURACION_CL_MIGRATION_REQUIRED');
+    if (this.config.base.snapshot().companies.some(c => c.enabled && c.environment === 'production')) {
+      if (!this.config.base.snapshot().productionEnabled) throw new Error('FACTURACION_CL_PRODUCTION_NOT_CERTIFIED');
+      if (!this.productionDatabaseReady) throw new Error('FACTURACION_CL_PRODUCTION_MIGRATION_REQUIRED');
+    }
     this.timer = setInterval(() => { void this.drain().catch(() => undefined); }, 15000);
     this.timer.unref();
     // No provider call during startup: recovery runs only from persisted pending work.
@@ -72,36 +92,38 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
   readinessSummary() {
     const snapshot=this.config.base.snapshot();
     const companies=snapshot.companies.filter(c=>c.enabled).map(c=>({idEmpresa:c.idEmpresa,state:this.getReadiness(c.idEmpresa).state}));
-    return {enabled:snapshot.enabled,ready:!snapshot.enabled || companies.length>0 && companies.every(c=>c.state==='READY_SANDBOX'),companies};
+    return {enabled:snapshot.enabled,ready:!snapshot.enabled || companies.length>0 && companies.every(c=>['READY_SANDBOX','READY_PRODUCTION'].includes(c.state)),companies};
   }
 
   getReadiness(idEmpresa:number): TaxDocumentIssuerReadiness {
     const snapshot = this.config.base.snapshot(), company = snapshot.companies.find(c => c.idEmpresa === idEmpresa);
-    let state:TaxDocumentIssuerState = 'READY_SANDBOX';
+    let state:TaxDocumentIssuerState = company?.environment === 'production' ? 'READY_PRODUCTION' : 'READY_SANDBOX';
     if (!snapshot.valid) state='CONFIGURATION_INVALID';
     else if (!snapshot.enabled) state='DISABLED';
     else if (!company) state='COMPANY_NOT_CONFIGURED';
     else if (!company.enabled) state='COMPANY_DISABLED';
-    else if (company.environment !== 'sandbox') state='PRODUCTION_NOT_CERTIFIED';
+    else if (company.environment === 'production' && !snapshot.productionEnabled) state='PRODUCTION_NOT_CERTIFIED';
     else if (!this.config.profile(idEmpresa)) state='PENDIENTE_CONTRATO_FACTURACION_CL';
-    else if (!this.databaseReady) state='MIGRATION_REQUIRED';
+    else if (!this.databaseReady || company.environment === 'production' && !this.productionDatabaseReady) state='MIGRATION_REQUIRED';
     else { try { this.config.credentials(idEmpresa); } catch { state='CREDENTIALS_MISSING'; } }
     return { provider:'FACTURACION_CL', idEmpresa, companyAlias:company?.alias ?? null,
-      environment:company?.environment ?? null, state, canIssue:state==='READY_SANDBOX', canRetry:false };
+      environment:company?.environment ?? null, state, canIssue:['READY_SANDBOX','READY_PRODUCTION'].includes(state), canRetry:false };
   }
 
   /** Called inside the payment transaction: local writes only, no auth/HTTP/SMTP. */
   async enqueuePayment(tx:Prisma.TransactionClient, input:PaymentTaxContext) {
     const snapshot = this.config.base.snapshot();
-    if (!snapshot.enabled || !snapshot.companies.some(c => c.idEmpresa === input.idEmpresa && c.enabled && c.environment === 'sandbox')) return;
+    const company = snapshot.companies.find(c => c.idEmpresa === input.idEmpresa);
+    if (!snapshot.enabled || !company?.enabled || company.environment === 'production' && !snapshot.productionEnabled) return;
     const profile = this.config.profile(input.idEmpresa);
     let document:BuiltTaxDocument | undefined; let code:string | null = null;
     try {
       if (!profile) throw new Error('FISCAL_PROFILE_MISSING');
+      if (company.environment === 'production' && !validateRut(profile.issuerRut).valid) throw new Error('FISCAL_IDENTITY_INVALID');
       if (input.folioExterno || await tx.documentoTributarioExterno.count({ where:{ idEmpresa:input.idEmpresa,idFactura:input.idFactura,estado:'REGISTRADO' } })) {
         throw new Error('EXISTING_TAX_DOCUMENT_REVIEW_REQUIRED');
       }
-      document = await this.buildPaymentDocument(tx,input,profile);
+      document = await this.buildPaymentDocument(tx,input,profile,company.environment);
     } catch (error) {
       const candidate = (error as Error)?.message;
       const known = ['FISCAL_PROFILE_MISSING','EXISTING_TAX_DOCUMENT_REVIEW_REQUIRED','FISCAL_FOLIOS_REQUIRED','FISCAL_ROUNDING_REQUIRED','FISCAL_IDENTITY_INVALID','DOCUMENT_TYPE_UNSUPPORTED','FISCAL_DATA_INVALID','DTE_INPUT_INVALID_OR_UNSUPPORTED'];
@@ -109,12 +131,12 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       code = candidate === 'DTE_INPUT_INVALID_OR_UNSUPPORTED' ? 'FISCAL_DATA_INVALID' : candidate;
     }
     await tx.taxPaymentJob.create({ data:{ idEmpresa:input.idEmpresa,idFactura:input.idFactura,idPago:input.idPago,idCliente:input.idCliente,
-      monto:input.monto, policyVersion:PAYMENT_TAX_POLICY, profileHash:profile ? this.config.profileHash(profile) : '0'.repeat(64),
+      monto:input.monto, ambiente:company.environment, policyVersion:PAYMENT_TAX_POLICY, profileHash:profile ? this.config.profileHash(profile) : '0'.repeat(64),
       documento:document?.bytes, tipoDte:document?.tipoDte, formato:document?.formato, folioEsperado:document?.folio,
       email:input.receiver.email, nombreCliente:input.receiver.name, estado:document ? 'PENDIENTE' : 'DATOS_REQUERIDOS', ultimoError:code } });
   }
 
-  private async buildPaymentDocument(tx:Prisma.TransactionClient, input:PaymentTaxContext, profile:PaymentTaxProfile) {
+  private async buildPaymentDocument(tx:Prisma.TransactionClient, input:PaymentTaxContext, profile:PaymentTaxProfile, environment:'sandbox' | 'production') {
     const receiverRut = validateRut(input.receiver.rut);
     if (!receiverRut.valid) throw new Error('FISCAL_IDENTITY_INVALID');
     const receiver = { ...input.receiver, rut:receiverRut.normalized! };
@@ -137,7 +159,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     // Only an explicitly authorized, exclusively reserved local folio range is used.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${input.idEmpresa},${invoice.tipoDte})`;
     const used = await tx.$queryRaw<Array<{ maximum:bigint | null }>>`SELECT MAX(folio_esperado::BIGINT) AS maximum
-      FROM tax_payment_job WHERE id_empresa=${input.idEmpresa} AND tipo_dte=${invoice.tipoDte} AND folio_esperado <> '0'`;
+      FROM tax_payment_job WHERE id_empresa=${input.idEmpresa} AND ambiente=${environment} AND tipo_dte=${invoice.tipoDte} AND folio_esperado <> '0'`;
     const start=BigInt(invoice.folioFrom), next=used[0]?.maximum === null || !used[0] ? start : (BigInt(used[0].maximum!) + 1n > start ? BigInt(used[0].maximum!) + 1n : start);
     if (next > BigInt(invoice.folioTo)) throw new Error('FISCAL_FOLIOS_REQUIRED');
     const divisor = new Prisma.Decimal(100).plus(invoice.vatRate || 0);
@@ -152,7 +174,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
   private intentInput(job:TaxPaymentJob): TaxIntentInput {
     if (!job.documento || !job.tipoDte || !job.formato || !job.folioEsperado) throw new Error('TAX_JOB_DOCUMENT_MISSING');
     return { idEmpresa:job.idEmpresa,idFactura:job.idFactura,idPago:job.idPago,businessKey:`PAYMENT:${job.idPago}`,
-      policyVersion:job.policyVersion,ambiente:'sandbox',document:{ bytes:Buffer.from(job.documento),
+      policyVersion:job.policyVersion,ambiente:job.ambiente as 'sandbox' | 'production',document:{ bytes:Buffer.from(job.documento),
         tipoDte:job.tipoDte as BuiltTaxDocument['tipoDte'],formato:job.formato as 1|2,folio:job.folioEsperado,
         ...(job.folioEsperado==='0' ? { folioMode:'provider_auto' as const } : {}) } };
   }
@@ -162,6 +184,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     if (!this.config.base.snapshot().enabled || !this.databaseReady) return { state:'DISABLED' };
     const job=await this.prisma.taxPaymentJob.findUnique({ where:{idPago} });
     if (!job) return { state:'NOT_QUEUED' };
+    if (job.ambiente !== this.environment(job.idEmpresa)) return {state:'DATOS_REQUERIDOS',code:'ENVIRONMENT_CHANGED'};
     if (job.estado==='DATOS_REQUERIDOS') return { state:job.estado,code:job.ultimoError };
     const profile=this.config.profile(job.idEmpresa);
     if (!profile || this.config.profileHash(profile)!==job.profileHash) {
@@ -169,7 +192,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       return { state:'DATOS_REQUERIDOS',code:'CONFIGURATION_CHANGED' };
     }
     if (!this.getReadiness(job.idEmpresa).canIssue) return {state:this.getReadiness(job.idEmpresa).state};
-    const existing=await this.prisma.taxEmissionIntent.findUnique({ where:{idEmpresa_ambiente_businessKey:{ idEmpresa:job.idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}` }} });
+    const existing=await this.prisma.taxEmissionIntent.findUnique({ where:{idEmpresa_ambiente_businessKey:{ idEmpresa:job.idEmpresa,ambiente:job.ambiente,businessKey:`PAYMENT:${idPago}` }} });
     if (existing?.estado==='FALLIDO' && !explicitRetry) return { state:existing.estado,code:existing.ultimoError };
     const record=await this.intents.execute(this.intentInput(job));
     if (['GENERADO','FALLIDO','RESULTADO_INDETERMINADO'].includes(record.estado)) {
@@ -179,21 +202,23 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     return {state:record.estado,idIntencion:record.idIntencion,folio:record.folio};
   }
 
-  private async finishArtifactsAndDelivery(job:TaxPaymentJob, idIntencion:string, explicitEmailRetry=false) {
-    const record=await this.prisma.taxEmissionIntent.findFirst({ where:{idIntencion,idEmpresa:job.idEmpresa,estado:'GENERADO'} });
+  private async finishArtifactsAndDelivery(job:TaxPaymentJob, idIntencion:string, explicitEmailRetry=false, refreshArtifact=false) {
+    if (!this.jobMatchesCurrentProfile(job) || !this.getReadiness(job.idEmpresa).canIssue) return;
+    const record=await this.prisma.taxEmissionIntent.findFirst({ where:{idIntencion,idEmpresa:job.idEmpresa,ambiente:job.ambiente,estado:'GENERADO'} });
     if (!record?.folio) return;
     let link=record.artefactoUrl;
-    if (!link || record.artefactoEstado==='FALLIDO') {
+    // Explicit recovery renews the existing folio link even after email delivery.
+    if (refreshArtifact || !link || record.artefactoEstado==='FALLIDO') {
       try { link=await this.artifacts.getLink(job.idEmpresa,record.tipoDte,record.folio);
         await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoUrl:link,artefactoEstado:'PENDIENTE'}});
-      } catch { await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,artefactoUrl:null},data:{artefactoEstado:'FALLIDO'}}); return; }
+      } catch { await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,idEmpresa:job.idEmpresa,estado:'GENERADO',artefactoUrl:record.artefactoUrl},data:{artefactoEstado:'FALLIDO'}}); return; }
     }
-    if (record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','SIMULADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
+    if (!refreshArtifact && record.artefactoEstado==='DISPONIBLE' && ['ENVIADO','SIMULADO','RESULTADO_INDETERMINADO','EN_PROCESO','SIN_DESTINATARIO'].includes(record.emailEstado)) return;
     let pdf:Buffer;
     try { pdf=await this.artifacts.downloadPdf(link);
       await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoEstado:'DISPONIBLE'}});
     } catch { await this.prisma.taxEmissionIntent.update({where:{idIntencion},data:{artefactoEstado:'FALLIDO'}}); return; }
-    if (!this.config.deliveryEnabled() || !this.mail.isConfigured()) {
+    if (!this.config.deliveryEnabled() || !this.mail.isConfigured(job.idEmpresa)) {
       await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:{in:['PENDIENTE','NO_CONFIGURADO']}},data:{emailEstado:'NO_CONFIGURADO'}}); return;
     }
     if (!job.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(job.email)) {
@@ -208,7 +233,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
       data:{emailEstado:'EN_PROCESO',fechaEmailInicio:new Date(),emailIntentos:{increment:1},fechaProximoEmail:null,ultimoErrorEmail:null}});
     if (!claimed.count) return;
     try {
-      const result=await this.mail.sendTaxDocument({to:job.email,customerName:job.nombreCliente,tipoDte:record.tipoDte,folio:record.folio,idPago:job.idPago,pdf,filename:`dte-${record.tipoDte}-${record.folio}.pdf`,deliveryKey:`tax:${record.idIntencion}`});
+      const result=await this.mail.sendTaxDocument({idEmpresa:job.idEmpresa,to:job.email,customerName:job.nombreCliente,tipoDte:record.tipoDte,folio:record.folio,idPago:job.idPago,pdf,filename:`dte-${record.tipoDte}-${record.folio}.pdf`,deliveryKey:`tax:${record.idIntencion}`});
       await this.prisma.taxEmissionIntent.updateMany({where:{idIntencion,emailEstado:'EN_PROCESO'},data:{emailEstado:result.status==='sent' ? 'ENVIADO' : result.status==='simulated' ? 'SIMULADO' : 'NO_CONFIGURADO'}});
     } catch (error) {
       const attempts = record.emailIntentos + 1;
@@ -224,23 +249,24 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
   private async drain() {
     if (this.draining) return; this.draining=true;
     try {
-      for (const company of this.config.base.snapshot().companies.filter(c=>c.enabled && c.environment==='sandbox')) {
-        await this.store.quarantineStale(company.idEmpresa,new Date(Date.now()-5*60*1000));
-        await this.prisma.taxEmissionIntent.updateMany({where:{idEmpresa:company.idEmpresa,emailEstado:'EN_PROCESO',fechaEmailInicio:{lt:new Date(Date.now()-5*60*1000)}},data:{emailEstado:'RESULTADO_INDETERMINADO',ultimoErrorEmail:'SMTP_STALE_RESULT_UNCERTAIN',fechaProximoEmail:null}});
+      for (const company of this.config.base.snapshot().companies.filter(c=>c.enabled && (c.environment==='sandbox' || this.config.base.snapshot().productionEnabled))) {
+        await this.store.quarantineStale(company.idEmpresa,new Date(Date.now()-5*60*1000),company.environment);
+        await this.prisma.taxEmissionIntent.updateMany({where:{idEmpresa:company.idEmpresa,ambiente:company.environment,emailEstado:'EN_PROCESO',fechaEmailInicio:{lt:new Date(Date.now()-5*60*1000)}},data:{emailEstado:'RESULTADO_INDETERMINADO',ultimoErrorEmail:'SMTP_STALE_RESULT_UNCERTAIN',fechaProximoEmail:null}});
       }
-      const companyIds=this.config.base.snapshot().companies.filter(c=>c.enabled && c.environment==='sandbox').map(c=>c.idEmpresa);
-      const jobs=await this.prisma.taxPaymentJob.findMany({where:{estado:'PENDIENTE',idEmpresa:{in:companyIds}},orderBy:{fechaCreacion:'asc'},take:10});
+      const companyIds=this.config.base.snapshot().companies.filter(c=>c.enabled && (c.environment==='sandbox' || this.config.base.snapshot().productionEnabled)).map(c=>c.idEmpresa);
+      const jobs=await this.prisma.taxPaymentJob.findMany({where:{estado:'PENDIENTE',OR:companyIds.map(idEmpresa=>({idEmpresa,ambiente:this.environment(idEmpresa)}))},orderBy:{fechaCreacion:'asc'},take:10});
       for (const job of jobs) { try { await this.processPayment(job.idPago); } catch { /* Persisted work remains; no raw errors/PII logged. */ } }
-      if (this.config.deliveryEnabled() && this.mail.isConfigured()) {
-        const pending = await this.prisma.taxEmissionIntent.findMany({where:{idEmpresa:{in:companyIds},ambiente:'sandbox',estado:'GENERADO',
+      const deliveryCompanyIds = companyIds.filter(idEmpresa => this.mail.isConfigured(idEmpresa));
+      if (this.config.deliveryEnabled() && deliveryCompanyIds.length) {
+        const pending = await this.prisma.taxEmissionIntent.findMany({where:{OR:deliveryCompanyIds.map(idEmpresa=>({idEmpresa,ambiente:this.environment(idEmpresa)})),estado:'GENERADO',
           idPago:{not:null},artefactoEstado:'DISPONIBLE',emailEstado:{in:['PENDIENTE','NO_CONFIGURADO','REINTENTO_PENDIENTE']},
-          emailIntentos:{lt:MAX_EMAIL_ATTEMPTS},OR:[{fechaProximoEmail:null},{fechaProximoEmail:{lte:new Date()}}]},
+          emailIntentos:{lt:MAX_EMAIL_ATTEMPTS},AND:[{OR:[{fechaProximoEmail:null},{fechaProximoEmail:{lte:new Date()}}]}]},
           orderBy:{fechaActualizacion:'asc'},take:10});
         for (const record of pending) {
           try {
             const job=await this.prisma.taxPaymentJob.findUnique({where:{idPago:record.idPago!}});
             const profile=this.config.profile(record.idEmpresa);
-            if (job?.idEmpresa===record.idEmpresa && profile && this.getReadiness(record.idEmpresa).canIssue &&
+            if (job?.idEmpresa===record.idEmpresa && job.ambiente===record.ambiente && profile && this.getReadiness(record.idEmpresa).canIssue &&
                 this.config.profileHash(profile)===job.profileHash) await this.finishArtifactsAndDelivery(job,record.idIntencion);
           } catch { /* Delivery remains separate from issuance. Never emit from this recovery path. */ }
         }
@@ -248,20 +274,37 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     } finally { this.draining=false; }
   }
 
+  private jobMatchesCurrentProfile(job:TaxPaymentJob) {
+    const profile = this.config.profile(job.idEmpresa);
+    return job.ambiente === this.environment(job.idEmpresa) && Boolean(profile) &&
+      this.config.profileHash(profile!) === job.profileHash;
+  }
+  private environment(idEmpresa:number) {
+    return this.config.base.snapshot().companies.find(c=>c.idEmpresa===idEmpresa)?.environment ?? 'sandbox';
+  }
   async assertPaymentAccess(idPago:number,user:AuthUser) {
+    const payment = await this.paymentContext(idPago,user);
+    return payment.factura!.contrato!.idEmpresa!;
+  }
+  private async paymentContext(idPago:number,user:AuthUser,db:Pick<Prisma.TransactionClient,'pago'>=this.prisma) {
     if (!isAdministrator(user.roles) && !hasRole(user.roles,'Comercial') && !hasRole(user.roles,'Soporte')) throw new ForbiddenException('Sin permiso de cobranza');
-    const payment=await this.prisma.pago.findUnique({where:{idPago},select:{idCliente:true,factura:{select:{contrato:{select:{idCliente:true,idEmpresa:true,cliente:{select:{idEmpresa:true}}}}}}}});
+    const payment=await db.pago.findUnique({where:{idPago},select:{idPago:true,idFactura:true,idCliente:true,
+      factura:{select:{idFactura:true,idContrato:true,contrato:{select:{idContrato:true,idCliente:true,idEmpresa:true,
+        cliente:{select:{idCliente:true,email:true}}}}}}}});
     const contract=payment?.factura?.contrato;
-    if (!contract?.idEmpresa || contract.cliente?.idEmpresa!==contract.idEmpresa || contract.idCliente!==payment?.idCliente ||
+    // Identity can be shared. Authority comes from the payment's own invoice and contract, never Cliente.idEmpresa or RUT.
+    if (!payment || payment.idPago!==idPago || payment.idFactura!==payment.factura?.idFactura ||
+        !contract?.idEmpresa || payment.factura?.idContrato!==contract.idContrato || !contract.idCliente ||
+        contract.cliente?.idCliente!==contract.idCliente || contract.idCliente!==payment.idCliente ||
         (!isAdministrator(user.roles) && user.idEmpresa!==contract.idEmpresa)) throw new NotFoundException('Pago no encontrado en este alcance');
-    return contract.idEmpresa;
+    return payment;
   }
   async paymentState(idPago:number,user:AuthUser) {
     const idEmpresa=await this.assertPaymentAccess(idPago,user), readiness=this.getReadiness(idEmpresa);
     if (!this.databaseReady) return {readiness,intention:null,job:null};
-    const job=await this.prisma.taxPaymentJob.findFirst({where:{idPago,idEmpresa},select:{estado:true,ultimoError:true}});
-    const intention=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}},
-      select:{idIntencion:true,estado:true,tipoDte:true,ambiente:true,folio:true,fingerprint:true,intentos:true,ultimoError:true,artefactoUrl:true,artefactoEstado:true,emailEstado:true,emailIntentos:true,fechaProximoEmail:true,ultimoErrorEmail:true}});
+    const job=await this.prisma.taxPaymentJob.findFirst({where:{idPago,idEmpresa},select:{estado:true,ultimoError:true,ambiente:true}});
+    const intention=job ? await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:job.ambiente,businessKey:`PAYMENT:${idPago}`}},
+      select:{idIntencion:true,estado:true,tipoDte:true,ambiente:true,folio:true,fingerprint:true,intentos:true,ultimoError:true,artefactoUrl:true,artefactoEstado:true,emailEstado:true,emailIntentos:true,fechaProximoEmail:true,ultimoErrorEmail:true}}) : null;
     return {readiness,job,intention};
   }
   async retryPayment(idPago:number,user:AuthUser) {
@@ -279,13 +322,14 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     await this.prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(81003, ${idPago})`;
       const job = await tx.taxPaymentJob.findUnique({where:{idPago}});
-      const intent = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
-      if (!job || job.idEmpresa !== idEmpresa || job.estado !== 'DATOS_REQUERIDOS' || intent) {
+      const intent = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:this.environment(idEmpresa),businessKey:`PAYMENT:${idPago}`}}});
+      if (!job || job.idEmpresa !== idEmpresa || job.ambiente !== this.environment(idEmpresa) || job.estado !== 'DATOS_REQUERIDOS' || intent) {
         throw new BadRequestException('Solo se preparan trabajos bloqueados sin intencion de emision previa');
       }
       const payment = await tx.pago.findUnique({where:{idPago},include:{factura:{include:{contrato:{include:{cliente:true}}}}}});
       const invoice = payment?.factura, contract = invoice?.contrato, customer = contract?.cliente;
-      if (!payment || !invoice || !contract || !customer || contract.idEmpresa !== idEmpresa || customer.idEmpresa !== idEmpresa ||
+      if (!payment || !invoice || !contract || !customer || contract.idEmpresa !== idEmpresa || contract.idCliente !== customer.idCliente ||
+          payment.idPago !== idPago || payment.idFactura !== invoice.idFactura || invoice.idContrato !== contract.idContrato ||
           payment.idCliente !== customer.idCliente || job.idFactura !== invoice.idFactura || job.idCliente !== customer.idCliente || !payment.monto.eq(job.monto)) {
         throw new BadRequestException('La identidad financiera cambio; requiere revision');
       }
@@ -299,7 +343,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
         monto:payment.monto.toFixed(2),periodoMes:invoice.periodoMes,periodoAnio:invoice.periodoAnio,fechaLimitePago:invoice.fechaLimitePago,
         tipoDocumento:invoice.tipoDocumento,folioExterno:invoice.folioExterno,
         receiver:{rut:customer.rut ?? '',name:customer.nombreCompleto,giro,address:contract.direccionInstalacion ?? '',
-          comuna:contract.comunaInstalacion ?? '',city:contract.ciudadInstalacion ?? '',email:customer.email}},profile);
+          comuna:contract.comunaInstalacion ?? '',city:contract.ciudadInstalacion ?? '',email:customer.email}},profile,job.ambiente as 'sandbox' | 'production');
       } catch (error) {
         if (/^(FISCAL_|DTE_INPUT_|DOCUMENT_TYPE_)/.test((error as Error)?.message ?? '')) throw new BadRequestException('Los datos fiscales siguen incompletos o no soportados');
         throw error;
@@ -324,12 +368,16 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     await this.prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(81003, ${idPago})`;
       const job = await tx.taxPaymentJob.findUnique({where:{idPago}});
-      const record = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
-      if (!job || job.idEmpresa !== idEmpresa || record?.estado !== 'GENERADO' || record.emailEstado !== 'SIN_DESTINATARIO' || record.emailIntentos !== 0) {
+      const record = await tx.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:this.environment(idEmpresa),businessKey:`PAYMENT:${idPago}`}}});
+      if (!job || job.idEmpresa !== idEmpresa || job.ambiente !== this.environment(idEmpresa) || record?.estado !== 'GENERADO' || record.emailEstado !== 'SIN_DESTINATARIO' || record.emailIntentos !== 0) {
         throw new BadRequestException('Solo se corrige un destinatario faltante sin envios previos');
       }
-      const customer = await tx.cliente.findUnique({where:{idCliente:job.idCliente}});
-      if (customer?.idEmpresa !== idEmpresa || !customer.email || !validSmtpAddress(customer.email)) throw new BadRequestException('Corrige primero el correo del cliente');
+      const payment = await this.paymentContext(idPago,user,tx);
+      const customer = payment.factura!.contrato!.cliente!;
+      if (payment.factura!.contrato!.idEmpresa !== idEmpresa || payment.idFactura !== job.idFactura || customer.idCliente !== job.idCliente) {
+        throw new BadRequestException('La identidad financiera cambio; requiere revision');
+      }
+      if (!customer.email || !validSmtpAddress(customer.email)) throw new BadRequestException('Corrige primero el correo del cliente');
       await tx.taxPaymentJob.update({where:{idPago},data:{email:customer.email}});
       const changed = await tx.taxEmissionIntent.updateMany({where:{idIntencion:record.idIntencion,idEmpresa,emailEstado:'SIN_DESTINATARIO',emailIntentos:0},
         data:{emailEstado:'PENDIENTE',ultimoErrorEmail:null,fechaProximoEmail:null}});
@@ -342,9 +390,10 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
   async recoverArtifacts(idPago:number,user:AuthUser) {
     const idEmpresa=await this.assertPaymentAccess(idPago,user);
     const job=await this.prisma.taxPaymentJob.findFirst({where:{idPago,idEmpresa}});
-    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
-    if (!job || record?.estado!=='GENERADO') throw new BadRequestException('El documento no esta confirmado como generado');
-    await this.finishArtifactsAndDelivery(job,record.idIntencion,true);
+    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:this.environment(idEmpresa),businessKey:`PAYMENT:${idPago}`}}});
+    if (!job || job.ambiente !== this.environment(idEmpresa) || record?.estado!=='GENERADO') throw new BadRequestException('El documento no esta confirmado como generado');
+    if (!this.jobMatchesCurrentProfile(job)) throw new BadRequestException('La configuracion tributaria cambio; revisa el documento antes de continuar');
+    await this.finishArtifactsAndDelivery(job,record.idIntencion,true,true);
     return this.paymentState(idPago,user);
   }
   /** An operator checks SMTP logs/inbox. This operation itself never sends mail or emits a DTE. */
@@ -354,7 +403,7 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     if (input.verified!==true || !['accepted','not_accepted'].includes(input.outcome) || !input.observation?.trim() || input.observation.length>1000) {
       throw new BadRequestException('Verifica el envio con el servidor de correo e informa la comprobacion');
     }
-    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
+    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:this.environment(idEmpresa),businessKey:`PAYMENT:${idPago}`}}});
     if (record?.estado!=='GENERADO' || record.emailEstado!=='RESULTADO_INDETERMINADO' || record.fingerprint!==input.fingerprint) {
       throw new BadRequestException('La identidad o el estado no permiten conciliar el correo');
     }
@@ -374,8 +423,10 @@ export class FacturacionClIssuer implements TaxDocumentIssuer, OnModuleInit, OnM
     const idEmpresa=await this.assertPaymentAccess(idPago,user);
     if (!isAdministrator(user.roles)) throw new ForbiddenException('La conciliacion requiere Administrador');
     if (input.confirmSameDocument!==true || !input.observation?.trim() || input.observation.length>1000) throw new BadRequestException('Revisa el documento remoto e informa la comprobacion');
-    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:'sandbox',businessKey:`PAYMENT:${idPago}`}}});
+    const record=await this.prisma.taxEmissionIntent.findUnique({where:{idEmpresa_ambiente_businessKey:{idEmpresa,ambiente:this.environment(idEmpresa),businessKey:`PAYMENT:${idPago}`}}});
     if (record?.estado!=='RESULTADO_INDETERMINADO' || record.fingerprint!==input.fingerprint || !matchesIssuedFolio(record.folioEsperado,input.folio,record.tipoDte)) throw new BadRequestException('La identidad o el estado no permiten conciliar');
+    const job=await this.prisma.taxPaymentJob.findFirst({where:{idPago,idEmpresa}});
+    if (!job || !this.jobMatchesCurrentProfile(job)) throw new BadRequestException('La configuracion tributaria cambio; revisa el documento antes de continuar');
     const link=await this.artifacts.getLink(idEmpresa,record.tipoDte,input.folio);
     await this.artifacts.downloadPdf(link); // Reject HTML/error representations even with a valid host.
     await this.prisma.$transaction(async tx=>{

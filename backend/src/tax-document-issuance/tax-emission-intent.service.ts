@@ -5,7 +5,7 @@ export type TaxIntentState = 'PENDIENTE' | 'EN_PROCESO' | 'GENERADO' | 'FALLIDO'
 export type TaxIntentCompletion = { estado: 'GENERADO' | 'FALLIDO' | 'RESULTADO_INDETERMINADO'; folio?: string; ultimoError?: string };
 export type TaxIntentInput = {
   idEmpresa: number; idFactura: number; idPago?: number;
-  businessKey: string; policyVersion: string; ambiente: 'sandbox'; document: BuiltTaxDocument;
+  businessKey: string; policyVersion: string; ambiente: 'sandbox' | 'production'; document: BuiltTaxDocument;
 };
 export type TaxIntentRecord = {
   idIntencion: string; idEmpresa: number; idFactura: number; idPago: number | null;
@@ -25,7 +25,7 @@ export type TaxDispatchResult = { state: 'GENERADO'; folio: string; tipoDte: num
   { state: 'FALLIDO'; code: 'CONFIRMED_NOT_SENT' } | { state: 'RESULTADO_INDETERMINADO' };
 /** Processing port; uncertainty never permits another processing request. */
 export interface TaxEmissionDispatchPort {
-  canIssue(idEmpresa: number): boolean;
+  canIssue(idEmpresa: number, environment?: 'sandbox' | 'production'): boolean;
   dispatch(input: { intentId: string; claimId: string; idEmpresa: number; document: BuiltTaxDocument }): Promise<TaxDispatchResult>;
 }
 
@@ -44,7 +44,7 @@ export class TaxEmissionIntentService {
 
   async prepare(input: TaxIntentInput) {
     if (![input.idEmpresa, input.idFactura].every(value => Number.isSafeInteger(value) && value > 0) ||
-        (input.idPago !== undefined && (!Number.isSafeInteger(input.idPago) || input.idPago < 1)) || input.ambiente !== 'sandbox' ||
+        (input.idPago !== undefined && (!Number.isSafeInteger(input.idPago) || input.idPago < 1)) || !['sandbox','production'].includes(input.ambiente) ||
         typeof input.businessKey !== 'string' || typeof input.policyVersion !== 'string' ||
         !/^[A-Za-z0-9:_-]{1,120}$/.test(input.businessKey) || !/^[A-Za-z0-9:_-]{1,64}$/.test(input.policyVersion) ||
         !Buffer.isBuffer(input.document.bytes) || !input.document.bytes.length ||
@@ -67,7 +67,7 @@ export class TaxEmissionIntentService {
     const snapshot: TaxIntentInput = { ...input, document: { ...input.document, bytes: Buffer.from(input.document.bytes) } };
     const record = await this.prepare(snapshot);
     const eligible = record.estado === 'PENDIENTE' || record.estado === 'FALLIDO' && record.ultimoError === 'CONFIRMED_NOT_SENT';
-    if (!eligible || !this.dispatcher.canIssue(input.idEmpresa)) return record;
+    if (!eligible || !this.dispatcher.canIssue(input.idEmpresa, input.ambiente)) return record;
     const claimId = randomUUID();
     // Durable atomic claim is committed before a dispatcher can send anything.
     if (!await this.store.claim(record, claimId)) return this.store.find(input.idEmpresa, record.idIntencion);

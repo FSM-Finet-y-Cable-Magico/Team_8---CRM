@@ -60,14 +60,18 @@ export class FacturacionClPaymentConfig {
   credentials(idEmpresa: number): FacturacionClTestCredentials {
     const company = this.base.snapshot().companies.find(c => c.idEmpresa === idEmpresa);
     const profile = this.profile(idEmpresa);
-    if (!company || company.environment !== 'sandbox' || !profile) throw new Error('TEST_CREDENTIALS_MISSING');
+    if (!company || !profile) throw new Error('TEST_CREDENTIALS_MISSING');
+    const production = company.environment === 'production';
+    const code = production ? 'PRODUCTION_CREDENTIALS_MISSING' : 'TEST_CREDENTIALS_MISSING';
+    if (production && !this.base.snapshot().productionEnabled) throw new Error(code);
     let credentials: FacturacionClTestCredentials;
-    try { credentials = JSON.parse(this.env.get<string>(`FACTURACION_CL_${company.alias}_SANDBOX_CREDENTIALS`) || 'null'); }
-    catch { throw new Error('TEST_CREDENTIALS_MISSING'); }
+    try { credentials = JSON.parse(this.env.get<string>(`FACTURACION_CL_${company.alias}_${production ? 'PRODUCTION' : 'SANDBOX'}_CREDENTIALS`) || 'null'); }
+    catch { throw new Error(code); }
     if (!credentials || Object.keys(credentials).sort().join(',') !== 'clave,rut,usuario' ||
         ![credentials.usuario,credentials.rut,credentials.clave].every(v => typeof v === 'string' && Boolean(v.trim())) ||
-        sandboxIssuerRut(credentials.rut) !== profile.issuerRut) throw new Error('TEST_CREDENTIALS_MISSING');
-    return credentials;
+        sandboxIssuerRut(credentials.rut) !== profile.issuerRut ||
+        (production && (!validateRut(profile.issuerRut).valid || !validateRut(credentials.rut).valid || credentials.usuario.trim().toUpperCase() === 'DEMOFE'))) throw new Error(code);
+    return { ...credentials, rut: sandboxIssuerRut(credentials.rut)! };
   }
   deliveryEnabled() { return this.env.get<string>('FACTURACION_CL_DELIVERY_ENABLED')?.trim().toLowerCase() === 'true'; }
 }
