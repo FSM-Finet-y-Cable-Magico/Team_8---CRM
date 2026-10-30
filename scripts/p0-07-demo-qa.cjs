@@ -27,7 +27,9 @@ async function main() {
   assert.ok(fs.existsSync(path.join(repo, 'backend/dist/main.js')), 'Build backend first');
   assert.ok(fs.existsSync(path.join(repo, 'frontend/dist/index.html')), 'Build frontend first');
   const schema = fs.readFileSync(path.join(repo, 'db/global/init-global.sql'));
-  assert.equal(digest(schema), 'f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa');
+  // Use the reviewed canonical gate, including the tax environment reconciliation.
+  const { parseGlobalSchema } = await import('./global-schema.mjs');
+  parseGlobalSchema(schema);
   const cluster = await createCluster('C:/Program Files/PostgreSQL/18/bin');
   const cap = cluster.capability;
   let db, stub, backend, web, expiryTimer, closing = false;

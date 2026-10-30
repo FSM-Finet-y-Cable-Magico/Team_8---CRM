@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-export const CONTRACT_HASH = 'f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa';
+export const CONTRACT_HASH = '52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91';
 export const contractPath = new URL('../db/global/init-global.sql', import.meta.url);
 export function splitSql(text) {
   const parts = []; let start = 0, depth = 0, quote = false;

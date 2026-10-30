@@ -10,9 +10,9 @@ async function setup() {
     FACTURACION_CL_PROFILES:JSON.stringify([profile]),FACTURACION_CL_QA_SANDBOX_CREDENTIALS:JSON.stringify({usuario:'FAKE',rut:'66666666-6',clave:'FAKE'})});
   const config=new FacturacionClPaymentConfig(env,new FacturacionClConfigService(env));
   const customer={idCliente:3,idEmpresa:2,rut:'66666666-6',nombreCompleto:'QA',email:'corrected@example.invalid',datosTecnicos:null};
-  const contract={idEmpresa:2,idCliente:3,cliente:customer,direccionInstalacion:'QA',comunaInstalacion:'QA',ciudadInstalacion:'QA'};
-  const payment={idCliente:3,monto:new Prisma.Decimal(100),factura:{idFactura:5,contrato:contract,folioExterno:null,tipoDocumento:'BOLETA',periodoMes:10,periodoAnio:2026,fechaLimitePago:new Date('2026-10-30')}};
-  const job={idEmpresa:2,idFactura:5,idCliente:3,idPago:7,monto:new Prisma.Decimal(100),estado:'DATOS_REQUERIDOS',profileHash:'old',email:null};
+  const contract={idContrato:4,idEmpresa:2,idCliente:3,cliente:customer,direccionInstalacion:'QA',comunaInstalacion:'QA',ciudadInstalacion:'QA'};
+  const payment={idPago:7,idFactura:5,idCliente:3,monto:new Prisma.Decimal(100),factura:{idFactura:5,idContrato:4,contrato:contract,folioExterno:null,tipoDocumento:'BOLETA',periodoMes:10,periodoAnio:2026,fechaLimitePago:new Date('2026-10-30')}};
+  const job={idEmpresa:2,ambiente:'sandbox',idFactura:5,idCliente:3,idPago:7,monto:new Prisma.Decimal(100),estado:'DATOS_REQUERIDOS',profileHash:'old',email:null};
   const record={idIntencion:'QA',idEmpresa:2,estado:'GENERADO',emailEstado:'SIN_DESTINATARIO',emailIntentos:0};
   const tx={$queryRaw:jest.fn().mockResolvedValue([{ready:true}]),$executeRaw:jest.fn(),pago:{findUnique:jest.fn().mockResolvedValue(payment)},
     cliente:{findUnique:jest.fn().mockResolvedValue(customer)},documentoTributarioExterno:{count:jest.fn().mockResolvedValue(0)},
@@ -25,6 +25,25 @@ async function setup() {
   return {issuer,db,tx,job,record,customer,payment,mail,audit};
 }
 describe('Tax recovery from authoritative G8 data',()=>{
+  it('shared identity can reprepare and correct recipient for its own contract without changing primary company',async()=>{
+    const {issuer,tx,customer,record,mail}=await setup();customer.idEmpresa=1;
+    await issuer.repreparePayment(7,'QA datos verificados',operator);
+    tx.taxEmissionIntent.findUnique.mockResolvedValue(record as never);
+    await issuer.correctRecipient(7,'QA correo verificado',operator);
+    expect(customer.idEmpresa).toBe(1);expect(tx.taxPaymentJob.update).toHaveBeenCalled();
+    expect(mail.sendTaxDocument).not.toHaveBeenCalled();
+  });
+  it.each(['idFactura','idCliente'] as const)('rejects recipient recovery with inconsistent job %s',async field=>{
+    const {issuer,tx,job,record}=await setup();job[field]=999;tx.taxEmissionIntent.findUnique.mockResolvedValue(record as never);
+    await expect(issuer.correctRecipient(7,'QA',operator)).rejects.toThrow('identidad financiera');
+    expect(tx.taxPaymentJob.update).not.toHaveBeenCalled();
+  });
+  it('rechecks authorization inside recipient transaction when ownership changes',async()=>{
+    const {issuer,tx,record,payment}=await setup();tx.taxEmissionIntent.findUnique.mockResolvedValue(record as never);
+    tx.pago.findUnique.mockResolvedValueOnce(payment).mockResolvedValue({...payment,factura:{...payment.factura,contrato:{...payment.factura.contrato,idEmpresa:1}}});
+    await expect(issuer.correctRecipient(7,'QA',operator)).rejects.toThrow('alcance');
+    expect(tx.taxPaymentJob.update).not.toHaveBeenCalled();
+  });
   it('reprepares an unissued job, persists the corrected document and audit without HTTP/SMTP',async()=>{
     const {issuer,tx,mail,audit,db}=await setup();
     const dispatch=jest.spyOn(issuer.intents,'execute');

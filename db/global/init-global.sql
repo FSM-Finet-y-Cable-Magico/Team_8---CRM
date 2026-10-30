@@ -713,7 +713,7 @@ CREATE TABLE IF NOT EXISTS tax_payment_job (
     id_pago                      INTEGER NOT NULL,
     id_cliente                   INTEGER NOT NULL,
     monto                        NUMERIC(10,2) NOT NULL CHECK (monto > 0),
-    ambiente                     VARCHAR(20) NOT NULL DEFAULT 'sandbox'::character varying CHECK (ambiente = 'sandbox'),
+    ambiente                     VARCHAR(20) NOT NULL DEFAULT 'sandbox'::character varying,
     policy_version               VARCHAR(64) NOT NULL,
     profile_hash                 CHAR(64) NOT NULL CHECK (profile_hash ~ '^[a-f0-9]{64}$'),
     documento                    BYTEA,
@@ -726,6 +726,7 @@ CREATE TABLE IF NOT EXISTS tax_payment_job (
     ultimo_error                 VARCHAR(64),
     fecha_creacion               TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT tax_payment_job_pkey PRIMARY KEY (id_trabajo),
+    CONSTRAINT tax_job_environment_check CHECK (ambiente IN ('sandbox', 'production')),
     CONSTRAINT tax_job_pending_document_check CHECK (estado <> 'PENDIENTE' OR (documento IS NOT NULL AND octet_length(documento) > 0 AND tipo_dte IS NOT NULL AND formato IS NOT NULL AND folio_esperado IS NOT NULL)),
     CONSTRAINT tax_job_document_format_check CHECK ((tipo_dte IN (33, 34) AND formato = 2) OR (tipo_dte IN (39, 41) AND formato = 1)),
     CONSTRAINT tax_job_folio_check CHECK (folio_esperado ~ '^[1-9][0-9]{0,9}$' OR (folio_esperado = '0' AND tipo_dte IN (39, 41)))
@@ -1420,7 +1421,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_zona_pago_empresa_nombre ON zona_pago (COAL
 CREATE UNIQUE INDEX IF NOT EXISTS tax_emission_intent_id_empresa_ambiente_business_key_key ON tax_emission_intent (id_empresa, ambiente, business_key);
 CREATE UNIQUE INDEX IF NOT EXISTS tax_intent_generated_folio_key ON tax_emission_intent (id_empresa, ambiente, tipo_dte, folio) WHERE estado = 'GENERADO';
 CREATE UNIQUE INDEX IF NOT EXISTS tax_payment_job_id_pago_key ON tax_payment_job (id_pago);
-CREATE UNIQUE INDEX IF NOT EXISTS tax_job_reserved_folio_key ON tax_payment_job (id_empresa, tipo_dte, folio_esperado) WHERE folio_esperado <> '0';
+CREATE UNIQUE INDEX IF NOT EXISTS tax_job_reserved_folio_key ON tax_payment_job (id_empresa, ambiente, tipo_dte, folio_esperado) WHERE folio_esperado <> '0';
 CREATE UNIQUE INDEX IF NOT EXISTS log_notificacion_correlation_id_key ON log_notificacion (correlation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS log_notificacion_provider_message_id_key ON log_notificacion (provider_message_id);
 CREATE INDEX IF NOT EXISTS alerta_monitoreo_id_empresa_resuelta_idx ON alerta_monitoreo (id_empresa, resuelta);

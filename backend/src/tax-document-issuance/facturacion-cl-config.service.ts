@@ -4,6 +4,7 @@ import { TaxDocumentIssuerCompany } from './tax-document-issuer.types';
 
 type FacturacionClConfigSnapshot = {
   enabled: boolean;
+  productionEnabled: boolean;
   valid: boolean;
   companies: TaxDocumentIssuerCompany[];
 };
@@ -50,17 +51,19 @@ export class FacturacionClConfigService implements OnModuleInit {
   onModuleInit() {
     const current = this.snapshot();
     if (!current.valid) throw new Error('FACTURACION_CL_CONFIGURATION_INVALID');
-    if (current.enabled && current.companies.some(company => company.enabled && company.environment === 'production')) {
+    if (current.enabled && current.companies.some(company => company.enabled && company.environment === 'production') && !current.productionEnabled) {
       throw new Error('FACTURACION_CL_PRODUCTION_NOT_CERTIFIED');
     }
   }
 
   snapshot(): FacturacionClConfigSnapshot {
     const flag = (this.config.get<string>('FACTURACION_CL_INTEGRATION_ENABLED') ?? 'false').trim().toLowerCase();
+    const productionFlag = (this.config.get<string>('FACTURACION_CL_PRODUCTION_ENABLED') ?? 'false').trim().toLowerCase();
     const parsed = parseFacturacionClCompanies(this.config.get<string>('FACTURACION_CL_COMPANIES'));
     return {
       enabled: flag === 'true',
-      valid: (flag === 'true' || flag === 'false') && parsed.valid,
+      productionEnabled: productionFlag === 'true',
+      valid: (flag === 'true' || flag === 'false') && ['true','false'].includes(productionFlag) && parsed.valid,
       companies: parsed.companies,
     };
   }

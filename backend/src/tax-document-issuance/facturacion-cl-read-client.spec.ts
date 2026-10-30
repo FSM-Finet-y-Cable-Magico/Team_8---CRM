@@ -68,6 +68,37 @@ describe('FacturacionClReadClient', () => {
     const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' })).mockResolvedValueOnce(reply(200, { version: ['FAKE_SECRET'] }));
     expect(await client(request).version(1)).toEqual({ state: 'CONTRACT_MISMATCH', responseShape: 'version:array' });
   });
+  it.each(['sandbox', 'production'] as const)('accepts a singleton numeric version in %s without losing its response shape', async environment => {
+    const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' }))
+      .mockResolvedValueOnce(reply(200, { version: ['1.2.3.4'] }));
+    const api = new FacturacionClReadClient({ enabled: true, productionEnabled: environment === 'production',
+      companies: [{ idEmpresa: 2, enabled: true, environment }],
+      credentials: async () => ({ usuario: 'SYNTHETIC_USER', rut: '66666666-6', clave: 'SYNTHETIC_ONLY' }) }, request);
+    const result = await api.version(2);
+    expect(result).toEqual({ state: 'VERIFIED', version: '1.2.3.4', responseShape: 'version:array' });
+    expect(request.mock.calls.map(call => new URL(call[0]).pathname)).toEqual(['/login', '/wsds/version']);
+    expect(JSON.stringify(result)).not.toContain('FAKE_TOKEN');
+  });
+  it.each([
+    { value: [] }, { value: ['1.2', '1.3'] }, { value: [123] }, { value: [null] },
+    { value: [{}] }, { value: [['1.2']] }, { value: ['1.2\n'] }, { value: [' 1.2'] },
+  ])('keeps unsupported array versions redacted: $value', async ({ value }) => {
+    const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' }))
+      .mockResolvedValueOnce(reply(200, { version: value }));
+    expect(await client(request).version(1)).toEqual({ state: 'CONTRACT_MISMATCH', responseShape: 'version:array' });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  it.each(['1.2\n', '1.2\r', ' 1.2', 'FAKE_SECRET'])('rejects invalid scalar version %p', async value => {
+    const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' }))
+      .mockResolvedValueOnce(reply(200, { version: value }));
+    await expect(client(request).version(1)).rejects.toThrow('VERSION_INVALID_RESPONSE');
+  });
+  it('does not accept a numeric array from a failed HTTP response', async () => {
+    const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' }))
+      .mockResolvedValueOnce(reply(500, { version: ['1.2.3'] }));
+    await expect(client(request).version(1)).rejects.toMatchObject({ code: 'VERSION_HTTP_FAILED' });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
   it('invalidates only the rejected token, without automatic login or version retry', async () => {
     const request = jest.fn().mockResolvedValueOnce(reply(200, { token: 'FAKE_TOKEN' })).mockResolvedValueOnce(reply(401, {})).mockResolvedValueOnce(reply(200, { token: 'FAKE_NEW_TOKEN' }));
     const api = client(request);
@@ -75,5 +106,24 @@ describe('FacturacionClReadClient', () => {
     expect(request).toHaveBeenCalledTimes(2);
     await api.authenticate(1);
     expect(request).toHaveBeenCalledTimes(3);
+  });
+});
+
+
+describe('Explicit production transport with fake credentials only',()=>{
+  const productionCompanies=[{idEmpresa:1,enabled:true,environment:'production' as const}];
+  it('requires opt-in and normalizes the corporate RUT before the single login',async()=>{
+    const request=jest.fn().mockResolvedValue(reply(200,{token:'SYNTHETIC_TOKEN'}));
+    const api=new FacturacionClReadClient({enabled:true,productionEnabled:true,companies:productionCompanies,
+      credentials:async()=>({usuario:'SYNTHETIC_USER',rut:'66.666.666-6',clave:'SYNTHETIC_ONLY'})},request);
+    expect(await api.authenticate(1)).toEqual({authenticated:true,environment:'production',idEmpresa:1});
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({usuario:'SYNTHETIC_USER',rut:'66666666-6',clave:'SYNTHETIC_ONLY'});
+  });
+  it('cannot send DEMO or invalid RUT identities even if a caller bypasses the config service',async()=>{
+    for(const c of [{usuario:'DEMOFE',rut:'66666666-6',clave:'FAKE'},{usuario:'FAKE',rut:'1-9',clave:'FAKE'}]){
+      const request=jest.fn();
+      const api=new FacturacionClReadClient({enabled:true,productionEnabled:true,companies:productionCompanies,credentials:async()=>c},request);
+      await expect(api.authenticate(1)).rejects.toThrow('PRODUCTION_CREDENTIALS_MISSING');expect(request).not.toHaveBeenCalled();
+    }
   });
 });

@@ -11,7 +11,7 @@ try {
 } catch {}
 const rules=[
  ['DATABASE_URI',/postgres(?:ql)?:\/\/[^\s"'<>:]+:[^\s"'<>@]+@/i],
- ['PRIVATE_KEY',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
+ ['PRIVATE_KEY',/-----BEGIN (?:RSA |DSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/],
  ['PROVIDER_TOKEN',/\b(?:ghp_[a-zA-Z0-9]{25,}|github_pat_[a-zA-Z0-9_]{30,}|sk-[a-zA-Z0-9_-]{30,})\b/],
  ['CREDENTIAL_LITERAL',/(?:api[_-]?key|jwt[_-]?secret|password|smtp_password|api_token|access_token|integration_secret)\s*['"]?\s*[:=]\s*['"]?([A-Za-z0-9_$!+./=-]{12,})/i],
  ['DOCUMENTED_INTEGRATION_KEY',/(?:X-API-KEY|API.key|credencial|token).*?`[A-Za-z0-9_$./+=-]{24,}`/i],

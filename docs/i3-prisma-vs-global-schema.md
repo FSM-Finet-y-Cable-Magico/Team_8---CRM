@@ -1,6 +1,6 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa. Modelos G8: 61.
+Hash canónico: 52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91. Modelos G8: 61.
 
 Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Tambien incorpora el estado final de tax_emission_intent, tax_payment_job y la extension Meta de log_notificacion; los indices parciales se conservan aunque Prisma no pueda declararlos. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
@@ -1237,7 +1237,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |unidad_equipo|INDEX:unidad_equipo_mac_address_key|G1|INDEX_MISMATCH|null|"(mac_address)"|
 |zona_pago|INDEX:uq_zona_pago_empresa_nombre|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(COALESCE(id_empresa, 0), lower((nombre_zona)::text))"|
 |tax_emission_intent|INDEX:tax_intent_generated_folio_key|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_empresa, ambiente, tipo_dte, folio) WHERE estado = 'GENERADO'"|
-|tax_payment_job|INDEX:tax_job_reserved_folio_key|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_empresa, tipo_dte, folio_esperado) WHERE folio_esperado <> '0'"|
+|tax_payment_job|INDEX:tax_job_reserved_folio_key|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_empresa, ambiente, tipo_dte, folio_esperado) WHERE folio_esperado <> '0'"|
 |alerta_monitoreo|INDEX:alerta_monitoreo_id_empresa_resuelta_idx|G3/Ops|INDEX_MISMATCH|null|"(id_empresa, resuelta)"|
 |alerta_monitoreo|INDEX:alerta_monitoreo_tipo_clave_caja_resuelta_idx|G3/Ops|INDEX_MISMATCH|null|"(tipo, clave_caja, resuelta)"|
 |asignacion_equipo_servicio|INDEX:ix_asignacion_empresa_servicio_activa|G1|INDEX_MISMATCH|null|"(id_empresa, id_servicio_externo, activa)"|

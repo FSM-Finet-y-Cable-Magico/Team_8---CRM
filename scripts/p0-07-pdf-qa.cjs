@@ -52,7 +52,8 @@ async function main() {
   const baseline=process.argv.includes('--baseline');
   assert.ok(process.argv.slice(2).every(a=>a==='--baseline'),'Unknown argument');
   const schema=fs.readFileSync(path.join(repo,'db/global/init-global.sql'));
-  assert.equal(sha(schema),'f42140bff257d8bcaf46d2f74d5c44fa6d304bd8f84e20085ba3bbf07bfeb2aa');
+  const {parseGlobalSchema}=await import('./global-schema.mjs');
+  parseGlobalSchema(schema); // Same reviewed hash gate as the global verifier.
   const cluster=await createCluster('C:/Program Files/PostgreSQL/18/bin');
   const cap=cluster.capability;
   const evidence={kind:baseline?'PDF_BASELINE':'PDF_REGRESSION',runId:cap.runId,at:new Date().toISOString(),
