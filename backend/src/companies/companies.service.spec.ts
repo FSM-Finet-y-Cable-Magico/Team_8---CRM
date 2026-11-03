@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompaniesService } from './companies.service';
+import { G3Installation, LocalInstallation } from './installation-metrics';
 
 const commercial: AuthUser = {
   idUsuario: 25,
@@ -10,6 +11,55 @@ const commercial: AuthUser = {
   nombreCompleto: 'Comercial FiNet',
   roles: ['Comercial'],
 };
+
+describe('CompaniesService CU47 integrado', () => {
+  beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-11-03T12:00:00Z')); });
+  afterEach(() => jest.useRealTimers());
+  function fixture(date: string | null, localRows: LocalInstallation[] = []) {
+    const contrato = { idContrato: 10, idEmpresa: 1, idCliente: 30 };
+    const remote: G3Installation = { idEmpresa: 1, idOtG3: '901', idServicio: 50, idCliente: 30, idContrato: 10, contrato,
+      servicio: { idServicio: 50, idEmpresa: 1, idContrato: 10, idCliente: 30, contrato,
+        datosTecnicos: { fuenteInstalacion: 'G3', idOtG3: '901', fechaCompletadaG3: date } } };
+    const count = () => jest.fn().mockResolvedValue(0), rows = () => jest.fn().mockResolvedValue([]);
+    const prisma = {
+      cliente: { count: count() }, prospecto: { count: count(), groupBy: rows() },
+      empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1 }]) },
+      ordenTrabajo: { count: count(), findMany: jest.fn().mockResolvedValue(localRows) },
+      integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([remote]) },
+      $transaction: jest.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+      ticket: { count: count(), findMany: rows() }, unidadEquipo: { count: count() },
+      servicioContratado: { count: count() }, contrato: { count: count(), findMany: rows() },
+      solicitudCliente: { count: count() }, historialCambioPlan: { findMany: rows() }, categoriaFalla: { findMany: rows() },
+    };
+    return { prisma, service: new CompaniesService(prisma as unknown as PrismaService) };
+  }
+  it('incluye G3 sin OT local en instalaciones del mes técnico', async () => {
+    const { service } = fixture('2026-11-02T12:00:00Z');
+    expect((await service.summary(commercial)).metricas.instalacionesMensuales).toBe(1);
+  });
+  it('informa completadas pendientes de fecha sin convertirlas en pendientes de ejecución', async () => {
+    const { service } = fixture(null);
+    expect((await service.summary(commercial)).metricas).toEqual(expect.objectContaining({
+      instalacionesMensuales: 0, instalacionesSinFechaTecnica: 1, instalacionesPendientes: 0,
+    }));
+  });
+  it.each([
+    [commercial, '2', 1], [{ ...commercial, idEmpresa: 2 }, '1', 2],
+    [{ ...commercial, roles: ['Administrador'] }, '2', 2],
+    [{ ...commercial, roles: ['Administrador'] }, 'consolidado', undefined],
+  ] as Array<[AuthUser, string, number | undefined]>)('consulta ambas fuentes con empresa autorizada y snapshot consistente', async (user, scope, company) => {
+    const { service, prisma } = fixture(null);
+    await service.summary(user, scope);
+    expect(prisma.integracionInstalacionG3.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ...(company ? { idEmpresa: company } : {}),
+        estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null } }),
+    }));
+    expect(prisma.ordenTrabajo.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ idEmpresa: company ?? { not: null }, tipoOt: 'Instalacion', estado: 'Completada' }),
+    }));
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), { isolationLevel: 'RepeatableRead' });
+  });
+});
 
 describe('CompaniesService', () => {
   it('uses the same active prospect and active customer definitions in the summary', async () => {
@@ -22,7 +72,9 @@ describe('CompaniesService', () => {
         groupBy: jest.fn().mockResolvedValue([]),
       },
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1, nombre: 'FiNet Limitada' }]) },
-      ordenTrabajo: { count: jest.fn().mockResolvedValue(0) },
+      ordenTrabajo: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+      integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
       ticket: {
         count: jest.fn().mockResolvedValue(0),
         findMany: jest.fn().mockResolvedValue([]),
@@ -105,7 +157,9 @@ describe('CompaniesService', () => {
     const rows = () => jest.fn().mockResolvedValue([]);
     const prisma = {
       cliente: { count: count() }, prospecto: { count: count(), groupBy: rows() },
-      empresa: { findMany: rows() }, ordenTrabajo: { count: count() },
+      empresa: { findMany: rows() }, ordenTrabajo: { count: count(), findMany: rows() },
+      integracionInstalacionG3: { findMany: rows() },
+      $transaction: jest.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
       ticket: { count: count(), findMany: rows() }, unidadEquipo: { count: count() },
       servicioContratado: { count: count() }, contrato: { count: count(), findMany: rows() },
       solicitudCliente: { count: count() }, historialCambioPlan: { findMany: rows() },
