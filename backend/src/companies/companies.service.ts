@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { installationMetrics } from './installation-metrics';
 
 @Injectable()
 export class CompaniesService {
@@ -42,7 +44,7 @@ export class CompaniesService {
       clientesMorosos,
       inventarioDisponible,
       serviciosActivos,
-      instalacionesMensuales,
+      completedInstallations,
       ticketsCerradosMensuales,
       churnBajasMensuales,
       clientesActivos,
@@ -77,14 +79,7 @@ export class CompaniesService {
       }),
       this.prisma.unidadEquipo.count({ where: { ...companyFilter, estado: 'Disponible' } }),
       this.prisma.servicioContratado.count({ where: { ...companyFilter, estadoOperativo: 'Activo' } }),
-      this.prisma.ordenTrabajo.count({
-        where: {
-          ...companyFilter,
-          tipoOt: 'Instalacion',
-          estado: 'Completada',
-          fechaCompletada: { gte: monthStart },
-        },
-      }),
+      this.completedInstallationMetrics(companyFilter, today),
       this.prisma.ticket.count({
         where: {
           ...companyFilter,
@@ -217,7 +212,7 @@ export class CompaniesService {
         clientesMorosos,
         inventarioDisponible,
         serviciosActivos,
-        instalacionesMensuales,
+        ...completedInstallations,
         ticketsCerradosMensuales,
         churnRateMensual: churnBase ? Number(((churnBajasMensuales / churnBase) * 100).toFixed(2)) : 0,
         churnBajasMensuales,
@@ -246,6 +241,28 @@ export class CompaniesService {
       alertasVencimiento,
       diasAnticipacionVencimiento: expiryDays,
     };
+  }
+
+  private async completedInstallationMetrics(companyFilter: { idEmpresa?: number }, today: string) {
+    const contract = { idContrato: true, idEmpresa: true, idCliente: true } as const;
+    const service = { idServicio: true, idEmpresa: true, idContrato: true, idCliente: true,
+      datosTecnicos: true, contrato: { select: contract } } as const;
+    // One read snapshot prevents mixing a newly confirmed tracking with an older mirror.
+    // Keep all confirmed dates: processing month cannot filter a technical completion,
+    // and undated completions must remain visible rather than silently disappear.
+    const [local, remote] = await this.prisma.$transaction([
+      this.prisma.ordenTrabajo.findMany({
+        where: { idEmpresa: companyFilter.idEmpresa ?? { not: null }, tipoOt: 'Instalacion', estado: 'Completada' },
+        select: { idOt: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
+          servicio: { select: service } },
+      }),
+      this.prisma.integracionInstalacionG3.findMany({
+        where: { ...companyFilter, estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null } },
+        select: { idEmpresa: true, idOtG3: true, idContrato: true, idServicio: true, idCliente: true,
+          contrato: { select: contract }, servicio: { select: service } },
+      }),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return installationMetrics(local, remote, today.slice(0, 7), today);
   }
 
   private expiryAlertDays() {

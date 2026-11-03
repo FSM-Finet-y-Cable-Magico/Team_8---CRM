@@ -121,6 +121,8 @@ type Summary = {
     inventarioDisponible?: number;
     serviciosActivos?: number;
     instalacionesMensuales?: number;
+    instalacionesSinFechaTecnica?: number;
+    instalacionesRequierenRevision?: number;
     ticketsCerradosMensuales?: number;
     churnRateMensual?: number;
     churnBajasMensuales?: number;

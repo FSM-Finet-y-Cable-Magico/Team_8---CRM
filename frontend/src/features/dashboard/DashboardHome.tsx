@@ -61,6 +61,8 @@ type Summary = {
     clientesMorosos?: number;
     inventarioDisponible?: number;
     instalacionesMensuales?: number;
+    instalacionesSinFechaTecnica?: number;
+    instalacionesRequierenRevision?: number;
     churnRateMensual?: number;
     churnBajasMensuales?: number;
   };
@@ -163,7 +165,7 @@ export function DashboardHome({
     {
       label: 'Instalaciones del mes',
       value: summary?.metricas.instalacionesMensuales ?? 0,
-      description: 'Completadas durante el mes',
+      description: 'Por fecha técnica efectiva (Santiago)',
       icon: CircleCheckBig,
       tone: 'green' as const,
       tab: 'installations' as Tab,
@@ -249,7 +251,7 @@ export function DashboardHome({
     }));
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
-    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Completadas durante el mes', tone: 'green', tab: 'installations' as Tab },
+    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Por fecha técnica efectiva (Santiago)', tone: 'green', tab: 'installations' as Tab },
     { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
     { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
@@ -305,6 +307,13 @@ export function DashboardHome({
 
         <article className="dashboard-installation-panel">
           <div className="dashboard-panel-heading"><h2>Instalaciones</h2></div>
+          {(summary?.metricas.instalacionesSinFechaTecnica ?? 0) > 0 && <p role="status">
+            Pendiente de fecha técnica: {summary?.metricas.instalacionesSinFechaTecnica} instalación(es) completada(s).
+            No se incluyen en el total mensual ni representan trabajo pendiente de ejecución.
+          </p>}
+          {(summary?.metricas.instalacionesRequierenRevision ?? 0) > 0 && <p role="status">
+            {summary?.metricas.instalacionesRequierenRevision} registro(s) de instalación requieren revisión de fecha o relaciones; no incluidos en el indicador.
+          </p>}
           <div className="installation-chart-layout">
             <div className="installation-donut-wrap">
               <svg className="installation-donut" viewBox="0 0 120 120" aria-label={`${installationSegments[0].value} instalaciones pendientes`} role="img">
