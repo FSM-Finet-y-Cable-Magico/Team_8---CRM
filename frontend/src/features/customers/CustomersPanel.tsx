@@ -868,8 +868,8 @@ export function CustomersPanel({
                       <td>#{contract?.idContrato ?? '-'}</td>
                       <td>{formatDateOnly(contract?.fechaFirmaManual)}</td>
                       <td>{pendingActivationAddress(prospect)}</td>
-                      <td>{contract?.comunaInstalacion ?? '-'}</td>
-                      <td>{contract?.ciudadInstalacion ?? '-'}</td>
+                      <td>{prospect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? '-'}</td>
+                      <td>{prospect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? '-'}</td>
                       <td><StatusBadge value="Pendiente de activación" /></td>
                       <td><button className="secondary compact" onClick={() => setSelectedPendingActivation(prospect)}>Ver detalle</button></td>
                     </tr>
@@ -1041,8 +1041,8 @@ export function CustomersPanel({
                 <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
                 <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
                 <div><dt>Dirección de instalación</dt><dd>{pendingActivationAddress(selectedPendingActivation)}</dd></div>
-                <div><dt>Comuna</dt><dd>{contract?.comunaInstalacion ?? 'No registrada'}</dd></div>
-                <div><dt>Ciudad</dt><dd>{contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
+                <div><dt>Comuna</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedPendingActivation.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
+                <div><dt>Ciudad</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
                 <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
               </dl>
               <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>

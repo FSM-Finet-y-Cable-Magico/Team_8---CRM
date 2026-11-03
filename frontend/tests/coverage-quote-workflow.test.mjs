@@ -76,6 +76,16 @@ test('React: cotizado sin cotización persistida, perdido y NO_FACTIBLE no fabri
   const h=await harness(t,{state:'Cotizacion Enviada'});assert.deepEqual(h.optionIds(1),[]);
   await h.select(1,1);assert.equal(h.button('Confirmar contratación').props.disabled,true);
 });
+test('React: contratación transporta comuna y ciudad explícitas sin inferirlas del mapa', async t => {
+  const h = await harness(t, { state: 'Cotizacion Enviada', quoted: true });
+  const inputs = h.tree.root.findAllByType('input').filter(input => input.props.maxLength === 80);
+  assert.equal(inputs.length, 2); assert.equal(inputs[1].props.value, '');
+  await act(async () => inputs[0].props.onChange({ target: { value: 'Comuna QA' } }));
+  await act(async () => inputs[1].props.onChange({ target: { value: 'Ciudad QA' } }));
+  await h.select(1, 1); await act(async () => h.button('Confirmar contratación').props.onClick());
+  assert.equal(h.calls.find(c => c.path.endsWith('/contracts')).body.comuna, 'Comuna QA');
+  assert.equal(h.calls.find(c => c.path.endsWith('/contracts')).body.ciudad, 'Ciudad QA');
+});
 for(const state of ['Perdido','No Factible'])test('React bloquea '+state,async t=>{
   const h=await harness(t,{state,quoted:true,outside:state==='No Factible'});await h.select(1,1);
   assert.equal(h.button('Confirmar contratación').props.disabled,true);

@@ -29,6 +29,8 @@ export function ProspectWorkflowPanel({
 
 
   const [contractObservation, setContractObservation] = useState('');
+  const [contractComuna, setContractComuna] = useState(prospect.comuna ?? '');
+  const [contractCity, setContractCity] = useState('');
   const [lossOpen, setLossOpen] = useState(false);
   const [lossReason, setLossReason] = useState('Precio');
   const [lossObservation, setLossObservation] = useState('');
@@ -48,6 +50,8 @@ export function ProspectWorkflowPanel({
     setAvailablePlanIds(null);
     setContractConfirmationDate(new Date().toISOString().slice(0, 10));
     setContractObservation('');
+    setContractComuna(prospect.comuna ?? '');
+    setContractCity('');
     setLossOpen(false);
     setLossReason('Precio');
     setLossObservation('');
@@ -129,6 +133,8 @@ export function ProspectWorkflowPanel({
           planId: Number(contractPlanId),
           fechaInicio: contractConfirmationDate || undefined,
           observacionContrato: contractObservation.trim() || undefined,
+          comuna: contractComuna.trim() || undefined,
+          ciudad: contractCity.trim() || undefined,
         }),
       'Contratación confirmada. El prospecto queda como cliente pendiente de firma.',
       true,
@@ -268,6 +274,9 @@ export function ProspectWorkflowPanel({
               </div>
             </header>
             <div className="prospect-contract-fields">
+              <label>Comuna de instalación<input maxLength={80} value={contractComuna} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractComuna(event.target.value)} /></label>
+              <label>Ciudad de instalación (si está registrada)<input maxLength={80} value={contractCity} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractCity(event.target.value)} /></label>
+              <p>Confirma los datos de la misma dirección antes de contratar. La región no sustituye a la ciudad.</p>
               <label>
                 Plan aceptado
                 <select value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>

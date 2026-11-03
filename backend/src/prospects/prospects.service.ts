@@ -129,16 +129,28 @@ export class ProspectsService {
         },
       },
     });
-    return prospects.map((prospect) => ({
-      ...prospect,
-      contratos: prospect.contratos
+    return prospects.map((prospect) => {
+      const contracts = prospect.contratos
         .filter((contract) => contract.idEmpresa === prospect.idEmpresa)
         .slice(0, 1)
         .map((contract) => ({
           ...contract,
           plan: contract.plan?.idEmpresa === prospect.idEmpresa ? contract.plan : null,
-        })),
-    }));
+        }));
+      const contract = contracts[0];
+      const clean = (value?: string | null) => value?.trim() || null;
+      const address = clean(contract?.direccionInstalacion);
+      const sameAddress = !address || address.replace(/\s+/g, ' ') === clean(prospect.direccion)?.replace(/\s+/g, ' ');
+      const contractComuna = clean(contract?.comunaInstalacion);
+      const prospectComuna = contract && sameAddress ? clean(prospect.comuna) : null;
+      // Read-only projection: never pretend a prospect supplement was signed.
+      return { ...prospect, contratos: contracts, ubicacionInstalacion: {
+        direccion: address || clean(prospect.direccion),
+        comuna: contractComuna || prospectComuna,
+        ciudad: clean(contract?.ciudadInstalacion),
+        fuenteComuna: contractComuna ? 'CONTRATO' : prospectComuna ? 'PROSPECTO' : null,
+      } };
+    });
   }
   async create(dto: CreateProspectDto, currentUser: AuthUser) {
     const rutResult = validateRut(dto.rut);
@@ -604,7 +616,8 @@ export class ProspectsService {
         || [NOT_FEASIBLE_PIPELINE_STATUS, LOST_PIPELINE_STATUS].includes(current.estadoPipeline ?? '')
         || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud
         || current.direccion !== prospect.direccion || current.rut !== prospect.rut
-        || current.nombreCompleto !== prospect.nombreCompleto || current.telefono !== prospect.telefono) {
+        || current.nombreCompleto !== prospect.nombreCompleto || current.telefono !== prospect.telefono
+        || current.comuna !== prospect.comuna) {
         throw new ConflictException('El prospecto cambio durante la confirmacion; vuelve a consultar ubicacion y estado');
       }
       const currentPlan = await tx.plan.findUnique({ where: { idPlan: dto.planId } });
@@ -631,7 +644,7 @@ export class ProspectsService {
         fechaEnvioCliente,
         observacionContrato: dto.observacionContrato?.trim() || undefined,
         direccionInstalacion,
-        comunaInstalacion: dto.comuna?.trim() || undefined,
+        comunaInstalacion: dto.comuna?.trim() || current.comuna?.trim() || undefined,
         ciudadInstalacion: dto.ciudad?.trim() || undefined,
       };
 
