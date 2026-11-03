@@ -21,6 +21,19 @@ export type Company = {
   nombre: string;
 };
 
+export type InstallationHistory = {
+  scope: string;
+  fuente: 'G8_PERSISTIDO';
+  items: Array<{
+    key: string; idEmpresa: number; fuente: 'G3' | 'LEGACY_LOCAL'; idOt: string | null;
+    idContrato: number | null; idServicio: number | null; idCliente: number | null;
+    estado: 'COMPLETADA';
+    clasificacionFecha: 'REQUIERE_REVISION' | 'PENDIENTE_FECHA_TECNICA' | 'FECHA_TECNICA_CONFIRMADA';
+    fechasTecnicasOriginales: string[]; ordenesLocales: number[];
+    solicitudesG3: Array<{ idIntegracion: number; requestId: string; traceId: string; fechaCierreProcesado: string }>;
+  }>;
+};
+
 export type Role = {
   idRol: number;
   nombreRol: string;

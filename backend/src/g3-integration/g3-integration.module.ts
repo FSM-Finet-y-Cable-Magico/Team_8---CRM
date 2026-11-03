@@ -9,11 +9,14 @@ import { InstallationActivationService } from './installation-activation.service
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 import { G1IntegrationModule } from '../g1-integration/g1-integration.module';
+import { InstallationHistoryController } from './installation-history.controller';
+import { InstallationHistoryService } from './installation-history.service';
 
 @Module({
   imports: [AuditModule, G1IntegrationModule, IntegrationAuthModule],
-  controllers: [G3IntegrationController, G3CanonicalWebhookController, ServiceWithdrawalController],
+  controllers: [G3IntegrationController, G3CanonicalWebhookController, ServiceWithdrawalController, InstallationHistoryController],
   providers: [
+    InstallationHistoryService,
     HttpG3IntegrationClient,
     { provide: G3_INTEGRATION_CLIENT, useExisting: HttpG3IntegrationClient },
     InstallationActivationService,
