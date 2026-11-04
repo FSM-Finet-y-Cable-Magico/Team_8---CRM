@@ -1,5 +1,9 @@
 # F3 — Propuesta de imputación, pendiente de autorización
 
+> Actualización 04-11-2026: informe histórico conservado. El propietario autorizó
+> la imputación manual explícita; ver [implementación y QA](i4-f3-imputaciones-validacion.md).
+> No autoriza imputación automática, reparaciones masivas ni migración compartida.
+
 03-11-2026. **NO IMPLEMENTADA**. Se conserva la decisión del propietario del
 29-10: sin imputación automática ni reparación histórica. Complementa
 [la decisión comercial previa](i4-convenios-decision-comercial.md), no la sustituye.

@@ -1,5 +1,10 @@
 # I4 — Convenios: inconsistencia confirmada, decisión pendiente
 
+> Actualización 04-11-2026: la decisión histórica que sigue se conserva como
+> trazabilidad. El propietario aprobó posteriormente imputación manual, explícita
+> y auditada. Ver [implementación y QA F3](i4-f3-imputaciones-validacion.md).
+> La prohibición de imputaciones automáticas y reparaciones históricas masivas continúa.
+
 29-10-2026. El propietario confirmó **mantener la política documentada**, sin imputación automática ni reparación histórica. Este punto no está funcionalmente cerrado para la entrega del 04-11-2026.
 
 ## Diagnóstico y reproducción
