@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, type G3InstallationTracking } from '../../api';
-import { formatDateTime } from '../../lib';
+import { formatDateTime, userFacingMessage } from '../../lib';
 import { StatusBadge } from '../../shared/components';
 
 const STATE_LABELS: Record<string, string> = {
@@ -12,7 +12,7 @@ function textValue(value: unknown) {
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    return String(record.nombre_completo ?? record.nombre ?? record.direccion_completa ?? 'Disponible en G3');
+    return String(record.nombre_completo ?? record.nombre ?? record.direccion_completa ?? 'No informado');
   }
   return '-';
 }
@@ -66,7 +66,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     try {
       const { data } = await api.patch(`/integrations/g3/contracts/${requirements.idContrato}/installation-data`, { comuna: comuna.trim(), confirmarMismaDireccion: true });
       setRequirements(data); setComuna(''); setSameAddress(false);
-      setNotice('Comuna complementada y auditada. El contrato firmado y su PDF no se modificaron.');
+      setNotice('Comuna guardada. El contrato firmado y su PDF conservan sus datos.');
       onChanged?.();
     } catch (cause) { setError(apiErrorMessage(cause)); } finally { setBusy(false); }
   }
@@ -83,7 +83,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
           const { data } = await api.get<G3InstallationTracking>(path); setTracking(data);
         } else {
           const { data } = await api.post(`${path}/${action}`);
-          if (action === 'reconcile' && data.available === false) setNotice('G3 todavía no dispone de un cierre confirmado. La instalación conserva su estado.');
+          if (action === 'reconcile' && data.available === false) setNotice('El cierre técnico aún no está confirmado. La instalación continúa en seguimiento.');
           await load();
         }
       }
@@ -93,18 +93,18 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
   if (!tracking) return <div className="g3-installation-card">
-    <p>G3 administrará la orden, agenda, técnico, evidencia y cierre de terreno.</p>
-    <p>Se requieren contrato firmado, factibilidad para el plan, identidad válida, móvil chileno, dirección y comuna. Ciudad y región no son obligatorias en el payload G3 actual.</p>
+    <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>
+    <p>Se requieren contrato firmado, factibilidad aprobada, identificación del cliente, teléfono móvil, dirección y comuna.</p>
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
     {requirements?.comunaFaltante && requirements.puedeCompletarComuna && <fieldset disabled={busy}>
       <legend>Completar datos de instalación</legend>
-      <p role="alert">Falta la comuna. Ingrésala desde una fuente verificada, sin deducirla del mapa. Esta operación solo complementa el prospecto; no cambia dirección, coordenadas, firma ni PDF.</p>
+      <p role="alert">Ingresa la comuna verificada del domicilio contratado y confirma que corresponde a la misma dirección.</p>
       <label>Comuna obligatoria<input value={comuna} maxLength={80} onChange={event => setComuna(event.target.value)} /></label>
       <label><input type="checkbox" checked={sameAddress} onChange={event => setSameAddress(event.target.checked)} />Confirmo que corresponde a la misma dirección contratada.</label>
       <p>Si la dirección contratada es incorrecta, solicita revisión y la aprobación o firma que corresponda antes de continuar.</p>
-      <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna faltante</button>
+      <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna</button>
     </fieldset>}
-    <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación a G3'}</button>
+    <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>
     {!canRequest && <p className="alert">Primero confirma el contrato firmado y la factibilidad.</p>}
     {error && <p className="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -113,30 +113,29 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
   return <div className="g3-installation-card">
-    <header><div><strong>Instalación técnica</strong><span className="source-badge">Fuente G3</span></div><StatusBadge value={state} /></header>
+    <header><div><strong>Instalación técnica</strong></div><StatusBadge value={state} /></header>
     <dl className="customer-readonly-details">
-      <div><dt>Código OT G3</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de respuesta'}</dd></div>
+      <div><dt>Orden de trabajo</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de asignación'}</dd></div>
       <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
-      <div><dt>Última sincronización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>
-      {tracking.fechaCierreProcesado && <div><dt>Cierre procesado en CRM</dt><dd>{formatDateTime(tracking.fechaCierreProcesado)}</dd></div>}
-      <div><dt>Intentos</dt><dd>{tracking.intentos}</dd></div>
-      {tracking.estadoRemotoG3 && <div><dt>Estado remoto informado</dt><dd>{STATE_LABELS[tracking.estadoRemotoG3] ?? tracking.estadoRemotoG3}</dd></div>}
+      <div><dt>Última actualización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>
+      {tracking.fechaCierreProcesado && <div><dt>Fecha de confirmación del cierre</dt><dd>{formatDateTime(tracking.fechaCierreProcesado)}</dd></div>}
+      <div><dt>Intentos de envío</dt><dd>{tracking.intentos}</dd></div>
+      {tracking.estadoRemotoG3 && <div><dt>Estado informado por el equipo técnico</dt><dd>{STATE_LABELS[tracking.estadoRemotoG3] ?? 'Pendiente de revisión'}</dd></div>}
       {tracking.detalle && <>
-        <div><dt>Técnico</dt><dd>{tracking.detalle.tecnico ? textValue(tracking.detalle.tecnico) : tracking.detalle.idTecnicoG3 ? `ID técnico G3 #${tracking.detalle.idTecnicoG3}` : 'No informado por G3'}</dd></div>
+        <div><dt>Técnico</dt><dd>{tracking.detalle.tecnico ? textValue(tracking.detalle.tecnico) : tracking.detalle.idTecnicoG3 ? `Técnico #${tracking.detalle.idTecnicoG3}` : 'Sin asignar'}</dd></div>
         <div><dt>Dirección</dt><dd>{textValue(tracking.detalle.direccion)}</dd></div>
-        <div><dt>Fecha completada G3</dt><dd>{tracking.detalle.fechaCompletada ? formatDateTime(tracking.detalle.fechaCompletada) : 'No informada por G3'}</dd></div>
+        <div><dt>Fecha de finalización</dt><dd>{tracking.detalle.fechaCompletada ? formatDateTime(tracking.detalle.fechaCompletada) : 'No registrada'}</dd></div>
         {tracking.detalle.potenciaOpticaDbm != null && <div><dt>Potencia óptica</dt><dd>{tracking.detalle.potenciaOpticaDbm} dBm</dd></div>}
         {tracking.detalle.resultadoLlamada && <div><dt>Resultado llamada</dt><dd>{tracking.detalle.resultadoLlamada}</dd></div>}
         {tracking.detalle.resueltoRemotamente != null && <div><dt>Resuelto remotamente</dt><dd>{tracking.detalle.resueltoRemotamente ? 'Sí' : 'No'}</dd></div>}
         {tracking.detalle.materiales && <div><dt>Materiales informados</dt><dd>{tracking.detalle.materiales.length} registro(s)</dd></div>}
       </>}
     </dl>
-    {completed && <p className="inline-status">El cierre ya fue confirmado en CRM. Las consultas de detalle no modifican ese estado terminal.</p>}
-    {tracking.estadoOriginalRemotoG3 && <p className="inline-status">Estado remoto informado por G3: {tracking.estadoOriginalRemotoG3}. El estado confirmado en CRM se conserva.</p>}
-    {tracking.estadoOriginalG3 && <p className="inline-status">Estado original G3: {tracking.estadoOriginalG3}. Se mantiene en seguimiento y no activa el servicio.</p>}
+    {completed && <p className="inline-status">La instalación ya tiene un cierre confirmado.</p>}
+    {(tracking.estadoOriginalRemotoG3 || tracking.estadoOriginalG3) && <p className="inline-status">La última actualización técnica está pendiente de revisión. {completed ? 'Se conserva el cierre confirmado de la instalación.' : 'La instalación continúa en seguimiento.'}</p>}
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
-    {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">Cliente ausente. La reprogramación queda pendiente del mecanismo que defina G3.</p>}
-    {tracking.ultimoErrorSanitizado && <p className="alert">{tracking.ultimoErrorSanitizado}</p>}
+    {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">No fue posible realizar la visita por ausencia del cliente. Está pendiente coordinar una nueva fecha.</p>}
+    {tracking.ultimoErrorSanitizado && <p className="alert">{userFacingMessage(tracking.ultimoErrorSanitizado, 'No se pudo actualizar la instalación. Inténtalo nuevamente más tarde.')}</p>}
     <div className="button-row">
       {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Ver detalle</button>}
       {!completed && (tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>}

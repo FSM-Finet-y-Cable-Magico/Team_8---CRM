@@ -6,3 +6,4 @@ export * from './rut';
 export * from './settled-data';
 export * from './technical';
 export * from './validation';
+export * from './user-facing-messages';

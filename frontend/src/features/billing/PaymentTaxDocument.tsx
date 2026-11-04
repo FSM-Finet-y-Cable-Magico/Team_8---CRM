@@ -5,7 +5,7 @@ type TaxStatus = { readiness: { state:string }; job: { estado:string; ultimoErro
   intention: { estado:string; ambiente:string; tipoDte:number; folio:string | null; fingerprint:string; ultimoError:string | null; artefactoUrl:string | null; artefactoEstado:string; emailEstado:string; emailIntentos:number; fechaProximoEmail:string | null } | null };
 const labels:Record<string,string> = { DISABLED:'Emisión deshabilitada', COMPANY_NOT_CONFIGURED:'Empresa sin configuración', COMPANY_DISABLED:'Empresa deshabilitada',
   SIMULADO:'Simulado; no se envió correo',
-  CREDENTIALS_MISSING:'Faltan credenciales API', MIGRATION_REQUIRED:'Falta preparar la base de datos', READY_SANDBOX:'Ambiente de pruebas', READY_PRODUCTION:'Configuración de producción lista', PRODUCTION_NOT_CERTIFIED:'Emisión productiva desactivada',
+  CREDENTIALS_MISSING:'Acceso al servicio tributario pendiente', MIGRATION_REQUIRED:'Configuración tributaria pendiente', READY_SANDBOX:'Ambiente de pruebas', READY_PRODUCTION:'Configuración de producción lista', PRODUCTION_NOT_CERTIFIED:'Emisión productiva desactivada',
   PENDIENTE_CONTRATO_FACTURACION_CL:'Falta configuración tributaria', PENDIENTE:'Pendiente', EN_PROCESO:'Procesando', GENERADO:'Generado',
   FALLIDO:'Falló', RESULTADO_INDETERMINADO:'Resultado por verificar', DATOS_REQUERIDOS:'Requiere revisión de datos',
   NO_CONFIGURADO:'Correo sin configurar', SIN_DESTINATARIO:'Sin correo del cliente', ENVIADO:'Enviado', DISPONIBLE:'Disponible', REINTENTO_PENDIENTE:'Reintento programado' };

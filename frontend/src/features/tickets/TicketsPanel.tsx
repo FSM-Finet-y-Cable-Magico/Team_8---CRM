@@ -1,9 +1,10 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useState } from 'react';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory, type UserRow } from '../../api';
 import { rutPattern } from '../../constants';
 import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { Modal, StatusBadge } from '../../shared/components';
+import { StatusBadge } from '../../shared/components';
+import { TicketManagementModal } from './TicketManagementModal';
 
 export function TicketsPanel({
   tickets,
@@ -19,18 +20,6 @@ export function TicketsPanel({
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createForm, setCreateForm] = useState({ rut: '', idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
-  const [categoryId, setCategoryId] = useState('');
-  const [priority, setPriority] = useState('Media');
-  const [ticketStatus, setTicketStatus] = useState('En progreso');
-  const [comment, setComment] = useState('');
-  const [diagnosis, setDiagnosis] = useState({
-    causaRaiz: '',
-    descripcionProblema: '',
-    accionesRealizadas: '',
-    estadoFinalServicio: 'Activo',
-    observaciones: '',
-  });
-  const [technicalNote, setTechnicalNote] = useState('');
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
@@ -38,21 +27,6 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
-  const associatedWorkOrder = selectedTicket?.workOrders?.[0] ?? null;
-  const hasOpenWorkOrder = Boolean(
-    selectedTicket?.hasOpenWorkOrder
-      || (associatedWorkOrder && associatedWorkOrder.estado !== 'Completada'),
-  );
-  const directClosureBlocked = hasOpenWorkOrder && ['Resuelto', 'Cerrado'].includes(ticketStatus);
-
-  useEffect(() => {
-    if (selectedTicket) {
-      setCategoryId(String(selectedTicket.idCategoria));
-      setPriority(selectedTicket.prioridad);
-      setTicketStatus(selectedTicket.estado);
-      setTechnicalNote('');
-    }
-  }, [selectedTicket?.idTicket]);
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -252,188 +226,14 @@ export function TicketsPanel({
           </table>
         </div>
 
-        <Modal title="Gestionar ticket" open={managementOpen} onClose={() => setManagementOpen(false)}>
-          {selectedTicket ? (
-            <div className="workflow-panel modal-workflow">
-              <section className="customer-preview">
-                <h3>{selectedTicket.codigoSeguimiento ?? `Ticket ${selectedTicket.idTicket}`}</h3>
-                <p><strong>Cliente:</strong> {selectedTicket.cliente?.nombreCompleto ?? '-'}</p>
-                <p><strong>Clasificación:</strong> {selectedTicket.categoria?.nombre ?? selectedTicket.idCategoria}</p>
-                <p><strong>Prioridad:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.prioridad)} /></p>
-                <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(selectedTicket.estado)} /></p>
-              </section>
-              <section className="history-list full-width-panel">
-                <h3>Orden de trabajo asociada</h3>
-                {associatedWorkOrder ? (
-                  <div className="customer-preview">
-                    <p><strong>OT:</strong> #{associatedWorkOrder.idOt}</p>
-                    <p><strong>Tipo:</strong> {formatWorkOrderValue(associatedWorkOrder.tipoOt)}</p>
-                    <p><strong>Estado:</strong> <StatusBadge value={formatWorkOrderValue(associatedWorkOrder.estado)} /></p>
-                    {hasOpenWorkOrder && (
-                      <p className="alert">La OT no consta completada. Su cierre corresponde a G3; puedes continuar registrando observaciones en el ticket.</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="inline-status">No hay una OT historica asociada.</p>
-                )}
-                <p className="inline-status">G3 administra las ordenes tecnicas. La derivacion de reparaciones y soporte esta pendiente de ratificacion; no se crean ni cierran OT desde Tickets.</p>
-              </section>
-              {(permissions.classifyTickets || permissions.updateTicketStatus || permissions.diagnoseTickets) ? (
-                <div className="workflow-grid">
-                  {permissions.classifyTickets && <label>
-                    Clasificación
-                    <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-                      {categories.map((category) => (
-                        <option key={category.idCategoria} value={category.idCategoria}>
-                          {category.nombre}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(
-                          () => api.patch(`/tickets/${selectedTicket.idTicket}/category`, { idCategoria: Number(categoryId) }),
-                          'Ticket clasificado',
-                        )
-                      }
-                    >
-                      Clasificar
-                    </button>
-                  </label>}
-
-                  {permissions.classifyTickets && <label>
-                    Prioridad
-                    <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-                      <option value="Alta">Alta</option>
-                      <option value="Media">Media</option>
-                      <option value="Baja">Baja</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(
-                          () => api.patch(`/tickets/${selectedTicket.idTicket}/priority`, { prioridad: priority }),
-                          'Prioridad actualizada',
-                        )
-                      }
-                    >
-                      Actualizar
-                    </button>
-                  </label>}
-
-                  {permissions.updateTicketStatus && <label>
-                    Estado
-                    <select value={ticketStatus} onChange={(event) => setTicketStatus(event.target.value)}>
-                      {['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
-                    <input value={comment} placeholder="Comentario" onChange={(event) => setComment(event.target.value)} />
-                    {directClosureBlocked && (
-                      <p className="alert">La OT no consta completada. Su cierre corresponde a G3; puedes continuar registrando observaciones en el ticket.</p>
-                    )}
-                    <button
-                      type="button"
-                      disabled={directClosureBlocked}
-                      onClick={() =>
-                        void run(
-                          () => api.patch(`/tickets/${selectedTicket.idTicket}/status`, { estado: ticketStatus, comentario: comment }),
-                          'Estado de ticket actualizado',
-                        )
-                      }
-                    >
-                      Cambiar estado
-                    </button>
-                  </label>}
-
-                  {permissions.diagnoseTickets && <label>
-                    Diagnóstico técnico del ticket
-                    <p className="inline-status">El estado informado es una observación técnica: no modifica el estado financiero del cliente, el contrato ni el servicio. Registrar el diagnóstico resuelve solo el ticket.</p>
-                    <input
-                      placeholder="Causa raíz"
-                      value={diagnosis.causaRaiz}
-                      onChange={(event) => setDiagnosis({ ...diagnosis, causaRaiz: event.target.value })}
-                    />
-                    <textarea
-                      placeholder="Problema detectado"
-                      value={diagnosis.descripcionProblema}
-                      onChange={(event) => setDiagnosis({ ...diagnosis, descripcionProblema: event.target.value })}
-                    />
-                    <textarea
-                      placeholder="Acciones realizadas"
-                      value={diagnosis.accionesRealizadas}
-                      onChange={(event) => setDiagnosis({ ...diagnosis, accionesRealizadas: event.target.value })}
-                    />
-                    <select
-                      aria-label="Estado observado en el diagnostico"
-                      value={diagnosis.estadoFinalServicio}
-                      onChange={(event) => setDiagnosis({ ...diagnosis, estadoFinalServicio: event.target.value })}
-                    >
-                      <option value="Activo">Activo</option>
-                      <option value="En Mantencion">En Mantencion</option>
-                    </select>
-                    {hasOpenWorkOrder && (
-                      <p className="alert">Este ticket tiene una OT pendiente. Su cierre técnico corresponde a G3 y la integración de reparaciones está pendiente de ratificación. Puedes registrar observaciones sin resolver el ticket.</p>
-                    )}
-                    <button
-                      type="button"
-                      disabled={hasOpenWorkOrder}
-                      onClick={() =>
-                        void run(
-                          () => api.post(`/tickets/${selectedTicket.idTicket}/diagnosis`, diagnosis),
-                          'Diagnóstico registrado',
-                        )
-                      }
-                    >
-                      Registrar diagnóstico
-                    </button>
-                  </label>}
-                </div>
-              ) : (
-                <p className="inline-status">No tienes permisos para modificar este ticket.</p>
-              )}
-              {permissions.registerTechnicalNotes && (
-                <section className="history-list full-width-panel">
-                  <h3>Observaciones técnicas</h3>
-                  {selectedTicket.observacionesTecnicas?.length ? (
-                    <ul className="compact-list">
-                      {selectedTicket.observacionesTecnicas.map((note) => (
-                        <li key={note.metadata}>
-                          <strong>{note.metadata}</strong>: {note.texto}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="inline-status">No hay observaciones técnicas registradas.</p>
-                  )}
-                  <textarea
-                    value={technicalNote}
-                    onChange={(event) => setTechnicalNote(event.target.value)}
-                    placeholder="Agregar observación técnica sin cerrar el ticket"
-                  />
-                  <button
-                    type="button"
-                    disabled={technicalNote.trim().length < 3}
-                    onClick={() =>
-                      void run(
-                        () => api.post(`/tickets/${selectedTicket.idTicket}/technical-notes`, { observacion: technicalNote.trim() }),
-                        'Observación técnica registrada',
-                      ).then(() => setTechnicalNote(''))
-                    }
-                  >
-                    Registrar observación
-                  </button>
-                </section>
-              )}
-              {status && <p className="inline-status">{status}</p>}
-            </div>
-          ) : (
-            <p className="inline-status">Selecciona un ticket para gestionarlo.</p>
-          )}
-        </Modal>
+        {managementOpen && selectedTicket && <TicketManagementModal
+          key={selectedTicket.idTicket}
+          ticket={selectedTicket}
+          categories={categories}
+          permissions={permissions}
+          onClose={() => setManagementOpen(false)}
+          onChanged={onChanged}
+        />}
       </section>
     </section>
   );

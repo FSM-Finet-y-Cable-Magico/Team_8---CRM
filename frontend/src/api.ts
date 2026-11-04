@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { userFacingApiError } from './lib/user-facing-messages';
+
 const envApiURL = import.meta.env.VITE_API_URL?.trim();
 const loopbackApiURL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
 const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
@@ -786,8 +788,8 @@ api.interceptors.response.use(
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
     const responseMessage = error.response?.data?.message;
-    return Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage ?? error.message;
+    return userFacingApiError(responseMessage ?? error.message, error.config?.url, error.response?.status);
   }
 
-  return 'Error inesperado';
+  return 'No se pudo completar la operación. Inténtalo nuevamente.';
 }
