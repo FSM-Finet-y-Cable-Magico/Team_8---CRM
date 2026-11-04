@@ -182,6 +182,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     try {
       if (editor.id) await api.patch('/coverage/zones/' + editor.id, payload);
       else await api.post('/coverage/zones', payload);
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
       if (!mounted.current) return;
       setEditing(false); setEditor(emptyEditor); setMessage('Zona guardada correctamente.');
       await loadZones();
@@ -194,6 +195,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     try {
       if (zone.activo === false) await api.patch('/coverage/zones/' + zone.idZonaPago, { activo: true });
       else await api.post('/coverage/zones/' + zone.idZonaPago + '/deactivate');
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
       if (!mounted.current) return;
       setMessage(zone.nombreZona + (zone.activo === false ? ' fue activada.' : ' fue desactivada.'));
       await loadZones();
@@ -210,6 +212,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     deletePending.current = true; setDeleting(true); setDeleteError(''); clearMessage();
     try {
       await api.delete('/coverage/zones/' + deletingZone.idZonaPago);
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
       if (!mounted.current) return;
       setZones(current => current.filter(zone => zone.idZonaPago !== deletingZone.idZonaPago));
       setSelected(current => current === deletingZone.idZonaPago ? null : current);

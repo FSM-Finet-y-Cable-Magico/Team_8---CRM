@@ -15,6 +15,7 @@ function loadComponent(file, mocks) {
   const exports = {};
   new Function('require', 'exports', outputText)(name => {
     if (name in mocks) return mocks[name];
+    if (name.endsWith('.css')) return {};
     if (name.startsWith('.')) throw new Error(`Unmocked dependency: ${name}`);
     return require(name);
   }, exports);
@@ -28,6 +29,7 @@ const mocks = {
     TablePagination: () => null,
   },
   '../coverage': { CoveragePicker: () => null },
+  './ContractDateCalendar': { localDateValue: () => '2026-11-04', ContractDateCalendar: () => null },
 };
 const Workflow = loadComponent('ProspectWorkflowPanel', mocks);
 const permissions = { generateQuotes: true, contractPlans: true, recordProspectLoss: true, manageContracts: true };

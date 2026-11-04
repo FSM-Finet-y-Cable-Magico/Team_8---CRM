@@ -73,6 +73,7 @@ test('pending closure is visible without losing the tracking', async () => {
   const h = await mount({ tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'PENDIENTE', estadoIntegracion: 'ENVIADA' } });
   try {
     await act(async () => h.button('Consultar cierre').props.onClick());
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes('Orden de instalación enviada a terreno'));
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('cierre técnico aún no está confirmado'));
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('9700002'));
     assert.equal(h.calls.some(c => c[1].endsWith('installation-requirements')), false);
@@ -87,6 +88,7 @@ test('seguimiento presenta estados y fallas remotas con mensajes de producción'
     assert.match(visible, /Pendiente de revisión/);
     assert.match(visible, /No se pudo actualizar la instalación/);
     assert.doesNotMatch(visible, /G3|INTEGRACION|CODIGO_DESCONOCIDO/);
+    assert.ok(!visible.includes('Orden de instalación enviada a terreno'));
     assert.ok(h.button('Reintentar envío'));
   } finally { await h.close(); }
 });

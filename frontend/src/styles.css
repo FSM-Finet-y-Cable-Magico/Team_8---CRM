@@ -4098,6 +4098,8 @@ button.profile-menu-item.danger:hover {
   letter-spacing: 0.02em;
 }
 
+.installation-delivery-heading { display: flex; align-items: center; gap: 10px; color: #24674e; font-size: .9rem; }
+.installation-delivery-heading svg { flex-shrink: 0; }
 .g3-installation-card {
   display: grid;
   gap: 0.9rem;

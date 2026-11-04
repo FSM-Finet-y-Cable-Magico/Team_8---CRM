@@ -13,6 +13,18 @@
 .coverage-result small { color: #64748b; }
 .coverage-picker summary { cursor: pointer; font-size: 13px; }
 .coverage-workspace { grid-column: 1 / -1; }
+.coverage-simple { display: grid; gap: 14px; min-width: 0; }
+.coverage-summary { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 11px; background: #edf2f1; color: #566b63; }
+.coverage-summary > svg { flex-shrink: 0; }
+.coverage-summary > div { min-width: 0; flex: 1; }
+.coverage-summary strong { display: block; font-size: .83rem; line-height: 1.4; }
+.coverage-summary-success { color: #14674e; background: #e5f4ec; }
+.coverage-summary-negative { color: #9b3e36; background: #fcedea; }
+.coverage-simple-summary .coverage-summary { padding: 17px 18px; gap: 12px; }
+.coverage-simple-summary .coverage-summary strong { font-size: 1.05rem; }
+.coverage-simple-summary .coverage-map { height: 300px; }
+.prospect-coverage-card { grid-column: 1 / -1; }
+.coverage-simple-status .coverage-summary { padding: 12px; }
 @media (max-width: 520px) { .coverage-coordinates { grid-template-columns: 1fr; } }
 .coverage-admin {
   --coverage-text: #20322b;

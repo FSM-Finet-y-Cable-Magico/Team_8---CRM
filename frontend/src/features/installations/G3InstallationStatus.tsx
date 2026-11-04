@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckCircle2, Clock3 } from 'lucide-react';
 import { api, apiErrorMessage, type G3InstallationTracking } from '../../api';
 import { formatDateTime, userFacingMessage } from '../../lib';
 import { StatusBadge } from '../../shared/components';
@@ -112,8 +113,9 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
 
   const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+  const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   return <div className="g3-installation-card">
-    <header><div><strong>Instalación técnica</strong></div><StatusBadge value={state} /></header>
+    <header><div className="installation-delivery-heading">{delivered ? <CheckCircle2 size={20} aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<strong>{delivered ? 'Orden de instalación enviada a terreno' : 'Orden de instalación pendiente de envío'}</strong></div><StatusBadge value={state} /></header>
     <dl className="customer-readonly-details">
       <div><dt>Orden de trabajo</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de asignación'}</dd></div>
       <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>

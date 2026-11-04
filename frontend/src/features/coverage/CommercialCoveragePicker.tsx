@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, CircleHelp, XCircle } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
@@ -32,19 +33,20 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, disabled = false, autoGeocode = false }: {
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor' }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
   onChange: (location: CoverageLocation | null) => void;
   onResult?: (result: CoverageResult | null) => void;
+  onBusyChange?: (busy: boolean) => void;
   disabled?: boolean;
   // Only enabled after the parent confirms a complete, finished address edit.
   autoGeocode?: boolean;
+  presentation?: 'editor' | 'status' | 'summary';
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
-  const [coverage, setResult] = useState<(CoverageResult & { companyId: number }) | null>(null);
-  const result = coverage?.companyId === idEmpresa ? coverage : null;
+  const [coverage, setResult] = useState<(CoverageResult & { queryKey: string }) | null>(null);
   const [zones, setZones] = useState<Array<CoverageZone & { idEmpresa: number; activo: boolean; fechaInicio?: string | null; fechaFin?: string | null }>>([]);
   const [zonesError, setZonesError] = useState('');
   const [mapWarning, setMapWarning] = useState('');
@@ -56,11 +58,18 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeMessage, setGeocodeMessage] = useState('');
   const [retry, setRetry] = useState(0);
+  const [backgroundRetry, setBackgroundRetry] = useState(0);
   const [coordinates, setCoordinates] = useState({ latitud: '', longitud: '' });
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layers = useRef<L.LayerGroup | null>(null);
   const version = JSON.stringify([idEmpresa, direccion.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CL')]);
+  const queryKey = JSON.stringify([version, value?.latitud, value?.longitud, retry]);
+  const result = coverage?.queryKey === queryKey ? coverage : null;
+  const latestQuery = useRef(queryKey);
+  latestQuery.current = queryKey;
+  const lastCoverage = useRef(coverage);
+  lastCoverage.current = coverage;
   const current = useRef({ version, onChange, value, disabled });
   current.current = { version, onChange, value, disabled };
   const geocodeController = useRef<AbortController | null>(null);
@@ -79,11 +88,37 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   }, [rememberAttempt]);
   const selection = useRef({ onChange: selectLocation, disabled });
   const resultListener = useRef(onResult);
+  const busyListener = useRef(onBusyChange);
   selection.current = { onChange: selectLocation, disabled };
   resultListener.current = onResult;
+  busyListener.current = onBusyChange;
+  const waitingForAddress = autoGeocode && !disabled && !value && !attempted.current.has(version);
+  const checking = busy || geocoding || waitingForAddress;
+
+  useEffect(() => { busyListener.current?.(checking); }, [checking]);
 
   useEffect(() => {
-    if (!container.current) return;
+    if (presentation === 'editor') return;
+    const refresh = () => { setBackgroundRetry(current => current + 1); };
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    const onChanged = (event: Event) => {
+      if ((event as CustomEvent<{ idEmpresa: number }>).detail?.idEmpresa === idEmpresa) refresh();
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('finet:coverage-updated', onChanged);
+    // Only the internal coverage API is polled. Geocoding is never repeated by this timer.
+    const timer = window.setInterval(onVisible, 30_000);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('finet:coverage-updated', onChanged);
+      window.clearInterval(timer);
+    };
+  }, [idEmpresa, presentation]);
+
+  useEffect(() => {
+    if (presentation === 'status' || !container.current) return;
     const instance = L.map(container.current, { scrollWheelZoom: false }).setView([-33.57, -70.61], 12);
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -95,24 +130,24 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     map.current = instance;
     layers.current = L.layerGroup().addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
-      if (!selection.current.disabled) {
+      if (presentation === 'editor' && !selection.current.disabled) {
         selection.current.onChange({ latitud: Number(event.latlng.lat.toFixed(6)), longitud: Number(event.latlng.lng.toFixed(6)) });
       }
     });
     const resize = new ResizeObserver(() => instance.invalidateSize());
     resize.observe(container.current);
     return () => { window.clearTimeout(tileTimer); tiles.off(); resize.disconnect(); instance.remove(); map.current = null; layers.current = null; };
-  }, []);
+  }, [presentation]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setZones([]); setZonesError('');
+    setZonesError('');
     if (!idEmpresa) return;
     void api.get('/coverage/zones', { params: { idEmpresa }, signal: controller.signal })
       .then(({ data }) => { if (!controller.signal.aborted) setZones(data); })
       .catch(() => { if (!controller.signal.aborted) setZonesError('No se pudieron consultar las zonas comerciales de esta empresa.'); });
     return () => controller.abort();
-  }, [idEmpresa, retry]);
+  }, [idEmpresa, retry, backgroundRetry]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,26 +162,34 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
 
   useEffect(() => {
     const controller = new AbortController();
-    setResult(null);
-    resultListener.current?.(null);
+    // Keep an unchanged address visible during background refresh so the form does not lose focus.
+    const background = lastCoverage.current?.queryKey === queryKey;
+    if (!background) {
+      setResult(null);
+      resultListener.current?.(null);
+    }
     setError('');
     setBusy(false);
     // Reading availability remains valid even when moving the pin is forbidden.
     if (!value || !connection) return;
-    setBusy(true);
+    setBusy(!background);
     const timer = window.setTimeout(() => {
       void api.post<CoverageResult>('/coverage/check', { idEmpresa, ...value }, { signal: controller.signal })
         .then(({ data }) => {
-          if (!controller.signal.aborted) {
-            setResult({ ...data, companyId: idEmpresa });
+          if (!controller.signal.aborted && latestQuery.current === queryKey) {
+            setResult({ ...data, queryKey });
             resultListener.current?.(data);
           }
         })
-        .catch(err => { if (!controller.signal.aborted) setError(apiErrorMessage(err)); })
+        .catch(err => {
+          if (!controller.signal.aborted) {
+            setResult(null); resultListener.current?.(null); setError(apiErrorMessage(err));
+          }
+        })
         .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     }, 350);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [idEmpresa, value?.latitud, value?.longitud, connection]);
+  }, [queryKey, connection, backgroundRetry]);
 
   useEffect(() => {
     setCoordinates({ latitud: value ? String(value.latitud) : '', longitud: value ? String(value.longitud) : '' });
@@ -170,12 +213,12 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       L.circleMarker([value.latitud, value.longitud], { radius: 9, color: '#2454b8', fillOpacity: 0.9 })
         .bindTooltip('Domicilio seleccionado').addTo(group);
     }
-    for (const box of result?.cajas ?? []) {
+    for (const box of presentation === 'editor' ? result?.cajas ?? [] : []) {
       const label = document.createElement('span');
       label.textContent = `${box.nombre} - ${box.puertosLibres} puertos libres`;
       L.circleMarker([box.latitud, box.longitud], { radius: 7, color: '#137a4c', fillOpacity: 0.8 }).bindTooltip(label).addTo(group);
     }
-  }, [value?.latitud, value?.longitud, result, visibleZones]);
+  }, [value?.latitud, value?.longitud, result, visibleZones, presentation]);
 
   useEffect(() => {
     if (value) map.current?.setView([value.latitud, value.longitud], Math.max(map.current.getZoom(), 15));
@@ -214,15 +257,19 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
       const first = data.candidatos[0];
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
-      else setGeocodeMessage(userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'));
+      else setGeocodeMessage(presentation === 'editor'
+        ? userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.')
+        : 'No pudimos ubicar esta dirección. Revisa la calle, el número y la comuna.');
     } catch {
       if (!controller.signal.aborted && current.current.version === version) {
-        setGeocodeMessage('No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.');
+        setGeocodeMessage(presentation === 'editor'
+          ? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'
+          : 'No pudimos ubicar esta dirección. Puedes reintentar o registrar el prospecto para revisarlo después.');
       }
     } finally {
       if (!controller.signal.aborted && current.current.version === version) setGeocoding(false);
     }
-  }, [direccion, version, rememberAttempt]);
+  }, [direccion, version, rememberAttempt, presentation]);
 
   useEffect(() => {
     setGeocoding(false);
@@ -235,9 +282,33 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     // Defer past mount/cleanup so React StrictMode does not issue duplicate requests.
     const timer = window.setTimeout(() => {
       if (current.current.version === version && !current.current.value && !attempted.current.has(version)) void geocodeAddress();
-    }, 0);
+    }, presentation === 'editor' ? 0 : 700);
     return () => window.clearTimeout(timer);
-  }, [autoGeocode, disabled, value, version, geocodeAddress]);
+  }, [autoGeocode, disabled, value, version, geocodeAddress, presentation]);
+
+  if (presentation !== 'editor') {
+    const showStatus = Boolean(value || autoGeocode);
+    if (presentation === 'status' && !showStatus) return null;
+    const tone = checking ? 'pending' : result?.coberturaComercial ? 'success'
+      : result?.estado === 'NO_FACTIBLE' ? 'negative' : 'pending';
+    const Icon = tone === 'success' ? CheckCircle2 : tone === 'negative' ? XCircle : CircleHelp;
+    const title = checking ? (geocoding || waitingForAddress ? 'Ubicando dirección…' : 'Consultando cobertura…')
+      : error ? 'Cobertura sin verificar'
+      : geocodeMessage ? 'No se pudo ubicar la dirección'
+      : result?.coberturaComercial ? 'Cobertura factible'
+      : result?.estado === 'NO_FACTIBLE' ? 'Sin cobertura comercial'
+      : value ? 'Cobertura pendiente' : 'Ubicación pendiente';
+    return <section className={`coverage-simple coverage-simple-${presentation}`} aria-label="Consulta de cobertura comercial">
+      {showStatus && <div className={`coverage-summary coverage-summary-${tone}`} role="status" aria-live="polite" aria-busy={checking}>
+        <Icon size={presentation === 'summary' ? 24 : 19} aria-hidden="true" />
+        <div><strong>{title}</strong></div>
+      </div>}
+      {presentation === 'summary' && <>
+        <div ref={container} className="coverage-map" aria-label="Mapa de ubicación del prospecto" />
+        {mapWarning && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base. La consulta de cobertura sigue disponible.</p>}
+      </>}
+    </section>;
+  }
 
   return <section className="coverage-picker" aria-label="Consulta de cobertura comercial">
     <div className="coverage-heading">

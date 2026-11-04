@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
-import { FileClock, HandCoins, TrendingDown, UserRoundPlus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { FileClock, HandCoins, MapPin, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
-import { CoveragePicker, CoverageLocation } from '../coverage';
+import { CoveragePicker, CoverageLocation, CoverageResult } from '../coverage';
+import { ContractDateCalendar, localDateValue } from './ContractDateCalendar';
+import './prospect-workflow.css';
 
 const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
 const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
@@ -16,21 +18,22 @@ export function ProspectWorkflowPanel({
   permissions,
   onChanged,
   onClose,
+  onNotify,
 }: {
   prospect: Prospect;
   plans: Plan[];
   permissions: DashboardPermissions;
   onChanged: () => void;
   onClose?: () => void;
+  onNotify?: (message: string) => void;
 }) {
   const [quotePlanId, setQuotePlanId] = useState('');
   const [contractPlanId, setContractPlanId] = useState('');
-  const [contractConfirmationDate, setContractConfirmationDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [contractConfirmationDate, setContractConfirmationDate] = useState(localDateValue);
 
 
   const [contractObservation, setContractObservation] = useState('');
   const [contractComuna, setContractComuna] = useState(prospect.comuna ?? '');
-  const [contractCity, setContractCity] = useState('');
   const [lossOpen, setLossOpen] = useState(false);
   const [lossReason, setLossReason] = useState('Precio');
   const [lossObservation, setLossObservation] = useState('');
@@ -38,8 +41,14 @@ export function ProspectWorkflowPanel({
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
   const [location, setLocation] = useState<CoverageLocation | null>(null);
-  const [availablePlanIds, setAvailablePlanIds] = useState<number[] | null>(null);
+  const [coverage, setCoverage] = useState<CoverageResult | null>(null);
+  const [synchronized, setSynchronized] = useState<{ source: Prospect; updated: Prospect } | null>(null);
   const [checkingCoverage, setCheckingCoverage] = useState(false);
+  const [coverageSyncError, setCoverageSyncError] = useState(false);
+  const changedListener = useRef(onChanged);
+  changedListener.current = onChanged;
+  const currentProspect = synchronized?.source === prospect ? synchronized.updated : prospect;
+  const availablePlanIds = coverage?.planes.map(plan => plan.idPlan) ?? null;
 
   useEffect(() => {
     setLocation(prospect.latitud !== null && prospect.latitud !== undefined && prospect.longitud !== null && prospect.longitud !== undefined
@@ -47,11 +56,12 @@ export function ProspectWorkflowPanel({
       : null);
     setQuotePlanId('');
     setContractPlanId('');
-    setAvailablePlanIds(null);
-    setContractConfirmationDate(new Date().toISOString().slice(0, 10));
+    setCoverage(null);
+    setSynchronized(null);
+    setCoverageSyncError(false);
+    setContractConfirmationDate(localDateValue());
     setContractObservation('');
     setContractComuna(prospect.comuna ?? '');
-    setContractCity('');
     setLossOpen(false);
     setLossReason('Precio');
     setLossObservation('');
@@ -64,16 +74,18 @@ export function ProspectWorkflowPanel({
     if (availablePlanIds === null) return;
     setQuotePlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
     setContractPlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
-  }, [availablePlanIds]);
+  }, [coverage]);
 
-  const currentStatus = prospect.estadoPipeline ?? 'Prospecto Nuevo';
+  const currentStatus = currentProspect.estadoPipeline ?? 'Prospecto Nuevo';
   const requiresReview = prospect.requiereRevisionComercial === true;
   const isFactible = !requiresReview && FACTIBLE_STATUSES.includes(currentStatus);
-  const isNoFactible = currentStatus === 'No Factible';
   const isQuoted = !requiresReview && QUOTED_STATUSES.includes(currentStatus);
   const isFinal = requiresReview || FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(pendingContract);
+  const canVerify = permissions.verifyFeasibility || permissions.createProspects;
+  const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
+  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked);
   const planOptions = plans.filter((plan) =>
     plan.activo !== false && plan.idEmpresa === prospect.empresa?.idEmpresa && availablePlanIds?.includes(plan.idPlan),
   );
@@ -83,7 +95,43 @@ export function ProspectWorkflowPanel({
   function planOptionLabel(plan: Plan) {
     return `${plan.nombreComercial} - ${plan.empresa?.nombre ?? 'Sin empresa'}`;
   }
+  function planSummary(planId: string, options: Plan[]) {
+    const plan = options.find(item => item.idPlan === Number(planId));
+    if (!plan) return null;
+    const price = coverage?.planes.find(item => item.idPlan === plan.idPlan)?.precioAplicable ?? Number(plan.precioMensual);
+    return <div className="prospect-selected-plan">
+      <span className="prospect-selected-plan-icon"><Wifi size={22} aria-hidden="true" /></span>
+      <div><strong>{plan.nombreComercial}</strong><span>{plan.velocidadMbps ? `${plan.velocidadMbps} Mbps` : plan.tipoPlan}</span></div>
+      {Number.isFinite(price) && <div className="prospect-selected-plan-price"><strong>{price.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })}</strong><span>al mes</span></div>}
+    </div>;
+  }
   const isContractConfirmationReady = Boolean(contractPlanOptions.some(plan => plan.idPlan === Number(contractPlanId)) && isQuoted && !isWorkflowLocked);
+
+  useEffect(() => {
+    setCoverageSyncError(false);
+    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted) { setCheckingCoverage(false); return; }
+    const nextStatus = coverage.coberturaComercial ? 'Factible' : 'No Factible';
+    const zoneId = coverage.microzona?.idZonaPago ?? coverage.zona?.idZonaPago ?? null;
+    if (hasSavedLocation && currentStatus === nextStatus && (currentProspect.idZonaPago ?? null) === zoneId) {
+      setCheckingCoverage(false); return;
+    }
+    const controller = new AbortController();
+    setCheckingCoverage(true);
+    // Persist only changed feasibility/location; opening or polling a modal must not create repeated checks in the history.
+    const timer = window.setTimeout(() => {
+      void api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location, { signal: controller.signal })
+        .then(({ data }) => {
+          if (controller.signal.aborted) return;
+          setSynchronized({ source: prospect, updated: { ...prospect, ...data } });
+          changedListener.current();
+        })
+        .catch(err => {
+          if (!controller.signal.aborted) { setCoverageSyncError(true); setStatus(apiErrorMessage(err)); setStatusIsError(true); }
+        })
+        .finally(() => { if (!controller.signal.aborted) setCheckingCoverage(false); });
+    }, 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, isWorkflowLocked, isQuoted, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
     setStatus('');
@@ -91,7 +139,8 @@ export function ProspectWorkflowPanel({
 
     try {
       await action();
-      setStatus(success);
+      if (onNotify) onNotify(success);
+      else setStatus(success);
       onChanged();
 
       if (closeAfterSuccess) {
@@ -104,6 +153,7 @@ export function ProspectWorkflowPanel({
   }
 
   async function generateQuote() {
+    if (!commercialReady || !planOptions.some(plan => plan.idPlan === Number(quotePlanId))) return;
     setStatus('');
     setStatusIsError(false);
 
@@ -112,13 +162,14 @@ export function ProspectWorkflowPanel({
       const pdf = await api.get(data.pdfUrl, { responseType: 'blob' });
       const objectUrl = URL.createObjectURL(pdf.data);
       window.open(objectUrl, '_blank');
-      setStatus(
-        data.envioEmail === 'sent'
-          ? `Cotización generada y enviada automáticamente a ${prospect.email}`
-          : data.envioEmail === 'failed'
-            ? 'Cotización generada, pero el servidor de correo rechazó el envío.'
-            : 'Cotización generada. Configura SMTP para enviarla automáticamente por correo.',
-      );
+      if (data.envioEmail === 'failed') {
+        setStatusIsError(true);
+        setStatus('No se pudo enviar la cotización.');
+      } else {
+        const message = data.envioEmail === 'sent' ? 'Cotización enviada' : 'Cotización generada';
+        if (onNotify) onNotify(message);
+        else setStatus(message);
+      }
       onChanged();
     } catch (err) {
       setStatusIsError(true);
@@ -127,6 +178,7 @@ export function ProspectWorkflowPanel({
   }
 
   async function registerExternalContract() {
+    if (!commercialReady || !isContractConfirmationReady) return;
     await runAction(
       () =>
         api.post(`/prospects/${prospect.idProspecto}/contracts`, {
@@ -134,9 +186,8 @@ export function ProspectWorkflowPanel({
           fechaInicio: contractConfirmationDate || undefined,
           observacionContrato: contractObservation.trim() || undefined,
           comuna: contractComuna.trim() || undefined,
-          ciudad: contractCity.trim() || undefined,
         }),
-      'Contratación confirmada. El prospecto queda como cliente pendiente de firma.',
+      'Contratación confirmada',
       true,
     );
   }
@@ -177,7 +228,7 @@ export function ProspectWorkflowPanel({
             <h3>{prospect.nombreCompleto}</h3>
             <p>{prospect.rut ?? 'RUT no registrado'}</p>
           </div>
-          <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : prospect.estadoPipeline} />
+          <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
         </header>
         {requiresReview && (
           <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
@@ -201,53 +252,42 @@ export function ProspectWorkflowPanel({
           </div>
           <div>
             <dt>Dirección</dt>
-            <dd>{prospect.direccion?.trim() || 'Sin dirección registrada'}</dd>
+            <dd>{[prospect.direccion, prospect.comuna, prospect.region].filter(Boolean).join(', ') || 'Sin dirección registrada'}</dd>
           </div>
         </dl>
       </section>
 
       <div className="workflow-grid prospect-action-grid">
-        {(permissions.verifyFeasibility || permissions.createProspects) && prospect.empresa && (
-          <section className="prospect-action-card coverage-workspace">
+        {(canVerify || permissions.generateQuotes || permissions.contractPlans) && prospect.empresa && (
+          <section className="prospect-action-card prospect-coverage-card">
             <CoveragePicker
               key={prospect.idProspecto}
+              presentation="summary"
               idEmpresa={prospect.empresa.idEmpresa}
-              direccion={prospect.direccion ?? ''}
+              direccion={[prospect.direccion, prospect.comuna, prospect.region, 'Chile'].filter(Boolean).join(', ')}
               value={location}
               onChange={setLocation}
-              onResult={(coverage) => setAvailablePlanIds(coverage ? coverage.planes.map((plan) => plan.idPlan) : location ? [] : null)}
-              disabled={isWorkflowLocked || isQuoted || checkingCoverage}
+              onResult={setCoverage}
+              autoGeocode={Boolean(canVerify && !isWorkflowLocked && !isQuoted && prospect.direccion && prospect.comuna && prospect.region)}
+              disabled={!canVerify || isWorkflowLocked || isQuoted}
             />
-            <button type="button" disabled={!location || isWorkflowLocked || isQuoted || checkingCoverage} onClick={async () => {
-              if (!location || checkingCoverage) return;
-              setCheckingCoverage(true);
-              setStatus('');
-              try {
-                const { data } = await api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location);
-                setStatus(`${data.cobertura.estado}: ${data.cobertura.motivo}`);
-                setStatusIsError(data.cobertura.estado === 'NO_FACTIBLE');
-                onChanged();
-              } catch (err) { setStatus(apiErrorMessage(err)); setStatusIsError(true); }
-              finally { setCheckingCoverage(false); }
-            }}>{checkingCoverage ? 'Verificando…' : 'Guardar ubicacion y verificar cobertura comercial'}</button>
+            {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>
         )}
-        {isNoFactible && <p className="alert">El prospecto fuera de cobertura no puede avanzar a cotización ni contrato externo.</p>}
 
-        {permissions.generateQuotes && (
-          <section className="prospect-action-card prospect-action-card-violet">
+        {permissions.generateQuotes && commercialReady && planOptions.length > 0 && (
+          <section className="prospect-commercial-section prospect-quote-section">
             <header className="prospect-action-header">
               <span className="prospect-action-icon" aria-hidden="true">
                 <FileClock size={19} strokeWidth={1.8} />
               </span>
               <div>
                 <h4>Generar cotización</h4>
-                <p>Crea el PDF cuando la ubicacion tiene cobertura comercial y el plan esta disponible.</p>
               </div>
             </header>
-            <label>
+            <div className="prospect-quote-fields"><label>
               Plan a cotizar
-              <select value={quotePlanId} disabled={!isFactible || isWorkflowLocked} onChange={(event) => setQuotePlanId(event.target.value)}>
+              <select aria-label="Plan a cotizar" value={quotePlanId} disabled={!isFactible || isWorkflowLocked} onChange={(event) => setQuotePlanId(event.target.value)}>
                 <option value="">Seleccionar plan</option>
                 {planOptions.map((plan) => (
                   <option key={plan.idPlan} value={plan.idPlan}>
@@ -259,27 +299,25 @@ export function ProspectWorkflowPanel({
             <button type="button" disabled={!quotePlanId || !isFactible || isWorkflowLocked} onClick={() => void generateQuote()}>
               Generar cotización
             </button>
+            </div>
+            {planSummary(quotePlanId, planOptions)}
           </section>
         )}
 
-        {permissions.contractPlans && (
-          <section className="prospect-action-card prospect-action-card-contract prospect-action-card-orange">
+        {permissions.contractPlans && commercialReady && isQuoted && contractPlanOptions.length > 0 && (
+          <section className="prospect-commercial-section prospect-contract-section">
             <header className="prospect-action-header">
               <span className="prospect-action-icon" aria-hidden="true">
                 <HandCoins size={19} strokeWidth={1.8} />
               </span>
               <div>
                 <h4>Confirmar contratación</h4>
-                <p>Confirma manualmente el plan aceptado; la firma se gestionará en Clientes.</p>
               </div>
             </header>
-            <div className="prospect-contract-fields">
-              <label>Comuna de instalación<input maxLength={80} value={contractComuna} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractComuna(event.target.value)} /></label>
-              <label>Ciudad de instalación (si está registrada)<input maxLength={80} value={contractCity} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractCity(event.target.value)} /></label>
-              <p>Confirma los datos de la misma dirección antes de contratar. La región no sustituye a la ciudad.</p>
+            <div className="prospect-contract-layout"><div className="prospect-contract-details">
               <label>
                 Plan aceptado
-                <select value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>
+                <select aria-label="Plan aceptado" value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>
                   <option value="">Seleccionar plan</option>
                   {contractPlanOptions.map((plan) => (
                     <option key={plan.idPlan} value={plan.idPlan}>
@@ -288,23 +326,21 @@ export function ProspectWorkflowPanel({
                   ))}
                 </select>
               </label>
-              <label>
-                Fecha de confirmación
-                <input
-                  type="date"
-                  value={contractConfirmationDate}
-                  disabled={!isQuoted || isWorkflowLocked}
-                  onChange={(event) => setContractConfirmationDate(event.target.value)}
-                />
-              </label>
+              {planSummary(contractPlanId, contractPlanOptions)}
+              <div className="prospect-contract-address"><MapPin size={18} aria-hidden="true" /><span>{prospect.direccion || 'Sin dirección registrada'}</span></div>
+              <label>Comuna de instalación<input maxLength={80} value={contractComuna} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractComuna(event.target.value)} /></label>
               <label>
                 Observación
                 <textarea
                   value={contractObservation}
+                  placeholder="Añadir una observación"
+                  maxLength={500}
                   disabled={!isQuoted || isWorkflowLocked}
                   onChange={(event) => setContractObservation(event.target.value)}
                 />
               </label>
+            </div>
+            <ContractDateCalendar value={contractConfirmationDate} onChange={setContractConfirmationDate} disabled={!isQuoted || isWorkflowLocked} />
             </div>
             <button
               type="button"
