@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, apiErrorMessage } from '../../api';
 import { ControlRow, currency, dateLabel, readable } from './control-book-model';
+import { InstallmentAllocationsPanel } from './InstallmentAllocationsPanel';
 
 type HistoryInvoice = {
   idFactura: number; idContrato: number; plan: string | null; periodoMes: number; periodoAnio: number;
@@ -69,6 +70,7 @@ export function ControlBookHistory({ row, revision, onOpenInvoice }: { row: Cont
           {movement.detalle && <p>{movement.detalle}</p>}
           {movement.fechaAprobacion && <p className="control-muted">Aprobado el {dateLabel(movement.fechaAprobacion)}{movement.aprobador && ' por ' + movement.aprobador}</p>}
           {movement.cuotas && <details><summary>Ver cuotas ({movement.cuotas.length})</summary>{movement.cuotas.map(q => <p key={q.numero}>Cuota {q.numero}: {money(q.monto)} · vence {dateLabel(q.fechaVencimiento)} · {readable(q.estado)}{q.fechaPago && ' · pagada el ' + dateLabel(q.fechaPago)}</p>)}</details>}
+          {movement.tipo === 'CONVENIO' && row.idEmpresa !== null && row.idEmpresa > 0 && /^agreement-[1-9]\d*$/.test(movement.key) && <InstallmentAllocationsPanel key={`${row.idEmpresa}:${movement.key}`} idConvenio={Number(movement.key.slice('agreement-'.length))} idEmpresa={row.idEmpresa} onChanged={() => setReload(value => value + 1)} />}
         </li>;
       })}</ol>}
       </details>
