@@ -22,8 +22,8 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], on
   const items = (current?.data?.items ?? []).filter(row => !filter || row.clasificacionFecha === filter);
   const pageSize = 20;
   return <section className="installation-history">
-    <h2>Instalaciones completadas: historial G8 / G3</h2>
-    <p>Datos persistidos en G8. No consulta proveedores ni ejecuta conciliaciones. Cada empresa y OT se presenta una sola vez; una solicitud G3 no es una OT local.</p>
+    <h2>Instalaciones completadas: historial</h2>
+    <p>Antecedentes registrados en el CRM. Esta consulta no actualiza las instalaciones. Cada empresa y orden se presenta una sola vez; una solicitud técnica puede no tener una orden local.</p>
     <button type="button" className="secondary compact" onClick={() => setRefresh(value => value + 1)}>Actualizar historial</button>
     {!current && <p role="status">Cargando historial confirmado…</p>}
     {current?.error && <p role="alert">No se pudo consultar el historial. Los cierres confirmados no han sido modificados.</p>}
@@ -33,7 +33,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], on
         <option value="PENDIENTE_FECHA_TECNICA">Pendiente de fecha técnica</option><option value="REQUIERE_REVISION">Requiere revisión</option>
       </select></label>
       <p>{items.length} instalaciones completadas. Sin fecha técnica no significa pendiente de ejecución.</p>
-      <div className="table-wrap"><table><thead><tr><th>Empresa / OT</th><th>Fuente y referencias</th><th>Contrato / Servicio</th><th>Fecha técnica original</th><th>Solicitud y cierre G3</th></tr></thead>
+      <div className="table-wrap"><table><thead><tr><th>Empresa / OT</th><th>Fuente y referencias</th><th>Contrato / Servicio</th><th>Fecha técnica original</th><th>Solicitud y cierre técnico</th></tr></thead>
         <tbody>{items.slice((page - 1) * pageSize, page * pageSize).map(row => <tr key={row.key}>
           <td>Empresa {row.idEmpresa} / OT {row.idOt ?? 'Sin referencia'}<br />Completada</td>
           <td>{row.fuente}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
@@ -48,12 +48,12 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], on
           <td>{row.clasificacionFecha === 'REQUIERE_REVISION' ? 'Requiere revisión de fecha o relaciones'
             : row.clasificacionFecha === 'PENDIENTE_FECHA_TECNICA' ? 'Pendiente de fecha técnica'
               : row.fechasTecnicasOriginales.map(date => <div key={date}>{date}</div>)}</td>
-          <td>{row.solicitudesG3.length ? <details><summary>{row.solicitudesG3.length} solicitud(es) G3</summary>
+          <td>{row.solicitudesG3.length ? <details><summary>{row.solicitudesG3.length} solicitud(es) técnica(s)</summary>
             {row.solicitudesG3.map(request => <div key={request.idIntegracion}>
               <p>Tracking #{request.idIntegracion}</p><p>request_id: {request.requestId}</p><p>trace_id: {request.traceId}</p>
-              <p>Procesado en G8: {request.fechaCierreProcesado} (no es fecha técnica)</p>
+              <p>Procesado en CRM: {request.fechaCierreProcesado} (no es fecha técnica)</p>
             </div>)}
-          </details> : 'Sin solicitud G3'}</td>
+          </details> : 'Sin solicitud técnica'}</td>
         </tr>)}</tbody></table></div>
       <TablePagination currentPage={page} totalItems={items.length} pageSize={pageSize} onPageChange={setPage} />
     </>}

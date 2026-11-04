@@ -78,7 +78,7 @@ async function harness(t, { geocode = async () => response(), check = async () =
     circleMarker: point => ({ bindTooltip() { return this; }, addTo(group) { group.map.markers.push(point); } }),
     polygon: () => ({ bindTooltip() { return this; }, addTo() {} }),
   };
-  const { CoveragePicker } = loadComponent('features/coverage/CommercialCoveragePicker.tsx', { leaflet, '../../api': { api, apiErrorMessage: () => 'Error local' } });
+  const { CoveragePicker } = loadComponent('features/coverage/CommercialCoveragePicker.tsx', { leaflet, '../../api': { api, apiErrorMessage: () => 'Error local' }, '../../lib/user-facing-messages': require('./helpers/user-facing-messages.cjs') });
   const { ProspectsPanel } = loadComponent('features/prospects/ProspectsPanel.tsx', {
     '../../api': { api },
     '../../lib': {

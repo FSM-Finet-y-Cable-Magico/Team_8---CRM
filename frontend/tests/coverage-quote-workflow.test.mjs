@@ -42,7 +42,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false}
       if(path.endsWith('/quotes')){persisted={...persisted,estadoPipeline:'Cotizacion Enviada',cotizaciones:[{idCotizacion:1,idPlan:body.planId,fechaEnvio:'2026-10-28'}]};return {data:{pdfUrl:'/qa.pdf',envioEmail:'disabled'}};}
       if(path.endsWith('/contracts'))return {data:{contrato:{idContrato:20,estado:'Pendiente firma contrato'}}};throw Error(path);
     }};
-  const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet};
+  const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
   const {ProspectWorkflowPanel:Workflow}=load('features/prospects/ProspectWorkflowPanel.tsx',{
     ...mocks,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});

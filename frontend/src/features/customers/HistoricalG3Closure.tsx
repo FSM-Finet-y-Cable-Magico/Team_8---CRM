@@ -28,7 +28,7 @@ export function HistoricalG3Closure({ idServicio }: { idServicio: number }) {
       });
       if (!controller.signal.aborted) setResult(data);
     } catch {
-      if (!controller.signal.aborted) setError('No se pudo consultar G3. La instalación confirmada y los datos guardados en G8 no cambian.');
+      if (!controller.signal.aborted) setError('No se pudieron consultar los antecedentes. La instalación confirmada conserva sus datos.');
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -36,24 +36,24 @@ export function HistoricalG3Closure({ idServicio }: { idServicio: number }) {
 
   const data = result?.estadoConsulta === 'DISPONIBLE' ? result.datos : null;
   return <section className="customer-service-history">
-    <header><h3>Cierre histórico consultado en G3</h3></header>
-    <p>Consulta temporal de solo lectura. No reemplaza los datos guardados en G8. El inventario físico se consulta exclusivamente en G1.</p>
+    <header><h3>Antecedentes del cierre técnico</h3></header>
+    <p>Consulta los detalles del cierre de la instalación. Esta consulta es de solo lectura.</p>
     <button type="button" className="secondary compact" disabled={loading} onClick={consult}>
-      {loading ? 'Consultando cierre…' : 'Consultar datos históricos G3'}
+      {loading ? 'Consultando…' : 'Consultar antecedentes'}
     </button>
     <div aria-live="polite">
       {error && <p className="inline-status">{error}</p>}
-      {result && <p className="inline-status">{result.mensaje}</p>}
+      {result && <p className="inline-status">{result.estadoConsulta === 'DISPONIBLE' ? 'Antecedentes disponibles.' : result.estadoConsulta === 'NO_VALIDADO' ? 'No se pudo verificar la información del cierre.' : 'No hay antecedentes disponibles para esta instalación.'}</p>}
       {data && <>
-        <p>Fuente: G3 · No persistido · Consultado: {formatDateTime(result!.consultadoEn)}</p>
+        <p>Consultado: {formatDateTime(result!.consultadoEn)}</p>
         <dl className="customer-readonly-details">
-          <div><dt>Fecha real de finalización</dt><dd>{data.fechaCompletada ? formatDateTime(data.fechaCompletada) : 'No informada por G3'}</dd></div>
-          <div><dt>Identificador del técnico G3</dt><dd>{data.idTecnicoG3 ?? 'No informado por G3'}</dd></div>
-          <div><dt>Potencia óptica</dt><dd>{data.potenciaOpticaDbm !== null ? `${data.potenciaOpticaDbm} dBm` : 'No informada por G3'}</dd></div>
-          <div><dt>Resultado de llamada</dt><dd>{data.resultadoLlamada ?? 'No informado por G3'}</dd></div>
-          <div><dt>Resuelto remotamente</dt><dd>{data.resueltoRemotamente === null ? 'No informado por G3' : data.resueltoRemotamente ? 'Sí' : 'No'}</dd></div>
-          <div><dt>Registros de materiales en el cierre</dt><dd>{data.cantidadMateriales ?? 'No informados por G3'}</dd></div>
-          <div><dt>Registros de equipos en el cierre (no inventario)</dt><dd>{data.cantidadEquiposInformados ?? 'No informados por G3'}</dd></div>
+          <div><dt>Fecha de finalización</dt><dd>{data.fechaCompletada ? formatDateTime(data.fechaCompletada) : 'No registrada'}</dd></div>
+          <div><dt>Identificador del técnico</dt><dd>{data.idTecnicoG3 ?? 'No registrado'}</dd></div>
+          <div><dt>Potencia óptica</dt><dd>{data.potenciaOpticaDbm !== null ? `${data.potenciaOpticaDbm} dBm` : 'No registrada'}</dd></div>
+          <div><dt>Resultado de llamada</dt><dd>{data.resultadoLlamada ?? 'No registrado'}</dd></div>
+          <div><dt>Resuelto remotamente</dt><dd>{data.resueltoRemotamente === null ? 'No registrado' : data.resueltoRemotamente ? 'Sí' : 'No'}</dd></div>
+          <div><dt>Materiales informados en el cierre</dt><dd>{data.cantidadMateriales ?? 'No registrados'}</dd></div>
+          <div><dt>Equipos informados en el cierre</dt><dd>{data.cantidadEquiposInformados ?? 'No registrados'}</dd></div>
         </dl>
       </>}
     </div>

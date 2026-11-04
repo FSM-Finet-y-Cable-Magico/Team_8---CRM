@@ -39,23 +39,23 @@ async function harness(t, get = async () => ({ data: response })) {
   };
 }
 
-test('consulta por acción explícita y separa datos temporales de G8 e inventario G1', async t => {
+test('consulta por acción explícita y presenta antecedentes con textos de producción', async t => {
   const ctx = await harness(t);
   assert.equal(ctx.calls.length, 0);
   await ctx.click();
   assert.equal(ctx.calls[0][0], '/integrations/g3/services/50/historical-closure');
-  for (const label of ['No persistido', '2026-10-07T12:30:00Z', '88', '-19.25 dBm', 'CONTACTADO', 'no inventario']) {
+  for (const label of ['solo lectura', '2026-10-07T12:30:00Z', '88', '-19.25 dBm', 'CONTACTADO', 'Equipos informados en el cierre']) {
     assert.ok(ctx.text().includes(label), label);
   }
-  assert.match(ctx.text(), /exclusivamente en G1/);
+  assert.doesNotMatch(ctx.text(), /G[138]|Fuente:|No persistido/);
   assert.equal(ctx.calls.length, 1);
 });
 
 test('campos ausentes no se sustituyen por datos inventados ni por la fecha de consulta', async t => {
   const ctx = await harness(t, async () => ({ data: { ...response, datos: Object.fromEntries(Object.keys(response.datos).map(key => [key, null])) } }));
   await ctx.click();
-  assert.match(ctx.text(), /No informada por G3/);
-  assert.match(ctx.text(), /No informado por G3/);
+  assert.match(ctx.text(), /No registrada/);
+  assert.match(ctx.text(), /No registrado/);
   assert.doesNotMatch(ctx.text(), /-19.25|12:30:00|CONTACTADO/);
 });
 
@@ -69,7 +69,7 @@ test('error de red mantiene el mensaje de instalación confirmada sin mostrar er
 test('una respuesta no validada no expone datos y permite consultar de nuevo', async t => {
   const ctx = await harness(t, async () => ({ data: { ...response, estadoConsulta: 'NO_VALIDADO', mensaje: 'Referencias incompletas', datos: response.datos } }));
   await ctx.click();
-  assert.match(ctx.text(), /Referencias incompletas/);
+  assert.match(ctx.text(), /No se pudo verificar la información/);
   assert.doesNotMatch(ctx.text(), /-19.25|CONTACTADO/);
   assert.equal(ctx.tree.root.findByType('button').props.disabled, false);
 });

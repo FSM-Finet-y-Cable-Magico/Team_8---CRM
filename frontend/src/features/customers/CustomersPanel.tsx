@@ -28,6 +28,7 @@ import {
   normalizeWorkOrderValue,
   normalizeRutInput,
   technicalEntries,
+  userFacingMessage,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
@@ -750,9 +751,9 @@ export function CustomersPanel({
       setInstallTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
 
       if (data.tecnicosDisponibles.length) {
-        setInstallOrderStatus(data.mensaje);
+        setInstallOrderStatus(userFacingMessage(data.mensaje, 'Disponibilidad de instalación consultada.'));
       } else {
-        setInstallOrderError(data.mensaje);
+        setInstallOrderError(userFacingMessage(data.mensaje, 'No se pudo confirmar la disponibilidad de instalación.'));
       }
     } catch (err) {
       setInstallAvailability(null);
@@ -1010,7 +1011,7 @@ export function CustomersPanel({
               }}
               onOpenObservations={setObservationTarget}
             />
-            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} onChanged={onChanged} />}
+            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} servicesStatus={servicesLoad.customerId === selectedCustomer.idCliente ? servicesLoad.status : 'loading'} onChanged={onChanged} />}
             {permissions.manageObservations && <button type="button" className="secondary compact" onClick={() => setObservationTarget({ tipoEntidad: 'Cliente', idEntidad: selectedCustomer.idCliente, label: selectedCustomer.nombreCompleto })}>Observaciones del cliente</button>}
           </div>
         ) : (

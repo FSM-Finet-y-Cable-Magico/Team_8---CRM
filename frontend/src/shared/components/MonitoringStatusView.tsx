@@ -1,5 +1,5 @@
 import type { MonitoringStatus } from '../../api';
-import { formatDateTime } from '../../lib';
+import { formatDateTime, userFacingMessage } from '../../lib';
 
 export function MonitoringStatusView({ status }: { status: MonitoringStatus | null }) {
   if (!status) {
@@ -9,7 +9,7 @@ export function MonitoringStatusView({ status }: { status: MonitoringStatus | nu
   return (
     <div className="monitoring-status-card">
       <p><strong>Estado:</strong> {status.estadoConexion}</p>
-      <p>{status.mensaje}</p>
+      <p>{userFacingMessage(status.mensaje, 'La consulta de monitoreo no está disponible en este momento.')}</p>
       <p><strong>Última medición:</strong> {formatDateTime(status.ultimaMedicion?.timestampMedicion)}</p>
       <p><strong>Potencia óptica:</strong> {status.ultimaMedicion?.potenciaActualDbm ?? 'No disponible'} dBm</p>
       <p><strong>Latencia:</strong> {status.latenciaEstado}</p>
