@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
+import { userFacingMessage } from '../../lib/user-facing-messages';
 import './coverage.css';
 
 export type CoverageLocation = { latitud: number; longitud: number };
@@ -124,7 +125,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, disabled
       {busy ? <p>Consultando cobertura y puertos…</p> : result ? <><strong>{result.estado}</strong><p>{result.motivo}</p>
         {result.cajas.length > 0 && <ul>{result.cajas.map(box => <li key={box.id}>{box.nombre}: {box.puertosLibres} puertos libres</li>)}</ul>}
         <small>Consulta: {new Date(result.consultadoEn).toLocaleString('es-CL')}</small></>
-        : <p>{connection?.mensaje ?? 'Comprobando conexión de cobertura…'}</p>}
+        : <p>{userFacingMessage(connection?.mensaje, connection ? 'La consulta de cobertura no está disponible en este momento.' : 'Comprobando la conexión de cobertura…')}</p>}
       {error && <p role="alert">{error}</p>}
     </div>
     <div className="coverage-actions">

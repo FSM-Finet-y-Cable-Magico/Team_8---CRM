@@ -28,6 +28,7 @@ import {
   normalizeWorkOrderValue,
   normalizeRutInput,
   technicalEntries,
+  userFacingMessage,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
@@ -750,9 +751,9 @@ export function CustomersPanel({
       setInstallTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
 
       if (data.tecnicosDisponibles.length) {
-        setInstallOrderStatus(data.mensaje);
+        setInstallOrderStatus(userFacingMessage(data.mensaje, 'Disponibilidad de instalación consultada.'));
       } else {
-        setInstallOrderError(data.mensaje);
+        setInstallOrderError(userFacingMessage(data.mensaje, 'No se pudo confirmar la disponibilidad de instalación.'));
       }
     } catch (err) {
       setInstallAvailability(null);
@@ -868,8 +869,8 @@ export function CustomersPanel({
                       <td>#{contract?.idContrato ?? '-'}</td>
                       <td>{formatDateOnly(contract?.fechaFirmaManual)}</td>
                       <td>{pendingActivationAddress(prospect)}</td>
-                      <td>{contract?.comunaInstalacion ?? '-'}</td>
-                      <td>{contract?.ciudadInstalacion ?? '-'}</td>
+                      <td>{prospect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? '-'}</td>
+                      <td>{prospect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? '-'}</td>
                       <td><StatusBadge value="Pendiente de activación" /></td>
                       <td><button className="secondary compact" onClick={() => setSelectedPendingActivation(prospect)}>Ver detalle</button></td>
                     </tr>
@@ -1010,7 +1011,7 @@ export function CustomersPanel({
               }}
               onOpenObservations={setObservationTarget}
             />
-            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} onChanged={onChanged} />}
+            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} servicesStatus={servicesLoad.customerId === selectedCustomer.idCliente ? servicesLoad.status : 'loading'} onChanged={onChanged} />}
             {permissions.manageObservations && <button type="button" className="secondary compact" onClick={() => setObservationTarget({ tipoEntidad: 'Cliente', idEntidad: selectedCustomer.idCliente, label: selectedCustomer.nombreCompleto })}>Observaciones del cliente</button>}
           </div>
         ) : (
@@ -1041,8 +1042,8 @@ export function CustomersPanel({
                 <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
                 <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
                 <div><dt>Dirección de instalación</dt><dd>{pendingActivationAddress(selectedPendingActivation)}</dd></div>
-                <div><dt>Comuna</dt><dd>{contract?.comunaInstalacion ?? 'No registrada'}</dd></div>
-                <div><dt>Ciudad</dt><dd>{contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
+                <div><dt>Comuna</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedPendingActivation.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
+                <div><dt>Ciudad</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
                 <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
               </dl>
               <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>

@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Empresa {
+  operacionesImputacion OperacionImputacionCuota[]
   idEmpresa                  Int                          @id @default(autoincrement()) @map("id_empresa")
   nombre                     String                       @db.VarChar(100)
   rutEmpresa                 String?                      @unique @map("rut_empresa") @db.VarChar(12)
@@ -39,6 +40,7 @@ model Empresa {
 }
 
 model Usuario {
+  operacionesImputacion OperacionImputacionCuota[]
   idUsuario                        Int                          @id @default(autoincrement()) @map("id_usuario")
   idEmpresa                        Int?                         @map("id_empresa")
   nombreCompleto                   String                       @map("nombre_completo") @db.VarChar(150)
@@ -92,6 +94,7 @@ model UsuarioRol {
 }
 
 model LogAuditoria {
+  operacionImputacion OperacionImputacionCuota?
   idLog             BigInt    @id @default(autoincrement()) @map("id_log")
   idUsuario         Int?      @map("id_usuario")
   accion            String    @db.VarChar(100)
@@ -269,6 +272,7 @@ model Contrato {
 }
 
 model Factura {
+  operacionesImputacion OperacionImputacionCuota[]
   idFactura               Int                          @id @default(autoincrement()) @map("id_factura")
   idContrato              Int?                         @map("id_contrato")
   periodoMes              Int                          @map("periodo_mes") @db.SmallInt
@@ -294,6 +298,7 @@ model Factura {
 }
 
 model Pago {
+  operacionesImputacion OperacionImputacionCuota[]
   idPago             Int      @id @default(autoincrement()) @map("id_pago")
   idFactura          Int?     @map("id_factura")
   idCliente          Int?     @map("id_cliente")
@@ -877,6 +882,7 @@ model EventoGestionComercial {
 }
 
 model ConvenioPago {
+  operacionesImputacion OperacionImputacionCuota[]
   idConvenio           Int       @id @default(autoincrement()) @map("id_convenio")
   idEmpresa            Int       @map("id_empresa")
   idCliente            Int       @map("id_cliente")
@@ -909,6 +915,7 @@ model ConvenioPago {
 }
 
 model CuotaConvenioPago {
+  imputaciones ImputacionCuota[]
   idCuota          Int       @id @default(autoincrement()) @map("id_cuota")
   idConvenio       Int       @map("id_convenio")
   numero           Int       @db.SmallInt
@@ -1256,4 +1263,47 @@ model HistorialConexionOnt {
   timestamp      DateTime? @default(now()) @db.Timestamp(6)
 
   @@map("historial_conexion_ont")
+}
+
+model OperacionImputacionCuota {
+  idOperacion Int @id @default(autoincrement()) @map("id_operacion")
+  idEmpresa Int @map("id_empresa")
+  idPago Int @map("id_pago")
+  idConvenio Int @map("id_convenio")
+  idFactura Int @map("id_factura")
+  idUsuario Int @map("id_usuario")
+  idAuditoria BigInt @unique @map("id_auditoria")
+  clave String @db.VarChar(100)
+  hash String @db.Char(64)
+  tipo String @db.VarChar(10)
+  motivo String @db.VarChar(250)
+  fecha DateTime @default(now()) @db.Timestamptz(6)
+  empresa Empresa @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  pago Pago @relation(fields: [idPago], references: [idPago], onDelete: Restrict, onUpdate: Cascade)
+  convenio ConvenioPago @relation(fields: [idConvenio], references: [idConvenio], onDelete: Restrict, onUpdate: Cascade)
+  factura Factura @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, onUpdate: Cascade)
+  usuario Usuario @relation(fields: [idUsuario], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+  auditoria LogAuditoria @relation(fields: [idAuditoria], references: [idLog], onDelete: Restrict, onUpdate: Cascade)
+  detalles ImputacionCuota[]
+  @@unique([idEmpresa, clave])
+  @@index([idPago])
+  @@index([idConvenio])
+  @@index([idFactura])
+  @@map("operacion_imputacion_cuota")
+}
+
+model ImputacionCuota {
+  idImputacion Int @id @default(autoincrement()) @map("id_imputacion")
+  idOperacion Int @map("id_operacion")
+  idCuota Int @map("id_cuota")
+  monto Decimal @db.Decimal(12, 2)
+  idOriginal Int? @map("id_original")
+  operacion OperacionImputacionCuota @relation(fields: [idOperacion], references: [idOperacion], onDelete: Restrict, onUpdate: Cascade)
+  cuota CuotaConvenioPago @relation(fields: [idCuota], references: [idCuota], onDelete: Restrict, onUpdate: Cascade)
+  original ImputacionCuota? @relation("Compensaciones", fields: [idOriginal], references: [idImputacion], onDelete: Restrict, onUpdate: Cascade)
+  compensaciones ImputacionCuota[] @relation("Compensaciones")
+  @@unique([idOperacion, idCuota])
+  @@index([idCuota])
+  @@index([idOriginal])
+  @@map("imputacion_cuota")
 }

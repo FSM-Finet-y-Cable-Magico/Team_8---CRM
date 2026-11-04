@@ -53,3 +53,14 @@ test('inconsistent installation evidence is visible and older summary responses 
     assert.equal(monthly.findByType('strong').props.children, 4);
   });
 });
+
+test('churn sin historia suficiente no presenta porcentaje ni bajas inventadas, incluso ante respuesta antigua', async () => {
+  for (const values of [{}, { churnRateMensual: null, churnBajasMensuales: null, churnEstado: 'HISTORIAL_INSUFICIENTE' }, { churnRateMensual: 50, churnBajasMensuales: 1 }]) {
+    await render(values, tree => {
+      const rendered = JSON.stringify(tree.toJSON());
+      assert.match(rendered, /Dato no validado/);
+      assert.match(rendered, /Historial insuficiente/);
+      assert.doesNotMatch(rendered, /50%|0%|baja\(s\) durante el mes/);
+    });
+  }
+});

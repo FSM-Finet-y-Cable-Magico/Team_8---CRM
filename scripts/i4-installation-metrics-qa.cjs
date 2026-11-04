@@ -106,14 +106,16 @@ async function main() {
       const before = await snapshot(); await summary(one); await summary(two); assert.equal(await snapshot(), before);
       return { customers: await db.cliente.count(), contracts: await db.contrato.count(), services: await db.servicioContratado.count(), trackings: await db.integracionInstalacionG3.count(), localOrders: await db.ordenTrabajo.count(), writesFromSummary: 0 };
     });
-    // Diagnostic only, not a passing assertion of CU16. Do not change its business policy.
+    // Explicit unavailability is a mitigation, not certification of a churn formula.
     await db.contrato.update({ where: { idContrato: a.contract.idContrato }, data: { estado: 'Suspendido', fechaSuspension: new Date(date) } });
     const churn = await summary(one);
     assert.equal(await db.contrato.count({ where: { idEmpresa: one, estado: 'Baja' } }), 0);
-    assert.equal(churn.churnBajasMensuales, 1);
-    result.churnDiagnostic = { status: 'KNOWN_DEFECT', temporarySuspensions: 1, definitiveCancellations: 0,
+    assert.equal(churn.churnBajasMensuales, null);
+    assert.equal(churn.churnRateMensual, null);
+    assert.equal(churn.churnEstado, 'HISTORIAL_INSUFICIENTE');
+    result.churnDiagnostic = { status: 'UNAVAILABLE_EXPLICITLY', temporarySuspensions: 1, definitiveCancellations: 0,
       observedMonthlyLosses: churn.churnBajasMensuales, observedRate: churn.churnRateMensual,
-      expectedLossesForFixture: 0, productionChurnCodeChanged: false };
+      expectedLossesForFixture: 0, formulaCertified: false };
     result.status = result.cases.every(c => c.status === 'PASS') ? 'QA_PASS' : 'QA_FAIL';
   } catch (error) { result.error = { code: error.code || error.name }; }
   finally {

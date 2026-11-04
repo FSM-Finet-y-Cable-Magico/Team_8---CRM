@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { userFacingApiError } from './lib/user-facing-messages';
+
 const envApiURL = import.meta.env.VITE_API_URL?.trim();
 const loopbackApiURL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
 const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
@@ -21,6 +23,19 @@ export type Company = {
   nombre: string;
 };
 
+export type InstallationHistory = {
+  scope: string;
+  fuente: 'G8_PERSISTIDO';
+  items: Array<{
+    key: string; idEmpresa: number; fuente: 'G3' | 'LEGACY_LOCAL'; idOt: string | null;
+    idContrato: number | null; idServicio: number | null; idCliente: number | null;
+    estado: 'COMPLETADA';
+    clasificacionFecha: 'REQUIERE_REVISION' | 'PENDIENTE_FECHA_TECNICA' | 'FECHA_TECNICA_CONFIRMADA';
+    fechasTecnicasOriginales: string[]; ordenesLocales: number[];
+    solicitudesG3: Array<{ idIntegracion: number; requestId: string; traceId: string; fechaCierreProcesado: string }>;
+  }>;
+};
+
 export type Role = {
   idRol: number;
   nombreRol: string;
@@ -37,6 +52,7 @@ export type UserRow = {
 };
 
 export type Prospect = {
+  ubicacionInstalacion?: { direccion: string | null; comuna: string | null; ciudad: string | null; fuenteComuna: string | null };
   cotizaciones?: Array<{ idCotizacion: number; idPlan: number; fechaEnvio: string }>;
   requiereRevisionComercial?: boolean;
   idProspecto: number;
@@ -786,8 +802,8 @@ api.interceptors.response.use(
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
     const responseMessage = error.response?.data?.message;
-    return Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage ?? error.message;
+    return userFacingApiError(responseMessage ?? error.message, error.config?.url, error.response?.status);
   }
 
-  return 'Error inesperado';
+  return 'No se pudo completar la operación. Inténtalo nuevamente.';
 }

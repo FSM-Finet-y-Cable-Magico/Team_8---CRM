@@ -192,7 +192,7 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
                 <td>${Number(document.montoTotal).toLocaleString('es-CL')}</td>
                 <td><StatusBadge value={document.estado} /></td>
                 <td>{document.urlDocumento ? <a href={document.urlDocumento} target="_blank" rel="noreferrer">Abrir referencia</a> : document.referenciaExterna ?? '-'}</td>
-                <td><span className="source-badge">{document.fuente}</span></td>
+                <td><span className="source-badge">Registro manual</span></td>
                 <td>{canManage && <div className="table-actions"><button type="button" className="secondary compact" onClick={() => edit(document)}>Corregir</button>{document.estado !== 'ANULADO' && <button type="button" className="secondary compact" onClick={() => void deactivate(document)}>Anular</button>}</div>}</td>
               </tr>
             ))}</tbody>

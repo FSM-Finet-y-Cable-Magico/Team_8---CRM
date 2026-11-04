@@ -25,8 +25,8 @@ function consultationError(error: unknown, serialSearch = false): ConsultationMe
     const code = error.response?.data?.upstreamCode ?? error.response?.data?.code;
     if (code === 'INTEGRACION_G1_NO_CONFIGURADA' || code === 'G1_INVALID_URL' || code === 'G1_INVALID_API_KEY_FORMAT') {
       return {
-        title: 'Inventario todavía no conectado',
-        description: 'La conexión con Inventario y Bodega debe estar habilitada para consultar sus equipos en este entorno.',
+        title: 'Inventario no disponible',
+        description: 'La consulta de equipos no está disponible en este momento. Inténtalo más tarde o contacta al administrador.',
       };
     }
     if (error.response?.status === 404 && serialSearch) {

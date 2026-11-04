@@ -23,6 +23,32 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it('conserva comuna registrada al confirmar sin repetirla y ciudad explicita', async () => {
+    const c = setup(); Object.assign(c.prospect, { comuna: ' Valparaiso ', region: 'Region QA' });
+    await c.service.contractPlan(1, { planId: 1, ciudad: ' Ciudad QA ' }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      comunaInstalacion: 'Valparaiso', ciudadInstalacion: 'Ciudad QA',
+    }) }));
+  });
+  it('proyecta comuna del prospecto sin modificar el contrato firmado ni inferir ciudad de region', async () => {
+    const c = setup();
+    const contract = { idContrato: 10, idEmpresa: 1, estado: 'Firmado', direccionInstalacion: 'Calle QA', comunaInstalacion: null, ciudadInstalacion: null };
+    c.prisma.prospecto.findMany.mockResolvedValue([{ ...c.prospect, direccion: 'Calle QA', comuna: 'Comuna QA', region: 'Region QA', contratos: [contract] }]);
+    const [row] = await c.service.listPendingActivation(user);
+    expect(row).toHaveProperty('ubicacionInstalacion', expect.objectContaining({ comuna: 'Comuna QA', ciudad: null, fuenteComuna: 'PROSPECTO' }));
+    expect(row.contratos[0].comunaInstalacion).toBeNull();
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+  });
+  it('no mezcla ubicacion de otra empresa ni complementa una direccion contractual diferente', async () => {
+    const c = setup();
+    c.prisma.prospecto.findMany.mockResolvedValue([{ ...c.prospect, direccion: 'Calle QA', comuna: 'Comuna QA', contratos: [
+      { idContrato: 9, idEmpresa: 2, estado: 'Firmado', comunaInstalacion: 'Privada', ciudadInstalacion: 'Privada' },
+      { idContrato: 10, idEmpresa: 1, estado: 'Firmado', direccionInstalacion: 'Otra direccion', comunaInstalacion: null },
+    ] }]);
+    const [row] = await c.service.listPendingActivation(user);
+    expect(row).toHaveProperty('ubicacionInstalacion', expect.objectContaining({ comuna: null, ciudad: null }));
+    expect(row.contratos.map(c => c.idContrato)).toEqual([10]);
+  });
   it.each([
     { latitud: -35 }, { direccion: 'Otra direccion' }, { estadoPipeline: 'Perdido' },
     { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 },

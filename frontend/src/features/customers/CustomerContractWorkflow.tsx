@@ -194,7 +194,7 @@ export function CustomerContractWorkflow({
       setSignatureOpen(false);
       setSignatureObservation('');
       setStage(2);
-      showMessage('Firma confirmada. La instalación técnica ya puede solicitarse a G3.');
+      showMessage('Firma confirmada. Ya puedes solicitar la instalación técnica.');
     } catch (error) {
       showMessage(apiErrorMessage(error));
     }
@@ -276,11 +276,11 @@ export function CustomerContractWorkflow({
           </section>}
 
           {stage === 2 && <section className="workflow-panel customer-contract-stage">
-            <header className="section-heading compact-heading"><h3>Instalación técnica</h3><span className="source-badge">Fuente G3</span></header>
+            <header className="section-heading compact-heading"><h3>Instalación técnica</h3></header>
             <dl className="customer-readonly-details">
               <div><dt>Plan</dt><dd>{selectedContract.plan?.nombreComercial ?? '-'}</dd></div>
               <div><dt>Dirección solicitada</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
-              <div><dt>Responsable técnico</dt><dd>G3 FSM</dd></div>
+              <div><dt>Atención</dt><dd>Equipo técnico</dd></div>
             </dl>
             <G3InstallationStatus
               contractId={selectedContract.idContrato}

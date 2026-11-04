@@ -63,8 +63,9 @@ type Summary = {
     instalacionesMensuales?: number;
     instalacionesSinFechaTecnica?: number;
     instalacionesRequierenRevision?: number;
-    churnRateMensual?: number;
-    churnBajasMensuales?: number;
+    churnRateMensual?: number | null;
+    churnBajasMensuales?: number | null;
+    churnEstado?: 'HISTORIAL_INSUFICIENTE';
   };
   alertasVencimiento?: DashboardExpiryAlert[];
   diasAnticipacionVencimiento?: number;
@@ -172,8 +173,8 @@ export function DashboardHome({
     },
     {
       label: 'Churn mensual',
-      value: `${summary?.metricas.churnRateMensual ?? 0}%`,
-      description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`,
+      value: 'Dato no validado',
+      description: 'Historial insuficiente para calcular bajas y población inicial',
       icon: TrendingDown,
       tone: 'amber' as const,
       tab: 'commercial' as Tab,
@@ -252,7 +253,7 @@ export function DashboardHome({
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
     { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Por fecha técnica efectiva (Santiago)', tone: 'green', tab: 'installations' as Tab },
-    { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'commercial' as Tab },
+    { label: 'Churn mensual', value: 'Dato no validado', description: 'Historial insuficiente para calcular bajas y población inicial', tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
     { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
   ];

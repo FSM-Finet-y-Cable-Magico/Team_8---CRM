@@ -124,8 +124,9 @@ type Summary = {
     instalacionesSinFechaTecnica?: number;
     instalacionesRequierenRevision?: number;
     ticketsCerradosMensuales?: number;
-    churnRateMensual?: number;
-    churnBajasMensuales?: number;
+    churnRateMensual?: number | null;
+    churnBajasMensuales?: number | null;
+    churnEstado?: 'HISTORIAL_INSUFICIENTE';
     solicitudesAbiertas?: number;
     solicitudesNoFactibles?: number;
   };
@@ -421,6 +422,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           )}
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel
+              scope={scope}
               prospects={prospects}
               pendingActivationProspects={pendingActivationProspects}
               workOrders={workOrders}

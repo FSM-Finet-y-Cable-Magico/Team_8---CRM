@@ -34,6 +34,6 @@ describe('Etapa 4 - dependencias externas explícitas', () => {
     expect(deprecatedConsumers).not.toContain("api.patch('/inventory/");
     expect(deprecatedConsumers).not.toContain('/complete-installation');
     expect(deprecatedConsumers).not.toContain('/services/${');
-    expect(deprecatedConsumers).toContain('No hay cierre local ni asignación');
+    expect(deprecatedConsumers).toContain('Esta orden está disponible para consulta de solo lectura.');
   });
 });

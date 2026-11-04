@@ -1,8 +1,8 @@
 {
-  "contractHash": "52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91",
-  "modeledTables": 61,
+  "contractHash": "0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50",
+  "modeledTables": 63,
   "summary": {
-    "MATCH": 893,
+    "MATCH": 929,
     "COLUMN_GLOBAL_ONLY": 35,
     "OWNER_EXTERNAL": 325,
     "INDEX_MISMATCH": 53,
@@ -12377,6 +12377,500 @@
       "global": [
         "id_historial_ont"
       ]
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_operacion",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_pago",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_convenio",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_factura",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_usuario",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "id_auditoria",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "global": {
+        "type": "bigint",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "clave",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(100)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(100)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "hash",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "char(64)",
+        "nullable": false
+      },
+      "global": {
+        "type": "char(64)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "tipo",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(10)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(10)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "motivo",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "varchar(250)",
+        "nullable": false
+      },
+      "global": {
+        "type": "varchar(250)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "fecha",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "global": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "PRIMARY KEY",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": [
+        "id_operacion"
+      ],
+      "global": [
+        "id_operacion"
+      ]
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:empresa",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:pago",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:convenio",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:factura",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:usuario",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "FK:auditoria",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "INDEX:id_auditoria",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_auditoria"
+        ],
+        "unique": true
+      },
+      "global": null
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "INDEX:id_empresa,clave",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_empresa",
+          "clave"
+        ],
+        "unique": true
+      },
+      "global": null
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "INDEX:id_pago",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_pago"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "INDEX:id_convenio",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_convenio"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "operacion_imputacion_cuota",
+      "column": "INDEX:id_factura",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_factura"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "id_imputacion",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "id_operacion",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "id_cuota",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": false
+      },
+      "global": {
+        "type": "integer",
+        "nullable": false
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "monto",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "numeric(12,2)",
+        "nullable": false
+      },
+      "global": {
+        "type": "numeric(12,2)",
+        "nullable": false
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "id_original",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "type": "integer",
+        "nullable": true
+      },
+      "global": {
+        "type": "integer",
+        "nullable": true
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "PRIMARY KEY",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": [
+        "id_imputacion"
+      ],
+      "global": [
+        "id_imputacion"
+      ]
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "FK:operacion",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "FK:cuota",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "FK:original",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      },
+      "global": {
+        "onDelete": "RESTRICT",
+        "onUpdate": "CASCADE"
+      }
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "INDEX:id_operacion,id_cuota",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_operacion",
+          "id_cuota"
+        ],
+        "unique": true
+      },
+      "global": null
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "INDEX:id_cuota",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_cuota"
+        ],
+        "unique": false
+      },
+      "global": null
+    },
+    {
+      "table": "imputacion_cuota",
+      "column": "INDEX:id_original",
+      "owner": "G8 (coordinar columnas compartidas)",
+      "status": "MATCH",
+      "prisma": {
+        "columns": [
+          "id_original"
+        ],
+        "unique": false
+      },
+      "global": null
     },
     {
       "table": "empresa",

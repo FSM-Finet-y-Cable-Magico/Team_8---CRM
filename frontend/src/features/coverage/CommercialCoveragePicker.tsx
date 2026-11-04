@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
+import { userFacingMessage } from '../../lib/user-facing-messages';
 import './coverage.css';
 
 export type CoverageLocation = { latitud: number; longitud: number };
@@ -213,7 +214,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
       const first = data.candidatos[0];
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
-      else setGeocodeMessage(data.mensaje ?? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.');
+      else setGeocodeMessage(userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'));
     } catch {
       if (!controller.signal.aborted && current.current.version === version) {
         setGeocodeMessage('No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.');
@@ -267,7 +268,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
         {result.coberturaComercial && result.planes.length === 0 && <p>No hay planes activos configurados para esta ubicacion.</p>}
         {result.cajas.length > 0 && <ul>{result.cajas.map(box => <li key={box.id}>{box.nombre}: {box.puertosLibres} puertos libres</li>)}</ul>}
         <small>Consulta de cobertura comercial: {new Date(result.consultadoEn).toLocaleString('es-CL')}</small>
-      </> : <p>{connection?.mensaje ?? 'Comprobando configuracion de cobertura...'}</p>}
+      </> : <p>{userFacingMessage(connection?.mensaje, connection ? 'La consulta de cobertura no está disponible en este momento.' : 'Comprobando la conexión de cobertura…')}</p>}
       {error && <p role="alert">{error}</p>}
     </div>
     <div className="coverage-actions">

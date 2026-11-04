@@ -10,7 +10,7 @@ const source = readFileSync(new URL('../src/features/installations/G3Installatio
 function component(api) {
   const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const exports = {};
-  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: () => '-' }, '../../shared/components': { StatusBadge: () => null } };
+  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: () => '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null } };
   new Function('require', 'exports', out)(name => name in mocks ? mocks[name] : require(name), exports);
   return exports.G3InstallationStatus;
 }
@@ -35,37 +35,37 @@ async function mount({ missing = true, error = false, tracking = null, mayComple
 test('missing comuna blocks installation and requires explicit same-address confirmation', async () => {
   const h = await mount();
   try {
-    assert.equal(h.button('Solicitar instalación a G3').props.disabled, true);
-    assert.equal(h.button('Guardar comuna faltante').props.disabled, true);
+    assert.equal(h.button('Solicitar instalación').props.disabled, true);
+    assert.equal(h.button('Guardar comuna').props.disabled, true);
     const inputs = h.tree.root.findAllByType('input'); assert.equal(inputs[0].props.value, '');
     await act(async () => inputs[0].props.onChange({ target: { value: 'Santiago' } }));
-    assert.equal(h.button('Guardar comuna faltante').props.disabled, true);
+    assert.equal(h.button('Guardar comuna').props.disabled, true);
     await act(async () => inputs[1].props.onChange({ target: { checked: true } }));
-    await act(async () => h.button('Guardar comuna faltante').props.onClick());
+    await act(async () => h.button('Guardar comuna').props.onClick());
     assert.deepEqual(h.calls.find(c => c[0] === 'PATCH'), ['PATCH', '/integrations/g3/contracts/4/installation-data', { comuna: 'Santiago', confirmarMismaDireccion: true }]);
-    assert.equal(h.button('Solicitar instalación a G3').props.disabled, false);
+    assert.equal(h.button('Solicitar instalación').props.disabled, false);
     assert.equal(h.calls.filter(c => c[1] === '/integrations/g3/installations').length, 0);
-    assert.ok(JSON.stringify(h.tree.toJSON()).includes('El contrato firmado y su PDF no se modificaron'));
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes('El contrato firmado y su PDF conservan sus datos'));
   } finally { await h.close(); }
 });
 test('failed preflight does not enable installation', async () => {
   const h = await mount({ error: true });
-  try { assert.equal(h.button('Solicitar instalación a G3').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
+  try { assert.equal(h.button('Solicitar instalación').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
   finally { await h.close(); }
 });
 test('support must ask an authorized commercial role to complete missing data', async () => {
   const h = await mount({ mayComplete: false });
   try {
-    assert.equal(h.button('Guardar comuna faltante'), undefined);
-    assert.equal(h.button('Solicitar instalación a G3').props.disabled, true);
+    assert.equal(h.button('Guardar comuna'), undefined);
+    assert.equal(h.button('Solicitar instalación').props.disabled, true);
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('Comercial o Administración'));
   } finally { await h.close(); }
 });
 test('validated installation still needs an explicit request', async () => {
   const h = await mount({ missing: false });
   try {
-    assert.equal(h.button('Solicitar instalación a G3').props.disabled, false);
-    await act(async () => h.button('Solicitar instalación a G3').props.onClick());
+    assert.equal(h.button('Solicitar instalación').props.disabled, false);
+    await act(async () => h.button('Solicitar instalación').props.onClick());
     assert.deepEqual(h.calls.find(c => c[1] === '/integrations/g3/installations'), ['POST', '/integrations/g3/installations', { idProspecto: 2 }]);
   } finally { await h.close(); }
 });
@@ -73,8 +73,20 @@ test('pending closure is visible without losing the tracking', async () => {
   const h = await mount({ tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'PENDIENTE', estadoIntegracion: 'ENVIADA' } });
   try {
     await act(async () => h.button('Consultar cierre').props.onClick());
-    assert.ok(JSON.stringify(h.tree.toJSON()).includes('todavía no dispone de un cierre confirmado'));
+    assert.ok(JSON.stringify(h.tree.toJSON()).includes('cierre técnico aún no está confirmado'));
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('9700002'));
     assert.equal(h.calls.some(c => c[1].endsWith('installation-requirements')), false);
+  } finally { await h.close(); }
+});
+
+test('seguimiento presenta estados y fallas remotas con mensajes de producción', async () => {
+  const h = await mount({ tracking: { idIntegracion: 2, estadoPresentacion: 'EN_SEGUIMIENTO', estadoIntegracion: 'FALLIDA_REINTENTABLE',
+    estadoRemotoG3: 'CODIGO_DESCONOCIDO_G3', estadoOriginalRemotoG3: 'G3_X', estadoOriginalG3: 'G3_Y', ultimoErrorSanitizado: 'INTEGRACION_G3_NO_CONFIGURADA' } });
+  try {
+    const visible = JSON.stringify(h.tree.toJSON());
+    assert.match(visible, /Pendiente de revisión/);
+    assert.match(visible, /No se pudo actualizar la instalación/);
+    assert.doesNotMatch(visible, /G3|INTEGRACION|CODIGO_DESCONOCIDO/);
+    assert.ok(h.button('Reintentar envío'));
   } finally { await h.close(); }
 });

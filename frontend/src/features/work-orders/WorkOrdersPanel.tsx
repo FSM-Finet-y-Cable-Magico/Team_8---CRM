@@ -69,14 +69,14 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
     <section className="work-orders-panel stack">
       <div className="section-heading">
         <h2>Órdenes de trabajo</h2>
-        <p>Listado operativo de visitas, soporte e instalaciones registradas.</p>
+        <p>Consulta las visitas, reparaciones e instalaciones registradas.</p>
       </div>
       <div className="table-wrap work-orders-table-wrap">
         <table className="work-orders-table operational-table">
           <thead>
             <tr>
               <th>Código OT</th>
-              <th>Fuente</th>
+              <th>Registro</th>
               <th>Tipo</th>
               <th>Asociado</th>
               <th>Ticket</th>
@@ -91,7 +91,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
             {workOrders.map((order) => (
               <tr key={order.idOt}>
                 <td className="work-order-id">{formatWorkOrderCode(order)}</td>
-                <td><span className="source-badge">LEGACY_LOCAL</span></td>
+                <td><span className="source-badge">Histórico</span></td>
                 <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
                 <td>{ownerLabel(order)}</td>
                 <td>{formatWorkOrderTicketCode(order)}</td>
@@ -189,11 +189,11 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación administrada por G3'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación pendiente de cierre'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'Esta orden local se conserva como antecedente histórico de solo lectura.'
-                        : 'El cierre técnico, los equipos y el resultado físico se registran en G3. CRM recibirá el cierre por integración.'}
+                        ? 'Consulta los antecedentes registrados de esta instalación.'
+                        : 'El cierre de esta instalación aún no está registrado.'}
                     </p>
                   </div>
                 </div>
@@ -209,7 +209,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
                     }
                   />
                 </div>
-                <p className="inline-status">Fuente operativa: G3. No hay cierre local ni asignación física de inventario desde CRM.</p>
+                <p className="inline-status">Esta orden está disponible para consulta de solo lectura.</p>
               </section>
             ) : selectedOrderHasTicket ? (
               <section className="work-order-completion">
@@ -220,15 +220,15 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Trabajo técnico administrado por G3'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Trabajo técnico pendiente de cierre'}</h3>
                     <p>
                       {selectedOrderIsCompleted
                         ? 'Esta orden consta completada; sus datos históricos se conservan sin modificaciones.'
-                        : 'El cierre tecnico corresponde a G3. Las observaciones y el seguimiento comercial se registran en Tickets.'}
+                        : 'El cierre técnico está pendiente. Puedes registrar observaciones y dar seguimiento desde Tickets.'}
                     </p>
                   </div>
                 </div>
-                <p className="inline-status">Consulta historica de solo lectura. La derivacion y recepcion del cierre de reparaciones requieren un contrato ratificado con G3; no hay cierre tecnico local.</p>
+                <p className="inline-status">{selectedOrderIsCompleted ? 'Consulta de solo lectura de los antecedentes del trabajo técnico.' : 'Consulta de solo lectura. El cierre técnico está pendiente de confirmación.'}</p>
               </section>
             ) : (
               <div className="work-order-information">
