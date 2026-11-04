@@ -1,10 +1,10 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: 52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91. Modelos G8: 61.
+Hash canónico: 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50. Modelos G8: 63.
 
 Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Tambien incorpora el estado final de tax_emission_intent, tax_payment_job y la extension Meta de log_notificacion; los indices parciales se conservan aunque Prisma no pueda declararlos. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
-Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":893,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}.
+Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":929,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}.
 
 |Tabla|Objeto|Owner|Estado|Prisma|Global|
 |---|---|---|---|---|---|
@@ -901,6 +901,42 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |historial_conexion_ont|evento|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(15)","nullable":true}|{"type":"varchar(15)","nullable":true}|
 |historial_conexion_ont|timestamp|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamp","nullable":true}|{"type":"timestamp","nullable":true}|
 |historial_conexion_ont|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_historial_ont"]|["id_historial_ont"]|
+|operacion_imputacion_cuota|id_operacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_pago|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_convenio|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_factura|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_usuario|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|operacion_imputacion_cuota|id_auditoria|G8 (coordinar columnas compartidas)|MATCH|{"type":"bigint","nullable":false}|{"type":"bigint","nullable":false}|
+|operacion_imputacion_cuota|clave|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(100)","nullable":false}|{"type":"varchar(100)","nullable":false}|
+|operacion_imputacion_cuota|hash|G8 (coordinar columnas compartidas)|MATCH|{"type":"char(64)","nullable":false}|{"type":"char(64)","nullable":false}|
+|operacion_imputacion_cuota|tipo|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(10)","nullable":false}|{"type":"varchar(10)","nullable":false}|
+|operacion_imputacion_cuota|motivo|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(250)","nullable":false}|{"type":"varchar(250)","nullable":false}|
+|operacion_imputacion_cuota|fecha|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz","nullable":false}|{"type":"timestamptz","nullable":false}|
+|operacion_imputacion_cuota|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_operacion"]|["id_operacion"]|
+|operacion_imputacion_cuota|FK:empresa|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|FK:pago|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|FK:convenio|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|FK:factura|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|FK:usuario|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|FK:auditoria|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|operacion_imputacion_cuota|INDEX:id_auditoria|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_auditoria"],"unique":true}|null|
+|operacion_imputacion_cuota|INDEX:id_empresa,clave|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa","clave"],"unique":true}|null|
+|operacion_imputacion_cuota|INDEX:id_pago|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_pago"],"unique":false}|null|
+|operacion_imputacion_cuota|INDEX:id_convenio|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_convenio"],"unique":false}|null|
+|operacion_imputacion_cuota|INDEX:id_factura|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_factura"],"unique":false}|null|
+|imputacion_cuota|id_imputacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|imputacion_cuota|id_operacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|imputacion_cuota|id_cuota|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|imputacion_cuota|monto|G8 (coordinar columnas compartidas)|MATCH|{"type":"numeric(12,2)","nullable":false}|{"type":"numeric(12,2)","nullable":false}|
+|imputacion_cuota|id_original|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
+|imputacion_cuota|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_imputacion"]|["id_imputacion"]|
+|imputacion_cuota|FK:operacion|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|imputacion_cuota|FK:cuota|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|imputacion_cuota|FK:original|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
+|imputacion_cuota|INDEX:id_operacion,id_cuota|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_operacion","id_cuota"],"unique":true}|null|
+|imputacion_cuota|INDEX:id_cuota|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_cuota"],"unique":false}|null|
+|imputacion_cuota|INDEX:id_original|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_original"],"unique":false}|null|
 |empresa|umbral_desconexion_min|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"smallint","nullable":true}|
 |usuario|bloqueado_hasta|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"timestamptz","nullable":true}|
 |usuario|debe_cambiar_password|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"boolean","nullable":true}|

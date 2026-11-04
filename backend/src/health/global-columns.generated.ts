@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91; no seeds or credentials.
+// Generated from init-global.sql SHA256 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -5789,5 +5789,107 @@ export const GLOBAL_COLUMNS = [
     "name": "fecha_actualizacion",
     "type": "timestamptz",
     "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_operacion",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_pago",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_convenio",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_factura",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_usuario",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "id_auditoria",
+    "type": "bigint",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "clave",
+    "type": "varchar(100)",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "hash",
+    "type": "char(64)",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "tipo",
+    "type": "varchar(10)",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "motivo",
+    "type": "varchar(250)",
+    "nullable": false
+  },
+  {
+    "table": "operacion_imputacion_cuota",
+    "name": "fecha",
+    "type": "timestamptz",
+    "nullable": false
+  },
+  {
+    "table": "imputacion_cuota",
+    "name": "id_imputacion",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "imputacion_cuota",
+    "name": "id_operacion",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "imputacion_cuota",
+    "name": "id_cuota",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "imputacion_cuota",
+    "name": "monto",
+    "type": "numeric(12,2)",
+    "nullable": false
+  },
+  {
+    "table": "imputacion_cuota",
+    "name": "id_original",
+    "type": "integer",
+    "nullable": true
   }
 ];

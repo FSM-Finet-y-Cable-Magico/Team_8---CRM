@@ -2,8 +2,9 @@
 
 `init-global.sql` es el contrato físico canónico de PostgreSQL compartido por G1, G2, G3/Ops y G8. No contiene datos ni seeds.
 
-- SHA-256 vigente: `bdbff3f99e81446d75312dede4571ab6154bea309ce8f90dceaa44e98105cce1`.
-- 91 tablas, 897 columnas, 91 PK, 211 FK, 33 checks y 109 índices explícitos.
+- SHA-256 vigente en esta rama: `0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50`.
+- 96 tablas, 982 columnas, 96 PK, 230 FK, 63 checks y 132 índices explícitos.
+- Incluye F3 manual (04-11-2026), autorizado únicamente para desarrollo/QA: dos tablas G8, sin modificar tablas financieras existentes. No implica que la base compartida esté migrada.
 - `db/final/init.sql` es un snapshot histórico de G8 y no representa el contrato global vigente.
 
 ## Cambio de contrato del 29-09-2026
@@ -38,6 +39,16 @@ node --env-file=.env.railway scripts/verify-global-db.mjs
 
 El primer comando compara archivos. El segundo consulta los catálogos dentro de una transacción `READ ONLY`; devuelve 0 si coincide, 1 si hay diferencias y 2 si falla la configuración o lectura. `GLOBAL_DB_REPORT_PATH` y `GLOBAL_DB_CATALOG_PATH` permiten guardar evidencia saneada.
 
-La lectura más reciente obtuvo 1.522 coincidencias y cero faltantes. El resultado continúa en `FAIL` exclusivamente por cinco `UNOWNED_EXTRA`; `_prisma_migrations` es el único extra permitido. No se ejecutaron escrituras desde esta rama.
+La lectura histórica de I3 obtuvo 1.522 coincidencias y cero faltantes; no representa el estado actual de producción. La política vigente preserva exactamente los cinco extras legacy enumerados en el verificador y `_prisma_migrations` como extra técnico. F3 valida el catálogo completo únicamente en PostgreSQL QA nuevo y actualización desechable; no consulta ni modifica la base compartida.
+
+## F3: imputación manual de pagos a cuotas
+
+`operacion_imputacion_cuota` e `imputacion_cuota` incorporan un ledger relacional
+con auditoría obligatoria y reversas compensatorias. La migración propuesta es
+`20261104090000_i4_manual_installment_allocation`; no regulariza datos anteriores.
+El backend nuevo requiere estas tablas (incluido readiness). Aplicar únicamente
+después de aprobar coordinación del esquema compartido, respaldo y preflight.
+Ver [diseño](../../docs/i4-f3-imputaciones-diseno.md) y
+[implementación y QA](../../docs/i4-f3-imputaciones-validacion.md).
 
 No usar `db push`, migraciones históricas ni el reconciliador obsoleto para cambiar la base compartida. Ver [contrato y proyección](../../docs/i3-global-database-contract.md) y [verificación final](../../docs/i3-global-verification-final.md).
