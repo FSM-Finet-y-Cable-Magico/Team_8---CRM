@@ -19,7 +19,7 @@ const fields = {
   '+56912345678': '+56912345678',
   'Av. Siempre Viva 123, Comuna': 'Av. de Prueba 123',
   Comuna: 'La Florida',
-  Region: 'Metropolitana',
+  Region: 'Metropolitana de Santiago',
 };
 const text = node => typeof node === 'string' ? node : (node.children ?? []).map(text).join('');
 
@@ -47,7 +47,7 @@ async function harness(t, post = async () => ({ data: { idProspecto: 101 } })) {
   const CoveragePicker = () => null;
   const mocks = new Map([
     [resolve(sourceRoot, 'api.ts'), { api, apiErrorMessage: error => error.message }],
-    [resolve(sourceRoot, 'shared/components/index.ts'), { Modal: () => null, TablePagination: () => null }],
+    [resolve(sourceRoot, 'shared/components/index.ts'), { Modal: () => null, TablePagination: () => null, ToastNotice: ({ message }) => message ? React.createElement('aside', { role: 'status', 'data-testid': 'toast' }, message) : null }],
     [resolve(sourceRoot, 'features/coverage/index.tsx'), { CoveragePicker, CoverageZonesPanel: () => null }],
     [resolve(sourceRoot, 'features/auth/index.ts'), { LoginScreen: ({ onLogin }) => React.createElement('button', { onClick: () => onLogin(user) }, 'Iniciar sesión de prueba') }],
   ]);
@@ -83,11 +83,11 @@ async function harness(t, post = async () => ({ data: { idProspecto: 101 } })) {
   });
   const button = label => tree.root.findAllByType('button').find(node => text(node).trim() === label);
   const click = async label => { await act(async () => button(label).props.onClick()); };
-  const input = placeholder => tree.root.findByProps({ placeholder });
+  const input = placeholder => ['Region', 'Comuna'].includes(placeholder) ? tree.root.findByProps({ 'aria-label': placeholder === 'Region' ? 'Región' : 'Comuna' }) : tree.root.findByProps({ placeholder });
   const change = async (placeholder, value) => { await act(async () => input(placeholder).props.onChange({ target: { value } })); };
   const fill = async () => {
     for (const [placeholder, value] of Object.entries(fields)) await change(placeholder, value);
-    await act(async () => tree.root.findByType('form').findByType('select').props.onChange({ target: { value: 'Referido' } }));
+    await act(async () => tree.root.findByProps({ 'aria-label': 'Origen de contacto' }).props.onChange({ target: { value: 'Referido' } }));
   };
   await click('Prospectos');
   return {
@@ -130,6 +130,32 @@ test('el campo RUT impide agregar más de nueve caracteres y permite corregirlos
   assert.equal(h.input('12345678-5').props.value, '');
 });
 
+test('celular agrega +569 al escribir, reconoce números pegados y conserva el valor al navegar', async t => {
+  const h = await harness(t);
+  const phone = '+56912345678';
+  for (const firstDigit of ['0', '5', '6', '9']) {
+    await h.change(phone, firstDigit);
+    assert.equal(h.input(phone).props.value, '+569' + firstDigit);
+  }
+  await h.change(phone, '6');
+  for (const digit of '1234567') await h.change(phone, h.input(phone).props.value + digit);
+  assert.equal(h.input(phone).props.value, '+56961234567');
+  await h.navigate();
+  assert.equal(h.input(phone).props.value, '+56961234567');
+  for (const pasted of ['61234567', '961234567', '56961234567', '+56 9 6123-4567']) {
+    await h.change(phone, pasted);
+    assert.equal(h.input(phone).props.value, '+56961234567');
+  }
+  await h.change(phone, '9');
+  for (const digit of '61234567') await h.change(phone, h.input(phone).props.value + digit);
+  assert.equal(h.input(phone).props.value, '+56961234567');
+  await h.change(phone, '+569');
+  await h.change(phone, '+56');
+  assert.equal(h.input(phone).props.value, '');
+  await h.change(phone, '');
+  assert.equal(h.input(phone).props.value, '');
+});
+
 test('conserva todos los campos, origen y ubicación al cambiar de apartado del CRM', async t => {
   const h = await harness(t);
   await h.fill();
@@ -137,7 +163,7 @@ test('conserva todos los campos, origen y ubicación al cambiar de apartado del 
   await h.point(point);
   await h.navigate();
   for (const [placeholder, value] of Object.entries(fields)) assert.equal(h.input(placeholder).props.value, value);
-  assert.equal(h.tree().root.findByType('form').findByType('select').props.value, 'Referido');
+  assert.equal(h.tree().root.findByProps({ 'aria-label': 'Origen de contacto' }).props.value, 'Referido');
   assert.deepEqual(h.location(), point);
   assert.equal(h.calls.length, 0, 'navegar no registra el prospecto');
   assert.deepEqual([...h.storage.keys()].sort(), ['finet_token', 'finet_user']);
@@ -150,7 +176,7 @@ test('al recargar la aplicación se descarta el borrador sin afectar la sesión 
   await h.reload();
   for (const placeholder of Object.keys(fields)) assert.equal(h.input(placeholder).props.value, '');
   assert.equal(h.location(), null);
-  assert.equal(h.tree().root.findByType('form').findByType('select').props.value, 'Formulario web');
+  assert.equal(h.tree().root.findByProps({ 'aria-label': 'Origen de contacto' }).props.value, 'Formulario web');
 });
 
 test('mantiene un borrador independiente por empresa y vuelve a recuperar el anterior', async t => {
@@ -177,6 +203,7 @@ test('un registro exitoso limpia el borrador y conserva el envío correcto a la 
   assert.equal(h.calls[0][0], '/prospects');
   assert.equal(h.calls[0][1].idEmpresa, 1);
   assert.equal(h.calls[0][1].nombreCompleto, fields['Nombre Apellido']);
+  assert.equal(h.calls[0][1].telefono, fields['+56912345678']);
   assert.deepEqual(h.calls[0][1].ubicacion, { latitud: -33.58, longitud: -70.63 });
   await h.navigate();
   for (const placeholder of Object.keys(fields)) assert.equal(h.input(placeholder).props.value, '');
@@ -244,4 +271,18 @@ test('cerrar sesión o expirar el acceso elimina los borradores de la sesión an
   await h.click('Iniciar sesión de prueba');
   await h.click('Prospectos');
   assert.equal(h.input('Nombre Apellido').props.value, '');
+});
+
+
+test('crear un prospecto muestra un aviso global breve y desaparece a los tres segundos', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = await harness(t);
+  await h.fill(); await h.submit();
+  assert.equal(h.tree().root.findByProps({ 'data-testid': 'toast' }).props.children, 'Prospecto creado');
+  await h.click('Cobertura');
+  assert.equal(h.tree().root.findByProps({ 'data-testid': 'toast' }).props.children, 'Prospecto creado');
+  await act(async () => t.mock.timers.tick(2999));
+  assert.equal(h.tree().root.findAllByProps({ 'data-testid': 'toast' }).length, 1);
+  await act(async () => t.mock.timers.tick(1));
+  assert.equal(h.tree().root.findAllByProps({ 'data-testid': 'toast' }).length, 0);
 });

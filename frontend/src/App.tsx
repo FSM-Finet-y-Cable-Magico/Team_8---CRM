@@ -78,6 +78,7 @@ import {
 } from './lib';
 import { Sidebar, Topbar, type SidebarNavItem } from './layouts';
 import { useCompanyDraft } from './shared/hooks/useCompanyDraft';
+import { useTransientMessage } from './shared/hooks/useTransientMessage';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 import {
   DashboardStatCard,
@@ -88,6 +89,7 @@ import {
   MonitoringStatusView,
   QuickActionCard,
   StatusBadge,
+  ToastNotice,
   type ExpiryCustomerAlert,
 } from './shared/components';
 
@@ -192,6 +194,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [prospectsLoading, setProspectsLoading] = useState(true);
   const [prospectsError, setProspectsError] = useState('');
   const prospectsRequest = useRef(0);
+  const prospectsScope = useRef(scope);
   const [pendingActivationProspects, setPendingActivationProspects] = useState<Prospect[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -204,6 +207,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
+  const { message: notification, showMessage: showNotification, clearMessage: clearNotification } = useTransientMessage(3000);
   const isAdmin = hasPermission(user.roles, 'manageCompanyScope');
   const permissions = getDashboardPermissions(user.roles);
   const canManageCustomers = permissions.viewCustomers;
@@ -231,7 +235,11 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     const request = ++prospectsRequest.current;
     setProspectsLoading(true);
     setProspectsError('');
-    setProspects([]);
+    // Keep the selected prospect mounted while rechecking coverage; clear only when changing company scope.
+    if (prospectsScope.current !== scope) {
+      prospectsScope.current = scope;
+      setProspects([]);
+    }
     try {
       const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000 });
       if (request === prospectsRequest.current) setProspects(data);
@@ -346,6 +354,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   return (
     <main className="crm-shell">
+      <ToastNotice message={notification} onDismiss={clearNotification} />
       <Sidebar
         activeTab={activeTab}
         mainItems={mainNavItems}
@@ -419,6 +428,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               writeCompanyId={writeCompanyId}
               permissions={permissions}
               onCreated={() => void loadData()}
+              onNotify={showNotification}
             />
           )}
           {activeTab === 'coverage' && permissions.managePaymentZones && (

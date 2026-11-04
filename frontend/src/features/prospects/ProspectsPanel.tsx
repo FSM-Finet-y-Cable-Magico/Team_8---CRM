@@ -1,11 +1,12 @@
 import { type ChangeEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
-import { emptyProspectForm, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
+import { emptyProspectForm, formatChileanMobileInput, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
 import { CoveragePicker, CoverageLocation } from '../coverage';
 import type { CompanyDraft } from '../../shared/hooks/useCompanyDraft';
+import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
 
 export type ProspectRegistrationDraft = {
   form: ProspectFormState;
@@ -26,6 +27,7 @@ export function ProspectsPanel({
   writeCompanyId,
   permissions,
   onCreated,
+  onNotify,
   registration,
 }: {
   prospects: Prospect[];
@@ -36,6 +38,7 @@ export function ProspectsPanel({
   writeCompanyId: number;
   permissions: DashboardPermissions;
   onCreated: () => void;
+  onNotify?: (message: string) => void;
   registration?: CompanyDraft<ProspectRegistrationDraft>;
 }) {
   const [localDraft, setLocalDraft] = useState(createProspectRegistrationDraft);
@@ -53,20 +56,23 @@ export function ProspectsPanel({
     }
   });
   const [status, setStatus] = useState('');
+  const [coverageBusy, setCoverageBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const addressParts = [form.direccion, form.comuna, form.region].map(part => part.trim().replace(/\s+/g, ' '));
   const fullAddress = addressParts.some(Boolean) ? [...addressParts.filter(Boolean), 'Chile'].join(', ') : '';
   const addressVersion = JSON.stringify([writeCompanyId, ...addressParts.map(part => part.toLocaleLowerCase('es-CL'))]);
   const location = located?.version === addressVersion ? located.location : null;
-  const [confirmedAddress, setConfirmedAddress] = useState<string | null>(null);
+  const [confirmedAddress, setConfirmedAddress] = useState<string | null>(() => addressParts.every(Boolean) ? addressVersion : null);
+  const selectedRegion = findChileRegion(form.region);
+  const selectedComuna = selectedRegion?.comunas.find(comuna => normalizeTerritory(comuna) === normalizeTerritory(form.comuna));
   useEffect(() => {
     changeDraft(current => current.located && current.located.version !== addressVersion ? { ...current, located: null } : current);
-    setConfirmedAddress(null);
   }, [addressVersion, changeDraft]);
 
-  function confirmAddress() {
-    if (addressParts.every(Boolean)) setConfirmedAddress(addressVersion);
+  function confirmAddress(nextForm = form) {
+    const parts = [nextForm.direccion, nextForm.comuna, nextForm.region].map(part => part.trim().replace(/\s+/g, ' '));
+    if (parts.every(Boolean)) setConfirmedAddress(JSON.stringify([writeCompanyId, ...parts.map(part => part.toLocaleLowerCase('es-CL'))]));
   }
 
   function setLocation(next: CoverageLocation | null) {
@@ -102,7 +108,7 @@ export function ProspectsPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || coverageBusy) return;
     setStatus('');
     const validationMessage = validateProspectForm(form);
 
@@ -113,7 +119,7 @@ export function ProspectsPanel({
 
     setSubmitting(true);
     try {
-      const { data } = await api.post('/prospects', {
+      await api.post('/prospects', {
         rut: normalizeRutInput(form.rut),
         nombreCompleto: form.nombreCompleto.trim(),
         email: form.email.trim().toLowerCase() || undefined,
@@ -127,7 +133,8 @@ export function ProspectsPanel({
       });
       setForm(emptyProspectForm);
       setLocation(null);
-      setStatus(data.cobertura ? `Prospecto creado. Cobertura: ${data.cobertura.estado}. ${data.cobertura.motivo}` : 'Prospecto creado sin ubicacion. Estado: Prospecto Nuevo.');
+      if (onNotify) onNotify('Prospecto creado');
+      else setStatus('Prospecto creado');
       onCreated();
     } catch (err) {
       setStatus(apiErrorMessage(err));
@@ -180,8 +187,11 @@ export function ProspectsPanel({
             Celular
             <input
               value={form.telefono}
-              onChange={(event) => setForm({ ...form, telefono: event.target.value })}
+              onChange={(event) => setForm({ ...form, telefono: formatChileanMobileInput(event.target.value) })}
               placeholder="+56912345678"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
               disabled={submitting}
               maxLength={20}
               required
@@ -190,6 +200,7 @@ export function ProspectsPanel({
           <label>
             Origen de contacto
             <select
+              aria-label="Origen de contacto"
               value={form.origenContacto}
               disabled={submitting}
               onChange={(event) => setForm({ ...form, origenContacto: event.target.value })}
@@ -206,7 +217,7 @@ export function ProspectsPanel({
             <input
               value={form.direccion}
               onChange={(event) => setForm({ ...form, direccion: event.target.value })}
-              onBlur={confirmAddress}
+              onBlur={() => confirmAddress()}
               placeholder="Av. Siempre Viva 123, Comuna"
               disabled={submitting}
               maxLength={200}
@@ -214,18 +225,33 @@ export function ProspectsPanel({
             />
           </label>
           <label>
-            Comuna
-            <input value={form.comuna} disabled={submitting} onChange={(event) => setForm({ ...form, comuna: event.target.value })} onBlur={confirmAddress} placeholder="Comuna" maxLength={80} />
+            Región
+            <select aria-label="Región" value={selectedRegion?.nombre ?? form.region} disabled={submitting} onChange={event => {
+              const region = findChileRegion(event.target.value);
+              const comuna = region?.comunas.find(name => normalizeTerritory(name) === normalizeTerritory(form.comuna)) ?? '';
+              const next = { ...form, region: event.target.value, comuna };
+              setForm(next); confirmAddress(next);
+            }}>
+              <option value="">Seleccionar región</option>
+              {form.region && !selectedRegion && <option value={form.region}>{form.region}</option>}
+              {chileRegions.map(region => <option key={region.codigo} value={region.nombre}>{region.nombre}</option>)}
+            </select>
           </label>
           <label>
-            Region
-            <input value={form.region} disabled={submitting} onChange={(event) => setForm({ ...form, region: event.target.value })} onBlur={confirmAddress} placeholder="Region" maxLength={80} />
+            Comuna
+            <select aria-label="Comuna" value={selectedComuna ?? form.comuna} disabled={submitting || !selectedRegion} onChange={event => {
+              const next = { ...form, comuna: event.target.value };
+              setForm(next); confirmAddress(next);
+            }}>
+              <option value="">{selectedRegion ? 'Seleccionar comuna' : 'Selecciona primero una región'}</option>
+              {form.comuna && !selectedComuna && <option value={form.comuna}>{form.comuna}</option>}
+              {selectedRegion?.comunas.map(comuna => <option key={comuna} value={comuna}>{comuna}</option>)}
+            </select>
           </label>
           {status && <p className="inline-status">{status}</p>}
-          <details onToggle={event => { if (event.currentTarget.open) confirmAddress(); }}><summary>Confirmar ubicación y consultar cobertura</summary>
-            <CoveragePicker idEmpresa={writeCompanyId} direccion={fullAddress} autoGeocode={confirmedAddress === addressVersion} value={location} onChange={setLocation} disabled={submitting} />
-          </details>
-          <button disabled={submitting}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
+          <CoveragePicker presentation="status" idEmpresa={writeCompanyId} direccion={fullAddress} autoGeocode={confirmedAddress === addressVersion}
+            value={location} onChange={setLocation} onBusyChange={setCoverageBusy} disabled={submitting} />
+          <button disabled={submitting || coverageBusy}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>
       )}
 
@@ -279,10 +305,12 @@ export function ProspectsPanel({
         >
           {selectedProspect && (
             <ProspectWorkflowPanel
+              key={selectedProspect.idProspecto}
               prospect={selectedProspect}
               plans={plans}
               permissions={permissions}
               onChanged={onCreated}
+              onNotify={onNotify}
               onClose={() => setSelectedId(null)}
             />
           )}

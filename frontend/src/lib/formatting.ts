@@ -1,5 +1,19 @@
 ﻿import type { WorkOrder } from '../api';
 
+export function formatChileanMobileInput(value: string) {
+  const digits = value.replace(/\D/g, '');
+  // Deleting the prefix must allow clearing the field rather than restoring it forever.
+  if (!digits || (value.trim().startsWith('+') && digits.length < 3)) return '';
+
+  let subscriber = digits;
+  if (digits.startsWith('569') && (value.trim().startsWith('+') || digits.length >= 11)) {
+    subscriber = digits.slice(3);
+  }
+  // Accept the national mobile number, including when entered after the automatic prefix.
+  if (subscriber.length === 9 && subscriber.startsWith('9')) subscriber = subscriber.slice(1);
+  return `+569${subscriber}`;
+}
+
 export function formatConnectionType(value?: WorkOrder['tipoConexion']) {
   if (value === 'Fibra Optica') {
     return 'Fibra Óptica';
