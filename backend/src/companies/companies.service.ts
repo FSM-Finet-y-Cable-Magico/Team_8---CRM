@@ -46,7 +46,6 @@ export class CompaniesService {
       serviciosActivos,
       completedInstallations,
       ticketsCerradosMensuales,
-      churnBajasMensuales,
       clientesActivos,
       ticketsCerrados,
       activeContracts,
@@ -85,13 +84,6 @@ export class CompaniesService {
           ...companyFilter,
           estado: { in: ['Resuelto', 'Cerrado'] },
           fechaCierre: { gte: monthStart },
-        },
-      }),
-      this.prisma.contrato.count({
-        where: {
-          ...companyFilter,
-          estado: { in: ['Baja', 'Suspendido'] },
-          fechaSuspension: { gte: monthStart },
         },
       }),
       this.prisma.cliente.count({
@@ -164,7 +156,6 @@ export class CompaniesService {
         })
       : [];
     const categoryById = new Map(categories.map((category) => [category.idCategoria, category]));
-    const churnBase = clientesActivos + churnBajasMensuales;
     const expiryDays = this.expiryAlertDays();
     const contractAlerts = activeContracts
       .map((contract) => {
@@ -214,8 +205,11 @@ export class CompaniesService {
         serviciosActivos,
         ...completedInstallations,
         ticketsCerradosMensuales,
-        churnRateMensual: churnBase ? Number(((churnBajasMensuales / churnBase) * 100).toFixed(2)) : 0,
-        churnBajasMensuales,
+        // Current contract status and suspension date cannot establish definitive
+        // cancellations or the opening-period customer population. Null is not 0%.
+        churnRateMensual: null,
+        churnBajasMensuales: null,
+        churnEstado: 'HISTORIAL_INSUFICIENTE' as const,
         solicitudesAbiertas,
         solicitudesNoFactibles,
       },

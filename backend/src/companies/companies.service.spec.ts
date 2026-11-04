@@ -37,6 +37,14 @@ describe('CompaniesService CU47 integrado', () => {
     const { service } = fixture('2026-11-02T12:00:00Z');
     expect((await service.summary(commercial)).metricas.instalacionesMensuales).toBe(1);
   });
+  it.each([0, 1, 5])('no publica churn ni bajas con %i estados actuales sin historia fiable', async currentCount => {
+    const { service, prisma } = fixture(null);
+    prisma.contrato.count.mockResolvedValue(currentCount);
+    expect((await service.summary(commercial)).metricas).toMatchObject({
+      churnRateMensual: null, churnBajasMensuales: null, churnEstado: 'HISTORIAL_INSUFICIENTE',
+    });
+    expect(prisma.contrato.count).not.toHaveBeenCalled();
+  });
   it('informa completadas pendientes de fecha sin convertirlas en pendientes de ejecución', async () => {
     const { service } = fixture(null);
     expect((await service.summary(commercial)).metricas).toEqual(expect.objectContaining({

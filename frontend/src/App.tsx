@@ -124,8 +124,9 @@ type Summary = {
     instalacionesSinFechaTecnica?: number;
     instalacionesRequierenRevision?: number;
     ticketsCerradosMensuales?: number;
-    churnRateMensual?: number;
-    churnBajasMensuales?: number;
+    churnRateMensual?: number | null;
+    churnBajasMensuales?: number | null;
+    churnEstado?: 'HISTORIAL_INSUFICIENTE';
     solicitudesAbiertas?: number;
     solicitudesNoFactibles?: number;
   };
