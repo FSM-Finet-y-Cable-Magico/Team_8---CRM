@@ -58,7 +58,7 @@ import { ImportPanel } from './features/import';
 import { InstallationsPanel } from './features/installations';
 import { InventoryPanel } from './features/inventory';
 import { PlansPanel } from './features/plans';
-import { ProspectsPanel } from './features/prospects';
+import { createProspectRegistrationDraft, ProspectsPanel } from './features/prospects';
 import { ReportsPanel } from './features/reports';
 import { TicketsPanel } from './features/tickets';
 import { UsersPanel } from './features/users';
@@ -77,6 +77,7 @@ import {
   technicalEntries,
 } from './lib';
 import { Sidebar, Topbar, type SidebarNavItem } from './layouts';
+import { useCompanyDraft } from './shared/hooks/useCompanyDraft';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 import {
   DashboardStatCard,
@@ -176,7 +177,7 @@ export default function App() {
     return <LoginScreen onLogin={setUser} />;
   }
 
-  return <Dashboard user={user} onLogout={() => setUser(null)} />;
+  return <Dashboard key={user.idUsuario} user={user} onLogout={() => setUser(null)} />;
 }
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -224,6 +225,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
     return user.idEmpresa ?? companies[0]?.idEmpresa ?? 1;
   }, [companies, scope, user.idEmpresa]);
+  const prospectRegistration = useCompanyDraft(writeCompanyId, createProspectRegistrationDraft);
 
   async function loadProspects() {
     const request = ++prospectsRequest.current;
@@ -407,6 +409,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           )}
           {activeTab === 'prospects' && permissions.viewProspects && (
             <ProspectsPanel
+              key={writeCompanyId}
+              registration={prospectRegistration}
               prospects={prospects}
               loading={prospectsLoading}
               loadError={prospectsError}

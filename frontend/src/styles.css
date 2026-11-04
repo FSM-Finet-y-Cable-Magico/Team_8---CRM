@@ -1121,6 +1121,12 @@ th {
   font-weight: 700;
 }
 
+.import-panel > button:disabled {
+  cursor: default;
+  background: #247c68;
+  box-shadow: none;
+}
+
 .import-panel > .inline-status {
   text-align: left;
 }
@@ -4064,6 +4070,19 @@ button.profile-menu-item.danger:hover {
   justify-content: center;
   gap: 22px;
 }
+
+.import-workspace.import-clients-only {
+  grid-template-columns: minmax(0, 520px);
+}
+
+.import-client-errors {
+  color: #65736c;
+  font-size: .82rem;
+  line-height: 1.6;
+}
+
+.import-client-errors summary { cursor: pointer; }
+.import-client-errors ul { max-height: 200px; overflow: auto; padding-left: 20px; }
 
 .source-badge {
   display: inline-flex;
