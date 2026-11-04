@@ -104,6 +104,7 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
       API_PROXY_TARGET: http://backend:3000
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     volumes:

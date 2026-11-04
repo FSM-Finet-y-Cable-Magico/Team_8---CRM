@@ -1,10 +1,21 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
-import { emptyProspectForm, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
+import { emptyProspectForm, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
 import { CoveragePicker, CoverageLocation } from '../coverage';
+import type { CompanyDraft } from '../../shared/hooks/useCompanyDraft';
+
+export type ProspectRegistrationDraft = {
+  form: ProspectFormState;
+  located: { version: string; location: CoverageLocation } | null;
+  submitting: boolean;
+};
+
+export function createProspectRegistrationDraft(): ProspectRegistrationDraft {
+  return { form: { ...emptyProspectForm }, located: null, submitting: false };
+}
 
 export function ProspectsPanel({
   prospects,
@@ -15,6 +26,7 @@ export function ProspectsPanel({
   writeCompanyId,
   permissions,
   onCreated,
+  registration,
 }: {
   prospects: Prospect[];
   loading: boolean;
@@ -24,26 +36,41 @@ export function ProspectsPanel({
   writeCompanyId: number;
   permissions: DashboardPermissions;
   onCreated: () => void;
+  registration?: CompanyDraft<ProspectRegistrationDraft>;
 }) {
-  const [form, setForm] = useState<ProspectFormState>(emptyProspectForm);
+  const [localDraft, setLocalDraft] = useState(createProspectRegistrationDraft);
+  const { form, located, submitting } = registration?.draft ?? localDraft;
+  const changeDraft = registration?.onChange ?? setLocalDraft;
+  const setForm = (next: ProspectFormState) => changeDraft(current => ({ ...current, form: next }));
+  const setSubmitting = (next: boolean) => changeDraft(current => ({ ...current, submitting: next }));
+  const rutInput = useRef<HTMLInputElement>(null);
+  const rutCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const position = rutCaret.current;
+    rutCaret.current = null;
+    if (position !== null && rutInput.current && document.activeElement === rutInput.current) {
+      rutInput.current.setSelectionRange(position, position);
+    }
+  });
   const [status, setStatus] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const addressParts = [form.direccion, form.comuna, form.region].map(part => part.trim().replace(/\s+/g, ' '));
   const fullAddress = addressParts.some(Boolean) ? [...addressParts.filter(Boolean), 'Chile'].join(', ') : '';
   const addressVersion = JSON.stringify([writeCompanyId, ...addressParts.map(part => part.toLocaleLowerCase('es-CL'))]);
-  const [located, setLocated] = useState<{ version: string; location: CoverageLocation } | null>(null);
   const location = located?.version === addressVersion ? located.location : null;
   const [confirmedAddress, setConfirmedAddress] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { setLocated(null); setConfirmedAddress(null); }, [addressVersion]);
+  useEffect(() => {
+    changeDraft(current => current.located && current.located.version !== addressVersion ? { ...current, located: null } : current);
+    setConfirmedAddress(null);
+  }, [addressVersion, changeDraft]);
 
   function confirmAddress() {
     if (addressParts.every(Boolean)) setConfirmedAddress(addressVersion);
   }
 
   function setLocation(next: CoverageLocation | null) {
-    setLocated(next ? { version: addressVersion, location: next } : null);
+    changeDraft(current => ({ ...current, located: next ? { version: addressVersion, location: next } : null }));
   }
 
   const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
@@ -51,6 +78,27 @@ export function ProspectsPanel({
   const visibleProspects = prospects.slice((page - 1) * pageSize, page * pageSize);
 
   useEffect(() => { setPage(1); }, [prospects.length]);
+
+  function changeRut(event: ChangeEvent<HTMLInputElement>) {
+    const raw = event.target.value;
+    const compact = raw.replace(/[.\s-]/g, '');
+    const previousLength = form.rut.replace(/[.\s-]/g, '').length;
+    const tooLong = compact.length > 9;
+    const value = tooLong ? form.rut : formatRutInput(raw);
+    const caret = event.target.selectionStart;
+    if (typeof caret === 'number') {
+      const extraCharacters = tooLong ? Math.max(0, compact.length - previousLength) : 0;
+      const charactersBeforeCaret = Math.max(0, raw.slice(0, caret).replace(/[.\s-]/g, '').length - extraCharacters);
+      let characters = 0;
+      let position = 0;
+      while (position < value.length && characters < charactersBeforeCaret) {
+        if (value[position] !== '-') characters++;
+        position++;
+      }
+      rutCaret.current = position;
+    }
+    setForm({ ...form, rut: value });
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -96,9 +144,13 @@ export function ProspectsPanel({
           <label>
             RUT
             <input
+              ref={rutInput}
               value={form.rut}
-              onChange={(event) => setForm({ ...form, rut: event.target.value })}
+              onChange={changeRut}
               placeholder="12345678-5"
+              autoCapitalize="characters"
+              spellCheck={false}
+              disabled={submitting}
               required
             />
           </label>
@@ -108,6 +160,7 @@ export function ProspectsPanel({
               value={form.nombreCompleto}
               onChange={(event) => setForm({ ...form, nombreCompleto: event.target.value })}
               placeholder="Nombre Apellido"
+              disabled={submitting}
               maxLength={120}
               required
             />
@@ -118,6 +171,7 @@ export function ProspectsPanel({
               value={form.email}
               onChange={(event) => setForm({ ...form, email: event.target.value })}
               placeholder="correo@ejemplo.cl"
+              disabled={submitting}
               type="email"
               maxLength={120}
             />
@@ -128,6 +182,7 @@ export function ProspectsPanel({
               value={form.telefono}
               onChange={(event) => setForm({ ...form, telefono: event.target.value })}
               placeholder="+56912345678"
+              disabled={submitting}
               maxLength={20}
               required
             />
@@ -136,6 +191,7 @@ export function ProspectsPanel({
             Origen de contacto
             <select
               value={form.origenContacto}
+              disabled={submitting}
               onChange={(event) => setForm({ ...form, origenContacto: event.target.value })}
             >
               {['Formulario web', 'Telefono', 'Sucursal', 'Referido', 'Redes sociales', 'Terreno'].map((origin) => (
@@ -152,17 +208,18 @@ export function ProspectsPanel({
               onChange={(event) => setForm({ ...form, direccion: event.target.value })}
               onBlur={confirmAddress}
               placeholder="Av. Siempre Viva 123, Comuna"
+              disabled={submitting}
               maxLength={200}
               required
             />
           </label>
           <label>
             Comuna
-            <input value={form.comuna} onChange={(event) => setForm({ ...form, comuna: event.target.value })} onBlur={confirmAddress} placeholder="Comuna" maxLength={80} />
+            <input value={form.comuna} disabled={submitting} onChange={(event) => setForm({ ...form, comuna: event.target.value })} onBlur={confirmAddress} placeholder="Comuna" maxLength={80} />
           </label>
           <label>
             Region
-            <input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} onBlur={confirmAddress} placeholder="Region" maxLength={80} />
+            <input value={form.region} disabled={submitting} onChange={(event) => setForm({ ...form, region: event.target.value })} onBlur={confirmAddress} placeholder="Region" maxLength={80} />
           </label>
           {status && <p className="inline-status">{status}</p>}
           <details onToggle={event => { if (event.currentTarget.open) confirmAddress(); }}><summary>Confirmar ubicación y consultar cobertura</summary>

@@ -67,6 +67,8 @@ Estas vistas no tienen actualmente un acceso directo desde el menú. No es neces
 | **Gestionar servicio → Instalación y equipos** | Eliminadas las etiquetas Fuente G1, G3 y G8; rótulos como Técnico, Orden de trabajo y Equipos instalados |
 | **Gestionar servicio → Antecedentes del cierre técnico** | Consulta con mensajes formales y sin referencias a grupos |
 | **Importación** | Se conserva el diseño de tarjeta original, solo para clientes y prospectos: seleccionar archivo e importar. Se retiró la tarjeta de vista previa del Libro de control. |
+| **Prospectos → Registro** | Los campos y la ubicación seleccionada se conservan al cambiar de apartado dentro de la sesión, con un borrador por empresa. Se limpian después de registrar correctamente, al recargar la página o al cerrar la sesión; los errores de guardado conservan lo ingresado. |
+| **Prospectos → Registro → RUT** | Se agrega el guion automáticamente, se limita a nueve caracteres sin contar separadores, se aceptan valores con puntos y el dígito verificador K se muestra en mayúscula. |
 
 ## Verificación
 
