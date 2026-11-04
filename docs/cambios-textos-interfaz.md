@@ -66,6 +66,7 @@ Estas vistas no tienen actualmente un acceso directo desde el menú. No es neces
 | **Clientes → Gestionar → servicio → Gestionar** | Acciones Modificar plan, Observaciones y Dar de baja; sin iconos en esas acciones; detalles agrupados en contrato, instalación/equipos y garantías |
 | **Gestionar servicio → Instalación y equipos** | Eliminadas las etiquetas Fuente G1, G3 y G8; rótulos como Técnico, Orden de trabajo y Equipos instalados |
 | **Gestionar servicio → Antecedentes del cierre técnico** | Consulta con mensajes formales y sin referencias a grupos |
+| **Importación** | Se conserva el diseño de tarjeta original, solo para clientes y prospectos: seleccionar archivo e importar. Se retiró la tarjeta de vista previa del Libro de control. |
 
 ## Verificación
 
