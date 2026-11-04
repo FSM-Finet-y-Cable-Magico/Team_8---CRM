@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api, type InstallationHistory } from '../../api';
+import { api, type InstallationHistory, type WorkOrder } from '../../api';
 import { TablePagination } from '../../shared/components';
 
-export function InstallationHistoryPanel({ scope, revision, onLoaded }: {
-  scope: string; revision: unknown; onLoaded?: (scope: string, keys: string[]) => void;
+export function InstallationHistoryPanel({ scope, revision, localOrders = [], onLoaded }: {
+  scope: string; revision: unknown; localOrders?: WorkOrder[]; onLoaded?: (scope: string, keys: string[]) => void;
 }) {
   const [result, setResult] = useState<{ scope: string; data?: InstallationHistory; error?: boolean } | null>(null);
   const [page, setPage] = useState(1);
@@ -36,7 +36,14 @@ export function InstallationHistoryPanel({ scope, revision, onLoaded }: {
       <div className="table-wrap"><table><thead><tr><th>Empresa / OT</th><th>Fuente y referencias</th><th>Contrato / Servicio</th><th>Fecha técnica original</th><th>Solicitud y cierre G3</th></tr></thead>
         <tbody>{items.slice((page - 1) * pageSize, page * pageSize).map(row => <tr key={row.key}>
           <td>Empresa {row.idEmpresa} / OT {row.idOt ?? 'Sin referencia'}<br />Completada</td>
-          <td>{row.fuente}{row.ordenesLocales.length ? <p>OT local: {row.ordenesLocales.join(', ')}</p> : <p>Sin OT local</p>}</td>
+          <td>{row.fuente}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
+            {localOrders.filter(order => order.idEmpresa === row.idEmpresa && row.ordenesLocales.includes(order.idOt)).map(order => <div key={order.idOt}>
+              <p>{order.codigoSeguimiento ?? `OT ${order.idOt}`} · {order.prioridad} · {order.estado}</p>
+              <p>{order.prospecto?.nombreCompleto ?? order.cliente?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</p>
+              <p>Visita programada: {order.fechaProgramada ?? 'Sin fecha'} {order.horaVisita ?? ''}</p>
+              <p>Técnico local: {order.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
+            </div>)}
+          </details> : <p>Sin OT local</p>}</td>
           <td>{row.idContrato ?? 'Por revisar'} / {row.idServicio ?? 'No registrado'}</td>
           <td>{row.clasificacionFecha === 'REQUIERE_REVISION' ? 'Requiere revisión de fecha o relaciones'
             : row.clasificacionFecha === 'PENDIENTE_FECHA_TECNICA' ? 'Pendiente de fecha técnica'

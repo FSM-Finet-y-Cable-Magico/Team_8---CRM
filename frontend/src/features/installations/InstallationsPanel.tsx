@@ -181,7 +181,7 @@ export function InstallationsPanel({
         <div className="table-wrap installation-history-table-wrap"><table className="operational-table"><thead><tr><th>Orden</th><th>Fuente</th><th>Cliente</th><th>Visita</th><th>Técnico</th><th className="operational-badge-column">Prioridad</th><th className="operational-badge-column">Estado</th></tr></thead><tbody>{paginatedInstallationOrders.map((order) => { const relatedProspect = order.prospecto ?? prospectByCustomerCompany.get(`${order.idCliente}:${order.idEmpresa}`); return <tr key={order.idOt}><td className="work-order-id">{formatInstallationOrderCode(order)}</td><td><span className="source-badge">LEGACY_LOCAL</span></td><td>{relatedProspect?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</td><td>{formatDateOnly(order.fechaProgramada)} {order.horaVisita ?? ''}</td><td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td><td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td><td className="installation-status">{formatWorkOrderValue(order.estado)}</td></tr>; })}</tbody></table></div>
         <TablePagination currentPage={historyPage} totalItems={filteredInstallationOrders.length} pageSize={historyPageSize} onPageChange={setHistoryPage} />
       </section>
-      <InstallationHistoryPanel scope={scope} revision={workOrders} onLoaded={onHistoryLoaded} />
+      <InstallationHistoryPanel scope={scope} revision={workOrders} localOrders={installationOrders} onLoaded={onHistoryLoaded} />
       <Modal title="Instalación técnica G3" open={modalOpen} onClose={() => setModalOpen(false)}>
         {selectedProspect ? (
           <InstallOrderForm

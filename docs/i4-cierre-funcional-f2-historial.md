@@ -33,8 +33,9 @@ presentan como indisponibilidad de consulta, nunca como pérdida de cierres.
 ## Pruebas
 
 - 49 pruebas backend dirigidas: historial de servicio/HTTP y regresión CU47.
-- Dos pruebas React: fecha original/ausente, filtros, error, respuesta tardía
-  y aislamiento entre cambios de empresa. No equivalen a aceptación en navegador.
+- Tres pruebas React: fecha original/ausente, filtros, error, respuesta tardía,
+  aislamiento entre cambios de empresa y detalle de OT local sin mezcla empresarial.
+  No equivalen a aceptación en navegador.
 - PostgreSQL 18.6 temporal: cuatro casos PASS; un cliente compartido, tres
   contratos/servicios, cuatro trackings y una OT local. Verificación de snapshot
   antes/después demuestra cero escrituras de la consulta.
@@ -52,3 +53,9 @@ Nuevo componente separado para minimizar conflictos con la rama visual.
 La lectura evalúa el conjunto histórico autorizado para deduplicar antes de paginar
 en pantalla, como CU47; medir volumen/latencia antes de uso a gran escala.
 No recuperación persistente de fechas ni validación con proveedores reales.
+
+La revisión de compatibilidad conserva en un detalle desplegable el código, estado,
+prioridad, cliente, visita programada y técnico local ya recibidos por la pantalla.
+Solo se asocian por empresa y OT explícitamente vinculada; no se atribuyen esos
+datos a instalaciones exclusivamente G3. Así se conserva la consulta histórica
+anterior sin duplicar una fila completada en ambas tablas.

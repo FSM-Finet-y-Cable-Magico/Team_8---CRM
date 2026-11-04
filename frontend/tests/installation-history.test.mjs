@@ -44,3 +44,16 @@ test('respuesta tardía de otra empresa no contamina la vista actual; error no a
   assert.doesNotMatch(JSON.stringify(tree.toJSON()), /request-2/);
   await act(async () => tree.unmount());
 });
+
+test('preserva detalle de OT local sin mezclar una OT de igual numero de otra empresa', async () => {
+  const Component = harness(async () => ({ data: { items: [{ ...row(1, null), ordenesLocales: [901] }] } }));
+  const localOrders = [
+    { idOt: 901, idEmpresa: 1, codigoSeguimiento: 'LOCAL-QA', prioridad: 'Alta', estado: 'Completada', fechaProgramada: '2026-10-01', tecnico: { nombreCompleto: 'Tecnico QA' } },
+    { idOt: 901, idEmpresa: 2, codigoSeguimiento: 'NO-MEZCLAR', tecnico: { nombreCompleto: 'AJENO' } },
+  ];
+  let tree; await act(async () => { tree = create(React.createElement(Component, { scope: '1', localOrders })); });
+  const text = JSON.stringify(tree.toJSON());
+  assert.match(text, /LOCAL-QA/); assert.match(text, /Tecnico QA/); assert.match(text, /Visita programada/);
+  assert.doesNotMatch(text, /NO-MEZCLAR|AJENO/);
+  await act(async () => tree.unmount());
+});
