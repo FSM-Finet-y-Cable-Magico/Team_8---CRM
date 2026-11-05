@@ -2,6 +2,12 @@
 
 Esta carpeta contiene los scripts usados por PostgreSQL 15 al iniciar con Docker Compose.
 
+## Entregable consolidado
+
+El esquema final del proyecto esta disponible en [`final/init.sql`](final/init.sql), con su alcance y guia de restauracion en [`final/README.md`](final/README.md). Es un dump estructural autonomo para comparar los modelos de los grupos y actualizar MERE, MR y modelo fisico. No contiene seeds, datos demo, PII, credenciales ni `_prisma_migrations`.
+
+`final/init.sql` se mantiene fuera de `db/init` para evitar que Docker lo ejecute despues de los scripts numerados y duplique objetos durante el bootstrap local.
+
 ## Orden de carga
 
 1. `init/01_schema.sql`: copia del archivo `mere_finet.sql`.

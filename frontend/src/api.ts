@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { userFacingApiError } from './lib/user-facing-messages';
+
 const envApiURL = import.meta.env.VITE_API_URL?.trim();
 const loopbackApiURL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
 const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
@@ -21,12 +23,26 @@ export type Company = {
   nombre: string;
 };
 
+export type InstallationHistory = {
+  scope: string;
+  fuente: 'G8_PERSISTIDO';
+  items: Array<{
+    key: string; idEmpresa: number; fuente: 'G3' | 'LEGACY_LOCAL'; idOt: string | null;
+    idContrato: number | null; idServicio: number | null; idCliente: number | null;
+    estado: 'COMPLETADA';
+    clasificacionFecha: 'REQUIERE_REVISION' | 'PENDIENTE_FECHA_TECNICA' | 'FECHA_TECNICA_CONFIRMADA';
+    fechasTecnicasOriginales: string[]; ordenesLocales: number[];
+    solicitudesG3: Array<{ idIntegracion: number; requestId: string; traceId: string; fechaCierreProcesado: string }>;
+  }>;
+};
+
 export type Role = {
   idRol: number;
   nombreRol: string;
 };
 
 export type UserRow = {
+  idEmpresa: number | null;
   idUsuario: number;
   nombreCompleto: string;
   email: string | null;
@@ -36,6 +52,9 @@ export type UserRow = {
 };
 
 export type Prospect = {
+  ubicacionInstalacion?: { direccion: string | null; comuna: string | null; ciudad: string | null; fuenteComuna: string | null };
+  cotizaciones?: Array<{ idCotizacion: number; idPlan: number; fechaEnvio: string }>;
+  requiereRevisionComercial?: boolean;
   idProspecto: number;
   idCliente: number | null;
   rut: string | null;
@@ -43,6 +62,11 @@ export type Prospect = {
   email: string | null;
   telefono: string | null;
   direccion: string | null;
+  comuna?: string | null;
+  region?: string | null;
+  latitud?: number | null;
+  longitud?: number | null;
+  idZonaPago?: number | null;
   estadoPipeline: string | null;
   motivoPerdida: string | null;
   observacionPerdida?: string | null;
@@ -50,12 +74,34 @@ export type Prospect = {
   idUsuarioPerdida?: number | null;
   origenContacto: string | null;
   empresa?: Company | null;
+  contratos?: Array<{
+    idContrato: number;
+    estado: string | null;
+    fechaFirmaManual?: string | null;
+    idPlan?: number | null;
+    plan?: Plan | null;
+    direccionInstalacion?: string | null;
+    comunaInstalacion?: string | null;
+    ciudadInstalacion?: string | null;
+  }>;
 };
 
 export type InstallTechnician = {
   idTecnico: number;
   nombreCompleto: string;
   email: string | null;
+};
+
+export type InstallTimeSlot = {
+  horaVisita: string;
+  disponible: boolean;
+  motivo: string;
+  tecnicosDisponibles: InstallTechnician[];
+};
+
+export type InstallDayAvailability = {
+  fechaProgramada: string;
+  horarios: InstallTimeSlot[];
 };
 
 export type InstallAvailability = {
@@ -67,7 +113,69 @@ export type InstallAvailability = {
     horaVisita: string;
     tecnicosDisponibles: InstallTechnician[];
   }>;
+  horarios?: InstallTimeSlot[];
   mensaje: string;
+};
+
+export type G3HistoricalClosure = {
+  fuente: 'G3_CONSULTA_TEMPORAL';
+  persistido: false;
+  consultadoEn: string;
+  estadoConsulta: 'DISPONIBLE' | 'NO_DISPONIBLE' | 'NO_VALIDADO';
+  mensaje: string;
+  datos: {
+    fechaCompletada: string | null;
+    idTecnicoG3: number | null;
+    potenciaOpticaDbm: number | null;
+    resultadoLlamada: string | null;
+    resueltoRemotamente: boolean | null;
+    cantidadMateriales: number | null;
+    cantidadEquiposInformados: number | null;
+  } | null;
+};
+
+export type G3InstallationTracking = {
+  idIntegracion: number;
+  idEmpresa: number;
+  idProspecto: number | null;
+  idContrato: number;
+  idPlan: number;
+  idServicio: number | null;
+  requestId: string;
+  traceId: string;
+  idOtG3: string | null;
+  codigoOtG3: string | null;
+  estadoIntegracion: string;
+  estadoOtG3: string | null;
+  estadoOriginalG3: string | null;
+  estadoPresentacion: string;
+  estadoRemotoG3: string | null;
+  estadoOriginalRemotoG3: string | null;
+  fechaSolicitud: string;
+  fechaUltimaSincronizacion: string | null;
+  intentos: number;
+  ultimoErrorSanitizado: string | null;
+  fechaCierreProcesado: string | null;
+  fuente: 'G3';
+  detalle: null | {
+    idOtG3: string | null;
+    codigoOtG3: string | null;
+    tipo: string | null;
+    estado: string;
+    estadoOriginalG3: string | null;
+    fecha: string | null;
+    fechaCompletada: string | null;
+    idTecnicoG3: number | null;
+    potenciaOpticaDbm: number | null;
+    resultadoLlamada: string | null;
+    resueltoRemotamente: boolean | null;
+    materiales: unknown[] | null;
+    tecnico: unknown;
+    direccion: unknown;
+    persona: unknown;
+    telefono: string | null;
+    resultado: unknown;
+  };
 };
 
 export type Plan = {
@@ -134,6 +242,40 @@ export type Customer = {
   }>;
 };
 
+export type ExternalTaxDocument = {
+  idDocumento: number;
+  idEmpresa: number;
+  tipoDocumento: 'BOLETA' | 'FACTURA';
+  folioONumero: string;
+  emisorProveedor: string;
+  fechaEmision: string;
+  montoNeto: string | null;
+  montoExento: string | null;
+  iva: string | null;
+  montoTotal: string;
+  urlDocumento: string | null;
+  referenciaExterna: string | null;
+  estado: 'REGISTRADO' | 'ANULADO';
+  fuente: 'EXTERNO_MANUAL';
+  idCliente: number | null;
+  idContrato: number | null;
+  idFactura: number | null;
+  idCargoAdicional: number | null;
+  fechaRegistro: string;
+  fechaActualizacion: string;
+  cliente?: { idCliente: number; nombreCompleto: string; rut: string | null } | null;
+  contrato?: { idContrato: number; estado: string } | null;
+  factura?: { idFactura: number; tipoDocumento: string | null; folioExterno: string | null } | null;
+  cargoAdicional?: { idCargo: number; tipo: string; estado: string } | null;
+  empresa?: { idEmpresa: number; nombre: string };
+  usuarioRegistro?: { idUsuario: number; nombreCompleto: string };
+};
+
+export type ExternalTaxDocumentPage = {
+  items: ExternalTaxDocument[];
+  pagination: { page: number; pageSize: number; totalRows: number; totalPages: number };
+};
+
 export type CustomerService = {
   idServicio: number;
   idCliente: number;
@@ -176,15 +318,80 @@ export type CustomerService = {
   solicitudes?: CustomerRequest[];
   auditoria?: AuditLog[];
   instalacion?: {
-    idOt: number;
+    fuente: 'G3' | 'LEGACY_LOCAL';
+    idOt: number | string | null;
     codigoSeguimiento: string | null;
+    estado: string;
     fechaCompletada: string | null;
+    fechaProcesamiento: string | null;
     idTecnico: number | null;
+    idTecnicoG3: number | null;
     tecnico?: {
       idUsuario: number;
       nombreCompleto: string;
     } | null;
   } | null;
+  integracionG1?: {
+    fuente: 'G1';
+    idIntegracion: number;
+    estadoIntegracion: string;
+    ultimoErrorSanitizado: string | null;
+    fechaCompletado: string | null;
+    updatedAt: string;
+  } | null;
+};
+
+export type G1EquipmentType = {
+  id_tipo_equipo: number;
+  id_empresa: number;
+  nombre: string;
+  categoria?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
+  descripcion_tecnica?: string | null;
+  unidad_medida?: string | null;
+  garantia_dias?: number | null;
+  requiere_serie_individual?: boolean | null;
+  activo?: boolean | null;
+};
+
+export type G1Unit = {
+  id_unidad?: number;
+  numero_serie: string;
+  id_empresa: number;
+  id_tipo_equipo?: number | null;
+  tipo_equipo?: G1EquipmentType | string | null;
+  mac_address?: string | null;
+  estado: string;
+  estadoFisicoOficial?: boolean;
+  id_bodega_actual?: number | null;
+  fecha_adquisicion?: string | null;
+  fecha_instalacion?: string | null;
+  id_ot?: number | string | null;
+  garantia?: { fecha_vencimiento?: string | null; vigente?: boolean | null } | null;
+};
+
+export type G1EquipmentResponse<T> = {
+  fuente: 'G1';
+  estadoContrato?: string;
+  data: T;
+};
+
+export type CommercialWarranty = {
+  idGarantia: number;
+  idEmpresa: number;
+  idCliente: number;
+  idServicio: number;
+  idContrato: number;
+  numeroSerieEquipo: string | null;
+  tipo: string;
+  fechaInicio: string;
+  fechaTermino: string;
+  cobertura: string;
+  monto: string | null;
+  observaciones: string | null;
+  estado: string;
+  responsable?: { idUsuario: number; nombreCompleto: string };
 };
 
 export type InventoryUnit = {
@@ -213,6 +420,24 @@ export type InventoryUnit = {
   } | null;
 };
 
+
+export type BillingInvoice = {
+  idFactura: number; idContrato: number | null; folioExterno: string | null; estado: string; estadoCalculado: string;
+  monto: number | null; pagado: number; saldo: number | null; saldoFavor: number | null; saldoExigible: number | null;
+  fechaLimitePago: string; fechaVencimientoEfectiva: string; diasAtraso: number; aceptaPagos: boolean;
+  contrato: { idContrato: number; idEmpresa: number | null; diaVencimiento: number; estado: string;
+    cliente: { idCliente: number; nombreCompleto: string; rut: string | null } | null } | null;
+  pagos: Array<{ idPago: number; monto: string; fechaPago: string; pasarela: string; codigoTransaccion: string | null }>;
+};
+export type BillingInvoicePage = { items: BillingInvoice[]; pagination: { page: number; pageSize: number; totalRows: number; totalPages: number } };
+export type BillingInvoiceDetail = BillingInvoice & {
+  convenios: Array<{ idConvenio: number; montoComprometido: string; estado: string; condiciones: string; cuotas: Array<{ idCuota: number; numero: number; monto: string; fechaVencimiento: string; estado: string }> }>;
+  prorrogas: Array<{ idProrroga: number; fechaOriginal: string; nuevaFecha: string; estado: string; motivo: string }>;
+  cargos: Array<{ idCargo: number; tipo: string; monto: string; estado: string; observacion: string | null }>;
+  cambios: Array<{ idCambio: number; tipoCambio: string; valorAnterior: string; valorNuevo: string; justificacion: string }>;
+  eventos: Array<{ idEvento: number; tipo: string; fecha: string; canal: string; observacion: string | null }>;
+};
+
 export type BillingOverview = {
   fechaCorteCalculo: string;
   reglaCorteDias: number;
@@ -230,6 +455,7 @@ export type BillingOverview = {
     saldo: number;
     fechaLimitePago: string;
     diasAtraso: number;
+    fechaVencimientoEfectiva: string;
     estadoFactura: string;
     cliente: {
       idCliente: number;
@@ -237,7 +463,7 @@ export type BillingOverview = {
       nombreCompleto: string;
       telefono: string | null;
       email: string | null;
-      estado: string;
+      estado: string | null;
       empresa: string | null;
     };
     contrato: {
@@ -265,6 +491,15 @@ export type PaymentZone = {
   descripcion: string | null;
   diaVencimientoSugerido: number | null;
   activo: boolean | null;
+  tipoZona?: 'COBERTURA_GENERAL' | 'MICROZONA_COMERCIAL' | null;
+  idZonaPadre?: number | null;
+  poligonoGeojson?: { type: 'Polygon'; coordinates: number[][][] } | null;
+  centroLat?: number | null;
+  centroLng?: number | null;
+  prioridad?: number;
+  fuenteCobertura?: string | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   empresa?: Company | null;
 };
 
@@ -275,6 +510,8 @@ export type ZonePriceRule = {
   precioMensual: string;
   valorInstalacion: string | null;
   activo: boolean | null;
+  fechaInicio?: string | null;
+  fechaFin?: string | null;
   plan?: Plan | null;
   zonaPago?: PaymentZone | null;
 };
@@ -457,15 +694,6 @@ export type MonitoringStatus = {
   }>;
 };
 
-export type PortalCustomer = {
-  idCliente: number;
-  rut: string | null;
-  nombreCompleto: string;
-  email: string | null;
-  telefono: string | null;
-  estado: string;
-  idEmpresa: number | null;
-};
 export type TicketCategory = {
   idCategoria: number;
   nombre: string;
@@ -491,6 +719,7 @@ export type Ticket = {
 
 export type WorkOrder = {
   idOt: number;
+  idProspecto?: number | null;
   idEmpresa: number | null;
   idCliente: number | null;
   idTecnico: number | null;
@@ -553,11 +782,28 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error)) {
+      const authorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
+
+      if (error.response?.status === 401 && authorization) {
+        localStorage.removeItem('finet_token');
+        localStorage.removeItem('finet_user');
+        window.dispatchEvent(new Event('finet:auth-expired'));
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
 export function apiErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
     const responseMessage = error.response?.data?.message;
-    return Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage ?? error.message;
+    return userFacingApiError(responseMessage ?? error.message, error.config?.url, error.response?.status);
   }
 
-  return 'Error inesperado';
+  return 'No se pudo completar la operación. Inténtalo nuevamente.';
 }

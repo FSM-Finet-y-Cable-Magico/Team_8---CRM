@@ -14,7 +14,7 @@ export type ServiceType = (typeof SERVICE_TYPES)[number];
  */
 export function serviceTypeFromPlan(tipoPlan?: string | null): ServiceType | null {
   const value = normalized(tipoPlan);
-  const includesInternet = value.includes('internet');
+  const includesInternet = value.includes('internet') || value.includes('fibra');
   const includesTelevision = value.includes('television') || /(^|\W)tv(\W|$)/.test(value);
 
   if (includesInternet && includesTelevision) {

@@ -14,6 +14,40 @@ const terreno: AuthUser = {
 };
 
 describe('WorkOrdersService', () => {
+  it('cancela una agenda existente y devuelve el servicio a pendiente de instalación', async () => {
+    const order = {
+      idOt: 20,
+      idEmpresa: 1,
+      idCliente: 10,
+      idServicio: 55,
+      tipoOt: 'Instalacion',
+      estado: 'Pendiente',
+    };
+    const tx = {
+      ordenTrabajo: { update: jest.fn().mockResolvedValue({ ...order, estado: 'Cancelada' }) },
+      servicioContratado: { update: jest.fn().mockResolvedValue({ idServicio: 55, estadoOperativo: 'Pendiente Instalacion' }) },
+      historialOt: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      ordenTrabajo: { findUnique: jest.fn().mockResolvedValue(order) },
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const audit = { record: jest.fn() };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await service.cancelInstallation(20, terreno);
+
+    expect(tx.ordenTrabajo.update).toHaveBeenCalledWith({ where: { idOt: 20 }, data: { estado: 'Cancelada' } });
+    expect(tx.servicioContratado.update).toHaveBeenCalledWith({
+      where: { idServicio: 55 },
+      data: { estadoOperativo: 'Pendiente Instalacion' },
+    });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CANCELAR_AGENDA_INSTALACION' }));
+  });
+
   it('expone tipo de conexion, hora y tecnico asignado en la vista de ordenes', async () => {
     const prisma = {
       ordenTrabajo: {
@@ -140,6 +174,7 @@ describe('WorkOrdersService', () => {
   it('permite completar una instalacion asociada directamente a un servicio sin prospecto', async () => {
     const tx = {
       ordenTrabajo: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({
           idOt: 20,
           idEmpresa: 1,
@@ -228,7 +263,10 @@ describe('WorkOrdersService', () => {
 
   it('asocia el equipo de inventario y conserva arriendo opcional al cerrar la instalación', async () => {
     const tx = {
-      ordenTrabajo: { update: jest.fn().mockResolvedValue({ idOt: 20, codigoSeguimiento: 'OT-INS-000020', estado: 'Completada' }) },
+      ordenTrabajo: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({ idOt: 20, codigoSeguimiento: 'OT-INS-000020', estado: 'Completada' }),
+      },
       cliente: { update: jest.fn().mockResolvedValue({ idCliente: 10, estado: 'Activo' }) },
       contrato: { update: jest.fn().mockResolvedValue({ idContrato: 30, estado: 'Activo' }) },
       servicioContratado: { update: jest.fn().mockResolvedValue({ idServicio: 55, estadoOperativo: 'Activo' }) },
@@ -263,5 +301,211 @@ describe('WorkOrdersService', () => {
       }),
     }));
     expect(tx.historialEstadoEquipo.create).toHaveBeenCalled();
+  });
+
+  it('rechaza un equipo ocupado aunque se envíe manualmente al completar la instalación', async () => {
+    const prisma = {
+      ordenTrabajo: { findUnique: jest.fn().mockResolvedValue({ idOt: 20, idEmpresa: 1, idCliente: 10, idServicio: 55, tipoOt: 'Instalacion', estado: 'Pendiente', observaciones: null }) },
+      prospecto: { findFirst: jest.fn().mockResolvedValue(null) },
+      servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 55, idCliente: 10, idEmpresa: 1, idContrato: 30, datosTecnicos: null }) },
+      unidadEquipo: { findUnique: jest.fn().mockResolvedValue({ idUnidad: 9, idEmpresa: 1, idServicio: 88, idClienteInstalado: 20, estado: 'Instalado', numeroSerie: 'ONT-OCUPADA' }) },
+    };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    await expect(service.completeInstallation(20, { idUnidad: 9 }, terreno)).rejects.toThrow(
+      'no está disponible para instalar',
+    );
+    expect((prisma as { $transaction?: jest.Mock }).$transaction).toBeUndefined();
+  });
+
+  it('convierte el prospecto firmado en cliente y servicio al completar la instalación', async () => {
+    const prospect = {
+      idProspecto: 42,
+      idEmpresa: 1,
+      idCliente: null,
+      rut: '25307395-0',
+      nombreCompleto: 'Jean Guerrero',
+      email: 'jean@example.com',
+      telefono: '+56912345678',
+      direccion: 'Av. Las Condes 123',
+      origenContacto: 'Formulario web',
+      fechaCreacion: new Date('2026-09-01T00:00:00.000Z'),
+    };
+    const contract = {
+      idContrato: 29,
+      idEmpresa: 1,
+      idProspecto: 42,
+      idCliente: null,
+      idZonaPago: null,
+      estado: 'Firmado',
+      direccionInstalacion: 'Av. Las Condes 123',
+      comunaInstalacion: 'Las Condes',
+      ciudadInstalacion: 'Santiago',
+      plan: { tipoPlan: 'Internet' },
+    };
+    const tx = {
+      cliente: {
+        create: jest.fn().mockResolvedValue({ idCliente: 81, estado: 'Activo' }),
+      },
+      direccionServicio: {
+        create: jest.fn().mockResolvedValue({ idDireccion: 91 }),
+      },
+      servicioContratado: {
+        create: jest.fn().mockResolvedValue({ idServicio: 71, idCliente: 81, estadoOperativo: 'Activo' }),
+      },
+      contrato: {
+        update: jest.fn().mockResolvedValue({ ...contract, idCliente: 81, estado: 'Activo' }),
+      },
+      ordenTrabajo: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idOt: 60, ...data })),
+      },
+      prospecto: {
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
+      },
+      historialOt: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      ordenTrabajo: {
+        findUnique: jest.fn().mockResolvedValue({
+          idOt: 60,
+          idEmpresa: 1,
+          idCliente: null,
+          idProspecto: 42,
+          idServicio: null,
+          idDireccion: null,
+          tipoOt: 'Instalacion',
+          estado: 'Pendiente',
+          observaciones: buildInstallOrderObservations({ tipoConexion: 'Fibra Optica', horaVisita: '14:00' }),
+        }),
+      },
+      prospecto: { findUnique: jest.fn().mockResolvedValue(prospect) },
+      contrato: { findFirst: jest.fn().mockResolvedValue(contract) },
+      $transaction: jest.fn(async (callback: (txClient: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    const audit = { record: jest.fn() };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    const result = await service.completeInstallation(60, { observaciones: 'Instalación conforme' }, terreno);
+
+    expect(tx.cliente.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ rut: '25307395-0', estado: 'Activo' }),
+    }));
+    expect(tx.servicioContratado.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        idCliente: 81,
+        idContrato: 29,
+        idDireccion: 91,
+        tipoServicio: 'Internet',
+        estadoOperativo: 'Activo',
+      }),
+    }));
+    expect(tx.ordenTrabajo.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idCliente: 81, idServicio: 71, estado: 'Completada' }),
+    }));
+    expect(tx.prospecto.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idCliente: 81, estadoPipeline: 'Servicio Activo' }),
+    }));
+    expect(result.cliente.idCliente).toBe(81);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'ACTIVAR_CLIENTE_INSTALACION',
+      valorNuevo: expect.objectContaining({ idCliente: 81, idServicio: 71, idContrato: 29 }),
+    }));
+
+    prisma.ordenTrabajo.findUnique.mockResolvedValueOnce({
+      idOt: 60,
+      idEmpresa: 1,
+      idCliente: 81,
+      idProspecto: 42,
+      idServicio: 71,
+      tipoOt: 'Instalacion',
+      estado: 'Completada',
+    });
+
+    await expect(service.completeInstallation(60, { observaciones: 'Retry' }, terreno)).rejects.toThrow(
+      'ya se encuentra completada',
+    );
+    expect(tx.cliente.create).toHaveBeenCalledTimes(1);
+    expect(tx.servicioContratado.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['Cancelada', 'ESTADO_G3_FUTURO'])('rechaza completar una instalacion con estado %s', async (estado) => {
+    const prisma = {
+      ordenTrabajo: {
+        findUnique: jest.fn().mockResolvedValue({
+          idOt: 77,
+          idEmpresa: 1,
+          idCliente: 10,
+          idServicio: 55,
+          tipoOt: 'Instalacion',
+          estado,
+        }),
+      },
+    };
+    const audit = { record: jest.fn() };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(service.completeInstallation(77, {}, terreno)).rejects.toBeInstanceOf(BadRequestException);
+    expect((prisma as { $transaction?: jest.Mock }).$transaction).toBeUndefined();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'RECHAZAR_CIERRE_OT_ESTADO_INVALIDO',
+      valorAnterior: { estado },
+    }));
+  });
+
+  it('completa una reparacion sobre el servicio existente sin crear ni activar un cliente', async () => {
+    const order = {
+      idOt: 88,
+      idEmpresa: 1,
+      idCliente: 10,
+      idServicio: 55,
+      idTicket: 99,
+      tipoOt: 'Reparacion',
+      estado: 'En Curso',
+      observaciones: null,
+    };
+    const tx = {
+      ordenTrabajo: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({ ...order, estado: 'Completada' }),
+      },
+      ticket: { update: jest.fn().mockResolvedValue({ idTicket: 99, estado: 'Resuelto' }) },
+      servicioContratado: {
+        update: jest.fn().mockResolvedValue({ idServicio: 55, estadoOperativo: 'Activo' }),
+      },
+      historialOt: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      ordenTrabajo: { findUnique: jest.fn().mockResolvedValue(order) },
+      ticket: { findUnique: jest.fn().mockResolvedValue({ idTicket: 99, estado: 'Abierto', descripcion: 'Sin senal' }) },
+      cliente: { create: jest.fn(), update: jest.fn() },
+      $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    const service = new WorkOrdersService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+    );
+
+    const result = await service.completeRepair(88, {
+      observaciones: 'Senal recuperada',
+      estadoFinalServicio: 'Activo',
+    }, terreno);
+
+    expect(result.servicio).toEqual(expect.objectContaining({ idServicio: 55, estadoOperativo: 'Activo' }));
+    expect(tx.servicioContratado.update).toHaveBeenCalledWith({
+      where: { idServicio: 55 },
+      data: { estadoOperativo: 'Activo' },
+    });
+    expect(prisma.cliente.create).not.toHaveBeenCalled();
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
   });
 });

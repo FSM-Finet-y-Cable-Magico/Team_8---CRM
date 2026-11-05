@@ -1,0 +1,55 @@
+# Etapa 4 — Matriz de migración de los 33 writes físicos
+
+Origen: auditoría de Etapa 0. La unidad de conteo es el sitio de escritura en código, no la cantidad de filas que una petición puede alterar. El inventario inicial fue de **33 sitios**, **16 métodos escritores** y **13 endpoints alcanzables**.
+
+Clasificaciones usadas: `WRITE_REEMPLAZAR_G1`, `WRITE_BLOQUEAR`, `WRITE_DEPRECAR`, `HISTORICO_NO_EJECUTABLE` y `REQUIERE_CONTRATO_G1`.
+
+| # | archivo | método | endpoint | tabla/modelo | write anterior | owner correcto | reemplazo | endpoint G1 | estado después Etapa 4 | riesgo |
+|---:|---|---|---|---|---|---|---|---|---|---|
+| 1 | `backend/src/inventory/inventory.service.ts` | `createEquipment` | `POST /api/inventory/equipment` | `UnidadEquipo` | `create` de unidad | G1 | Alta física solo en G1 | No ratificado | `WRITE_BLOQUEAR + REQUIERE_CONTRATO_G1`; ruta 409 | Código legacy permanece, pero el controller ya no lo invoca |
+| 2 | `backend/src/inventory/inventory.service.ts` | `recordMovement` | `POST /api/inventory/movements` | `MovimientoInventario` | `create` movimiento | G1 | Operación física en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Contrato write pendiente |
+| 3 | `backend/src/inventory/inventory.service.ts` | `recordMovement` | `POST /api/inventory/movements` | `UnidadEquipo` | `update` ubicación/estado | G1 | Operación física en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Contrato write pendiente |
+| 4 | `backend/src/inventory/inventory.service.ts` | `recordMovement` | `POST /api/inventory/movements` | `HistorialEstadoEquipo` | `create` historial | G1 | Historial físico en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Contrato write pendiente |
+| 5 | `backend/src/inventory/inventory.service.ts` | `updateStatus` | `PATCH /api/inventory/equipment/:id/status` | `UnidadEquipo` | `update` estado físico | G1 | Cambio físico solo en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | No traducir estado comercial a físico |
+| 6 | `backend/src/inventory/inventory.service.ts` | `updateStatus` | `PATCH /api/inventory/equipment/:id/status` | `HistorialEstadoEquipo` | `create` historial | G1 | Historial físico en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Código legacy no debe reactivarse |
+| 7 | `backend/src/inventory/inventory.service.ts` | `installRouter` | `POST /api/inventory/equipment/:id/install` | `UnidadEquipo` | `update` a instalado/asociado | G1 | Cierre G3→G1 más asociación comercial G8→G1 | `POST /api/integraciones/activaciones` | `WRITE_REEMPLAZAR_G1`; ruta legacy 409 | Activación pendiente de despliegue G1 |
+| 8 | `backend/src/inventory/inventory.service.ts` | `installRouter` | `POST /api/inventory/equipment/:id/install` | `HistorialEstadoEquipo` | `create` historial de instalación | G1 | Resultado físico del cierre G3→G1 | No debe duplicarlo G8 | `WRITE_REEMPLAZAR_G1`; ruta legacy 409 | G8 no conoce confirmación física directa |
+| 9 | `backend/src/inventory/inventory.service.ts` | `createConsumableStock` | `POST /api/inventory/consumables` | `StockConsumible` | `create` stock | G1 | Alta/stock solo en G1 | No ratificado | `WRITE_BLOQUEAR + REQUIERE_CONTRATO_G1`; ruta 409 | P2 sin contrato |
+| 10 | `backend/src/inventory/inventory.service.ts` | `recordConsumableMovement` | `POST /api/inventory/consumables/:id/movements` | `StockConsumible` | `update` cantidad | G1 | Movimiento/consumo en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | CU-61 depende de G1 P2 |
+| 11 | `backend/src/inventory/inventory.service.ts` | `recordConsumableMovement` | `POST /api/inventory/consumables/:id/movements` | `MovimientoInventario` | `create` movimiento | G1 | Movimiento en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Contrato pendiente |
+| 12 | `backend/src/inventory/inventory.service.ts` | `recordConsumableMovement` | `POST /api/inventory/consumables/:id/movements` | `UsoMaterialOt` | `create` consumo OT | G1/G3 | G3 ejecuta OT; G1 procesa consumo | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | CU-61 queda bloqueado P2 |
+| 13 | `backend/src/inventory/inventory.service.ts` | `blockEquipment` | `POST /api/inventory/equipment/:id/block` | `UnidadEquipo` | `update estado=Bloqueado` | G1 | G1 conserva estados físicos oficiales | No existe para “Bloqueado” | `WRITE_BLOQUEAR + WRITE_DEPRECAR`; ruta 409 | “Bloqueado” no es estado físico G1 |
+| 14 | `backend/src/inventory/inventory.service.ts` | `blockEquipment` | `POST /api/inventory/equipment/:id/block` | `BajaEquipo` | `create` baja | G1 | Baja física solo G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Bloqueo comercial futuro debe ser otra entidad |
+| 15 | `backend/src/inventory/inventory.service.ts` | `blockEquipment` | `POST /api/inventory/equipment/:id/block` | `HistorialEstadoEquipo` | `create` historial | G1 | Historial físico G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Código legacy permanece aislado |
+| 16 | `backend/src/inventory/inventory.service.ts` | `diagnoseEquipment` | `POST /api/inventory/equipment/:id/diagnosis` | `UnidadEquipo` | `update` diagnóstico/estado | G1 | Diagnóstico físico en G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 17 | `backend/src/inventory/inventory.service.ts` | `diagnoseEquipment` | `POST /api/inventory/equipment/:id/diagnosis` | `HistorialEstadoEquipo` | `create` historial | G1 | Historial físico G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 18 | `backend/src/inventory/inventory.service.ts` | `transferEquipment` | `POST /api/inventory/equipment/:id/transfer` | `TransferenciaEquipo` | `create` transferencia | G1 | Transferencia física G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 19 | `backend/src/inventory/inventory.service.ts` | `transferEquipment` | `POST /api/inventory/equipment/:id/transfer` | `UnidadEquipo` | `update` bodega/ubicación | G1 | Transferencia física G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 20 | `backend/src/inventory/inventory.service.ts` | `transferEquipment` | `POST /api/inventory/equipment/:id/transfer` | `MovimientoInventario` | `create` movimiento | G1 | Movimiento físico G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 21 | `backend/src/inventory/inventory.service.ts` | `registerMaintenance` | `POST /api/inventory/equipment/:id/maintenance` | `UnidadEquipo` | `update` mantenimiento/estado | G1 | Mantención física G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 22 | `backend/src/inventory/inventory.service.ts` | `registerMaintenance` | `POST /api/inventory/equipment/:id/maintenance` | `HistorialEstadoEquipo` | `create` historial | G1 | Historial físico G1 | No ratificado | `WRITE_BLOQUEAR`; ruta 409 | Sin contrato write |
+| 23 | `backend/src/inventory/inventory.service.ts` | `resolveType` | `POST /api/inventory/equipment` | `TipoEquipo` | `create` tipo implícito | G1 | Solo consultar catálogo G1 | `GET /api/integraciones/tipos-equipo` es read | `WRITE_BLOQUEAR + REQUIERE_CONTRATO_G1`; ruta 409 | Nunca crear catálogo desde CRM |
+| 24 | `backend/src/inventory/inventory.service.ts` | `resolveConsumableType` | `POST /api/inventory/consumables` | `TipoEquipo` | `create` tipo consumible | G1 | Solo consultar catálogo G1 | `GET /api/integraciones/tipos-equipo` es read | `WRITE_BLOQUEAR + REQUIERE_CONTRATO_G1`; ruta 409 | Nunca crear catálogo desde CRM |
+| 25 | `backend/src/inventory/inventory.service.ts` | `resolveWarehouse` | `POST /api/inventory/consumables` | `Bodega` | `create` bodega implícita | G1 | Bodega solo G1 | No ratificado | `WRITE_BLOQUEAR + REQUIERE_CONTRATO_G1`; ruta 409 | G8 no replica catálogo de bodegas |
+| 26 | `backend/src/services/services.service.ts` | `attachEquipment` | `POST /api/services/:id/equipment` | `UnidadEquipo` | `update idServicio/idCliente` | G1 | Asociación comercial posterior al cierre | `POST /api/integraciones/activaciones` | `WRITE_REEMPLAZAR_G1`; ruta legacy 409 | Endpoint G1 pendiente de despliegue |
+| 27 | `backend/src/work-orders/work-orders.service.ts` | `completeInstallation` | `PATCH /api/work-orders/:id/complete-installation` | `UnidadEquipo` | `update` instalación/asociación | G1 | Cierre técnico G3→G1 y activación G8→G1 | `POST /api/integraciones/activaciones` | `WRITE_REEMPLAZAR_G1 + WRITE_DEPRECAR`; ruta 410 | Solo nuevas instalaciones G3; método legacy permanece histórico |
+| 28 | `backend/src/work-orders/work-orders.service.ts` | `completeInstallation` | `PATCH /api/work-orders/:id/complete-installation` | `HistorialEstadoEquipo` | `create` historial instalación | G1 | Resultado físico del cierre G3→G1 | No lo duplica G8 | `WRITE_REEMPLAZAR_G1 + WRITE_DEPRECAR`; ruta 410 | Método legacy aislado |
+| 29 | `backend/src/users/users.service.ts` | `remove` | `DELETE /api/users/:id` | `BajaEquipo` | SQL `UPDATE baja_equipo ... NULL` | G1/histórico | Desactivación lógica del usuario | No aplica | `HISTORICO_NO_EJECUTABLE`; SQL eliminado | Referencias históricas quedan intactas |
+| 30 | `backend/src/users/users.service.ts` | `remove` | `DELETE /api/users/:id` | `HistorialEstadoEquipo` | SQL `UPDATE historial_estado_equipo ... NULL` | G1/histórico | Desactivación lógica del usuario | No aplica | `HISTORICO_NO_EJECUTABLE`; SQL eliminado | Referencias históricas quedan intactas |
+| 31 | `backend/src/users/users.service.ts` | `remove` | `DELETE /api/users/:id` | `MovimientoInventario` | SQL `UPDATE movimiento_inventario ... NULL` | G1/histórico | Desactivación lógica del usuario | No aplica | `HISTORICO_NO_EJECUTABLE`; SQL eliminado | Referencias históricas quedan intactas |
+| 32 | `backend/src/users/users.service.ts` | `remove` | `DELETE /api/users/:id` | `orden_ingreso` SQL | SQL `UPDATE orden_ingreso ... NULL` | G1/histórico | Desactivación lógica del usuario | No aplica | `HISTORICO_NO_EJECUTABLE`; SQL eliminado | Referencias históricas quedan intactas |
+| 33 | `backend/src/users/users.service.ts` | `remove` | `DELETE /api/users/:id` | `TransferenciaEquipo` | SQL `UPDATE transferencia_equipo ... NULL` | G1/histórico | Desactivación lógica del usuario | No aplica | `HISTORICO_NO_EJECUTABLE`; SQL eliminado | Referencias históricas quedan intactas |
+
+## Resultado cuantitativo
+
+| Resultado | Sitios |
+|---|---:|
+| Inventario inicial | 33 |
+| `WRITE_BLOQUEAR` / requiere contrato G1 | 23 |
+| `WRITE_REEMPLAZAR_G1` / deprecados por G3+G1 | 5 |
+| `HISTORICO_NO_EJECUTABLE` por desactivación lógica | 5 |
+| Writes físicos activos alcanzables desde rutas de negocio G8 | **0** |
+
+Las 12 rutas heredadas de Inventory/NAP/evidencia, la asociación local de Servicio y el cierre local de instalación están protegidos por `DomainOwnershipService`. Los 13 endpoints originales que alcanzaban los 33 writes físicos ya no pueden ejecutarlos. NAP/evidencia no forman parte del conteo G1 de 33 sitios, pero también se deprecaron porque pertenecen a G3.
+
+El código de servicio y schema legacy se conserva para histórico y migración. Su presencia no equivale a una ruta activa; reactivarlo requeriría retirar deliberadamente los guards del controller y violaría las pruebas de regresión.

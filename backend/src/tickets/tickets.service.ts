@@ -1,8 +1,8 @@
-﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
-import { generateWorkOrderCode } from '../common/work-order-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -41,10 +41,11 @@ export class TicketsService {
       categoryIds.length ? this.prisma.categoriaFalla.findMany({ where: { idCategoria: { in: categoryIds } } }) : [],
       ticketIds.length
         ? this.prisma.ordenTrabajo.findMany({
-            where: { idTicket: { in: ticketIds } },
+            where: { idTicket: { in: ticketIds }, ...this.companyScope(currentUser, scope) },
             orderBy: { fechaCreacion: 'desc' },
             select: {
               idOt: true,
+              idEmpresa: true,
               idTicket: true,
               idCliente: true,
               idServicio: true,
@@ -73,7 +74,7 @@ export class TicketsService {
       workOrdersByTicket.set(order.idTicket, current);
     }
 
-    return tickets.map((ticket) => {
+    return companyResponse(tickets.map((ticket) => {
       const ticketWorkOrders = workOrdersByTicket.get(ticket.idTicket) ?? [];
 
       return {
@@ -84,7 +85,7 @@ export class TicketsService {
         hasOpenWorkOrder: ticketWorkOrders.some((order) => order.estado !== 'Completada'),
         observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
       };
-    });
+    }), currentUser);
   }
 
   async create(dto: CreateTicketDto, currentUser: AuthUser) {
@@ -94,164 +95,45 @@ export class TicketsService {
       throw new BadRequestException(rut.reason ?? 'RUT invalido');
     }
 
-    const cliente = await this.prisma.cliente.findUnique({ where: { rut: rut.normalized } });
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { rut: rut.normalized },
+      include: { contratos: { select: { idEmpresa: true } }, servicios: { select: { idEmpresa: true } } },
+    });
 
     if (!cliente) {
       throw new BadRequestException('El RUT no corresponde a un cliente existente');
     }
 
-    if (!isAdministrator(currentUser.roles) && cliente.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa ||
+      (cliente.idEmpresa !== currentUser.idEmpresa &&
+        !cliente.contratos.some(c => c.idEmpresa === currentUser.idEmpresa) &&
+        !cliente.servicios.some(s => s.idEmpresa === currentUser.idEmpresa)))) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
     }
 
     return this.createForCustomer(cliente.idCliente, dto, {
       idUsuario: currentUser.idUsuario,
       idUsuarioAsignado: currentUser.idUsuario,
+      idEmpresa: isAdministrator(currentUser.roles) ? undefined : currentUser.idEmpresa!,
       accion: 'CREAR_TICKET',
       origen: dto.origen ?? 'CRM',
     });
   }
 
-  async createForPortal(
-    idCliente: number,
-    dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
-  ) {
-    return this.createForCustomer(idCliente, dto, {
-      idUsuario: null,
-      idUsuarioAsignado: null,
-      accion: 'CREAR_TICKET_PORTAL',
-      origen: 'Portal',
-    });
-  }
-
-  async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser) {
-    const ticket = await this.getTicketOrThrow(idTicket, currentUser);
-
-    if (!ticket.idCliente) {
-      throw new BadRequestException('El ticket no tiene cliente asociado para generar una orden de trabajo');
-    }
-
-    if (['Resuelto', 'Cerrado'].includes(ticket.estado)) {
-      throw new BadRequestException('No se puede generar una orden de trabajo para un ticket ya cerrado o resuelto');
-    }
-
-    const existingOrder = await this.prisma.ordenTrabajo.findFirst({ where: { idTicket } });
-
-    if (existingOrder) {
-      throw new BadRequestException('Este ticket ya tiene una orden de trabajo asociada');
-    }
-
-    const cliente = await this.prisma.cliente.findUnique({ where: { idCliente: ticket.idCliente } });
-
-    if (!cliente) {
-      throw new BadRequestException('El cliente asociado al ticket no existe');
-    }
-
-    const idEmpresa = ticket.idEmpresa ?? cliente.idEmpresa;
-
-    if (!idEmpresa) {
-      throw new BadRequestException('El ticket no tiene empresa asociada');
-    }
-
-    const servicio = ticket.idServicio
-      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: ticket.idServicio } })
-      : null;
-
-    if (ticket.idServicio && !servicio) {
-      throw new BadRequestException('El servicio asociado al ticket no existe');
-    }
-
-    if (servicio && (servicio.idCliente !== ticket.idCliente || servicio.idEmpresa !== idEmpresa)) {
-      throw new BadRequestException('El servicio asociado al ticket no corresponde al cliente o empresa');
-    }
-
-    const technician = dto.idTecnico
-      ? await this.prisma.usuario.findUnique({ where: { idUsuario: dto.idTecnico } })
-      : null;
-
-    if (dto.idTecnico && !technician) {
-      throw new BadRequestException('El tecnico seleccionado no existe');
-    }
-
-    if (technician && technician.idEmpresa !== idEmpresa) {
-      throw new BadRequestException('El tecnico seleccionado no pertenece a la empresa del ticket');
-    }
-
-    const direccion = servicio?.idDireccion
-      ? await this.prisma.direccionServicio.findUnique({ where: { idDireccion: servicio.idDireccion } })
-      : await this.prisma.direccionServicio.findFirst({
-          where: { idCliente: ticket.idCliente, esPrincipal: true },
-          orderBy: { idDireccion: 'asc' },
-        });
-
-    const scheduledDate = dto.fechaProgramada ? this.parseScheduleDate(dto.fechaProgramada) : null;
-    const observations = this.buildTicketWorkOrderObservations(ticket, dto);
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const createdOrder = await tx.ordenTrabajo.create({
-        data: {
-          idEmpresa,
-          idCliente: ticket.idCliente,
-          idTecnico: dto.idTecnico,
-          idDireccion: direccion?.idDireccion,
-          idServicio: ticket.idServicio,
-          idTicket,
-          tipoOt: dto.tipoOt ?? 'Reparacion',
-          prioridad: dto.prioridad ?? ticket.prioridad,
-          estado: 'Pendiente',
-          fechaCreacion: new Date(),
-          fechaProgramada: scheduledDate,
-          observaciones: observations,
-          resueltoRemotamente: false,
-        },
-      });
-      const order = await tx.ordenTrabajo.update({
-        where: { idOt: createdOrder.idOt },
-        data: { codigoSeguimiento: generateWorkOrderCode(createdOrder.tipoOt, createdOrder.idOt) },
-      });
-
-      const updatedTicket = await tx.ticket.update({
-        where: { idTicket },
-        data: {
-          estado: 'Escalado',
-          descripcion: `${ticket.descripcion ?? ''}\n\nDerivado a terreno mediante ${order.codigoSeguimiento ?? `OT #${order.idOt}`}`.trim(),
-        },
-      });
-
-      await tx.historialOt.create({
-        data: {
-          idOt: order.idOt,
-          idUsuario: currentUser.idUsuario,
-          estadoAnterior: null,
-          estadoNuevo: 'Pendiente',
-          observaciones: `OT generada desde ticket ${ticket.codigoSeguimiento ?? idTicket}`,
-          fechaHora: new Date(),
-        },
-      });
-
-      return { order, ticket: updatedTicket };
-    });
-
+  async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser): Promise<never> {
+    await this.getTicketOrThrow(idTicket, currentUser);
+    void dto;
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
-      accion: 'GENERAR_OT_DESDE_TICKET',
+      accion: 'INTENTO_WRITE_DOMINIO_G3_DEPRECADO',
       entidadAfectada: 'ticket',
       idEntidadAfectada: idTicket,
-      valorAnterior: { estado: ticket.estado },
-      valorNuevo: {
-        estado: result.ticket.estado,
-        idOt: result.order.idOt,
-        codigoSeguimiento: result.order.codigoSeguimiento,
-        tipoOt: result.order.tipoOt,
-        idCliente: ticket.idCliente,
-        idServicio: ticket.idServicio,
-        idTecnico: dto.idTecnico,
-        fechaProgramada: dto.fechaProgramada,
-        horaVisita: dto.horaVisita,
-      },
+      valorNuevo: { endpoint: 'POST /api/tickets/:id/work-order', owner: 'G3' },
     });
-
-    return result;
+    throw new GoneException({
+      code: 'G3_INTEGRATION_REQUIRED',
+      message: 'G3 administra las ordenes tecnicas. La derivacion de reparaciones y soporte esta pendiente de un contrato de integracion ratificado; no se creo ninguna OT.',
+    });
   }
 
   async updateCategory(idTicket: number, dto: UpdateTicketCategoryDto, currentUser: AuthUser) {
@@ -360,49 +242,22 @@ export class TicketsService {
         },
       });
 
-      if (ticket.idCliente) {
-        await tx.cliente.update({
-          where: { idCliente: ticket.idCliente },
-          data: { estado: dto.estadoFinalServicio },
-        });
-      }
-
-      const order = await tx.ordenTrabajo.findFirst({ where: { idTicket } });
-
-      if (order) {
-        await tx.ordenTrabajo.update({
-          where: { idOt: order.idOt },
-          data: {
-            estado: 'Completada',
-            fechaCompletada: new Date(),
-            observaciones: diagnosis,
-          },
-        });
-        await tx.historialOt.create({
-          data: {
-            idOt: order.idOt,
-            idUsuario: currentUser.idUsuario,
-            estadoAnterior: order.estado,
-            estadoNuevo: 'Completada',
-            observaciones: diagnosis,
-            fechaHora: new Date(),
-          },
-        });
-      }
+      // The diagnosis is ticket evidence, never authority over financial state or an OT.
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'REGISTRAR_DIAGNOSTICO_VISITA',
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: idTicket,
+        valorAnterior: { estado: ticket.estado },
+        valorNuevo: {
+          estado: updatedTicket.estado,
+          causaRaiz: dto.causaRaiz,
+          estadoFinalServicio: dto.estadoFinalServicio,
+          idCliente: ticket.idCliente,
+        },
+      }, tx);
 
       return updatedTicket;
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_DIAGNOSTICO_VISITA',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: idTicket,
-      valorNuevo: {
-        causaRaiz: dto.causaRaiz,
-        estadoFinalServicio: dto.estadoFinalServicio,
-        idCliente: ticket.idCliente,
-      },
     });
 
     return result;
@@ -443,7 +298,7 @@ export class TicketsService {
   private async createForCustomer(
     idCliente: number,
     dto: Pick<CreateTicketDto, 'idCategoria' | 'idServicio' | 'prioridad' | 'descripcion'>,
-    options: { idUsuario: number | null; idUsuarioAsignado: number | null; accion: string; origen: string },
+    options: { idEmpresa?: number; idUsuario: number | null; idUsuarioAsignado: number | null; accion: string; origen: string },
   ) {
     const cliente = await this.prisma.cliente.findUnique({ where: { idCliente } });
 
@@ -458,7 +313,10 @@ export class TicketsService {
     }
 
     const servicio = dto.idServicio
-      ? await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } })
+      ? await this.prisma.servicioContratado.findUnique({
+          where: { idServicio: dto.idServicio },
+          include: { contrato: true },
+        })
       : null;
 
     if (dto.idServicio && !servicio) {
@@ -469,10 +327,29 @@ export class TicketsService {
       throw new BadRequestException('El servicio contratado no corresponde al cliente seleccionado');
     }
 
+    if (options.idEmpresa !== undefined && servicio && servicio.idEmpresa !== options.idEmpresa) {
+      throw new BadRequestException('El servicio contratado no pertenece a tu empresa');
+    }
+
+    const idEmpresa = options.idEmpresa ?? servicio?.idEmpresa ?? cliente.idEmpresa;
+    if (!idEmpresa) {
+      throw new BadRequestException('El ticket requiere una empresa asociada');
+    }
+
+    // Validate attribution, not financial eligibility: a suspended or delinquent
+    // customer must still be able to request support for their own contract.
+    const contrato = servicio
+      ? servicio.contrato
+      : await this.prisma.contrato.findFirst({ where: { idCliente, idEmpresa } });
+    if (!contrato || contrato.idCliente !== idCliente || contrato.idEmpresa !== idEmpresa ||
+      (servicio && contrato.idContrato !== servicio.idContrato)) {
+      throw new BadRequestException('El ticket requiere un contrato vinculado al cliente y empresa seleccionados');
+    }
+
     const ticket = await this.prisma.ticket.create({
       data: {
         idCliente: cliente.idCliente,
-        idEmpresa: servicio?.idEmpresa ?? cliente.idEmpresa,
+        idEmpresa,
         idServicio: servicio?.idServicio,
         idUsuarioAsignado: options.idUsuarioAsignado,
         idCategoria: dto.idCategoria,
@@ -510,7 +387,7 @@ export class TicketsService {
       throw new NotFoundException('Ticket no encontrado');
     }
 
-    if (!isAdministrator(currentUser.roles) && ticket.idEmpresa !== currentUser.idEmpresa) {
+    if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa || ticket.idEmpresa !== currentUser.idEmpresa)) {
       throw new BadRequestException('El ticket no pertenece a tu empresa');
     }
 
@@ -527,36 +404,9 @@ export class TicketsService {
 
     if (pendingOrder) {
       throw new BadRequestException(
-        'El cierre debe realizarse desde la orden de trabajo asociada',
+        'La OT asociada no consta completada. G3 administra su cierre tecnico; la recepcion de cierres de reparacion esta pendiente de ratificacion. Puedes registrar observaciones sin cerrar el ticket',
       );
     }
-  }
-
-  private parseScheduleDate(value: string) {
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-      throw new BadRequestException('Fecha de visita invalida');
-    }
-
-    const minimum = new Date('2020-01-01T00:00:00.000Z');
-
-    if (date < minimum) {
-      throw new BadRequestException('La fecha de visita debe ser posterior al 01-01-2020');
-    }
-
-    return date;
-  }
-
-  private buildTicketWorkOrderObservations(ticket: { codigoSeguimiento: string | null; descripcion: string | null }, dto: CreateTicketWorkOrderDto) {
-    return [
-      `Ticket=${ticket.codigoSeguimiento ?? 'Sin codigo'}`,
-      dto.horaVisita ? `HoraVisita=${dto.horaVisita}` : '',
-      ticket.descripcion ? `Reporte inicial: ${ticket.descripcion}` : '',
-      dto.observaciones?.trim() ? `Observaciones de agenda: ${dto.observaciones.trim()}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
   }
 
   private companyScope(currentUser: AuthUser, scope: string) {

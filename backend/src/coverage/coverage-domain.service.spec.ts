@@ -1,0 +1,219 @@
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { CommercialCoverageProvider } from './commercial-coverage.provider';
+import { CoverageDomainService } from './coverage-domain.service';
+import { G3CoverageProvider } from './g3-coverage.provider';
+import { GeocodingService } from './geocoding.service';
+import { LegacyTomodatCoverageProvider } from './legacy-tomodat-coverage.provider';
+
+const polygon = (west: number, south: number, east: number, north: number) => ({
+  type: 'Polygon' as const, coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]],
+});
+
+describe('CoverageDomainService', () => {
+  const admin = { idUsuario: 1, idEmpresa: 1, email: null, nombreCompleto: 'Admin', roles: ['Administrador'] };
+  const commercial = { ...admin, roles: ['Comercial'] };
+  const support = { ...admin, roles: ['Soporte'] };
+  const parent = {
+    idZonaPago: 10, idEmpresa: 1, nombreZona: 'Cobertura Sur', descripcion: null, tipoZona: 'COBERTURA_GENERAL', idZonaPadre: null,
+    poligonoGeojson: polygon(-70.7, -33.7, -70.5, -33.5), activo: true, fechaInicio: null, fechaFin: null,
+    centroLat: -33.6, centroLng: -70.6, prioridad: 0, fuenteCobertura: 'MANUAL', diaVencimientoSugerido: null,
+  };
+
+  function setup(config: Record<string, string> = {}) {
+    const prisma = {
+      zonaPago: {
+        findUnique: jest.fn().mockResolvedValue(parent),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idZonaPago: 20, ...data })),
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...parent, ...data })),
+      },
+    };
+    const audit = { record: jest.fn() };
+    const commercialProvider = { resolvePlanAvailabilityForLocation: jest.fn() };
+    const g3 = { configured: jest.fn().mockReturnValue(false), check: jest.fn() };
+    const legacy = { configuredFor: jest.fn().mockReturnValue(false), check: jest.fn() };
+    const geocoding = { geocode: jest.fn().mockResolvedValue([]) };
+    const service = new CoverageDomainService(
+      prisma as unknown as PrismaService,
+      new ConfigService(config),
+      audit as unknown as AuditService,
+      commercialProvider as unknown as CommercialCoverageProvider,
+      g3 as unknown as G3CoverageProvider,
+      legacy as unknown as LegacyTomodatCoverageProvider,
+      geocoding as unknown as GeocodingService,
+    );
+    return { service, prisma, audit, commercialProvider, g3, legacy };
+  }
+
+  it('crea una cobertura general valida y registra auditoria', async () => {
+    const { service, prisma, audit } = setup();
+    const result = await service.createZone({ idEmpresa: 1, nombre: 'General', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: polygon(-70.7, -33.7, -70.5, -33.5) }, commercial);
+    expect(result).toMatchObject({ idZonaPago: 20, tipoZona: 'COBERTURA_GENERAL', fuenteCobertura: 'MANUAL' });
+    expect(prisma.zonaPago.create).toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_ZONA_GEOGRAFICA' }));
+  });
+
+  it.each(['create', 'update'] as const)('explica el nombre duplicado al %s sin registrar una zona exitosa', async operation => {
+    const { service, prisma, audit } = setup();
+    const duplicate = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: '5.22.0', meta: { target: 'uq_zona_pago_empresa_nombre' },
+    });
+    prisma.zonaPago[operation].mockRejectedValueOnce(duplicate);
+    const request = operation === 'create'
+      ? service.createZone({ idEmpresa: 1, nombre: 'Cobertura Sur', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)
+      : service.updateZone(10, { nombre: 'Cobertura Sur' }, commercial);
+    await expect(request).rejects.toMatchObject({
+      status: 409, message: 'Ya existe una zona o cobertura con ese nombre en esta empresa. Usa otro nombre.',
+    });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('conserva otros errores de almacenamiento sin atribuirlos a nombres duplicados', async () => {
+    const { service, prisma } = setup();
+    const failure = new Error('Database unavailable');
+    prisma.zonaPago.create.mockRejectedValueOnce(failure);
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Nueva', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: parent.poligonoGeojson }, commercial)).rejects.toBe(failure);
+  });
+
+  function deletionSetup(counts = {}) {
+    const current = setup();
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id_zona_pago: 10 }]),
+      zonaPago: {
+        findUnique: jest.fn().mockResolvedValue({ ...parent, _count: { zonasHijas: 0, contratos: 0, servicios: 0, prospectos: 0, ...counts } }),
+        delete: jest.fn().mockResolvedValue(parent),
+      },
+      planZonaPrecio: { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    Object.assign(current.prisma, { $transaction: jest.fn().mockImplementation(callback => callback(tx)) });
+    return { ...current, tx };
+  }
+
+  it('elimina una zona sin uso y sus asignaciones a planes, con auditoría en la misma transacción', async () => {
+    const { service, tx, audit } = deletionSetup();
+    await expect(service.deleteZone(10, commercial)).resolves.toEqual({ idZonaPago: 10, eliminada: true });
+    expect(tx.planZonaPrecio.deleteMany).toHaveBeenCalledWith({ where: { idZonaPago: 10 } });
+    expect(tx.zonaPago.delete).toHaveBeenCalledWith({ where: { idZonaPago: 10 } });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ELIMINAR_ZONA_GEOGRAFICA', valorAnterior: expect.objectContaining({ asignacionesEliminadas: 2 }) }), tx);
+  });
+
+  it.each(['zonasHijas', 'contratos', 'servicios', 'prospectos'])('conserva la zona y sus precios si tiene %s', async relation => {
+    const { service, tx, audit } = deletionSetup({ [relation]: 1 });
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 409 });
+    expect(tx.planZonaPrecio.deleteMany).not.toHaveBeenCalled();
+    expect(tx.zonaPago.delete).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('impide eliminar zonas de otra empresa, sin permiso o inexistentes', async () => {
+    const { service, tx } = deletionSetup();
+    await expect(service.deleteZone(10, support)).rejects.toMatchObject({ status: 403 });
+    await expect(service.deleteZone(10, { ...commercial, idEmpresa: 2 })).rejects.toMatchObject({ status: 403 });
+    tx.zonaPago.findUnique.mockResolvedValueOnce(null);
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 404 });
+    expect(tx.planZonaPrecio.deleteMany).not.toHaveBeenCalled();
+    expect(tx.zonaPago.delete).not.toHaveBeenCalled();
+  });
+
+  it('explica una referencia concurrente y propaga otros fallos de eliminación', async () => {
+    const { service, tx, audit } = deletionSetup();
+    tx.zonaPago.delete.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', { code: 'P2003', clientVersion: '5.22.0' }));
+    await expect(service.deleteZone(10, commercial)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('información asociada') });
+    const failure = new Error('Database unavailable');
+    tx.zonaPago.delete.mockRejectedValueOnce(failure);
+    await expect(service.deleteZone(10, commercial)).rejects.toBe(failure);
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('rechaza poligono invalido, vigencia invertida y usuario sin permiso', async () => {
+    const { service } = setup();
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Mal', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: { type: 'Polygon', coordinates: [] } }, commercial)).rejects.toThrow('Polygon');
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Mal', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: polygon(-70.7, -33.7, -70.5, -33.5), fechaInicio: '2026-10-01', fechaFin: '2026-09-01' }, commercial)).rejects.toThrow('fecha de inicio');
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Mal', tipoZona: 'COBERTURA_GENERAL', poligonoGeojson: polygon(-70.7, -33.7, -70.5, -33.5) }, support)).rejects.toThrow('permiso');
+  });
+
+  it('valida padre, empresa, contencion y solapamiento de microzonas', async () => {
+    const { service, prisma } = setup();
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Fuera', tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, poligonoGeojson: polygon(-70.8, -33.6, -70.75, -33.55) }, admin)).rejects.toThrow('dentro');
+    prisma.zonaPago.findUnique.mockResolvedValueOnce({ ...parent, idEmpresa: 2 });
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Cruzada', tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, poligonoGeojson: polygon(-70.65, -33.65, -70.6, -33.6) }, admin)).rejects.toThrow('misma empresa');
+    prisma.zonaPago.findUnique.mockResolvedValue(parent);
+    prisma.zonaPago.findMany.mockResolvedValueOnce([{ ...parent, idZonaPago: 11, tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, nombreZona: 'Promocion Norte', poligonoGeojson: polygon(-70.66, -33.66, -70.6, -33.6) }]);
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Solapada', tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, poligonoGeojson: polygon(-70.64, -33.64, -70.58, -33.58) }, admin)).rejects.toThrow('Promocion Norte');
+  });
+
+  it('permite microzonas separadas y bloquea acceso cruzado', async () => {
+    const { service, prisma } = setup();
+    prisma.zonaPago.findMany.mockResolvedValueOnce([{ ...parent, idZonaPago: 11, tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, poligonoGeojson: polygon(-70.66, -33.66, -70.63, -33.63) }]);
+    await expect(service.createZone({ idEmpresa: 1, nombre: 'Separada', tipoZona: 'MICROZONA_COMERCIAL', idZonaPadre: 10, poligonoGeojson: polygon(-70.58, -33.58, -70.55, -33.55) }, admin)).resolves.toMatchObject({ idZonaPago: 20 });
+    await expect(service.listZones(2, commercial)).rejects.toThrow('acceso');
+  });
+
+  it('fuera de cobertura es NO_FACTIBLE y no consulta proveedor tecnico', async () => {
+    const { service, commercialProvider, g3, legacy } = setup();
+    commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({ coberturaComercial: false, zona: null, microzona: null, planes: [] });
+    const result = await service.check(1, { latitud: -34, longitud: -71 }, commercial);
+    expect(result.estado).toBe('NO_FACTIBLE');
+    expect(g3.check).not.toHaveBeenCalled();
+    expect(legacy.check).not.toHaveBeenCalled();
+  });
+
+  it('dentro de cobertura general sin microzona es FACTIBLE aunque G3 no este configurado', async () => {
+    const current = setup();
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      planes: [],
+    });
+
+    const result = await current.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial);
+
+    expect(result).toMatchObject({
+      estado: 'FACTIBLE',
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      tecnica: { estado: 'PENDIENTE', proveedor: 'NINGUNO' },
+      cajas: [],
+    });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
+    expect(current.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CONSULTAR_COBERTURA_COMERCIAL' }));
+  });
+
+  it('dentro de microzona es FACTIBLE y conserva la microzona como zona comercial aplicable', async () => {
+    const current = setup();
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: { idZonaPago: 11 },
+      planes: [],
+    });
+
+    const result = await current.service.check(1, { latitud: -33.59, longitud: -70.61 }, commercial);
+
+    expect(result).toMatchObject({ estado: 'FACTIBLE', microzona: { idZonaPago: 11 } });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
+  });
+
+  it('errores potenciales de G3 o TomoDAT no afectan ni son consultados por la factibilidad comercial', async () => {
+    const current = setup({ COVERAGE_TECHNICAL_PROVIDER: 'LEGACY_TOMODAT' });
+    current.commercialProvider.resolvePlanAvailabilityForLocation.mockResolvedValue({
+      coberturaComercial: true,
+      zona: { idZonaPago: 10 },
+      microzona: null,
+      planes: [],
+    });
+    current.g3.check.mockRejectedValue(new Error('G3 no disponible'));
+    current.legacy.check.mockRejectedValue(new Error('TomoDAT no configurado'));
+
+    await expect(current.service.check(1, { latitud: -33.6, longitud: -70.6 }, commercial))
+      .resolves.toMatchObject({ estado: 'FACTIBLE', tecnica: { proveedor: 'NINGUNO' } });
+    expect(current.g3.check).not.toHaveBeenCalled();
+    expect(current.legacy.check).not.toHaveBeenCalled();
+  });
+});

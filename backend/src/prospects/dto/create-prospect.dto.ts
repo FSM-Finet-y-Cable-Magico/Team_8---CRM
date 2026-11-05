@@ -1,6 +1,13 @@
-import { IsEmail, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsEmail, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { CoverageLocationDto } from '../../coverage/coverage.dto';
 
 export class CreateProspectDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CoverageLocationDto)
+  ubicacion?: CoverageLocationDto;
+
   @IsString()
   @MaxLength(12)
   rut!: string;
@@ -23,6 +30,16 @@ export class CreateProspectDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(80)
+  comuna?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  region?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(40)
   origenContacto?: string;
 
@@ -30,4 +47,10 @@ export class CreateProspectDto {
   @IsInt()
   @Min(1)
   idEmpresa?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  idPlanInteres?: number;
 }

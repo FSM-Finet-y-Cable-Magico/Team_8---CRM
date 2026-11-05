@@ -6,6 +6,7 @@ export type AuthUser = {
   email: string | null;
   nombreCompleto: string;
   roles: string[];
+  versionSesion?: number;
 };
 
 export type AuthRequest = Request & {

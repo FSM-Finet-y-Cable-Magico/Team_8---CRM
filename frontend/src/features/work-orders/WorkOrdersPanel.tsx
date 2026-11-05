@@ -1,7 +1,6 @@
-﻿import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { CircleCheckBig, ClipboardList, Wrench } from 'lucide-react';
-import { api, apiErrorMessage, type WorkOrder } from '../../api';
-import { equipmentModeOptions } from '../../constants';
+import { type WorkOrder } from '../../api';
 import {
   formatConnectionType,
   formatDateOnly,
@@ -11,44 +10,13 @@ import {
 } from '../../lib';
 import { HistoryBox, Modal, StatusBadge } from '../../shared/components';
 
-export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrder[]; onChanged: () => void }) {
+export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState({
-    potenciaOpticaDbm: '',
-    observaciones: '',
-    estadoFinalServicio: 'Activo',
-    numeroSerie: '',
-    modelo: '',
-    macAddress: '',
-    puertoOlt: '',
-    modalidadAsignacion: 'Propiedad empresa',
-    valorArriendoMensual: '',
-  });
-  const [status, setStatus] = useState('');
-
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
   const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
   const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
   const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
-  const selectedOrderHasInstallContext = Boolean(selectedOrder?.prospecto?.fechaCreacion || selectedOrder?.idServicio);
-  const selectedOrderCanCompleteInstallation =
-    selectedOrderIsInstallation && !selectedOrderIsCompleted && selectedOrderHasInstallContext;
-
-  useEffect(() => {
-    setForm({
-      potenciaOpticaDbm: '',
-      observaciones: '',
-      estadoFinalServicio: 'Activo',
-      numeroSerie: '',
-      modelo: '',
-      macAddress: '',
-      puertoOlt: '',
-      modalidadAsignacion: 'Propiedad empresa',
-      valorArriendoMensual: '',
-    });
-    setStatus('');
-  }, [selectedId]);
 
   function ownerLabel(order: WorkOrder) {
     if (order.prospecto?.idProspecto) {
@@ -97,73 +65,18 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
     return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
   }
 
-  async function completeInstallation() {
-    if (!selectedOrder) {
-      return;
-    }
-
-    try {
-      const { data } = await api.patch(`/work-orders/${selectedOrder.idOt}/complete-installation`, {
-        potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
-        observaciones: form.observaciones,
-        numeroSerie: form.numeroSerie.trim() || undefined,
-        modelo: form.modelo.trim() || undefined,
-        macAddress: form.macAddress.trim() || undefined,
-        puertoOlt: form.puertoOlt.trim() || undefined,
-        modalidadAsignacion: form.numeroSerie.trim() ? form.modalidadAsignacion : undefined,
-        valorArriendoMensual: form.modalidadAsignacion === 'Arriendo' && form.valorArriendoMensual
-          ? Number(form.valorArriendoMensual)
-          : undefined,
-      });
-      if (data.prospect) {
-        setStatus(
-          `Instalación completada. Fecha de creación: ${formatDateTime(data.prospect.fechaCreacion)}. ` +
-          `Fecha de conversión: ${formatDateOnly(data.prospect.fechaConversion)}. ` +
-          `Tiempo de conversión calculado: ${data.prospect.tiempoConversionDias} día(s).`,
-        );
-      } else {
-        setStatus('Instalación completada y servicio activado desde la orden de trabajo.');
-      }
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
-  async function completeRepair() {
-    if (!selectedOrder) {
-      return;
-    }
-
-    if (form.observaciones.trim().length < 3) {
-      setStatus('Ingresa las observaciones de cierre de la orden.');
-      return;
-    }
-
-    try {
-      const { data } = await api.patch(`/work-orders/${selectedOrder.idOt}/complete-repair`, {
-        potenciaOpticaDbm: form.potenciaOpticaDbm ? Number(form.potenciaOpticaDbm) : undefined,
-        observaciones: form.observaciones.trim(),
-        estadoFinalServicio: form.estadoFinalServicio,
-      });
-      setStatus(`Orden completada y ticket ${data.ticket?.codigoSeguimiento ?? data.ticket?.idTicket ?? ''} resuelto.`);
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
   return (
     <section className="work-orders-panel stack">
       <div className="section-heading">
         <h2>Órdenes de trabajo</h2>
-        <p>Listado operativo de visitas, soporte e instalaciones registradas.</p>
+        <p>Consulta las visitas, reparaciones e instalaciones registradas.</p>
       </div>
       <div className="table-wrap work-orders-table-wrap">
         <table className="work-orders-table operational-table">
           <thead>
             <tr>
               <th>Código OT</th>
+              <th>Registro</th>
               <th>Tipo</th>
               <th>Asociado</th>
               <th>Ticket</th>
@@ -178,6 +91,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
             {workOrders.map((order) => (
               <tr key={order.idOt}>
                 <td className="work-order-id">{formatWorkOrderCode(order)}</td>
+                <td><span className="source-badge">Histórico</span></td>
                 <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
                 <td>{ownerLabel(order)}</td>
                 <td>{formatWorkOrderTicketCode(order)}</td>
@@ -275,11 +189,11 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Cierre de instalación'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación pendiente de cierre'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'La orden ya fue completada. Puedes consultar aquí los datos registrados.'
-                        : 'Registra los datos técnicos para confirmar la instalación y activar al cliente.'}
+                        ? 'Consulta los antecedentes registrados de esta instalación.'
+                        : 'El cierre de esta instalación aún no está registrado.'}
                     </p>
                   </div>
                 </div>
@@ -295,83 +209,7 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                     }
                   />
                 </div>
-                {!selectedOrderHasInstallContext && (
-                  <p className="alert">No se puede completar la instalación: falta prospecto o servicio asociado.</p>
-                )}
-                {!selectedOrderIsCompleted && <div className="workflow-grid work-order-technical-grid">
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Potencia óptica</span>
-                    <span className="work-order-measurement">
-                      <input
-                        aria-label="Potencia óptica en dBm"
-                        type="number"
-                        step="0.01"
-                        placeholder="-19.50"
-                        value={form.potenciaOpticaDbm}
-                        onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-                      />
-                      <span>dBm</span>
-                    </span>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Observaciones</span>
-                    <textarea
-                      placeholder="Agrega observaciones técnicas"
-                      value={form.observaciones}
-                      onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
-                    />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Número de serie del equipo</span>
-                    <input
-                      placeholder="Serie registrada en inventario"
-                      value={form.numeroSerie}
-                      onChange={(event) => setForm({ ...form, numeroSerie: event.target.value })}
-                    />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Modelo</span>
-                    <input value={form.modelo} onChange={(event) => setForm({ ...form, modelo: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">MAC</span>
-                    <input value={form.macAddress} onChange={(event) => setForm({ ...form, macAddress: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Puerto OLT</span>
-                    <input value={form.puertoOlt} onChange={(event) => setForm({ ...form, puertoOlt: event.target.value })} />
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Modalidad</span>
-                    <select
-                      value={form.modalidadAsignacion}
-                      onChange={(event) => setForm({
-                        ...form,
-                        modalidadAsignacion: event.target.value,
-                        valorArriendoMensual: event.target.value === 'Arriendo' ? form.valorArriendoMensual : '',
-                      })}
-                    >
-                      {equipmentModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                    </select>
-                  </label>
-                  {form.modalidadAsignacion === 'Arriendo' && <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Valor de arriendo mensual</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.valorArriendoMensual}
-                      onChange={(event) => setForm({ ...form, valorArriendoMensual: event.target.value })}
-                    />
-                  </label>}
-                </div>}
-                <button
-                  type="button"
-                  className="work-order-complete-button"
-                  disabled={!selectedOrderCanCompleteInstallation}
-                  onClick={completeInstallation}
-                >
-                  Confirmar instalación y activar cliente
-                </button>
+                <p className="inline-status">Esta orden está disponible para consulta de solo lectura.</p>
               </section>
             ) : selectedOrderHasTicket ? (
               <section className="work-order-completion">
@@ -382,56 +220,15 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Cierre de trabajo técnico'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Trabajo técnico pendiente de cierre'}</h3>
                     <p>
                       {selectedOrderIsCompleted
-                        ? 'La orden ya fue completada y el ticket asociado quedó actualizado.'
-                        : 'Registra el cierre de la visita para resolver el ticket asociado.'}
+                        ? 'Esta orden consta completada; sus datos históricos se conservan sin modificaciones.'
+                        : 'El cierre técnico está pendiente. Puedes registrar observaciones y dar seguimiento desde Tickets.'}
                     </p>
                   </div>
                 </div>
-                <div className="workflow-grid work-order-technical-grid">
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Potencia óptica</span>
-                    <span className="work-order-measurement">
-                      <input
-                        aria-label="Potencia óptica en dBm"
-                        type="number"
-                        step="0.01"
-                        placeholder="-19.50"
-                        value={form.potenciaOpticaDbm}
-                        onChange={(event) => setForm({ ...form, potenciaOpticaDbm: event.target.value })}
-                      />
-                      <span>dBm</span>
-                    </span>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Estado final del servicio</span>
-                    <select
-                      value={form.estadoFinalServicio}
-                      onChange={(event) => setForm({ ...form, estadoFinalServicio: event.target.value })}
-                    >
-                      <option value="Activo">Activo</option>
-                      <option value="En Mantencion">En Mantención</option>
-                    </select>
-                  </label>
-                  <label className="work-order-technical-field">
-                    <span className="work-order-field-label">Observaciones de cierre</span>
-                    <textarea
-                      placeholder="Describe el diagnóstico y las acciones realizadas"
-                      value={form.observaciones}
-                      onChange={(event) => setForm({ ...form, observaciones: event.target.value })}
-                    />
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  className="work-order-complete-button"
-                  disabled={selectedOrderIsCompleted}
-                  onClick={completeRepair}
-                >
-                  Completar orden y resolver ticket
-                </button>
+                <p className="inline-status">{selectedOrderIsCompleted ? 'Consulta de solo lectura de los antecedentes del trabajo técnico.' : 'Consulta de solo lectura. El cierre técnico está pendiente de confirmación.'}</p>
               </section>
             ) : (
               <div className="work-order-information">
@@ -444,7 +241,6 @@ export function WorkOrdersPanel({ workOrders, onChanged }: { workOrders: WorkOrd
                 </div>
               </div>
             )}
-            {status && <p className="inline-status">{status}</p>}
           </div>
         ) : (
           <p className="inline-status">Selecciona una orden de trabajo para gestionarla.</p>

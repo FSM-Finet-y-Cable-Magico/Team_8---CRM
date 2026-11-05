@@ -8,3 +8,4 @@ export * from './QuickActionCard';
 export * from './StatCard';
 export * from './StatusBadge';
 export * from './TablePagination';
+export * from './ToastNotice';

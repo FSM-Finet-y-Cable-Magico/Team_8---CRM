@@ -1,0 +1,30 @@
+import { UsersService } from './users.service';
+import * as bcrypt from 'bcryptjs';
+const admin = { idUsuario: 1, idEmpresa: null, email: 'admin@test.local', nombreCompleto: 'Admin', roles: ['Administrador'] };
+const dto = { nombreCompleto: 'Usuario', email: 'USER@test.local', roleId: 2, idEmpresa: 1, activo: true };
+function setup() {
+  const target = { idUsuario: 2, activo: true, usuarioRoles: [{ rol: { nombreRol: 'Administrador' } }] };
+  const db = { $queryRaw: jest.fn(), $executeRaw: jest.fn(), $transaction: jest.fn(), rol: { findUnique: jest.fn().mockResolvedValue({ idRol: 2, nombreRol: 'Comercial' }) }, empresa: { findUnique: jest.fn().mockResolvedValue({ idEmpresa: 1 }) },
+    usuario: { updateMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(target), findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue({ idUsuario: 3 }), update: jest.fn().mockResolvedValue({ idUsuario: 2 }), delete: jest.fn().mockResolvedValue({ idUsuario: 2 }) }, usuarioRol: { create: jest.fn(), deleteMany: jest.fn() }, logAuditoria: { create: jest.fn() } };
+  db.$transaction.mockImplementation(fn => fn(db));
+  return { db, target, service: new UsersService(db as never, { record: jest.fn() } as never) };
+}
+describe('Usuarios internos', () => {
+  it('normaliza version NULL antes de revocar sin reiniciar versiones concurrentes', async () => {
+    const {service,db,target}=setup();
+    Object.assign(target,{versionSesion:null});
+    await service.resetPassword(2,['temporary','test','password'].join('-'),admin);
+    expect(db.usuario.updateMany).toHaveBeenCalledWith({where:{idUsuario:2,versionSesion:null},data:{versionSesion:0}});
+    expect(db.usuario.update).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({versionSesion:{increment:1}})}));
+    expect(db.usuario.updateMany.mock.invocationCallOrder[0]).toBeLessThan(db.usuario.update.mock.invocationCallOrder[0]);
+  });
+  it('impide desactivar la propia cuenta', async () => { const { service } = setup(); await expect(service.save(1, { ...dto, activo: false }, admin)).rejects.toThrow('propia'); });
+  it('protege al último administrador activo', async () => { const { service, db } = setup(); await expect(service.save(2, { ...dto, activo: false }, admin)).rejects.toThrow('administrador activo'); expect(db.usuario.update).not.toHaveBeenCalled(); });
+  it('exige empresa para un perfil comercial', async () => { const { service } = setup(); await expect(service.save(2, { ...dto, idEmpresa: undefined }, admin)).rejects.toThrow('empresa'); });
+  it('crea contraseña cifrada sin devolverla ni auditarla', async () => { const { service, db } = setup(); const password = 'Prueba-local-12345'; const result = await service.save(null, { ...dto, password }, admin);
+    const saved = db.usuario.create.mock.calls[0][0].data; expect(await bcrypt.compare(password, saved.passwordHash)).toBe(true); expect(saved.email).toBe('user@test.local'); expect(result).not.toHaveProperty('passwordHash'); expect(JSON.stringify(db.logAuditoria.create.mock.calls)).not.toContain(password); });
+  it('restablece el acceso y revoca las sesiones', async () => { const { service, db } = setup(); await service.resetPassword(2, 'Prueba-local-12345', admin); expect(db.usuario.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ versionSesion: { increment: 1 } }) })); });
+  it('rechaza claves que bcrypt truncaría por longitud en bytes', async () => { const { service } = setup(); await expect(service.resetPassword(2, 'á'.repeat(40), admin)).rejects.toThrow('72 bytes'); });
+  it('impide eliminar la propia cuenta', async () => { const { service } = setup(); await expect(service.remove(1, admin)).rejects.toThrow('propia'); });
+  it('desactiva un usuario sin alterar tablas físicas G1', async () => { const { service, db, target } = setup(); target.usuarioRoles = [{ rol: { nombreRol: 'Comercial' } }]; const result = await service.remove(2, admin); expect(db.usuario.update).toHaveBeenCalledWith({ where: { idUsuario: 2 }, data: { activo: false, versionSesion: { increment: 1 } } }); expect(db.usuario.delete).not.toHaveBeenCalled(); expect(db.$executeRaw).not.toHaveBeenCalled(); expect(db.logAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accion: 'DESACTIVAR_USUARIO', idEntidadAfectada: 2 }) })); expect(result).toMatchObject({ desactivado: true, sesionesRevocadas: true }); });
+});

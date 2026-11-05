@@ -1,9 +1,12 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { HealthController } from './health/health.controller';
+import { MessagingModule } from './messaging/messaging.module';
 import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
 import { CompaniesModule } from './companies/companies.module';
+import { CommercialModule } from './commercial/commercial.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { CustomersModule } from './customers/customers.module';
 import { ImportsModule } from './imports/imports.module';
@@ -11,7 +14,6 @@ import { InventoryModule } from './inventory/inventory.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { ObservationsModule } from './observations/observations.module';
 import { PlansModule } from './plans/plans.module';
-import { PortalModule } from './portal/portal.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProspectsModule } from './prospects/prospects.module';
 import { ReportsModule } from './reports/reports.module';
@@ -24,6 +26,12 @@ import { TvipModule } from './tvip/tvip.module';
 import { UsersModule } from './users/users.module';
 import { WorkOrdersModule } from './work-orders/work-orders.module';
 import { AppController } from './app.controller';
+import { G3IntegrationModule } from './g3-integration/g3-integration.module';
+import { G1IntegrationModule } from './g1-integration/g1-integration.module';
+import { G2IntegrationModule } from './g2-integration/g2-integration.module';
+import { ExternalTaxDocumentsModule } from './external-tax-documents/external-tax-documents.module';
+import { IntegrationAuthModule } from './integration-auth/integration-auth.module';
+import { TaxDocumentIssuanceModule } from './tax-document-issuance/tax-document-issuance.module';
 
 @Module({
   imports: [
@@ -33,11 +41,18 @@ import { AppController } from './app.controller';
     AuditModule,
     AuthModule,
     BillingModule,
-    PortalModule,
     TvipModule,
     MonitoringModule,
+    G3IntegrationModule,
+    G1IntegrationModule,
+    G2IntegrationModule,
+    ExternalTaxDocumentsModule,
+    IntegrationAuthModule,
+    TaxDocumentIssuanceModule,
+    MessagingModule,
     UsersModule,
     CompaniesModule,
+    CommercialModule,
     ContractsModule,
     RequestsModule,
     ObservationsModule,
@@ -52,6 +67,6 @@ import { AppController } from './app.controller';
     ReportsModule,
     ImportsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
 })
 export class AppModule {}

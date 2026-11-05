@@ -1,0 +1,6 @@
+-- La definicion de contrato.id_prospecto, su FK y su indice pertenece a:
+-- backend/prisma/migrations/20260912150000_crm_activation_flow/migration.sql
+--
+-- Este archivo se conserva como marcador historico para no cambiar el orden
+-- nominal de db/init. El bootstrap local ejecuta la migracion Prisma una sola
+-- vez y evita duplicar fk_contrato_id_prospecto.

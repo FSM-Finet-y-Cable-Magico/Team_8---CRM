@@ -1,9 +1,11 @@
-﻿import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
-import { activeCustomerWhere, activeProspectWhere } from '../common/customer-lifecycle';
+import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { installationMetrics } from './installation-metrics';
 
 @Injectable()
 export class CompaniesService {
@@ -20,7 +22,7 @@ export class CompaniesService {
     const customerFilter = this.buildCustomerCompanyFilter(effectiveScope);
     const companyFilter = this.buildCompanyFilter(effectiveScope);
     const activeProspectFilter = activeProspectWhere(companyFilter);
-    const activeCustomerFilter = activeCustomerWhere(customerFilter);
+    const activeCustomerFilter = activeCustomerWhere(customerFilter, companyFilter);
     const companiesFilter = 'idEmpresa' in companyFilter ? companyFilter : {};
     const today = todayDateOnly();
     const monthStart = parseDateOnly(`${today.slice(0, 8)}01`);
@@ -30,17 +32,20 @@ export class CompaniesService {
       throw new BadRequestException('No se pudo calcular el periodo operativo');
     }
 
+    const empresas = await this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } });
+    // Match prospect and contract within each company even in the consolidated view.
+    const pendingActivationFilter = { OR: empresas.map(({ idEmpresa }) => pendingActivationWhere({ idEmpresa })) };
+
     const [
       prospectos,
-      empresas,
+      pendientesActivacion,
       instalacionesPendientes,
       ticketsAbiertos,
       clientesMorosos,
       inventarioDisponible,
       serviciosActivos,
-      instalacionesMensuales,
+      completedInstallations,
       ticketsCerradosMensuales,
-      churnBajasMensuales,
       clientesActivos,
       ticketsCerrados,
       activeContracts,
@@ -50,7 +55,7 @@ export class CompaniesService {
       origenCaptacion,
     ] = await Promise.all([
       this.prisma.prospecto.count({ where: activeProspectFilter }),
-      this.prisma.empresa.findMany({ where: companiesFilter, orderBy: { idEmpresa: 'asc' } }),
+      this.prisma.prospecto.count({ where: pendingActivationFilter }),
       this.prisma.ordenTrabajo.count({
         where: {
           ...companyFilter,
@@ -65,32 +70,20 @@ export class CompaniesService {
         where: {
           AND: [
             customerFilter,
-            { estado: { in: ['Moroso', 'Suspendido'] } },
+            'idEmpresa' in companyFilter
+              ? { contratos: { some: { ...companyFilter, estado: { in: ['Moroso', 'Suspendido'] } } } }
+              : { estado: { in: ['Moroso', 'Suspendido'] } },
           ],
         },
       }),
       this.prisma.unidadEquipo.count({ where: { ...companyFilter, estado: 'Disponible' } }),
       this.prisma.servicioContratado.count({ where: { ...companyFilter, estadoOperativo: 'Activo' } }),
-      this.prisma.ordenTrabajo.count({
-        where: {
-          ...companyFilter,
-          tipoOt: 'Instalacion',
-          estado: 'Completada',
-          fechaCompletada: { gte: monthStart },
-        },
-      }),
+      this.completedInstallationMetrics(companyFilter, today),
       this.prisma.ticket.count({
         where: {
           ...companyFilter,
           estado: { in: ['Resuelto', 'Cerrado'] },
           fechaCierre: { gte: monthStart },
-        },
-      }),
-      this.prisma.contrato.count({
-        where: {
-          ...companyFilter,
-          estado: { in: ['Baja', 'Suspendido'] },
-          fechaSuspension: { gte: monthStart },
         },
       }),
       this.prisma.cliente.count({
@@ -163,7 +156,7 @@ export class CompaniesService {
         })
       : [];
     const categoryById = new Map(categories.map((category) => [category.idCategoria, category]));
-    const churnBase = clientesActivos + churnBajasMensuales;
+    const expiryDays = this.expiryAlertDays();
     const contractAlerts = activeContracts
       .map((contract) => {
         const unpaidInvoice = contract.facturas.find((invoice) => {
@@ -180,13 +173,13 @@ export class CompaniesService {
           idCliente: contract.idCliente,
           cliente: contract.cliente?.nombreCompleto ?? 'Cliente sin nombre',
           rut: contract.cliente?.rut ?? null,
-          plan: contract.plan?.nombreComercial ?? null,
+          plan: contract.plan?.idEmpresa === contract.idEmpresa ? contract.plan?.nombreComercial ?? null : null,
           estado: contract.estado,
           fechaVencimiento: dueDate.toISOString().slice(0, 10),
           diasRestantes: daysUntilDue,
         };
       })
-      .filter((item) => item.diasRestantes <= 7);
+      .filter((item) => item.diasRestantes <= expiryDays);
     const alertasVencimiento = [
       ...contractAlerts
         .filter((item) => item.diasRestantes < 0)
@@ -204,15 +197,19 @@ export class CompaniesService {
       metricas: {
         clientes: clientesActivos,
         prospectos,
+        pendientesActivacion,
         instalacionesPendientes,
         ticketsAbiertos,
         clientesMorosos,
         inventarioDisponible,
         serviciosActivos,
-        instalacionesMensuales,
+        ...completedInstallations,
         ticketsCerradosMensuales,
-        churnRateMensual: churnBase ? Number(((churnBajasMensuales / churnBase) * 100).toFixed(2)) : 0,
-        churnBajasMensuales,
+        // Current contract status and suspension date cannot establish definitive
+        // cancellations or the opening-period customer population. Null is not 0%.
+        churnRateMensual: null,
+        churnBajasMensuales: null,
+        churnEstado: 'HISTORIAL_INSUFICIENTE' as const,
         solicitudesAbiertas,
         solicitudesNoFactibles,
       },
@@ -220,9 +217,11 @@ export class CompaniesService {
         idCambioPlan: change.idCambioPlan,
         idContrato: change.idContrato,
         cliente: change.cliente?.nombreCompleto ?? 'Cliente sin nombre',
-        planAnterior: change.planAnterior?.nombreComercial ?? null,
-        planNuevo: change.planNuevo.nombreComercial,
+        planAnterior: change.planAnterior?.idEmpresa === change.idEmpresa ? change.planAnterior?.nombreComercial ?? null : null,
+        planNuevo: change.planNuevo.idEmpresa === change.idEmpresa ? change.planNuevo.nombreComercial : 'Plan no disponible',
         fechaRegistro: change.fechaRegistro,
+        fechaEfectiva: change.fechaEfectiva,
+        estadoCambio: change.estadoCambio,
       })),
       origenCaptacion: origenCaptacion.map((row) => ({
         origen: row.origenContacto ?? 'Sin origen',
@@ -234,7 +233,35 @@ export class CompaniesService {
         total,
       })),
       alertasVencimiento,
+      diasAnticipacionVencimiento: expiryDays,
     };
+  }
+
+  private async completedInstallationMetrics(companyFilter: { idEmpresa?: number }, today: string) {
+    const contract = { idContrato: true, idEmpresa: true, idCliente: true } as const;
+    const service = { idServicio: true, idEmpresa: true, idContrato: true, idCliente: true,
+      datosTecnicos: true, contrato: { select: contract } } as const;
+    // One read snapshot prevents mixing a newly confirmed tracking with an older mirror.
+    // Keep all confirmed dates: processing month cannot filter a technical completion,
+    // and undated completions must remain visible rather than silently disappear.
+    const [local, remote] = await this.prisma.$transaction([
+      this.prisma.ordenTrabajo.findMany({
+        where: { idEmpresa: companyFilter.idEmpresa ?? { not: null }, tipoOt: 'Instalacion', estado: 'Completada' },
+        select: { idOt: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
+          servicio: { select: service } },
+      }),
+      this.prisma.integracionInstalacionG3.findMany({
+        where: { ...companyFilter, estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null } },
+        select: { idEmpresa: true, idOtG3: true, idContrato: true, idServicio: true, idCliente: true,
+          contrato: { select: contract }, servicio: { select: service } },
+      }),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return installationMetrics(local, remote, today.slice(0, 7), today);
+  }
+
+  private expiryAlertDays() {
+    const value = Number(process.env.COMMERCIAL_PLAN_EXPIRY_ALERT_DAYS ?? 7);
+    return Number.isInteger(value) && value >= 1 && value <= 90 ? value : 7;
   }
 
   private resolveScope(currentUser: AuthUser, requestedScope: string) {

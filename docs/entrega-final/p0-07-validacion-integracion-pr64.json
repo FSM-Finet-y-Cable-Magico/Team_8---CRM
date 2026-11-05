@@ -1,0 +1,440 @@
+{
+  "date": "2026-10-29",
+  "generatedAt": "2026-10-30T02:22:20.530Z",
+  "branch": "docs/i4-p0-07-cierre-entrega",
+  "pr": 64,
+  "previousP007SHA": "e02bbfa4bd19602632470973ba9bbc6ef2dbbd9d",
+  "integratedDevelopSHA": "6185c22d8a81897dc9e8878ee89301c2089a91c6",
+  "environment": {
+    "node": "v22.19.0",
+    "postgresql": [
+      "postgres (PostgreSQL) 18.6",
+      "postgres (PostgreSQL) 18.6"
+    ],
+    "database": "fresh local clusters, synthetic data, loopback only",
+    "externalProviders": false,
+    "privateEnvLoaded": false
+  },
+  "backend": {
+    "name": "backend-tests",
+    "exitCode": 0,
+    "error": null,
+    "passed": 1358,
+    "failed": 0,
+    "skipped": 9,
+    "suites": 81,
+    "failedSuites": []
+  },
+  "directed": {
+    "name": "directed",
+    "exitCode": 0,
+    "error": null,
+    "passed": 1016,
+    "failed": 0,
+    "skipped": 2,
+    "suites": 52,
+    "failedSuites": []
+  },
+  "frontend": {
+    "passed": 54,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tools": {
+    "passed": 82,
+    "failed": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "backendErrors": 0,
+    "frontendErrors": 0,
+    "frontendWarnings": 78
+  },
+  "dependencies": {
+    "manifests": [
+      "root",
+      "backend/",
+      "frontend/"
+    ],
+    "versions": {
+      "jest": "30.5.2",
+      "@prisma/client": "5.22.0",
+      "nodemailer": "10.0.14",
+      "csv-parse": "7.0.3",
+      "exceljs": "4.4.0",
+      "exceljsUuid": "11.1.1"
+    },
+    "excel": true,
+    "csv": true
+  },
+  "validation": [
+    {
+      "name": "backend-build",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "backend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "backend-tests",
+      "exitCode": 0,
+      "error": null,
+      "passed": 1358,
+      "failed": 0,
+      "skipped": 9,
+      "suites": 81,
+      "failedSuites": []
+    },
+    {
+      "name": "directed",
+      "exitCode": 0,
+      "error": null,
+      "passed": 1016,
+      "failed": 0,
+      "skipped": 2,
+      "suites": 52,
+      "failedSuites": []
+    },
+    {
+      "name": "frontend-lint",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-tests",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-tsc",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "frontend-vite",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-generate",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "prisma-validate",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-coverage",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-installation",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-pdf",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-recovery",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "qa-tax",
+      "exitCode": 0,
+      "error": null
+    },
+    {
+      "name": "tools",
+      "exitCode": 0,
+      "error": null
+    }
+  ],
+  "postgres": [
+    {
+      "name": "tax",
+      "status": "QA_PASS",
+      "passed": 17,
+      "failed": 0,
+      "cleanup": true,
+      "evidenceSHA256": "9c83aa4fb609754cd90b5f7906d50bf5a8af38758aad5969001f6f4fc1bab1f0",
+      "cases": [
+        {
+          "name": "legacy_rejects_production",
+          "status": "PASS"
+        },
+        {
+          "name": "migration_rollback_preserves_history_and_old_constraint",
+          "status": "PASS"
+        },
+        {
+          "name": "migration_preserves_historical_snapshot",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_canonical_catalog",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_unique_payment_environment_and_folio",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_shared_customer_access_and_financial_integrity",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_concurrent_claim_and_durable_idempotency",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_generated_folio_scoped_to_company_and_environment",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_full_tax_pipeline_fake_transport_both_environments",
+          "status": "PASS"
+        },
+        {
+          "name": "upgrade_agreement_gap_reproduced_without_repair",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_canonical_catalog",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_unique_payment_environment_and_folio",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_shared_customer_access_and_financial_integrity",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_concurrent_claim_and_durable_idempotency",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_generated_folio_scoped_to_company_and_environment",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_full_tax_pipeline_fake_transport_both_environments",
+          "status": "PASS"
+        },
+        {
+          "name": "fresh_agreement_gap_reproduced_without_repair",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "installation",
+      "status": "QA_PASS",
+      "passed": 10,
+      "failed": 0,
+      "cleanup": true,
+      "evidenceSHA256": "a83766dd1b69b4537f969dac6b6cee3d27d1aeaf179528a71f8cb2d3680377ca",
+      "cases": [
+        {
+          "name": "01_comuna_present_accepted",
+          "status": "PASS"
+        },
+        {
+          "name": "02_missing_comuna_no_tracking",
+          "status": "PASS"
+        },
+        {
+          "name": "03_authorized_missing_comuna_without_signed_contract_changes",
+          "status": "PASS"
+        },
+        {
+          "name": "04_two_contracts_distinct_correlations",
+          "status": "PASS"
+        },
+        {
+          "name": "05_identical_retry_immutable_snapshot",
+          "status": "PASS"
+        },
+        {
+          "name": "06_incompatible_request_409_preserved",
+          "status": "PASS"
+        },
+        {
+          "name": "07_pending_detail_and_closure_no_500",
+          "status": "PASS"
+        },
+        {
+          "name": "08_simulated_closures_activate_g8",
+          "status": "PASS"
+        },
+        {
+          "name": "09_g1_correct_service_company_contract_and_distinct_equipment",
+          "status": "PASS"
+        },
+        {
+          "name": "10_recovery_conflicts_preserve_confirmed_evidence",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "coverage",
+      "status": "QA_PASS",
+      "passed": 7,
+      "failed": 0,
+      "cleanup": true,
+      "evidenceSHA256": "d641ee721938fe34ffd7e6d81be2c9c8ec929dba46cac853a9b251ac4a67769b",
+      "cases": [
+        {
+          "name": "company_coverage_and_isolation",
+          "status": "PASS"
+        },
+        {
+          "name": "reject_without_quote_inactive_and_foreign_plan",
+          "status": "PASS"
+        },
+        {
+          "name": "quote_pdf_and_persisted_plan_after_new_login",
+          "status": "PASS"
+        },
+        {
+          "name": "concurrent_confirmation_single_pending_contract",
+          "status": "PASS"
+        },
+        {
+          "name": "outside_coverage_rejected_and_location_updates",
+          "status": "PASS"
+        },
+        {
+          "name": "lost_prospect_rejected",
+          "status": "PASS"
+        },
+        {
+          "name": "zones_prices_and_manual_principal_preserved",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "pdf",
+      "status": "QA_PASS",
+      "passed": 9,
+      "failed": 0,
+      "cleanup": true,
+      "evidenceSHA256": "5c3ca11b73b10530c9232691f3c365ffc8cb8fd6c1695fb408fa0b72207da8ef",
+      "cases": [
+        {
+          "name": "pool_1",
+          "status": "PASS"
+        },
+        {
+          "name": "pool_5",
+          "status": "PASS"
+        },
+        {
+          "name": "consecutive_versions",
+          "status": "PASS"
+        },
+        {
+          "name": "concurrent_independent_connections",
+          "status": "PASS"
+        },
+        {
+          "name": "partial_file_write_failure",
+          "status": "PASS"
+        },
+        {
+          "name": "document_insert_rollback",
+          "status": "PASS"
+        },
+        {
+          "name": "audit_insert_rollback",
+          "status": "PASS"
+        },
+        {
+          "name": "versions_audit_and_historical_download",
+          "status": "PASS"
+        },
+        {
+          "name": "unauthorized_company_no_writes",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "name": "recovery",
+      "status": "QA_PASS",
+      "passed": 8,
+      "failed": 0,
+      "cleanup": true,
+      "evidenceSHA256": "59e7901012ff26f7c31c48cc35f9477a554a0c76be312cda436f4645eb09445e",
+      "cases": [
+        {
+          "name": "01 rollback real del evento",
+          "status": "PASS"
+        },
+        {
+          "name": "02 caida antes de G1 y reinicio",
+          "status": "PASS"
+        },
+        {
+          "name": "03 segunda auditoria G3 revierte ambas",
+          "status": "PASS"
+        },
+        {
+          "name": "04 recuperaciones concurrentes independientes",
+          "status": "PASS"
+        },
+        {
+          "name": "05 G1 confirmado y caida local sin reenvio",
+          "status": "PASS"
+        },
+        {
+          "name": "06 respuesta HTTP tardia no degrada resultado posterior",
+          "status": "PASS"
+        },
+        {
+          "name": "07 empresas y cliente compartido",
+          "status": "PASS"
+        },
+        {
+          "name": "08 idempotencia G1 simulado tras ACK perdido",
+          "status": "PASS"
+        }
+      ],
+      "finalRows": {
+        "companies": 2,
+        "customers": 8,
+        "contracts": 9,
+        "services": 8,
+        "trackingsG3": 9,
+        "events": 8,
+        "trackingsG1": 8,
+        "audits": 33,
+        "localHttpRequests": 10,
+        "simulatedEffects": 8
+      }
+    }
+  ],
+  "canonicalSHA256": "52ae791e04e4951bbc0e2b3655dfbf3ecbc1e80e46afcbfa592d90e1aa9a5e91",
+  "migrationSHA256": "e06687281f0539207a2271b5351447764c9c84b08917232b6f446026dd74f6cf",
+  "preservedPreexistingFiles": 62,
+  "QA_LOCAL_READY": true,
+  "RELEASE_READY": false,
+  "agreements": "FAIL_FUNCTIONAL_BLOCKED_BUSINESS_DECISION",
+  "productionAccess": false,
+  "sharedDatabaseWrites": 0,
+  "realProviderCalls": 0,
+  "deploy": false
+}

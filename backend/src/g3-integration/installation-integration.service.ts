@@ -1,0 +1,658 @@
+import { BadRequestException, ForbiddenException, HttpException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { AuditService } from '../audit/audit.service';
+import { AuthUser } from '../common/auth.types';
+import { isAdministrator } from '../common/roles';
+import { ACCESS_ROLES } from '../common/permissions';
+import { PrismaService } from '../prisma/prisma.service';
+import { validateRut } from '../rut/rut.util';
+import { G3ClosureProcessor } from './g3-closure.processor';
+import { historicalClosureData, HistoricalClosureView, numericWorkOrderId, positiveId } from './g3-historical-closure';
+import { CompleteG3InstallationDataDto, RequestG3InstallationDto } from './g3-integration.dto';
+import {
+  G3ClosurePayload,
+  G3InstallationPayload,
+  G3IntegrationClient,
+  G3IntegrationError,
+  G3WorkOrderResponse,
+  G3_INTEGRATION_CLIENT,
+} from './g3-integration.types';
+import { externalWorkOrderCode, externalWorkOrderId, installationSnapshot, normalizeG3State, sha256Payload } from './g3-integration.utils';
+
+const ACTIVE_REQUEST_STATES = [
+  'PENDIENTE_ENVIO',
+  'ENVIADA',
+  'EN_SEGUIMIENTO',
+  'COMPLETADA',
+  'FALLIDA_REINTENTABLE',
+];
+const G3_INSTALLATION_LOCK_NAMESPACE = 20260926;
+
+@Injectable()
+export class InstallationIntegrationService {
+  private readonly logger = new Logger(InstallationIntegrationService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+    private readonly closureProcessor: G3ClosureProcessor,
+    @Inject(G3_INTEGRATION_CLIENT) private readonly client: G3IntegrationClient,
+  ) {}
+
+  async requestInstallation(dto: RequestG3InstallationDto, currentUser: AuthUser) {
+    const initialContext = await this.resolveContext(dto, currentUser);
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+        CAST(${G3_INSTALLATION_LOCK_NAMESPACE} AS integer),
+        CAST(${initialContext.contract.idContrato} AS integer)
+      )`;
+      const existing = await tx.integracionInstalacionG3.findFirst({
+        where: {
+          idContrato: initialContext.contract.idContrato,
+          estadoIntegracion: { in: ACTIVE_REQUEST_STATES },
+        },
+        orderBy: { fechaSolicitud: 'desc' },
+      });
+      if (existing) {
+        this.assertCompanyAccess(existing.idEmpresa, currentUser);
+        if (existing.idEmpresa !== initialContext.idEmpresa
+          || existing.idProspecto !== initialContext.prospect.idProspecto
+          || existing.idPlan !== initialContext.plan.idPlan
+          || (existing.idCliente != null && initialContext.customer?.idCliente !== existing.idCliente)
+          || (initialContext.service && existing.idServicio !== initialContext.service.idServicio)) {
+          throw new BadRequestException('El tracking existente no corresponde a las relaciones del contrato objetivo');
+        }
+        return { tracking: existing, created: false as const };
+      }
+
+      const context = await this.resolveContext(dto, currentUser, tx);
+      if (context.contract.idContrato !== initialContext.contract.idContrato) {
+        throw new BadRequestException('El contrato objetivo cambio durante la solicitud');
+      }
+
+      // Match the closure's service eligibility before creating any new request.
+      // Existing requests above and retries keep their original idempotent flow.
+      const candidates = context.service
+        ? [context.service]
+        : await tx.servicioContratado.findMany({
+          where: { idContrato: context.contract.idContrato },
+          orderBy: { idServicio: 'asc' }, take: 2,
+        });
+      if (candidates.length > 1) {
+        throw new BadRequestException('Indica idServicio: el contrato tiene varios servicios y requiere una referencia explicita');
+      }
+      const targetService = candidates[0];
+      if (targetService && (targetService.idCliente !== context.customer?.idCliente
+        || targetService.idEmpresa !== context.idEmpresa
+        || targetService.idContrato !== context.contract.idContrato)) {
+        throw new BadRequestException('El servicio pendiente no corresponde al contrato, cliente y empresa de la instalacion');
+      }
+      if (targetService && !['Pendiente', 'Pendiente Instalacion', 'Instalacion Programada'].includes(targetService.estadoOperativo)) {
+        throw new BadRequestException('El estado del servicio no permite solicitar la instalacion');
+      }
+
+      const requestId = randomUUID();
+      const traceId = randomUUID();
+      const payload = this.buildPayload(context, requestId, traceId);
+      const payloadHash = sha256Payload(payload);
+      const created = await tx.integracionInstalacionG3.create({
+        data: {
+          idEmpresa: context.idEmpresa,
+          idProspecto: context.prospect.idProspecto,
+          idCliente: context.customer?.idCliente,
+          idContrato: context.contract.idContrato,
+          idPlan: context.plan.idPlan,
+          idServicio: context.service?.idServicio,
+          requestId,
+          traceId,
+          payloadHash,
+          payloadSnapshot: payload,
+        },
+      });
+      await tx.prospecto.update({
+        where: { idProspecto: context.prospect.idProspecto },
+        data: { estadoPipeline: 'Instalacion solicitada G3' },
+      });
+      return { tracking: created, created: true as const };
+    });
+
+    if (!result.created) return this.toView(result.tracking);
+    const tracking = result.tracking;
+
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'SOLICITAR_INSTALACION_G3',
+      entidadAfectada: 'integracion_instalacion_g3',
+      idEntidadAfectada: tracking.idIntegracion,
+      valorNuevo: this.auditContext(tracking),
+    });
+    return this.send(tracking, currentUser, false);
+  }
+
+  async retry(idIntegracion: number, currentUser: AuthUser) {
+    const tracking = await this.getTrackingOrThrow(idIntegracion, currentUser);
+    if (tracking.fechaCierreProcesado || tracking.estadoIntegracion === 'COMPLETADA') {
+      throw new BadRequestException('La instalacion ya fue completada y no admite reintento');
+    }
+    if (tracking.estadoIntegracion === 'FALLIDA_DEFINITIVA') {
+      throw new BadRequestException('El error requiere corregir el origen antes de crear una nueva solicitud');
+    }
+    installationSnapshot(tracking);
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'REINTENTAR_INSTALACION_G3',
+      entidadAfectada: 'integracion_instalacion_g3',
+      idEntidadAfectada: tracking.idIntegracion,
+      valorNuevo: this.auditContext(tracking),
+    });
+    return this.send(tracking, currentUser, true);
+  }
+
+  async detail(idIntegracion: number, currentUser: AuthUser) {
+    const tracking = await this.getTrackingOrThrow(idIntegracion, currentUser);
+    const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
+    if (!externalId) return this.toView(tracking);
+    try {
+      const response = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
+      this.validateResponseCompany(response.data, tracking.idEmpresa);
+      const state = normalizeG3State(response.data.estado);
+      const terminal = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+      const updated = terminal
+        ? await this.prisma.integracionInstalacionG3.update({
+          where: { idIntegracion },
+          data: {
+            fechaUltimaSincronizacion: new Date(),
+            ultimoErrorSanitizado: state.known ? null : 'Estado remoto G3 no reconocido; el cierre confirmado en G8 se conserva.',
+          },
+        })
+        : await this.updateNonTerminalTracking(idIntegracion, {
+          fechaUltimaSincronizacion: new Date(),
+          estadoIntegracion: this.trackingState(state.known, state.state),
+          estadoOtG3: state.state,
+          estadoOriginalG3: state.known ? null : state.original,
+          ultimoErrorSanitizado: state.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
+        });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'CONSULTAR_OT_G3',
+        entidadAfectada: 'integracion_instalacion_g3',
+        idEntidadAfectada: idIntegracion,
+        valorNuevo: { ...this.auditContext(updated), statusHttp: response.status, duracionMs: response.durationMs },
+      });
+      return this.toView(updated, response.data);
+    } catch (error) {
+      const failure = this.normalizeError(error);
+      const updated = await this.prisma.integracionInstalacionG3.update({
+        where: { idIntegracion },
+        data: { ultimoErrorSanitizado: failure.message, fechaUltimaSincronizacion: new Date() },
+      });
+      return this.toView(updated);
+    }
+  }
+
+  async reconcile(idIntegracion: number, currentUser: AuthUser) {
+    const tracking = await this.getTrackingOrThrow(idIntegracion, currentUser);
+    if (tracking.estadoIntegracion === 'COMPLETADA' && tracking.fechaCierreProcesado) {
+      return { available: true, result: await this.closureProcessor.recoverPostClosure(idIntegracion) };
+    }
+    const externalId = tracking.idOtG3 ?? tracking.codigoOtG3;
+    if (!externalId) throw new BadRequestException('La solicitud aun no tiene una referencia de OT G3');
+    try {
+      const response = await this.client.getWorkOrderClosure(externalId, tracking.idEmpresa);
+      this.validateResponseCompany(response.data, tracking.idEmpresa);
+      if (!response.data.id_ot || !response.data.request_id
+        || (response.data.estado && response.data.estado.trim().toUpperCase() !== 'COMPLETADA')) {
+        const updated = await this.prisma.integracionInstalacionG3.update({
+          where: { idIntegracion },
+          data: { fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: null },
+        });
+        return { available: false, tracking: this.toView(updated) };
+      }
+      const closure = {
+        id_ot: Number(response.data.id_ot),
+        request_id: response.data.request_id,
+        trace_id: response.data.trace_id,
+        id_empresa: response.data.id_empresa,
+        id_prospecto: response.data.id_prospecto,
+        id_contrato: response.data.id_contrato,
+        id_plan: response.data.id_plan,
+        equipos_instalados: response.data.equipos_instalados,
+        equipos_retirados: response.data.equipos_retirados,
+        ...(response.data.fecha_completada === undefined ? {} : { fecha_completada: response.data.fecha_completada }),
+        ...(response.data.id_tecnico === undefined ? {} : { id_tecnico: response.data.id_tecnico }),
+        ...(response.data.potencia_optica_dbm === undefined ? {} : { potencia_optica_dbm: response.data.potencia_optica_dbm }),
+        ...(response.data.resultado_llamada === undefined ? {} : { resultado_llamada: response.data.resultado_llamada }),
+        ...(response.data.resuelto_remotamente === undefined ? {} : { resuelto_remotamente: response.data.resuelto_remotamente }),
+        ...(response.data.materiales === undefined ? {} : { materiales: response.data.materiales }),
+      };
+      const result = await this.closureProcessor.process(
+        closure as G3ClosurePayload,
+        'RECONCILIACION',
+        tracking.idIntegracion,
+      );
+      return { available: true, result };
+    } catch (error) {
+      const failure = this.normalizeError(error);
+      if (failure.status === 404) {
+        const updated = await this.prisma.integracionInstalacionG3.update({
+          where: { idIntegracion },
+          data: { fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: 'El cierre G3 aun no esta disponible.' },
+        });
+        return { available: false, tracking: this.toView(updated) };
+      }
+      // A GET conflict is not evidence of a conflicting installation POST. Confirm
+      // the pending state and correlation independently; never infer it from 409 alone.
+      if (failure.code === 'G3_CONFLICTO_CONSULTA') {
+        try {
+          const detail = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
+          const state = normalizeG3State(detail.data.estado);
+          if (detail.data.id_empresa === tracking.idEmpresa
+            && String(detail.data.id_ot) === String(externalId)
+            && detail.data.request_id === tracking.requestId && detail.data.trace_id === tracking.traceId
+            && state.known && ['PENDIENTE', 'ASIGNADA', 'EN_CURSO', 'PENDIENTE_CLIENTE_AUSENTE'].includes(state.state)) {
+            const updated = await this.updateNonTerminalTracking(idIntegracion, {
+              fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: 'El cierre G3 aun no esta disponible.',
+            });
+            return { available: false, tracking: this.toView(updated) };
+          }
+        } catch { /* Preserve the original sanitized conflict; no activation or retry. */ }
+      }
+      await this.prisma.integracionInstalacionG3.update({
+        where: { idIntegracion },
+        data: { ultimoErrorSanitizado: failure.message, fechaUltimaSincronizacion: new Date() },
+      });
+      if (error instanceof G3IntegrationError) {
+        throw new HttpException({ code: failure.code, message: failure.message }, failure.status ?? 502);
+      }
+      throw error;
+    }
+  }
+
+  async latestForProspect(idProspecto: number, currentUser: AuthUser) {
+    const prospect = await this.prisma.prospecto.findUnique({ where: { idProspecto } });
+    if (!prospect) throw new NotFoundException('Prospecto no encontrado');
+    this.assertCompanyAccess(prospect.idEmpresa, currentUser);
+    const tracking = await this.prisma.integracionInstalacionG3.findFirst({
+      where: { idProspecto },
+      orderBy: { fechaSolicitud: 'desc' },
+    });
+    return tracking ? this.toView(tracking) : null;
+  }
+
+  async latestForContract(idContrato: number, currentUser: AuthUser) {
+    const contract = await this.prisma.contrato.findUnique({ where: { idContrato } });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+    this.assertCompanyAccess(contract.idEmpresa, currentUser);
+    const tracking = await this.prisma.integracionInstalacionG3.findFirst({
+      where: { idContrato },
+      orderBy: { fechaSolicitud: 'desc' },
+    });
+    return tracking ? this.toView(tracking) : null;
+  }
+
+  async historicalClosureForService(idServicio: number, currentUser: AuthUser): Promise<HistoricalClosureView> {
+    const service = await this.prisma.servicioContratado.findUnique({ where: { idServicio } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+    this.assertCompanyAccess(service.idEmpresa, currentUser);
+    const view = (estadoConsulta: HistoricalClosureView['estadoConsulta'], mensaje: string,
+      datos: HistoricalClosureView['datos'] = null): HistoricalClosureView => ({
+      fuente: 'G3_CONSULTA_TEMPORAL', persistido: false, consultadoEn: new Date().toISOString(),
+      estadoConsulta, mensaje, datos,
+    });
+    if (!positiveId(service.idEmpresa) || !positiveId(service.idContrato)) {
+      return view('NO_DISPONIBLE', 'El servicio no tiene referencias suficientes para consultar el cierre.');
+    }
+    const tracking = await this.prisma.integracionInstalacionG3.findFirst({
+      where: { idServicio, idEmpresa: service.idEmpresa, idContrato: service.idContrato, estadoIntegracion: 'COMPLETADA' },
+      orderBy: [{ fechaCierreProcesado: 'desc' }, { idIntegracion: 'desc' }],
+    });
+    if (!tracking || tracking.idEmpresa !== service.idEmpresa || tracking.idContrato !== service.idContrato
+      || tracking.idServicio !== service.idServicio || tracking.idCliente !== service.idCliente
+      || tracking.estadoIntegracion !== 'COMPLETADA' || !tracking.fechaCierreProcesado
+      || numericWorkOrderId(tracking.idOtG3) === null || !positiveId(tracking.idProspecto)
+      || !positiveId(tracking.idPlan) || !tracking.requestId || !tracking.traceId) {
+      return view('NO_DISPONIBLE', 'No hay un cierre G3 confirmado con referencias completas para este servicio.');
+    }
+    // Deliberately independent of detail/reconcile: no tracking, events, audit or activation writes.
+    // The historical plan is the tracking's plan, which may differ from a later commercial plan change.
+    try {
+      const response = await this.client.getWorkOrderClosure(tracking.idOtG3!, tracking.idEmpresa);
+      const datos = historicalClosureData(response.data, tracking);
+      if (!datos) return view('NO_VALIDADO', 'G3 no entregó todas las referencias coincidentes del cierre. No se muestran datos técnicos.');
+      return view('DISPONIBLE', 'Consulta temporal de G3; no modifica los datos guardados ni el estado confirmado en G8.', datos);
+    } catch {
+      // Never expose a remote response/error body, or turn a transient failure into a business-state change.
+      return view('NO_DISPONIBLE', 'No se pudo consultar el cierre en G3. La instalación confirmada en G8 no cambia.');
+    }
+  }
+
+  private async send(
+    tracking: Awaited<ReturnType<InstallationIntegrationService['getTrackingOrThrow']>>,
+    currentUser: AuthUser,
+    retry: boolean,
+  ) {
+    const payload = tracking.payloadSnapshot as G3InstallationPayload;
+    const attemptAt = new Date();
+    await this.prisma.integracionInstalacionG3.update({
+      where: { idIntegracion: tracking.idIntegracion },
+      data: { ultimoIntento: attemptAt, intentos: { increment: 1 }, ultimoErrorSanitizado: null },
+    });
+    try {
+      const response = await this.client.createInstallation(payload);
+      this.validateResponseCompany(response.data, tracking.idEmpresa);
+      if (response.data.request_id && response.data.request_id !== tracking.requestId) {
+        throw new G3IntegrationError('G3_CORRELACION_INVALIDA', 409, false, 'G3 respondio con un request_id diferente.');
+      }
+      const idOtG3 = externalWorkOrderId(response.data as Record<string, unknown>);
+      const codigoOtG3 = externalWorkOrderCode(response.data as Record<string, unknown>);
+      if (!idOtG3 && !codigoOtG3) {
+        throw new G3IntegrationError('G3_RESPUESTA_INVALIDA', 502, true, 'G3 no entrego una referencia de orden.');
+      }
+      const state = normalizeG3State(response.data.estado ?? 'PENDIENTE');
+      const updated = await this.updateNonTerminalTracking(tracking.idIntegracion, {
+        idOtG3,
+        codigoOtG3,
+        estadoIntegracion: this.trackingState(state.known, state.state),
+        estadoOtG3: state.state,
+        estadoOriginalG3: state.known ? null : state.original,
+        fechaUltimaSincronizacion: new Date(),
+        ultimoErrorSanitizado: state.known ? null : 'Estado G3 no reconocido; requiere seguimiento.',
+      });
+      if (tracking.idProspecto && updated.estadoIntegracion !== 'COMPLETADA' && !updated.fechaCierreProcesado) {
+        await this.prisma.prospecto.update({
+          where: { idProspecto: tracking.idProspecto },
+          data: { estadoPipeline: this.pipelineState(state.state) },
+        });
+      }
+      this.logger.log(JSON.stringify({
+        result: 'accepted', requestId: tracking.requestId, traceId: tracking.traceId,
+        idEmpresa: tracking.idEmpresa, idProspecto: tracking.idProspecto,
+        idContrato: tracking.idContrato, idOtG3, statusHttp: response.status, durationMs: response.durationMs,
+      }));
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'INSTALACION_G3_ACEPTADA',
+        entidadAfectada: 'integracion_instalacion_g3',
+        idEntidadAfectada: updated.idIntegracion,
+        valorNuevo: {
+          ...this.auditContext(updated), statusHttp: response.status,
+          duplicado: response.status === 200 || response.data.duplicado === true,
+          retry,
+        },
+      });
+      return this.toView(updated, response.data);
+    } catch (error) {
+      const failure = this.normalizeError(error);
+      const updated = await this.updateNonTerminalTracking(tracking.idIntegracion, {
+        estadoIntegracion: failure.retryable ? 'FALLIDA_REINTENTABLE' : 'FALLIDA_DEFINITIVA',
+        ultimoErrorSanitizado: failure.message,
+      });
+      this.logger.warn(JSON.stringify({
+        result: failure.code, requestId: tracking.requestId, traceId: tracking.traceId,
+        idEmpresa: tracking.idEmpresa, idProspecto: tracking.idProspecto,
+        idContrato: tracking.idContrato, statusHttp: failure.status,
+      }));
+      return this.toView(updated);
+    }
+  }
+
+  async installationRequirements(dto: RequestG3InstallationDto, currentUser: AuthUser) {
+    const context = await this.resolveContext(dto, currentUser, this.prisma, true);
+    return { idContrato: context.contract.idContrato, comunaFaltante: !context.comuna,
+      puedeCompletarComuna: currentUser.roles.some(role => (ACCESS_ROLES.MANAGE_PROSPECTS as readonly string[]).includes(role)) };
+  }
+
+  async completeInstallationData(idContrato: number, dto: CompleteG3InstallationDataDto, currentUser: AuthUser) {
+    if (!currentUser.roles.some(role => (ACCESS_ROLES.MANAGE_PROSPECTS as readonly string[]).includes(role))) {
+      throw new ForbiddenException('La correccion requiere un rol autorizado para gestionar prospectos');
+    }
+    const comuna = dto.comuna.trim();
+    if (!comuna || dto.confirmarMismaDireccion !== true) throw new BadRequestException('Confirma la comuna de la misma direccion contratada');
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(CAST(${G3_INSTALLATION_LOCK_NAMESPACE} AS integer), CAST(${idContrato} AS integer))`;
+      const initial = await this.resolveContext({ idContrato }, currentUser, tx, true);
+      // contractPlan also locks this prospect: a concurrent new contract cannot
+      // appear between the relationship check and the supplemental update.
+      await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${initial.prospect.idProspecto} FOR UPDATE`;
+      const context = await this.resolveContext({ idContrato }, currentUser, tx, true);
+      if (context.comuna) throw new BadRequestException('La comuna ya esta informada; su cambio requiere revision contractual');
+      const otherContract = await tx.contrato.findFirst({ where: { idProspecto: context.prospect.idProspecto, idContrato: { not: idContrato } } });
+      const tracking = await tx.integracionInstalacionG3.findFirst({ where: { idProspecto: context.prospect.idProspecto } });
+      if (otherContract || tracking) throw new BadRequestException('Existen contratos o solicitudes tecnicas que requieren revision antes de completar datos');
+      await tx.prospecto.update({ where: { idProspecto: context.prospect.idProspecto }, data: { comuna } });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario, accion: 'COMPLETAR_COMUNA_INSTALACION', entidadAfectada: 'prospecto',
+        idEntidadAfectada: context.prospect.idProspecto, valorAnterior: { comuna: null },
+        valorNuevo: { comuna, idContrato, idEmpresa: context.idEmpresa, mismaDireccionConfirmada: true, contratoModificado: false },
+      }, tx);
+      return { idContrato, comunaFaltante: false };
+    });
+  }
+
+  private async resolveContext(
+    dto: RequestG3InstallationDto,
+    currentUser: AuthUser,
+    db: Pick<Prisma.TransactionClient, 'contrato' | 'servicioContratado' | 'cotizacion' | 'cliente'> = this.prisma,
+    allowMissingComuna = false,
+  ) {
+    if (!dto.idProspecto && !dto.idContrato && !dto.idServicio) {
+      throw new BadRequestException('Indica prospecto, contrato o servicio para solicitar la instalacion');
+    }
+    const service = dto.idServicio
+      ? await db.servicioContratado.findUnique({
+        where: { idServicio: dto.idServicio },
+        include: { cliente: { include: { direcciones: true } }, direccion: true },
+      })
+      : null;
+    if (dto.idServicio && !service) throw new NotFoundException('Servicio contratado no encontrado');
+
+    const contractId = dto.idContrato ?? service?.idContrato;
+    const contract = contractId
+      ? await db.contrato.findUnique({
+        where: { idContrato: contractId },
+        include: { plan: true, prospecto: true, cliente: { include: { direcciones: true } } },
+      })
+      : dto.idProspecto
+        ? await db.contrato.findFirst({
+          where: { idProspecto: dto.idProspecto, estado: { in: ['Firmado', 'Activo'] } },
+          include: { plan: true, prospecto: true, cliente: { include: { direcciones: true } } },
+          orderBy: { idContrato: 'desc' },
+        })
+        : null;
+    if (!contract) throw new BadRequestException('No existe un contrato firmado para solicitar la instalacion');
+    const idEmpresa = contract.idEmpresa;
+    if (!idEmpresa) throw new BadRequestException('El contrato no tiene empresa asociada');
+    this.assertCompanyAccess(idEmpresa, currentUser);
+    if (!['Firmado', 'Activo'].includes(contract.estado)) {
+      throw new BadRequestException('El contrato debe estar firmado antes de solicitar la instalacion');
+    }
+    if (!contract.prospecto) {
+      throw new BadRequestException('La integracion G3 requiere un contrato originado desde un prospecto.');
+    }
+    if (dto.idProspecto && contract.idProspecto !== dto.idProspecto) {
+      throw new BadRequestException('El contrato no corresponde al prospecto indicado');
+    }
+    if (service && service.idContrato !== contract.idContrato) {
+      throw new BadRequestException('El servicio no corresponde al contrato indicado');
+    }
+    if (!contract.plan || !contract.idPlan) throw new BadRequestException('El contrato no tiene un plan valido');
+    if (contract.plan.idEmpresa !== idEmpresa
+      || (contract.prospecto && contract.prospecto.idEmpresa !== idEmpresa)
+      || (service && service.idEmpresa !== idEmpresa)) {
+      throw new BadRequestException('La instalacion contiene referencias cruzadas entre empresas');
+    }
+    if (contract.plan.idPlan !== contract.idPlan || contract.prospecto.idProspecto !== contract.idProspecto) {
+      throw new BadRequestException('Las referencias de plan o prospecto no corresponden al contrato');
+    }
+    const customer = contract.cliente;
+    if ((contract.idCliente != null && (!customer || customer.idCliente !== contract.idCliente))
+      || (customer && customer.idCliente !== contract.idCliente)
+      || [contract.prospecto.idCliente, service?.idCliente, service?.cliente?.idCliente]
+        .some((id) => id != null && id !== contract.idCliente)
+      || (service && (!customer || service.direccion?.idCliente != null
+        && service.direccion.idCliente !== customer.idCliente))) {
+      throw new BadRequestException('Las referencias de cliente no corresponden al contrato objetivo');
+    }
+    const feasible = await db.cotizacion.findFirst({
+      where: {
+        idProspecto: contract.prospecto.idProspecto,
+        idPlan: contract.idPlan,
+        factibilidadVerificada: true,
+      },
+    });
+    if (!feasible) throw new BadRequestException('La instalacion requiere factibilidad verificada para el plan contratado');
+
+    const prospect = contract.prospecto;
+    const rutResult = validateRut(prospect?.rut ?? customer?.rut ?? '');
+    if (!rutResult.valid || !rutResult.normalized) throw new BadRequestException(rutResult.reason ?? 'RUT invalido');
+    if (customer && validateRut(customer.rut ?? '').normalized !== rutResult.normalized) {
+      throw new BadRequestException('La identidad del cliente no corresponde al prospecto');
+    }
+    if (!customer && await db.cliente.findUnique({ where: { rut: rutResult.normalized } })) {
+      throw new BadRequestException('La identidad existente requiere vinculacion contractual explicita');
+    }
+    const name = prospect?.nombreCompleto?.trim() || customer?.nombreCompleto?.trim();
+    if (!name) throw new BadRequestException('La instalacion requiere nombre completo');
+    const phone = this.normalizePhone(prospect?.telefono ?? customer?.telefono);
+    const address = contract.direccionInstalacion?.trim()
+      || prospect?.direccion?.trim()
+      || service?.direccion?.direccionCompleta?.trim();
+    const comuna = contract.comunaInstalacion?.trim()
+      || prospect?.comuna?.trim()
+      || service?.direccion?.comuna?.trim();
+    if (!address) throw new BadRequestException('La instalacion requiere direccion completa');
+    if (!comuna && !allowMissingComuna) throw new BadRequestException('La instalacion requiere comuna');
+    return { idEmpresa, contract, plan: contract.plan, prospect, customer, service, rut: rutResult.normalized, name, phone, address, comuna: comuna || '' };
+  }
+
+  private buildPayload(
+    context: Awaited<ReturnType<InstallationIntegrationService['resolveContext']>>,
+    requestId: string,
+    traceId: string,
+  ): G3InstallationPayload {
+    return {
+      request_id: requestId,
+      trace_id: traceId,
+      id_empresa: context.idEmpresa,
+      id_prospecto: context.prospect.idProspecto,
+      id_contrato: context.contract.idContrato,
+      id_plan: context.plan.idPlan,
+      persona: {
+        rut: context.rut,
+        nombre_completo: context.name,
+        telefono: context.phone,
+        ...(context.prospect?.email?.trim() || context.customer?.email?.trim()
+          ? { email: context.prospect?.email?.trim() || context.customer?.email?.trim() || undefined }
+          : {}),
+      },
+      direccion: { direccion_completa: context.address, comuna: context.comuna },
+    };
+  }
+
+  private normalizePhone(value: string | null | undefined) {
+    const compact = (value ?? '').replace(/[\s().-]/g, '');
+    const normalized = compact.startsWith('+') ? compact : compact.startsWith('56') ? `+${compact}` : compact.length === 9 ? `+56${compact}` : compact;
+    if (!/^\+569\d{8}$/.test(normalized)) {
+      throw new BadRequestException('El telefono debe ser un movil chileno valido en formato E.164 (+569XXXXXXXX)');
+    }
+    return normalized;
+  }
+
+  private async getTrackingOrThrow(idIntegracion: number, currentUser: AuthUser) {
+    const tracking = await this.prisma.integracionInstalacionG3.findUnique({ where: { idIntegracion } });
+    if (!tracking) throw new NotFoundException('Tracking de instalacion no encontrado');
+    this.assertCompanyAccess(tracking.idEmpresa, currentUser);
+    return tracking;
+  }
+
+  private async updateNonTerminalTracking(
+    idIntegracion: number,
+    data: Prisma.IntegracionInstalacionG3UpdateManyMutationInput,
+  ) {
+    await this.prisma.integracionInstalacionG3.updateMany({
+      where: {
+        idIntegracion,
+        estadoIntegracion: { not: 'COMPLETADA' },
+        fechaCierreProcesado: null,
+      },
+      data,
+    });
+    const current = await this.prisma.integracionInstalacionG3.findUnique({ where: { idIntegracion } });
+    if (!current) throw new NotFoundException('Tracking de instalacion no encontrado');
+    return current;
+  }
+
+  private assertCompanyAccess(idEmpresa: number | null, currentUser: AuthUser) {
+    if (!isAdministrator(currentUser.roles) && (!currentUser.idEmpresa || currentUser.idEmpresa !== idEmpresa)) {
+      throw new ForbiddenException('El registro no pertenece a tu empresa');
+    }
+  }
+
+  private validateResponseCompany(response: G3WorkOrderResponse, idEmpresa: number) {
+    if (response.id_empresa !== undefined && response.id_empresa !== idEmpresa) {
+      throw new G3IntegrationError('G3_SCOPE_EMPRESA_INVALIDO', 403, false, 'G3 respondio con una empresa diferente.');
+    }
+  }
+
+  private normalizeError(error: unknown) {
+    if (error instanceof G3IntegrationError) return error;
+    if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
+    return new G3IntegrationError('G3_ERROR_INESPERADO', null, true, 'No fue posible completar la comunicacion con G3.');
+  }
+
+  private pipelineState(state: string) {
+    if (state === 'CANCELADA') return 'Seguimiento comercial';
+    if (state === 'PENDIENTE_CLIENTE_AUSENTE') return 'Cliente ausente';
+    if (state === 'EN_SEGUIMIENTO') return 'Instalacion en seguimiento';
+    return 'Instalacion en G3';
+  }
+
+  private trackingState(known: boolean, state: string) {
+    if (!known || state === 'COMPLETADA') return 'EN_SEGUIMIENTO';
+    return 'ENVIADA';
+  }
+
+  private auditContext(tracking: { requestId: string; traceId: string; idEmpresa: number; idProspecto: number | null; idContrato: number; idOtG3: string | null }) {
+    return {
+      requestId: tracking.requestId,
+      traceId: tracking.traceId,
+      idEmpresa: tracking.idEmpresa,
+      idProspecto: tracking.idProspecto,
+      idContrato: tracking.idContrato,
+      idOtG3: tracking.idOtG3,
+    };
+  }
+
+  private toView(tracking: Record<string, unknown>, detail?: G3WorkOrderResponse) {
+    const { payloadSnapshot: _payloadSnapshot, payloadHash: _payloadHash, ...safeTracking } = tracking;
+    const terminal = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+    const remoteState = detail ? normalizeG3State(detail.estado) : null;
+    return {
+      ...safeTracking,
+      fuente: 'G3',
+      estadoPresentacion: terminal ? 'COMPLETADA' : normalizeG3State(detail?.estado ?? tracking.estadoOtG3).state,
+      estadoRemotoG3: remoteState?.state ?? null,
+      estadoOriginalRemotoG3: remoteState?.known ? null : remoteState?.original ?? null,
+      detalle: detail ? {
+        idOtG3: externalWorkOrderId(detail as Record<string, unknown>),
+        codigoOtG3: externalWorkOrderCode(detail as Record<string, unknown>),
+        tipo: detail.tipo ?? null,
+        estado: normalizeG3State(detail.estado).state,
+        estadoOriginalG3: normalizeG3State(detail.estado).known ? null : normalizeG3State(detail.estado).original,
+        fecha: detail.fecha ?? null,
+        fechaCompletada: detail.fecha_completada ?? null,
+        idTecnicoG3: detail.id_tecnico ?? null,
+        potenciaOpticaDbm: detail.potencia_optica_dbm ?? null,
+        resultadoLlamada: detail.resultado_llamada ?? null,
+        resueltoRemotamente: detail.resuelto_remotamente ?? null,
+        materiales: detail.materiales ?? null,
+        tecnico: detail.tecnico ?? null,
+        direccion: detail.direccion ?? null,
+        persona: detail.persona ?? null,
+        telefono: detail.telefono ?? null,
+        resultado: detail.resultado_tecnico ?? detail.resultado ?? null,
+      } : null,
+    };
+  }
+}

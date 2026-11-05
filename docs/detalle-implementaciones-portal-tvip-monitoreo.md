@@ -134,6 +134,10 @@ GET  /api/portal/me
 6. Registra intentos fallidos en `intento_fallido`.
 7. Devuelve un token propio del portal.
 
+### Ownership intergrupo ratificado
+
+G2 es owner de la autenticación y sesiones del Portal, incluida `cliente.password_portal_hash`. Para activar una cuenta identifica el candidato por `id_empresa` y RUT normalizado, pero conocer el RUT no basta: G2 debe verificar un segundo factor de posesión mediante su propio mecanismo Portal antes de establecer el hash. G8 no almacena OTP ni implementa un segundo sistema de autenticación Portal. La proyección Prisma G8 incluye la columna para mantener alineación física y permitir la lectura técnica necesaria, sin asumir ownership de la ceremonia de activación.
+
 ### Por que se hizo asi
 
 El cliente no debe iniciar sesion como empleado interno. Por eso no se reutilizo `AuthController`. El portal tiene autenticacion propia, lo que evita exponer permisos administrativos o informacion de otros clientes.
@@ -542,13 +546,7 @@ Se aplicaron manualmente dentro del contenedor sin borrar datos.
 
 ## Comandos Para Levantar Local
 
-Desde:
-
-```powershell
-cd "C:\Users\Manguera\CRM Finet proyect\Team_8---CRM"
-```
-
-Levantar:
+Desde la raíz del repositorio, ejecutar:
 
 ```powershell
 npm run docker:local

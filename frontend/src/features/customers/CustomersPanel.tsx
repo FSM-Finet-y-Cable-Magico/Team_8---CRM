@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, BarChart3, Boxes, ChevronDown, CircleCheckBig, Router, Ticket as TicketIcon, UserCog, Users, Wifi } from 'lucide-react';
 import {
   api,
@@ -12,6 +12,7 @@ import {
   OperationalObservation,
   PaymentZone,
   Plan,
+  Prospect,
   TvipCredentialSummary,
   TvipGenerationResult,
 } from '../../api';
@@ -27,11 +28,17 @@ import {
   normalizeWorkOrderValue,
   normalizeRutInput,
   technicalEntries,
+  userFacingMessage,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
 import { ObservationsModal } from '../observations';
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
+import { CustomerRequestsPanel } from './CustomerRequestsPanel';
+import {
+  CustomerServicesRequestGate,
+  type CustomerServicesLoadState,
+} from './customer-services-state';
 
 type CustomerHistory = {
   contratos: Array<{ idContrato: number; estado: string | null; plan?: Plan | null }>;
@@ -106,18 +113,37 @@ function customerAddressLabel(customer: Customer) {
     ?? 'No registrada';
 }
 
+function pendingActivationContract(prospect: Prospect) {
+  return prospect.contratos?.[0] ?? null;
+}
+
+function pendingActivationAddress(prospect: Prospect) {
+  const contract = pendingActivationContract(prospect);
+  const address = [contract?.direccionInstalacion, contract?.comunaInstalacion, contract?.ciudadInstalacion]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(', ');
+
+  return address || prospect.direccion || 'No registrada';
+}
+
 export function CustomersPanel({
   customers,
   plans,
   scope,
   permissions,
+  onManageInstallation,
   onChanged,
+  focusedCustomerId,
+  onFocusConsumed,
 }: {
   customers: Customer[];
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
+  onManageInstallation: (idProspecto: number) => void;
   onChanged: () => void;
+  focusedCustomerId?: number | null;
+  onFocusConsumed?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [statusValue, setStatusValue] = useState('Activo');
@@ -125,19 +151,15 @@ export function CustomersPanel({
   const [status, setStatus] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [services, setServices] = useState<CustomerService[]>([]);
+  const [servicesLoad, setServicesLoad] = useState<CustomerServicesLoadState>({
+    customerId: null,
+    status: 'idle',
+    error: '',
+  });
+  const servicesRequestGate = useRef(new CustomerServicesRequestGate());
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [serviceCreateForm, setServiceCreateForm] = useState(emptyServiceForm());
   const [serviceUpdateForm, setServiceUpdateForm] = useState(emptyServiceForm());
-  const [equipmentForm, setEquipmentForm] = useState({
-    numeroSerie: '',
-    modelo: '',
-    macAddress: '',
-    puertoOlt: '',
-    observaciones: '',
-    modalidadAsignacion: 'Propiedad empresa',
-    valorArriendoMensual: '',
-    fechaInicioAsignacion: '',
-  });
   const [paymentZones, setPaymentZones] = useState<PaymentZone[]>([]);
   const [customerTechnicalForm, setCustomerTechnicalForm] = useState({
     tecnologiaPrincipal: '',
@@ -181,6 +203,10 @@ export function CustomersPanel({
   const [installOrderError, setInstallOrderError] = useState('');
   const [page, setPage] = useState(1);
   const [customerStatusFilter, setCustomerStatusFilter] = useState('');
+  const [pendingActivations, setPendingActivations] = useState<Prospect[]>([]);
+  const [pendingActivationsError, setPendingActivationsError] = useState('');
+  const [pendingActivationsLoading, setPendingActivationsLoading] = useState(true);
+  const [selectedPendingActivation, setSelectedPendingActivation] = useState<Prospect | null>(null);
 
   const normalizedSearchTerm = normalizeWorkOrderValue(searchTerm);
   const customerList = customers.filter((customer) => {
@@ -248,8 +274,15 @@ export function CustomersPanel({
       if (permissions.manageTvip) {
         void loadCustomerTvip(selectedCustomer.idCliente, true);
       }
+    } else {
+      servicesRequestGate.current.cancel();
+      setServices([]);
+      setSelectedServiceId(null);
+      setServicesLoad({ customerId: null, status: 'idle', error: '' });
     }
   }, [selectedCustomer?.idCliente]);
+
+  useEffect(() => () => servicesRequestGate.current.cancel(), []);
 
   useEffect(() => {
     if (!selectedService) {
@@ -295,8 +328,44 @@ export function CustomersPanel({
     setSearchTerm('');
     void loadPaymentZones(true);
   }, [scope]);
+  useEffect(() => {
+    let active = true;
+    setPendingActivationsLoading(true);
+    setPendingActivationsError('');
+
+    api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
+      .then(({ data }) => {
+        if (active) {
+          setPendingActivations(data);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setPendingActivations([]);
+          setPendingActivationsError(apiErrorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setPendingActivationsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [scope, customers]);
 
   useEffect(() => { setPage(1); }, [customers.length, searchTerm, customerStatusFilter]);
+
+  useEffect(() => {
+    if (!focusedCustomerId) return;
+    const customer = customers.find(value => value.idCliente === focusedCustomerId);
+    setSearchTerm(''); setCustomerStatusFilter('');
+    if (customer) { setSelectedId(customer.idCliente); setManagementOpen(true); setStatus(''); }
+    else { setManagementOpen(false); setStatus('No se encontró el cliente solicitado en este alcance.'); }
+    onFocusConsumed?.();
+  }, [focusedCustomerId, customers, onFocusConsumed]);
 
   function openCustomerManagement(customerId: number) {
     setSelectedId(customerId);
@@ -461,18 +530,25 @@ export function CustomersPanel({
   }
 
   async function loadServicesForCustomer(idCliente: number, silent = false, preferredServiceId?: number) {
+    const token = servicesRequestGate.current.begin(idCliente);
+    setServicesLoad({ customerId: idCliente, status: 'loading', error: '' });
     try {
-      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`);
+      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { signal: token.signal });
+      if (!servicesRequestGate.current.isCurrent(token)) return;
       setServices(data);
       setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);
+      setServicesLoad({ customerId: idCliente, status: data.length ? 'success' : 'empty', error: '' });
 
       if (!silent) {
         setStatus(data.length ? 'Servicios contratados cargados' : 'El cliente no tiene servicios registrados');
       }
     } catch (err) {
+      if (!servicesRequestGate.current.isCurrent(token)) return;
+      const message = apiErrorMessage(err);
       setServices([]);
       setSelectedServiceId(null);
-      setStatus(apiErrorMessage(err));
+      setServicesLoad({ customerId: idCliente, status: 'error', error: message });
+      setStatus(message);
     }
   }
 
@@ -611,47 +687,6 @@ export function CustomersPanel({
     }
   }
 
-  async function attachEquipment(event: FormEvent) {
-    event.preventDefault();
-
-    if (!selectedService || !selectedCustomer) {
-      return;
-    }
-
-    if (!equipmentForm.numeroSerie.trim()) {
-      setStatus('Ingresa el numero de serie del equipo a asociar.');
-      return;
-    }
-
-    try {
-      await api.post(`/services/${selectedService.idServicio}/equipment`, {
-        numeroSerie: equipmentForm.numeroSerie.trim(),
-        modelo: equipmentForm.modelo.trim() || undefined,
-        macAddress: equipmentForm.macAddress.trim() || undefined,
-        puertoOlt: equipmentForm.puertoOlt.trim() || undefined,
-        observaciones: equipmentForm.observaciones.trim() || undefined,
-        modalidadAsignacion: equipmentForm.modalidadAsignacion,
-        valorArriendoMensual: equipmentForm.valorArriendoMensual ? Number(equipmentForm.valorArriendoMensual) : undefined,
-        fechaInicioAsignacion: equipmentForm.fechaInicioAsignacion || undefined,
-      });
-      setEquipmentForm({
-        numeroSerie: '',
-        modelo: '',
-        macAddress: '',
-        puertoOlt: '',
-        observaciones: '',
-        modalidadAsignacion: 'Propiedad empresa',
-        valorArriendoMensual: '',
-        fechaInicioAsignacion: '',
-      });
-      await loadServicesForCustomer(selectedCustomer.idCliente, true, selectedService.idServicio);
-      setStatus('Equipo asociado al servicio contratado');
-      onChanged();
-    } catch (err) {
-      setStatus(apiErrorMessage(err));
-    }
-  }
-
   function updateInstallOrderSchedule(field: 'fechaProgramada' | 'horaVisita', value: string) {
     setInstallOrderForm((current) => ({ ...current, [field]: value }));
     setInstallAvailability(null);
@@ -716,9 +751,9 @@ export function CustomersPanel({
       setInstallTechnicianId(data.tecnicosDisponibles[0] ? String(data.tecnicosDisponibles[0].idTecnico) : '');
 
       if (data.tecnicosDisponibles.length) {
-        setInstallOrderStatus(data.mensaje);
+        setInstallOrderStatus(userFacingMessage(data.mensaje, 'Disponibilidad de instalación consultada.'));
       } else {
-        setInstallOrderError(data.mensaje);
+        setInstallOrderError(userFacingMessage(data.mensaje, 'No se pudo confirmar la disponibilidad de instalación.'));
       }
     } catch (err) {
       setInstallAvailability(null);
@@ -795,7 +830,63 @@ export function CustomersPanel({
     <section className="customers-module">
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
-          <h2>Clientes</h2>
+          <h2>Pendientes de activación</h2>
+        </div>
+        <div className="customer-list-filters">
+          <span>Pendientes de activación: {pendingActivations.length}</span>
+        </div>
+        {pendingActivationsError && <p className="inline-status">No fue posible cargar pendientes de activación: {pendingActivationsError}</p>}
+        {pendingActivationsLoading ? (
+          <p className="inline-status">Cargando pendientes de activación...</p>
+        ) : pendingActivations.length ? (
+          <div className="table-wrap customers-table-wrap">
+            <table className="customers-table">
+              <thead>
+                <tr>
+                  <th>RUT</th>
+                  <th>Nombre</th>
+                  <th>Empresa</th>
+                  <th>Plan</th>
+                  <th>Contrato</th>
+                  <th>Fecha de firma</th>
+                  <th>Dirección prevista</th>
+                  <th>Comuna</th>
+                  <th>Ciudad</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingActivations.map((prospect) => {
+                  const contract = pendingActivationContract(prospect);
+
+                  return (
+                    <tr key={prospect.idProspecto}>
+                      <td>{prospect.rut ?? '-'}</td>
+                      <td>{prospect.nombreCompleto ?? '-'}</td>
+                      <td>{prospect.empresa?.nombre ?? '-'}</td>
+                      <td>{contract?.plan?.nombreComercial ?? '-'}</td>
+                      <td>#{contract?.idContrato ?? '-'}</td>
+                      <td>{formatDateOnly(contract?.fechaFirmaManual)}</td>
+                      <td>{pendingActivationAddress(prospect)}</td>
+                      <td>{prospect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? '-'}</td>
+                      <td>{prospect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? '-'}</td>
+                      <td><StatusBadge value="Pendiente de activación" /></td>
+                      <td><button className="secondary compact" onClick={() => setSelectedPendingActivation(prospect)}>Ver detalle</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="empty-state">No hay contrataciones pendientes de activación.</p>
+        )}
+      </section>
+
+      <section className="customers-list-panel">
+        <div className="section-heading customers-list-heading">
+          <h2>Clientes activos</h2>
         </div>
         <div className="customer-search">
           <label>
@@ -808,7 +899,7 @@ export function CustomersPanel({
           </label>
         </div>
         <div className="customer-list-filters">
-          <span>{visibleCustomers.length} registros</span>
+          <span>Clientes activos: {visibleCustomers.length}</span>
           <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
             {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
@@ -894,14 +985,24 @@ export function CustomersPanel({
                 </div>
                 <div>
                   <dt>Contratos / servicios</dt>
-                  <dd>{contractOptions.length} contrato(s) · {services.length} servicio(s)</dd>
+                  <dd>{contractOptions.length} contrato(s) · {
+                    servicesLoad.customerId !== selectedCustomer.idCliente || servicesLoad.status === 'loading'
+                      ? 'cargando servicios…'
+                      : servicesLoad.status === 'error'
+                        ? 'servicios no disponibles'
+                        : `${services.length} servicio(s)`
+                  }</dd>
                 </div>
               </dl>
             </section>
 
             <CustomerContractWorkflow
+              key={selectedCustomer.idCliente}
               customer={selectedCustomer}
               services={services}
+              servicesLoad={servicesLoad.customerId === selectedCustomer.idCliente
+                ? servicesLoad
+                : { customerId: selectedCustomer.idCliente, status: 'loading', error: '' }}
               plans={plans}
               permissions={permissions}
               onRefresh={async (preferredServiceId) => {
@@ -910,10 +1011,53 @@ export function CustomersPanel({
               }}
               onOpenObservations={setObservationTarget}
             />
+            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} servicesStatus={servicesLoad.customerId === selectedCustomer.idCliente ? servicesLoad.status : 'loading'} onChanged={onChanged} />}
+            {permissions.manageObservations && <button type="button" className="secondary compact" onClick={() => setObservationTarget({ tipoEntidad: 'Cliente', idEntidad: selectedCustomer.idCliente, label: selectedCustomer.nombreCompleto })}>Observaciones del cliente</button>}
           </div>
         ) : (
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
         )}
+      </Modal>
+      <Modal title="Pendiente de activación" open={Boolean(selectedPendingActivation)} onClose={() => setSelectedPendingActivation(null)}>
+        {selectedPendingActivation && (() => {
+          const contract = pendingActivationContract(selectedPendingActivation);
+
+          return (
+            <section className="customer-profile-overview">
+              <header className="customer-profile-header">
+                <span className="customer-profile-avatar" aria-hidden="true">
+                  <Users size={22} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <h3>{selectedPendingActivation.nombreCompleto ?? 'Sin nombre registrado'}</h3>
+                  <p>{selectedPendingActivation.rut ?? 'RUT no registrado'}</p>
+                </div>
+                <StatusBadge value="Pendiente de activación" />
+              </header>
+              <dl className="customer-profile-data">
+                <div><dt>Empresa</dt><dd>{selectedPendingActivation.empresa?.nombre ?? 'No registrada'}</dd></div>
+                <div><dt>Contacto</dt><dd>{selectedPendingActivation.telefono ?? selectedPendingActivation.email ?? 'No registrado'}</dd></div>
+                <div><dt>Plan contratado</dt><dd>{contract?.plan?.nombreComercial ?? 'No registrado'}</dd></div>
+                <div><dt>Contrato</dt><dd>#{contract?.idContrato ?? '-'}</dd></div>
+                <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
+                <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
+                <div><dt>Dirección de instalación</dt><dd>{pendingActivationAddress(selectedPendingActivation)}</dd></div>
+                <div><dt>Comuna</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedPendingActivation.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
+                <div><dt>Ciudad</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
+                <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
+              </dl>
+              <p className="inline-status">La activación del cliente se realizará cuando se complete la instalación.</p>
+              {permissions.createInstallOrders && (
+                <button
+                  type="button"
+                  onClick={() => onManageInstallation(selectedPendingActivation.idProspecto)}
+                >
+                  Gestionar instalación
+                </button>
+              )}
+            </section>
+          );
+        })()}
       </Modal>
       <ObservationsModal
         target={observationTarget}

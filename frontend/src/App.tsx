@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -8,9 +8,10 @@ import {
   ClipboardList,
   FileClock,
   FileUp,
-  HandCoins,
   House,
+  Map as MapIcon,
   Router,
+  Table2,
   Ticket as TicketIcon,
   UserCog,
   UserRoundPlus,
@@ -20,7 +21,6 @@ import {
 import {
   api,
   apiErrorMessage,
-  AdvancedInventory,
   AuditLog,
   AuthUser,
   BillingOverview,
@@ -50,14 +50,15 @@ import {
 } from './constants';
 import { AuditPanel } from './features/audit';
 import { LoginScreen } from './features/auth';
-import { BillingPanel } from './features/billing';
+import { CommercialControlBookPanel } from './features/commercial';
 import { CustomersPanel } from './features/customers';
+import { CoverageZonesPanel } from './features/coverage';
 import { DashboardHome } from './features/dashboard';
 import { ImportPanel } from './features/import';
 import { InstallationsPanel } from './features/installations';
 import { InventoryPanel } from './features/inventory';
 import { PlansPanel } from './features/plans';
-import { ProspectsPanel } from './features/prospects';
+import { createProspectRegistrationDraft, ProspectsPanel } from './features/prospects';
 import { ReportsPanel } from './features/reports';
 import { TicketsPanel } from './features/tickets';
 import { UsersPanel } from './features/users';
@@ -76,6 +77,8 @@ import {
   technicalEntries,
 } from './lib';
 import { Sidebar, Topbar, type SidebarNavItem } from './layouts';
+import { useCompanyDraft } from './shared/hooks/useCompanyDraft';
+import { useTransientMessage } from './shared/hooks/useTransientMessage';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 import {
   DashboardStatCard,
@@ -86,17 +89,19 @@ import {
   MonitoringStatusView,
   QuickActionCard,
   StatusBadge,
+  ToastNotice,
   type ExpiryCustomerAlert,
 } from './shared/components';
 
 type Tab =
   | 'dashboard'
   | 'prospects'
+  | 'coverage'
   | 'installations'
   | 'customers'
   | 'inventory'
   | 'plans'
-  | 'billing'
+  | 'commercial'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -112,15 +117,19 @@ type Summary = {
   metricas: {
     clientes: number;
     prospectos: number;
+    pendientesActivacion?: number;
     instalacionesPendientes?: number;
     ticketsAbiertos?: number;
     clientesMorosos?: number;
     inventarioDisponible?: number;
     serviciosActivos?: number;
     instalacionesMensuales?: number;
+    instalacionesSinFechaTecnica?: number;
+    instalacionesRequierenRevision?: number;
     ticketsCerradosMensuales?: number;
-    churnRateMensual?: number;
-    churnBajasMensuales?: number;
+    churnRateMensual?: number | null;
+    churnBajasMensuales?: number | null;
+    churnEstado?: 'HISTORIAL_INSUFICIENTE';
     solicitudesAbiertas?: number;
     solicitudesNoFactibles?: number;
   };
@@ -159,24 +168,37 @@ export default function App() {
     return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
   });
 
+  useEffect(() => {
+    const handleExpiredSession = () => setUser(null);
+    window.addEventListener('finet:auth-expired', handleExpiredSession);
+
+    return () => window.removeEventListener('finet:auth-expired', handleExpiredSession);
+  }, []);
+
   if (!user) {
     return <LoginScreen onLogin={setUser} />;
   }
 
-  return <Dashboard user={user} onLogout={() => setUser(null)} />;
+  return <Dashboard key={user.idUsuario} user={user} onLogout={() => setUser(null)} />;
 }
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [commercialNavigation, setCommercialNavigation] = useState(0);
+  const [focusedCustomerId, setFocusedCustomerId] = useState<number | null>(null);
   const [scope, setScope] = useState('consolidado');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [prospectsLoading, setProspectsLoading] = useState(true);
+  const [prospectsError, setProspectsError] = useState('');
+  const prospectsRequest = useRef(0);
+  const prospectsScope = useRef(scope);
+  const [pendingActivationProspects, setPendingActivationProspects] = useState<Prospect[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryUnit[]>([]);
-  const [advancedInventory, setAdvancedInventory] = useState<AdvancedInventory | null>(null);
   const [billingOverview, setBillingOverview] = useState<BillingOverview | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>([]);
@@ -185,14 +207,20 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
   const [message, setMessage] = useState('');
+  const { message: notification, showMessage: showNotification, clearMessage: clearNotification } = useTransientMessage(3000);
   const isAdmin = hasPermission(user.roles, 'manageCompanyScope');
   const permissions = getDashboardPermissions(user.roles);
   const canManageCustomers = permissions.viewCustomers;
   const canViewInventory = permissions.viewInventory;
-  const canViewBilling = permissions.viewBilling;
   const canViewTickets = permissions.viewTickets;
   const canViewInstallations = permissions.viewInstallations;
   const canViewWorkOrders = permissions.viewWorkOrders;
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = window.setTimeout(() => setMessage(''), 3000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -201,19 +229,41 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
     return user.idEmpresa ?? companies[0]?.idEmpresa ?? 1;
   }, [companies, scope, user.idEmpresa]);
+  const prospectRegistration = useCompanyDraft(writeCompanyId, createProspectRegistrationDraft);
+
+  async function loadProspects() {
+    const request = ++prospectsRequest.current;
+    setProspectsLoading(true);
+    setProspectsError('');
+    // Keep the selected prospect mounted while rechecking coverage; clear only when changing company scope.
+    if (prospectsScope.current !== scope) {
+      prospectsScope.current = scope;
+      setProspects([]);
+    }
+    try {
+      const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000 });
+      if (request === prospectsRequest.current) setProspects(data);
+    } catch {
+      if (request === prospectsRequest.current) {
+        setProspectsError('No se pudieron cargar los prospectos. Comprueba la conexión del servidor y la configuración de la base de datos.');
+      }
+    } finally {
+      if (request === prospectsRequest.current) setProspectsLoading(false);
+    }
+  }
 
   async function loadData() {
+    void loadProspects();
     setMessage('');
     const errors: string[] = [];
     const loadCustomers = canManageCustomers || permissions.installEquipment;
     const [
       summaryResult,
       companiesResult,
-      prospectsResult,
+      pendingActivationProspectsResult,
       plansResult,
       customersResult,
       inventoryResult,
-      advancedInventoryResult,
       billingResult,
       ticketsResult,
       categoriesResult,
@@ -221,15 +271,18 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     ] = await Promise.allSettled([
       api.get<Summary>('/companies/summary', { params: { scope } }),
       isAdmin ? api.get<Company[]>('/companies') : Promise.resolve({ data: [] as Company[] }),
-      api.get<Prospect[]>('/prospects', { params: { scope } }),
+      canViewInstallations
+        ? api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
+        : Promise.resolve({ data: [] as Prospect[] }),
       api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
       loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
       canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-      canViewInventory ? api.get<AdvancedInventory>('/inventory/advanced', { params: { scope } }) : Promise.resolve({ data: null as AdvancedInventory | null }),
-      canViewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
+      permissions.viewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
       canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
       canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
-      canViewWorkOrders ? api.get<WorkOrder[]>('/work-orders', { params: { scope } }) : Promise.resolve({ data: [] as WorkOrder[] }),
+      canViewWorkOrders || canViewInstallations
+        ? api.get<WorkOrder[]>('/work-orders', { params: { scope } })
+        : Promise.resolve({ data: [] as WorkOrder[] }),
     ]);
     const summaryData = settledData(summaryResult, null as Summary | null, errors);
     const companyOptions = isAdmin
@@ -238,11 +291,10 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
     setSummary(summaryData);
     setCompanies(companyOptions.length > 0 ? companyOptions : summaryData?.empresas ?? []);
-    setProspects(settledData(prospectsResult, [] as Prospect[], errors));
+    setPendingActivationProspects(settledData(pendingActivationProspectsResult, [] as Prospect[], errors));
     setPlans(settledData(plansResult, [] as Plan[], errors));
     setCustomers(settledData(customersResult, [] as Customer[], errors));
     setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
-    setAdvancedInventory(settledData(advancedInventoryResult, null as AdvancedInventory | null, errors));
     setBillingOverview(settledData(billingResult, null as BillingOverview | null, errors));
     setTickets(settledData(ticketsResult, [] as Ticket[], errors));
     setTicketCategories(settledData(categoriesResult, [] as TicketCategory[], errors));
@@ -284,11 +336,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const mainNavItems: NavItem[] = [
     { tab: 'dashboard', label: 'Dashboard', visible: true, icon: House },
     { tab: 'prospects', label: 'Prospectos', visible: permissions.viewProspects, icon: UserRoundPlus },
+    { tab: 'coverage', label: 'Cobertura', visible: permissions.managePaymentZones, icon: MapIcon },
     { tab: 'customers', label: 'Clientes', visible: canManageCustomers, icon: Users },
     { tab: 'installations', label: 'Instalaciones', visible: canViewInstallations, icon: Router },
     { tab: 'inventory', label: 'Inventario', visible: canViewInventory, icon: Boxes },
     { tab: 'plans', label: 'Planes', visible: permissions.managePlans, icon: ClipboardList },
-    { tab: 'billing', label: 'Cobranza', visible: canViewBilling, icon: HandCoins },
+    { tab: 'commercial', label: 'Libro de control', visible: permissions.viewControlBook, icon: Table2 },
     { tab: 'tickets', label: 'Tickets', visible: canViewTickets, icon: TicketIcon },
     { tab: 'workOrders', label: 'Órdenes de Trabajo', visible: canViewWorkOrders, icon: ClipboardList },
     { tab: 'reports', label: 'Reportes', visible: permissions.viewReports, icon: BarChart3 },
@@ -301,11 +354,12 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
 
   return (
     <main className="crm-shell">
+      <ToastNotice message={notification} onDismiss={clearNotification} />
       <Sidebar
         activeTab={activeTab}
         mainItems={mainNavItems}
         secondaryItems={secondaryNavItems}
-        onNavigate={setActiveTab}
+        onNavigate={(tab) => { setActiveTab(tab); if (tab === 'commercial') setCommercialNavigation(value => value + 1); }}
       />
 
       <section className="crm-main">
@@ -364,51 +418,74 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           )}
           {activeTab === 'prospects' && permissions.viewProspects && (
             <ProspectsPanel
+              key={writeCompanyId}
+              registration={prospectRegistration}
               prospects={prospects}
+              loading={prospectsLoading}
+              loadError={prospectsError}
+              onReload={() => void loadProspects()}
               plans={plans}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
               onCreated={() => void loadData()}
+              onNotify={showNotification}
             />
+          )}
+          {activeTab === 'coverage' && permissions.managePaymentZones && (
+            <CoverageZonesPanel idEmpresa={writeCompanyId} canManage={permissions.managePaymentZones} />
           )}
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel
+              scope={scope}
               prospects={prospects}
+              pendingActivationProspects={pendingActivationProspects}
               workOrders={workOrders}
+              inventory={inventory}
+              canComplete={permissions.installEquipment}
               focusedProspectId={focusedInstallationProspectId}
               onFocusConsumed={() => setFocusedInstallationProspectId(null)}
               onChanged={() => void loadData()}
             />
           )}
           {activeTab === 'customers' && canManageCustomers && (
-            <CustomersPanel customers={customers} plans={plans} scope={scope} permissions={permissions} onChanged={() => void loadData()} />
+            <CustomersPanel
+              focusedCustomerId={focusedCustomerId}
+              onFocusConsumed={() => setFocusedCustomerId(null)}
+              customers={customers}
+              plans={plans}
+              scope={scope}
+              permissions={permissions}
+              onManageInstallation={(idProspecto) => {
+                setFocusedInstallationProspectId(idProspecto);
+                setActiveTab('installations');
+              }}
+              onChanged={() => void loadData()}
+            />
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
-              inventory={inventory}
-              advancedInventory={advancedInventory}
-              customers={customers}
-              workOrders={workOrders}
-              writeCompanyId={writeCompanyId}
-              permissions={permissions}
-              onChanged={() => void loadData()}
+              companyId={writeCompanyId}
+              companyName={currentCompanyName}
             />
           )}
           {activeTab === 'plans' && permissions.managePlans && (
             <PlansPanel
               plans={plans}
               companies={companies}
+              scope={scope}
+              permissions={permissions}
               writeCompanyId={writeCompanyId}
               onChanged={() => void loadData()}
             />
           )}
-          {activeTab === 'billing' && canViewBilling && (
-            <BillingPanel
-              overview={billingOverview}
-              plans={plans}
+          {activeTab === 'commercial' && permissions.viewControlBook && (
+            <CommercialControlBookPanel
+              key={commercialNavigation}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
+              onOpenCustomers={(row) => { if (permissions.viewCustomers) { setFocusedCustomerId(row.idCliente); setActiveTab('customers'); } }}
+              customers={customers}
               onChanged={() => void loadData()}
             />
           )}
@@ -421,7 +498,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <ImportPanel writeCompanyId={writeCompanyId} onImported={() => void loadData()} />
           )}
           {activeTab === 'users' && permissions.viewUsers && (
-            <UsersPanel users={users} roles={roles} onUpdated={() => void loadData()} />
+            <UsersPanel users={users} roles={roles} companies={companies} currentUserId={user.idUsuario} onUpdated={() => void loadData()} />
           )}
           {activeTab === 'audit' && permissions.viewAudit && <AuditPanel audit={audit} />}
         </section>

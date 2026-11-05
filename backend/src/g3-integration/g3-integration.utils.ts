@@ -1,0 +1,63 @@
+import { createHash } from 'crypto';
+import { BadRequestException } from '@nestjs/common';
+import { IntegracionInstalacionG3 } from '@prisma/client';
+import { G3InstallationPayload, G3PresentationState, G3_WORK_ORDER_STATES, G3WorkOrderState } from './g3-integration.types';
+
+function sortValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, sortValue(item)]),
+    );
+  }
+  return value;
+}
+
+export function stableJson(value: unknown) {
+  return JSON.stringify(sortValue(value));
+}
+
+export function sha256Payload(value: unknown) {
+  return createHash('sha256').update(stableJson(value), 'utf8').digest('hex');
+}
+
+// Validate persisted G8 evidence; this does not change the G3 wire contract.
+export function installationSnapshot(tracking: IntegracionInstalacionG3): G3InstallationPayload {
+  const payload = tracking.payloadSnapshot as G3InstallationPayload | null;
+  if (!payload || sha256Payload(payload) !== tracking.payloadHash
+    || payload.request_id !== tracking.requestId || payload.trace_id !== tracking.traceId
+    || payload.id_empresa !== tracking.idEmpresa || payload.id_contrato !== tracking.idContrato
+    || payload.id_prospecto !== tracking.idProspecto || payload.id_plan !== tracking.idPlan
+    || !payload.persona?.rut || !payload.persona.nombre_completo || !payload.persona.telefono
+    || !payload.direccion?.direccion_completa || !payload.direccion.comuna) {
+    throw new BadRequestException('El snapshot persistido no corresponde a la solicitud original');
+  }
+  return payload;
+}
+
+export function normalizeG3State(value: unknown): {
+  known: boolean;
+  original: string | null;
+  state: G3PresentationState;
+} {
+  const original = typeof value === 'string' ? value.trim().toUpperCase() : null;
+  const known = Boolean(original && G3_WORK_ORDER_STATES.includes(original as G3WorkOrderState));
+  return {
+    known,
+    original,
+    state: known ? original as G3WorkOrderState : 'EN_SEGUIMIENTO',
+  };
+}
+
+export function externalWorkOrderId(payload: Record<string, unknown>) {
+  const value = payload.id_ot;
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : null;
+}
+
+export function externalWorkOrderCode(payload: Record<string, unknown>) {
+  return typeof payload.codigo_ot === 'string' && payload.codigo_ot.trim()
+    ? payload.codigo_ot.trim()
+    : null;
+}

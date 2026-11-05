@@ -1,0 +1,1216 @@
+{
+  "date": "2026-10-03",
+  "baseCommit": "e2a7bbb54064e14c6d3c49cc264784b544a66a99",
+  "source": "Actual Jest output on final working tree published with this checkpoint",
+  "providerTransport": "fake",
+  "providerCalls": 0,
+  "suites": 24,
+  "passedSuites": 24,
+  "tests": 264,
+  "passed": 264,
+  "failed": 0,
+  "success": true,
+  "rawOutputSha256": "cdfeb843511f89172bd965d0f55fd6cf8261e064f198dff2daeabd9c772f825c",
+  "results": [
+    {
+      "file": "src/tax-document-issuance/facturacion-cl.issuer.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) default disabled creates no work, and an enabled instance requires migration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) captures an immutable receipt for the partial payment, with explicit automatic folio",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) fiscal errors leave a reviewable job; database errors are not disguised",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) artifact failure keeps the generated document and never sends email",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) verifies the PDF even without SMTP and keeps email as not configured",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) an invalid PDF cannot become available or reach SMTP",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) SMTP failure leaves generation intact and blocks automatic email replay",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) concurrent replay sends one email through a database claim",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) does not retry a failed emission without explicit request, nor dispatch changed configuration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) enforces billing roles and company ownership before reading artifacts",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl payment pipeline (fake provider, no emissions) manual reconciliation requires administrator and matching fingerprint before any provider read",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/facturacion-cl-payment.config.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Payment tax profiles defaults to no profiles; requires explicit approval and valid tax identity",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles requires invoice folios and an explicit rate; rejects guessed zero folios",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles accepts the observed short sandbox access identity only for receipts, never for invoice or customer identity",
+          "status": "passed"
+        },
+        {
+          "name": "Payment tax profiles isolates credentials by company and checks the issuer RUT without exposing secrets",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/legacy-installation-routing.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - rutas legacy de instalacion 47. ruta de Prospecto delega a G3 y no crea OT local",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - rutas legacy de instalacion 47b. ruta de Servicio delega a G3 y no crea OT local",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - rutas legacy de instalacion 47c. preparar contrato delega a G3",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g2-integration/g2-integration.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "integración S2S G2 normaliza el RUT y reutiliza BillingReadService con scope de empresa",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 admite identificación exacta por cliente o contrato",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 admite identificación exacta por cliente o contrato",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 impide lectura masiva y rechaza RUT inválido o identidades ambiguas",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 delega el detalle con el mismo scope de empresa",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 envía los cuatro datos contractuales obligatorios al registro de pago",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 registra resultado WiFi saneado y resuelve el Ticket de forma atómica",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 el retry exacto WiFi es idempotente y no vuelve a actualizar el Ticket",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza el mismo request_id WiFi con datos distintos",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: password SuperSecreto",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: plaintext",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: ciphertext=abc123",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: token SmartOLT abc123",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: credenciales técnicas adjuntas",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: token=abc123",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza material secreto en el resultado técnico: -----BEGIN PRIVATE KEY-----",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 REQUIERE_ATENCION_MANUAL deja el Ticket Escalado",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 ERROR_TECNICO deja el Ticket Escalado",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza empresa o servicio que no correlacionan con el Ticket",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 solo entrega una URL HTTPS cuando el comprobante está GENERADO",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 un comprobante pendiente devuelve metadata sin inventar archivo",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 un comprobante FALLIDO no expone URL aunque exista un valor legado",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 oculta por existencia un comprobante de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "integración S2S G2 rechaza rutas locales y URLs no seguras de comprobante",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/g3-integration.controller.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "webhook G3 canónico y alias ambas rutas aceptan el cierre sin estado y reutilizan el mismo processor",
+          "status": "passed"
+        },
+        {
+          "name": "webhook G3 canónico y alias rechaza un id_ot de body distinto al de la ruta",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/billing/billing.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "BillingService lifecycle de pago persists tax work inside the transaction, then dispatches after commit; provider failure preserves payment",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago does not dispatch after financial rollback",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago G2 duplicate confirmation does not enqueue another fiscal job",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago registra pago parcial sin cerrar ni reactivar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago no convierte un pago de contrato firmado en activación inicial",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago reactiva solo el servicio suspendido e instalado al pagar la última deuda vencida",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago no reactiva si queda otra factura vencida con saldo en la misma empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago ignora como deuda una factura antigua cuyo saldo ya está pagado",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago rechaza sobrepago, factura sin cliente, empresa ajena y rol sin permiso antes de insertar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 exige fecha, autorización y transacción",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S G2 persiste metadatos obligatorios y la fecha informada",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago retry exacto de pago S2S devuelve duplicate sin insertar",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago rechaza reutilizar codigo_transaccion con contenido incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza sobrepago",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza más de dos decimales",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza factura cerrada",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService lifecycle de pago pago S2S rechaza factura de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión registra aviso simulado como notificación, evento funcional y auditoría atómica",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión impide último aviso antes del vencimiento efectivo de una prórroga",
+          "status": "passed"
+        },
+        {
+          "name": "BillingService avisos y suspensión no suspende mientras una prórroga aprobada mantiene la factura vigente",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/pending-facturacion-cl.issuer.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "PendingFacturacionClIssuer permanece deshabilitado por defecto y nunca permite emitir o reintentar",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer separa configuracion por empresa sin aceptar credenciales en el JSON no secreto",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer falla cerrado ante JSON, flag o duplicados invalidos",
+          "status": "passed"
+        },
+        {
+          "name": "PendingFacturacionClIssuer impide configuracion invalida o produccion sin certificar; permite configurar sandbox",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/mail/mail.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "MailService informa que SMTP no esta configurado sin intentar enviar",
+          "status": "passed"
+        },
+        {
+          "name": "MailService envia la cotizacion como adjunto mediante SMTP",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/installation-integration.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 1. instalacion valida invoca POST G3 mediante el adapter",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 2. el payload contiene RUT canonico",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 3. el payload contiene nombre completo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 4. el payload contiene telefono E.164",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 5. el payload contiene snapshot de direccion",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 6. el payload contiene comuna",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 7. request_id es UUID",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 8. trace_id es UUID v4",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 9. retry reutiliza request_id y payload persistido",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 10. HTTP 201 guarda referencia OT externa",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 11. solicitud repetida devuelve tracking sin duplicarlo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 12. HTTP 409 se registra como conflicto definitivo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 13. HTTP 403 se registra como scope invalido definitivo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 14. timeout no crea OrdenTrabajo local",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 15. timeout deja retry seguro disponible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 16. G3 no configurado no crea OT local",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 17. referencias de empresa cruzada son rechazadas",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 GET defensivo presenta un estado no contractual como seguimiento sin activar",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 GET detalle usa la empresa 2 persistida y no una constante",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 GET detalle no mezcla una respuesta de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 40. reconciliacion GET de cierre sin estado usa el processor común como COMPLETADA",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 41. GET cierre aun no disponible no activa",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 42. GET cierre 404 queda disponible para reconciliacion posterior",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 43. timeout de reconciliacion no ejecuta processor",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - solicitud y reconciliacion G3 44. reconciliacion no procesa estados distintos de COMPLETADA si un backend legacy los expone",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/http-g3-integration.client.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 envia X-API-KEY solo desde backend y conserva snake_case",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 acepta HTTP 201 de creacion",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 acepta HTTP 200 idempotente",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 GET detalle agrega el scope de empresa 1 y preserva el encoding del id",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 GET detalle agrega el scope de empresa 2 y preserva el encoding del id",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 GET cierre valida la empresa, pero no inventa un query todavía no ratificado",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 rechaza id_empresa no positivo antes de consultar G3: 0",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 rechaza id_empresa no positivo antes de consultar G3: -1",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 rechaza id_empresa no positivo antes de consultar G3: 1.5",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 rechaza id_empresa no positivo antes de consultar G3: NaN",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 400 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 401 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 403 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 404 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 409 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 429 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea HTTP 500 sin exponer respuesta sensible",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 mapea timeout como reintentable",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - adaptador HTTP G3 falla cerrado cuando la integracion no esta habilitada",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/g3-closure.processor.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "G3ClosureProcessor approval-only acepta el payload real sin estado e interpreta el cierre como COMPLETADA",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only solo después del commit comercial solicita una activación G1",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only un fallo G1 posterior al commit no revierte la activación comercial G8",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only un retry idéntico no duplica Cliente, Servicio ni activación G1",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only reconciliación posterior al webhook no duplica efectos comerciales",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only webhook posterior a reconciliación no duplica efectos comerciales",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza un request_id que no corresponde a una instalación conocida",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación id_ot incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación id_empresa incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación id_prospecto incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación id_contrato incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación id_plan incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza la correlación trace_id incompatible",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only procesa el cierre para una empresa autorizable 1",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only procesa el cierre para una empresa autorizable 2",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only rechaza un payload incompleto antes de activar",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureProcessor approval-only un payload diferente con la misma identidad de cierre produce conflicto",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/billing/billing-read.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "BillingReadService fuerza empresa y cliente de la misma empresa en el listado",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService filtra S2S por empresa y RUT exacto y conserva los conceptos de Billing",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService mantiene aislamiento por empresa con identificadores exactos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService mantiene aislamiento por empresa con identificadores exactos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService responde lista vacía para cliente inexistente o RUT perteneciente a otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService rechaza un scope explícito de otra empresa",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService oculta por existencia una factura de otra empresa y rechaza roles ajenos",
+          "status": "passed"
+        },
+        {
+          "name": "BillingReadService el detalle S2S usa el mismo balance y oculta facturas cross-company",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/facturacion-cl-sandbox-dispatcher.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) is disabled by default and requires both company and emission gates",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) rejects production or invalid contracts before a request",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"estado\":\"PENDIENTE\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"claimId\":\"OTHER_OWNER\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"intentos\":0}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"ambiente\":\"production\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"policyVersion\":\"OTHER_RULE\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"fingerprint\":\"0000000000000000000000000000000000000000000000000000000000000000\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"folioEsperado\":\"127\"}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) requires persisted company, owner, policy, content and folio proof: {\"idEmpresa\":2}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) uses documented GET, raw Authorization, Base64 and both result levels",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) prevents concurrent and restarted direct dispatches with the same durable marker",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: null",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"False\"}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"False\",\"Folio\":\"126\",\"TipoDte\":\"33\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"True\",\"Folio\":\"127\",\"TipoDte\":\"33\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":{\"Resultado\":\"True\",\"Folio\":\"126\",\"TipoDte\":\"39\"}}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) keeps uncertain processing responses quarantined: {\"WSPLANO\":{\"Resultado\":\"True\",\"Detalle\":{\"Documento\":[]}}}",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) does not dispatch on failed authentication and exposes no provider message",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) never retries processing HTTP 401",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) never retries processing HTTP 500",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClSandboxDispatcher (fake transport only, no provider calls) preserves uncertainty after processing timeout or a failed durable marker",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/g3-integration.dto.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "G3ClosureDto approval-only acepta el payload contractual sin campo estado",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureDto approval-only no incorpora estado como campo contractual del webhook",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureDto approval-only acepta id_empresa=1 para que el guard aplique el scope de la key",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureDto approval-only acepta id_empresa=2 para que el guard aplique el scope de la key",
+          "status": "passed"
+        },
+        {
+          "name": "G3ClosureDto approval-only exige todas las correlaciones y los dos arreglos de equipos",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/prisma-tax-intent.store.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) checks financial ownership in a local Serializable transaction before preserving an intent",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects an invoice without matching company ownership",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects a payment attached to another invoice or customer",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) retrieves an immutable existing row after a uniqueness race",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) does not swallow database errors or turn them into an external retry",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) claims work atomically for the company and refuses a lost claim",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) requires the same claim owner when persisting completion",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) marks dispatch once using durable company, owner, fingerprint and null timestamp predicates",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) rejects resetting an intent or storing arbitrary remote error text",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) quarantines stale work without releasing it for another dispatch",
+          "status": "passed"
+        },
+        {
+          "name": "PrismaTaxIntentStore (mock queries, no database migration applied) keeps reads scoped to a company and fails closed on missing records",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/service-withdrawal.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 50. registra una solicitud de retiro valida",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 51. servicio es obligatorio y debe existir",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 52. empresa cruzada es rechazada",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 53. motivo es obligatorio",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 54. registra auditoria con servicio y bloqueo tecnico",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 55. registrar retiro no borra ni da de baja el Servicio",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 56. sin contrato G3 de retiro no inventa OrdenTrabajo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - CU-84 solicitud de retiro 57. el estado de despacho permanece bloqueado hasta existir contrato ratificado",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/tax-emission-intent.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) persists and commits an atomic claim before dispatch",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not dispatch while readiness is blocked",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) allows one send for repeated and concurrent requests with the same identity",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) rejects changed content, document type, policy and payment without overwriting",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not store full payload or recipient data in the intent",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) isolates identical logical keys by company",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) quarantines timeouts and exceptions without any automatic resend",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not trust a different folio or type in an otherwise successful response",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) records a proven pre-send failure without automatically releasing it",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) does not resend after completion persistence fails",
+          "status": "passed"
+        },
+        {
+          "name": "TaxEmissionIntentService (fake dispatcher, no real emission) rejects unknown policy metadata and production before preparing work",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/installation-activation.service.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - activacion comercial desde G3 29. crea Cliente exactamente una vez",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - activacion comercial desde G3 30. crea ServicioContratado exactamente una vez y activo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - activacion comercial desde G3 31. crea DireccionServicio definitiva exactamente una vez",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - activacion comercial desde G3 31b. resuelve entidades existentes sin duplicarlas",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/facturacion-cl-document-builder.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) permits provider automatic folio only for an explicitly selected receipt mode",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds invoice XML with the documented root and Latin1 encoding",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds exempt invoice separately without deriving tax treatment",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds the receipt with 16 header and 13 detail positions and an empty email",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) builds an exempt receipt with exempt amounts in their documented positions",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 2026-02-30",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 2026-13-01",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects invalid date 03-10-2026",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects totals/line mismatch, fractional peso rounding, mixed and unapproved extensions",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects folio guessing, unsupported encoding and lossy Latin1 conversion",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects VAT inconsistent with the supplied rate even when net plus VAT equals total",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) rejects TXT injection",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) requires dates for periodic receipts without selecting a service indicator by default",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl document builders (offline, unapproved for emission) enforces the separate detail limits for invoice and receipt",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/facturacion-cl-read-client.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "FacturacionClReadClient authenticates and consults only version, without exposing the token",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient fails before connecting when disabled or the company is missing",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient refuses production and duplicate configuration",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient does not permit later mutation of the original options to enable it",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient caches independently and shares concurrent logins only within a company",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes auth HTTP 401 and does not retry",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes auth HTTP 500 and does not retry",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient sanitizes malformed auth and network failures",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient reports the observed array discrepancy without returning its contents",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionClReadClient invalidates only the rejected token, without automatic login or version retry",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/tax-document-issuance/facturacion-cl-artifacts.client.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination http://www.facturacion.cl/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://evil.example/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl@evil.example/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl/other",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://user:pass@www.facturacion.cl/sistema/descargar.php",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) rejects destination https://www.facturacion.cl/sistema/descargar.php#x",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) reads documented Base64 link with B movement for receipts, never calls processing",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) upgrades only the observed sandbox download path to HTTPS without allowing plaintext requests",
+          "status": "passed"
+        },
+        {
+          "name": "FacturacionCl read-only artifacts (fake HTTP) downloads bounded PDF without Authorization and rejects HTML and oversized files",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/billing/invoice-balance.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "invoiceBalance calcula saldo parcial con precisión decimal",
+          "status": "passed"
+        },
+        {
+          "name": "invoiceBalance usa la prórroga aprobada más tardía para morosidad",
+          "status": "passed"
+        },
+        {
+          "name": "invoiceBalance una factura anulada no tiene saldo exigible aunque conserve diferencia contable",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/external-tax-documents/external-tax-documents.boundaries.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 5 - fronteras de CU-86 no contiene cliente HTTP, fetch ni descarga de URL",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 no implementa emisión ni conexión SII",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 mantiene el adapter pendiente aislado de CU-86 y sin cliente HTTP",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 no expone operación DELETE",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 protege todo el controlador para Administrador",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 la respuesta no selecciona credenciales ni secretos de usuario",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 la interfaz solo ofrece registro, corrección y anulación de metadata",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 mantiene Factura y Pago separados del documento externo",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 la migración es aditiva y no destructiva",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 la migración limita tipo, estado, fuente y montos",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 5 - fronteras de CU-86 la unicidad está acotada por empresa y normalización",
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "file": "src/g3-integration/g3-integration.utils.spec.ts",
+      "status": "passed",
+      "tests": [
+        {
+          "name": "Etapa 3 - contrato y estados G3 18. procesa PENDIENTE sin equivalencias",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 19. procesa ASIGNADA sin equivalencias",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 21. procesa COMPLETADA sin equivalencias",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 22. procesa CANCELADA sin equivalencias",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 23. procesa PENDIENTE_CLIENTE_AUSENTE sin equivalencias",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 24. estado desconocido se presenta EN_SEGUIMIENTO y conserva original",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 25. un valor vacio tampoco puede activar",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 63. el serializer determinista conserva snake_case y orden estable",
+          "status": "passed"
+        },
+        {
+          "name": "Etapa 3 - contrato y estados G3 8. SHA-256 local es determinista y no depende del orden de claves",
+          "status": "passed"
+        }
+      ]
+    }
+  ]
+}

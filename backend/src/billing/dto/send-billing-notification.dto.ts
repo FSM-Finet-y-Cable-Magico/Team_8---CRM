@@ -1,6 +1,7 @@
-import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class SendBillingNotificationDto {
+  @IsOptional() @IsUUID('4') correlationId?: string;
   @IsInt()
   @Min(1)
   idCliente!: number;

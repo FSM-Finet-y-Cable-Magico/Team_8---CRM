@@ -1,0 +1,3 @@
+# SQL checksums are byte based; keep the reviewed files stable on Windows/Linux.
+db/global/init-global.sql text eol=lf
+backend/prisma/migrations/**/migration.sql text eol=lf

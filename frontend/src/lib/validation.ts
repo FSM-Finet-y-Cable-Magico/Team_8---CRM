@@ -7,6 +7,8 @@ export type ProspectFormState = {
   email: string;
   telefono: string;
   direccion: string;
+  comuna: string;
+  region: string;
   origenContacto: string;
 };
 
@@ -16,6 +18,8 @@ export const emptyProspectForm: ProspectFormState = {
   email: '',
   telefono: '',
   direccion: '',
+  comuna: '',
+  region: '',
   origenContacto: 'Formulario web',
 };
 

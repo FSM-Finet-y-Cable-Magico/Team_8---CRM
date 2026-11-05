@@ -29,9 +29,9 @@ type Tab =
   | 'prospects'
   | 'installations'
   | 'customers'
+  | 'commercial'
   | 'inventory'
   | 'plans'
-  | 'billing'
   | 'tickets'
   | 'workOrders'
   | 'reports'
@@ -53,15 +53,22 @@ type Summary = {
   metricas: {
     clientes: number;
     prospectos: number;
+    pendientesActivacion?: number;
+    solicitudesAbiertas?: number;
+    solicitudesNoFactibles?: number;
     instalacionesPendientes?: number;
     ticketsAbiertos?: number;
     clientesMorosos?: number;
     inventarioDisponible?: number;
     instalacionesMensuales?: number;
-    churnRateMensual?: number;
-    churnBajasMensuales?: number;
+    instalacionesSinFechaTecnica?: number;
+    instalacionesRequierenRevision?: number;
+    churnRateMensual?: number | null;
+    churnBajasMensuales?: number | null;
+    churnEstado?: 'HISTORIAL_INSUFICIENTE';
   };
   alertasVencimiento?: DashboardExpiryAlert[];
+  diasAnticipacionVencimiento?: number;
   ticketsCerradosPorTipo?: Array<{
     idCategoria: number;
     categoria: string;
@@ -109,6 +116,14 @@ export function DashboardHome({
       tab: 'prospects' as Tab,
     },
     {
+      label: 'Pendientes de activacion',
+      value: summary?.metricas.pendientesActivacion ?? 0,
+      description: 'Contratos firmados sin servicio activo',
+      icon: CalendarPlus,
+      tone: 'blue' as const,
+      tab: 'customers' as Tab,
+    },
+    {
       label: 'Clientes activos',
       value: summary?.metricas.clientes ?? 0,
       description: 'Clientes de la vista actual',
@@ -138,7 +153,7 @@ export function DashboardHome({
       description: 'Con deuda o suspensión',
       icon: HandCoins,
       tone: 'rose' as const,
-      tab: 'billing' as Tab,
+      tab: 'commercial' as Tab,
     },
     {
       label: 'Inventario disponible',
@@ -151,18 +166,18 @@ export function DashboardHome({
     {
       label: 'Instalaciones del mes',
       value: summary?.metricas.instalacionesMensuales ?? 0,
-      description: 'Completadas durante el mes',
+      description: 'Por fecha técnica efectiva (Santiago)',
       icon: CircleCheckBig,
       tone: 'green' as const,
       tab: 'installations' as Tab,
     },
     {
       label: 'Churn mensual',
-      value: `${summary?.metricas.churnRateMensual ?? 0}%`,
-      description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`,
+      value: 'Dato no validado',
+      description: 'Historial insuficiente para calcular bajas y población inicial',
       icon: TrendingDown,
       tone: 'amber' as const,
-      tab: 'billing' as Tab,
+      tab: 'commercial' as Tab,
     },
   ];
   const quickActions = [
@@ -200,8 +215,9 @@ export function DashboardHome({
     },
   ];
   const expiryAlerts = summary?.alertasVencimiento ?? [];
+  const expiryWindowDays = summary?.diasAnticipacionVencimiento ?? 7;
   const overdueAlerts = expiryAlerts.filter((alert) => alert.diasRestantes < 0);
-  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= 7);
+  const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= expiryWindowDays);
   const filteredExpiryAlerts = expiryFilter === 'overdue' ? overdueAlerts : upcomingAlerts;
   const selectedAlert = filteredExpiryAlerts.find((alert) => expiryAlertKey(alert) === selectedAlertKey)
     ?? filteredExpiryAlerts[0]
@@ -236,10 +252,10 @@ export function DashboardHome({
     }));
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
-    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Completadas durante el mes', tone: 'green', tab: 'installations' as Tab },
-    { label: 'Churn mensual', value: `${summary?.metricas.churnRateMensual ?? 0}%`, description: `${summary?.metricas.churnBajasMensuales ?? 0} baja(s) durante el mes`, tone: 'amber', tab: 'billing' as Tab },
+    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Por fecha técnica efectiva (Santiago)', tone: 'green', tab: 'installations' as Tab },
+    { label: 'Churn mensual', value: 'Dato no validado', description: 'Historial insuficiente para calcular bajas y población inicial', tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
-    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'billing' as Tab },
+    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
   ];
 
   function selectExpiryFilter(filter: 'overdue' | 'upcoming') {
@@ -292,6 +308,13 @@ export function DashboardHome({
 
         <article className="dashboard-installation-panel">
           <div className="dashboard-panel-heading"><h2>Instalaciones</h2></div>
+          {(summary?.metricas.instalacionesSinFechaTecnica ?? 0) > 0 && <p role="status">
+            Pendiente de fecha técnica: {summary?.metricas.instalacionesSinFechaTecnica} instalación(es) completada(s).
+            No se incluyen en el total mensual ni representan trabajo pendiente de ejecución.
+          </p>}
+          {(summary?.metricas.instalacionesRequierenRevision ?? 0) > 0 && <p role="status">
+            {summary?.metricas.instalacionesRequierenRevision} registro(s) de instalación requieren revisión de fecha o relaciones; no incluidos en el indicador.
+          </p>}
           <div className="installation-chart-layout">
             <div className="installation-donut-wrap">
               <svg className="installation-donut" viewBox="0 0 120 120" aria-label={`${installationSegments[0].value} instalaciones pendientes`} role="img">
@@ -353,7 +376,7 @@ export function DashboardHome({
                 aria-pressed={expiryFilter === 'upcoming'}
                 onClick={() => selectExpiryFilter('upcoming')}
               >
-                Próximos 7 días
+                Próximos {expiryWindowDays} días
                 <span>{upcomingAlerts.length}</span>
               </button>
             </div>
@@ -385,7 +408,7 @@ export function DashboardHome({
             <p className="empty-state">
               {expiryFilter === 'overdue'
                 ? 'No hay contratos vencidos para mostrar.'
-                : 'No hay contratos próximos a vencer durante los próximos 7 días.'}
+                : `No hay contratos próximos a vencer durante los próximos ${expiryWindowDays} días.`}
             </p>
           )}
 
@@ -463,8 +486,8 @@ export function DashboardHome({
               <span>Seguimiento financiero</span>
               <h2>Resumen de cobranza</h2>
             </div>
-            <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('billing')}>
-              Ver cobranza
+            <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('commercial')}>
+              Ver libro de control
               <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
             </button>
           </div>

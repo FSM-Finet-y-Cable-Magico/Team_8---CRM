@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
+import { companyResponse } from '../common/company-response';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
@@ -17,7 +18,9 @@ import { CreateServiceInstallOrderDto } from './dto/create-service-install-order
 import { CreateServiceDto } from './dto/create-service.dto';
 import { DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
+import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { canActivateService } from './service-activation.policy';
 
 const SERVICE_INCLUDE = {
   cliente: true,
@@ -73,7 +76,7 @@ export class ServicesService {
       include: SERVICE_INCLUDE,
     });
 
-    return this.withInstallationContext(services);
+    return this.withInstallationContext(companyResponse(services, currentUser));
   }
 
   async detail(idServicio: number, currentUser: AuthUser) {
@@ -89,11 +92,16 @@ export class ServicesService {
       take: 40,
     });
 
-    const [enrichedService] = await this.withInstallationContext([service]);
+    const [enrichedService] = await this.withInstallationContext(companyResponse([service], currentUser));
 
     return {
       ...enrichedService,
-      auditoria: auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() })),
+      // Cross-entity JSON snapshots may contain unscoped customer data.
+      auditoria: isAdministrator(currentUser.roles)
+        ? auditoria.map((row) => ({ ...row, idLog: row.idLog.toString() }))
+        : auditoria.filter(row => row.entidadAfectada === 'servicio_contratado' && row.idEntidadAfectada === idServicio)
+          .map(row => ({ idLog: row.idLog.toString(), accion: row.accion, fechaHora: row.fechaHora,
+            entidadAfectada: row.entidadAfectada, idEntidadAfectada: row.idEntidadAfectada })),
     };
   }
 
@@ -104,6 +112,22 @@ export class ServicesService {
     const idDireccion = dto.idDireccion ?? await this.resolvePrimaryAddressId(dto.idCliente);
     await this.assertAddress(idDireccion, dto.idCliente);
     await this.assertPaymentZone(dto.idZonaPago, idEmpresa);
+
+    if (!canActivateService({
+      intent: 'MANUAL_SERVICE_CHANGE',
+      targetStatus: dto.estadoOperativo,
+      installationCompleted: false,
+    })) {
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+        entidadAfectada: 'servicio_contratado',
+        valorNuevo: { idCliente: dto.idCliente, idContrato: dto.idContrato, estadoSolicitado: dto.estadoOperativo },
+      });
+      throw new BadRequestException(
+        'Un servicio nuevo no puede quedar Activo sin una instalacion completada',
+      );
+    }
 
     const created = await this.prisma.servicioContratado.create({
       data: {
@@ -136,7 +160,7 @@ export class ServicesService {
 
     await this.reconcileCustomerStatus(created.idCliente);
 
-    return created;
+    return companyResponse(created, currentUser);
   }
 
   async ensureInstallationServiceForContract(idContrato: number, currentUser: AuthUser) {
@@ -152,7 +176,8 @@ export class ServicesService {
       throw new NotFoundException('Contrato o cliente no encontrado');
     }
 
-    const idEmpresa = contract.idEmpresa ?? contract.cliente.idEmpresa;
+    // A customer's primary company cannot authorize an unattributed contract.
+    const idEmpresa = contract.idEmpresa ?? (isAdministrator(currentUser.roles) ? contract.cliente.idEmpresa : null);
 
     if (!this.canAccessCompany(idEmpresa, currentUser)) {
       throw new BadRequestException('El contrato no pertenece a tu empresa');
@@ -172,7 +197,8 @@ export class ServicesService {
     });
 
     if (existing) {
-      return existing;
+      this.assertServiceCompany(existing.idEmpresa, currentUser);
+      return companyResponse(existing, currentUser);
     }
 
     const tipoServicio = serviceTypeFromPlan(contract.plan?.tipoPlan);
@@ -218,11 +244,41 @@ export class ServicesService {
 
     await this.reconcileCustomerStatus(created.idCliente);
 
-    return created;
+    return companyResponse(created, currentUser);
   }
 
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    if (dto.estadoOperativo === 'Activo' && service.estadoOperativo !== 'Activo') {
+      const completedInstallation = await this.prisma.ordenTrabajo.findFirst({
+        where: {
+          idServicio,
+          tipoOt: 'Instalacion',
+          estado: 'Completada',
+        },
+        select: { idOt: true },
+      });
+
+      if (!canActivateService({
+        intent: 'MANUAL_SERVICE_CHANGE',
+        targetStatus: dto.estadoOperativo,
+        currentStatus: service.estadoOperativo,
+        installationCompleted: Boolean(completedInstallation),
+      })) {
+        await this.auditService.record({
+          idUsuario: currentUser.idUsuario,
+          accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO',
+          entidadAfectada: 'servicio_contratado',
+          idEntidadAfectada: idServicio,
+          valorAnterior: { estadoOperativo: service.estadoOperativo },
+          valorNuevo: { estadoSolicitado: dto.estadoOperativo },
+        });
+        throw new BadRequestException(
+          'El servicio no puede activarse sin una instalacion completada asociada',
+        );
+      }
+    }
     const data: Prisma.ServicioContratadoUncheckedUpdateInput = {
       tipoServicio: dto.tipoServicio,
       estadoOperativo: dto.estadoOperativo,
@@ -264,14 +320,19 @@ export class ServicesService {
       },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   async deactivate(idServicio: number, dto: DeactivateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
 
     if (service.estadoOperativo === 'Baja') {
-      return service;
+      return companyResponse(service, currentUser);
+    }
+
+    if (service.idContrato && (!service.contrato ||
+      service.contrato.idEmpresa !== service.idEmpresa || service.contrato.idCliente !== service.idCliente)) {
+      throw new BadRequestException('El contrato asociado no corresponde al cliente y empresa del servicio');
     }
 
     const observation = dto.observacion?.trim() || null;
@@ -321,7 +382,7 @@ export class ServicesService {
       },
     });
 
-    return updated;
+    return companyResponse(updated, currentUser);
   }
 
   async attachEquipment(idServicio: number, dto: AttachEquipmentDto, currentUser: AuthUser) {
@@ -406,6 +467,28 @@ export class ServicesService {
     this.validateInstallSchedule(dto.fechaProgramada, dto.horaVisita);
 
     return this.buildInstallAvailability(service.idEmpresa, dto.fechaProgramada, dto.horaVisita);
+  }
+
+  async installDayAvailability(
+    idServicio: number,
+    dto: ServiceInstallDayAvailabilityDto,
+    currentUser: AuthUser,
+  ) {
+    const service = await this.getServiceOrThrow(idServicio, currentUser);
+
+    await this.validateServiceInstallOrderPreconditions(service);
+    this.validateInstallDate(dto.fechaProgramada);
+
+    const availability = await this.buildInstallAvailability(
+      service.idEmpresa,
+      dto.fechaProgramada,
+      ALTERNATIVE_VISIT_TIMES[0],
+    );
+
+    return {
+      fechaProgramada: dto.fechaProgramada,
+      horarios: availability.horarios,
+    };
   }
 
   async createInstallOrder(
@@ -538,8 +621,8 @@ export class ServicesService {
     }
 
     const canAccess = isAdministrator(currentUser.roles) ||
-      customer.idEmpresa === currentUser.idEmpresa ||
-      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa);
+      Boolean(currentUser.idEmpresa && (customer.idEmpresa === currentUser.idEmpresa ||
+      customer.contratos.some((contract) => contract.idEmpresa === currentUser.idEmpresa)));
 
     if (!canAccess) {
       throw new BadRequestException('El cliente no pertenece a tu empresa');
@@ -650,11 +733,69 @@ export class ServicesService {
   }
 
   private canAccessCompany(idEmpresa: number | null, currentUser: AuthUser) {
-    return isAdministrator(currentUser.roles) || idEmpresa === currentUser.idEmpresa;
+    return isAdministrator(currentUser.roles) || Boolean(currentUser.idEmpresa && idEmpresa === currentUser.idEmpresa);
+  }
+
+  private assertServiceCompany(idEmpresa: number | null, currentUser: AuthUser) {
+    if (!this.canAccessCompany(idEmpresa, currentUser)) throw new BadRequestException('El servicio no pertenece a tu empresa');
   }
 
   private async withInstallationContext(services: ServiceWithRelations[]) {
     const completedInstallationByService = new Map<number, ServiceWithRelations['ordenes'][number]>();
+    const serviceIds = services.map((service) => service.idServicio);
+    const [g3Installations, g1Activations] = serviceIds.length
+      ? await Promise.all([
+        this.prisma.integracionInstalacionG3.findMany({
+          where: {
+            idServicio: { in: serviceIds },
+            estadoIntegracion: 'COMPLETADA',
+          },
+          orderBy: { idIntegracion: 'desc' },
+          select: {
+            idIntegracion: true,
+            idEmpresa: true,
+            idContrato: true,
+            idServicio: true,
+            idOtG3: true,
+            codigoOtG3: true,
+            estadoIntegracion: true,
+            estadoOtG3: true,
+            fechaCierreProcesado: true,
+          },
+        }),
+        this.prisma.integracionActivacionG1.findMany({
+          where: { idServicio: { in: serviceIds } },
+          orderBy: [{ createdAt: 'desc' }, { idIntegracion: 'desc' }],
+          select: {
+            idIntegracion: true,
+            idEmpresa: true,
+            idContrato: true,
+            idServicio: true,
+            estadoIntegracion: true,
+            ultimoErrorSanitizado: true,
+            fechaCompletado: true,
+            updatedAt: true,
+          },
+        }),
+      ])
+      : [[], []];
+    const serviceById = new Map(services.map((service) => [service.idServicio, service]));
+    const g3ByService = new Map<number, (typeof g3Installations)[number]>();
+    for (const installation of g3Installations) {
+      if (!installation.idServicio || g3ByService.has(installation.idServicio)) continue;
+      const service = serviceById.get(installation.idServicio);
+      if (service && installation.idEmpresa === service.idEmpresa && installation.idContrato === service.idContrato) {
+        g3ByService.set(installation.idServicio, installation);
+      }
+    }
+    const g1ByService = new Map<number, (typeof g1Activations)[number]>();
+    for (const activation of g1Activations) {
+      if (g1ByService.has(activation.idServicio)) continue;
+      const service = serviceById.get(activation.idServicio);
+      if (service && activation.idEmpresa === service.idEmpresa && activation.idContrato === service.idContrato) {
+        g1ByService.set(activation.idServicio, activation);
+      }
+    }
 
     for (const service of services) {
       const installation = service.ordenes
@@ -674,8 +815,9 @@ export class ServicesService {
     }
 
     const technicianIds = [...new Set(
-      [...completedInstallationByService.values()]
-        .map((order) => order.idTecnico)
+      [...completedInstallationByService.entries()]
+        .filter(([idServicio]) => !g3ByService.has(idServicio))
+        .map(([, order]) => order.idTecnico)
         .filter((id): id is number => id !== null),
     )];
     const technicians = technicianIds.length
@@ -687,17 +829,63 @@ export class ServicesService {
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
 
     return services.map((service) => {
-      const installation = completedInstallationByService.get(service.idServicio);
+      const localInstallation = completedInstallationByService.get(service.idServicio);
+      const g3Installation = g3ByService.get(service.idServicio);
+      const g1Activation = g1ByService.get(service.idServicio);
+      const technicalData = service.datosTecnicos && typeof service.datosTecnicos === 'object' && !Array.isArray(service.datosTecnicos)
+        ? service.datosTecnicos as Record<string, Prisma.JsonValue>
+        : {};
+      const g3Result = technicalData.resultadoInstalacion
+        && typeof technicalData.resultadoInstalacion === 'object'
+        && !Array.isArray(technicalData.resultadoInstalacion)
+        ? technicalData.resultadoInstalacion as Record<string, Prisma.JsonValue>
+        : {};
+      const fechaCompletadaG3 = typeof technicalData.fechaCompletadaG3 === 'string'
+        ? technicalData.fechaCompletadaG3
+        : typeof g3Result.fecha_completada === 'string'
+          ? g3Result.fecha_completada
+          : null;
+      const idTecnicoG3 = typeof technicalData.idTecnicoG3 === 'number'
+        ? technicalData.idTecnicoG3
+        : typeof g3Result.id_tecnico === 'number'
+          ? g3Result.id_tecnico
+          : null;
 
       return {
         ...service,
-        instalacion: installation
+        instalacion: g3Installation
           ? {
-            idOt: installation.idOt,
-            codigoSeguimiento: installation.codigoSeguimiento,
-            fechaCompletada: installation.fechaCompletada,
-            idTecnico: installation.idTecnico,
-            tecnico: installation.idTecnico ? technicianById.get(installation.idTecnico) ?? null : null,
+            fuente: 'G3',
+            idOt: g3Installation.idOtG3,
+            codigoSeguimiento: g3Installation.codigoOtG3,
+            estado: g3Installation.estadoIntegracion,
+            fechaCompletada: fechaCompletadaG3,
+            fechaProcesamiento: g3Installation.fechaCierreProcesado,
+            idTecnico: null,
+            idTecnicoG3,
+            tecnico: null,
+          }
+          : localInstallation
+            ? {
+              fuente: 'LEGACY_LOCAL',
+              idOt: localInstallation.idOt,
+              codigoSeguimiento: localInstallation.codigoSeguimiento,
+              estado: localInstallation.estado,
+              fechaCompletada: localInstallation.fechaCompletada,
+              fechaProcesamiento: null,
+              idTecnico: localInstallation.idTecnico,
+              idTecnicoG3: null,
+              tecnico: localInstallation.idTecnico ? technicianById.get(localInstallation.idTecnico) ?? null : null,
+            }
+            : null,
+        integracionG1: g1Activation
+          ? {
+            fuente: 'G1',
+            idIntegracion: g1Activation.idIntegracion,
+            estadoIntegracion: g1Activation.estadoIntegracion,
+            ultimoErrorSanitizado: g1Activation.ultimoErrorSanitizado,
+            fechaCompletado: g1Activation.fechaCompletado,
+            updatedAt: g1Activation.updatedAt,
           }
           : null,
       };
@@ -780,17 +968,13 @@ export class ServicesService {
     }
   }
 
-  private validateInstallSchedule(dateValue: string, timeValue: string) {
+  private validateInstallDate(dateValue: string) {
     const scheduledDate = parseDateOnly(dateValue);
     const today = todayDateOnly();
     const latestScheduledDate = addYearsToDateOnly(today, 1);
 
     if (!scheduledDate) {
       throw new BadRequestException('La fecha programada no es una fecha calendario valida');
-    }
-
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
-      throw new BadRequestException('La hora de visita no tiene un formato valido');
     }
 
     if (dateValue < today) {
@@ -801,7 +985,17 @@ export class ServicesService {
       throw new BadRequestException('La fecha programada no puede superar un ano desde hoy');
     }
 
-    if (dateValue === today && timeValue <= this.currentChileTime()) {
+    return scheduledDate;
+  }
+
+  private validateInstallSchedule(dateValue: string, timeValue: string) {
+    const scheduledDate = this.validateInstallDate(dateValue);
+
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeValue)) {
+      throw new BadRequestException('La hora de visita no tiene un formato valido');
+    }
+
+    if (dateValue === todayDateOnly() && timeValue <= this.currentChileTime()) {
       throw new BadRequestException('La fecha y hora de visita deben ser posteriores a la hora actual');
     }
 
@@ -844,6 +1038,12 @@ export class ServicesService {
         horaVisita: requestedTime,
         tecnicosDisponibles: [],
         alternativas: [],
+        horarios: ALTERNATIVE_VISIT_TIMES.map((horaVisita) => ({
+          horaVisita,
+          disponible: false,
+          motivo: 'No hay técnicos activos para esta empresa',
+          tecnicosDisponibles: [],
+        })),
         mensaje: 'No existen tecnicos en terreno activos para la empresa seleccionada',
       };
     }
@@ -894,6 +1094,21 @@ export class ServicesService {
         email: technician.email,
       }));
     const availableTechnicians = availableAt(requestedDate, requestedTime);
+    const horarios = ALTERNATIVE_VISIT_TIMES.map((horaVisita) => {
+      const pasado = requestedDate === todayDateOnly() && horaVisita <= this.currentChileTime();
+      const tecnicosDisponibles = pasado ? [] : availableAt(requestedDate, horaVisita);
+
+      return {
+        horaVisita,
+        disponible: tecnicosDisponibles.length > 0,
+        motivo: pasado
+          ? 'Horario ya pasado'
+          : tecnicosDisponibles.length
+            ? `${tecnicosDisponibles.length} técnico(s) disponible(s)`
+            : 'Horario ocupado',
+        tecnicosDisponibles,
+      };
+    });
     const alternatives: Array<{
       fechaProgramada: string;
       horaVisita: string;
@@ -941,6 +1156,7 @@ export class ServicesService {
       horaVisita: requestedTime,
       tecnicosDisponibles: availableTechnicians,
       alternativas: alternatives,
+      horarios,
       mensaje: availableTechnicians.length
         ? `${availableTechnicians.length} tecnico(s) disponible(s) para la visita`
         : 'No existen tecnicos disponibles en el horario solicitado. Selecciona una alternativa',

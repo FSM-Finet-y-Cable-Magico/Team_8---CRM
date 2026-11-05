@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "idFactura": 101,
+      "idContrato": 456,
+      "monto": 19990,
+      "fechaLimitePago": "2026-10-10",
+      "pagado": 5000,
+      "saldo": 14990,
+      "saldoFavor": 0,
+      "saldoExigible": 14990,
+      "fechaVencimientoEfectiva": "2026-10-15",
+      "diasAtraso": 0,
+      "estadoCalculado": "Parcial",
+      "aceptaPagos": true
+    }
+  ]
+}

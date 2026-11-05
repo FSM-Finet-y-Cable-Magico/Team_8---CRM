@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "data": {
+    "id_pago": 9001,
+    "id_factura": 101,
+    "monto": 14990,
+    "fecha_pago": "2026-10-02T18:15:00Z",
+    "codigo_autorizacion": "AUTH-987654",
+    "codigo_transaccion": "PORTAL-20261002-000001",
+    "duplicado": false,
+    "saldo": 0,
+    "saldo_exigible": 0,
+    "estado_factura": "Pagada"
+  }
+}

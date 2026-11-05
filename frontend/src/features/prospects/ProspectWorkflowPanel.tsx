@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
-import { FileClock, HandCoins, TrendingDown, UserRoundPlus, Wrench } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { FileClock, HandCoins, MapPin, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
+import { CoveragePicker, CoverageLocation, CoverageResult } from '../coverage';
+import { ContractDateCalendar, localDateValue } from './ContractDateCalendar';
+import './prospect-workflow.css';
 
-const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
-const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
-const FINAL_PROSPECT_STATUSES = ['Perdido', 'Contrato externo registrado'];
+const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
+const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
+const FINAL_PROSPECT_STATUSES = ['Perdido'];
 const LOSS_REASONS = ['Precio', 'Sin cobertura', 'Competencia', 'Falta de respuesta', 'Otro'];
 
 export function ProspectWorkflowPanel({
@@ -15,33 +18,50 @@ export function ProspectWorkflowPanel({
   permissions,
   onChanged,
   onClose,
+  onNotify,
 }: {
   prospect: Prospect;
   plans: Plan[];
   permissions: DashboardPermissions;
   onChanged: () => void;
   onClose?: () => void;
+  onNotify?: (message: string) => void;
 }) {
-  const [feasibilityResult, setFeasibilityResult] = useState<'Factible' | 'No Factible'>('Factible');
   const [quotePlanId, setQuotePlanId] = useState('');
   const [contractPlanId, setContractPlanId] = useState('');
-  const [contractConfirmationDate, setContractConfirmationDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [contractConfirmationDate, setContractConfirmationDate] = useState(localDateValue);
 
 
   const [contractObservation, setContractObservation] = useState('');
+  const [contractComuna, setContractComuna] = useState(prospect.comuna ?? '');
   const [lossOpen, setLossOpen] = useState(false);
   const [lossReason, setLossReason] = useState('Precio');
   const [lossObservation, setLossObservation] = useState('');
 
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
+  const [location, setLocation] = useState<CoverageLocation | null>(null);
+  const [coverage, setCoverage] = useState<CoverageResult | null>(null);
+  const [synchronized, setSynchronized] = useState<{ source: Prospect; updated: Prospect } | null>(null);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
+  const [coverageSyncError, setCoverageSyncError] = useState(false);
+  const changedListener = useRef(onChanged);
+  changedListener.current = onChanged;
+  const currentProspect = synchronized?.source === prospect ? synchronized.updated : prospect;
+  const availablePlanIds = coverage?.planes.map(plan => plan.idPlan) ?? null;
 
   useEffect(() => {
-    setFeasibilityResult('Factible');
+    setLocation(prospect.latitud !== null && prospect.latitud !== undefined && prospect.longitud !== null && prospect.longitud !== undefined
+      ? { latitud: prospect.latitud, longitud: prospect.longitud }
+      : null);
     setQuotePlanId('');
     setContractPlanId('');
-    setContractConfirmationDate(new Date().toISOString().slice(0, 10));
+    setCoverage(null);
+    setSynchronized(null);
+    setCoverageSyncError(false);
+    setContractConfirmationDate(localDateValue());
     setContractObservation('');
+    setContractComuna(prospect.comuna ?? '');
     setLossOpen(false);
     setLossReason('Precio');
     setLossObservation('');
@@ -50,17 +70,68 @@ export function ProspectWorkflowPanel({
     setStatusIsError(false);
   }, [prospect.idProspecto]);
 
-  const currentStatus = prospect.estadoPipeline ?? 'Prospecto Nuevo';
-  const isFactible = FACTIBLE_STATUSES.includes(currentStatus);
-  const isNoFactible = currentStatus === 'No Factible';
-  const isQuoted = QUOTED_STATUSES.includes(currentStatus);
-  const isFinal = FINAL_PROSPECT_STATUSES.includes(currentStatus);
-  const planOptions = plans.filter((plan) => plan.activo !== false);
+  useEffect(() => {
+    if (availablePlanIds === null) return;
+    setQuotePlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
+    setContractPlanId((current) => current && !availablePlanIds.includes(Number(current)) ? '' : current);
+  }, [coverage]);
+
+  const currentStatus = currentProspect.estadoPipeline ?? 'Prospecto Nuevo';
+  const requiresReview = prospect.requiereRevisionComercial === true;
+  const isFactible = !requiresReview && FACTIBLE_STATUSES.includes(currentStatus);
+  const isQuoted = !requiresReview && QUOTED_STATUSES.includes(currentStatus);
+  const isFinal = requiresReview || FINAL_PROSPECT_STATUSES.includes(currentStatus);
+  const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
+  const isWorkflowLocked = isFinal || Boolean(pendingContract);
+  const canVerify = permissions.verifyFeasibility || permissions.createProspects;
+  const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
+  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked);
+  const planOptions = plans.filter((plan) =>
+    plan.activo !== false && plan.idEmpresa === prospect.empresa?.idEmpresa && availablePlanIds?.includes(plan.idPlan),
+  );
+  const quotedPlanIds = new Set((prospect.cotizaciones ?? []).filter(quote => quote.fechaEnvio).map(quote => quote.idPlan));
+  const contractPlanOptions = planOptions.filter(plan => quotedPlanIds.has(plan.idPlan));
 
   function planOptionLabel(plan: Plan) {
     return `${plan.nombreComercial} - ${plan.empresa?.nombre ?? 'Sin empresa'}`;
   }
-  const isContractConfirmationReady = Boolean(contractPlanId && isQuoted && !isFinal);
+  function planSummary(planId: string, options: Plan[]) {
+    const plan = options.find(item => item.idPlan === Number(planId));
+    if (!plan) return null;
+    const price = coverage?.planes.find(item => item.idPlan === plan.idPlan)?.precioAplicable ?? Number(plan.precioMensual);
+    return <div className="prospect-selected-plan">
+      <span className="prospect-selected-plan-icon"><Wifi size={22} aria-hidden="true" /></span>
+      <div><strong>{plan.nombreComercial}</strong><span>{plan.velocidadMbps ? `${plan.velocidadMbps} Mbps` : plan.tipoPlan}</span></div>
+      {Number.isFinite(price) && <div className="prospect-selected-plan-price"><strong>{price.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 })}</strong><span>al mes</span></div>}
+    </div>;
+  }
+  const isContractConfirmationReady = Boolean(contractPlanOptions.some(plan => plan.idPlan === Number(contractPlanId)) && isQuoted && !isWorkflowLocked);
+
+  useEffect(() => {
+    setCoverageSyncError(false);
+    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted) { setCheckingCoverage(false); return; }
+    const nextStatus = coverage.coberturaComercial ? 'Factible' : 'No Factible';
+    const zoneId = coverage.microzona?.idZonaPago ?? coverage.zona?.idZonaPago ?? null;
+    if (hasSavedLocation && currentStatus === nextStatus && (currentProspect.idZonaPago ?? null) === zoneId) {
+      setCheckingCoverage(false); return;
+    }
+    const controller = new AbortController();
+    setCheckingCoverage(true);
+    // Persist only changed feasibility/location; opening or polling a modal must not create repeated checks in the history.
+    const timer = window.setTimeout(() => {
+      void api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location, { signal: controller.signal })
+        .then(({ data }) => {
+          if (controller.signal.aborted) return;
+          setSynchronized({ source: prospect, updated: { ...prospect, ...data } });
+          changedListener.current();
+        })
+        .catch(err => {
+          if (!controller.signal.aborted) { setCoverageSyncError(true); setStatus(apiErrorMessage(err)); setStatusIsError(true); }
+        })
+        .finally(() => { if (!controller.signal.aborted) setCheckingCoverage(false); });
+    }, 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, isWorkflowLocked, isQuoted, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
     setStatus('');
@@ -68,7 +139,8 @@ export function ProspectWorkflowPanel({
 
     try {
       await action();
-      setStatus(success);
+      if (onNotify) onNotify(success);
+      else setStatus(success);
       onChanged();
 
       if (closeAfterSuccess) {
@@ -81,6 +153,7 @@ export function ProspectWorkflowPanel({
   }
 
   async function generateQuote() {
+    if (!commercialReady || !planOptions.some(plan => plan.idPlan === Number(quotePlanId))) return;
     setStatus('');
     setStatusIsError(false);
 
@@ -89,13 +162,14 @@ export function ProspectWorkflowPanel({
       const pdf = await api.get(data.pdfUrl, { responseType: 'blob' });
       const objectUrl = URL.createObjectURL(pdf.data);
       window.open(objectUrl, '_blank');
-      setStatus(
-        data.envioEmail === 'sent'
-          ? `Cotización generada y enviada automáticamente a ${prospect.email}`
-          : data.envioEmail === 'failed'
-            ? 'Cotización generada, pero el servidor de correo rechazó el envío.'
-            : 'Cotización generada. Configura SMTP para enviarla automáticamente por correo.',
-      );
+      if (data.envioEmail === 'failed') {
+        setStatusIsError(true);
+        setStatus('No se pudo enviar la cotización.');
+      } else {
+        const message = data.envioEmail === 'sent' ? 'Cotización enviada' : 'Cotización generada';
+        if (onNotify) onNotify(message);
+        else setStatus(message);
+      }
       onChanged();
     } catch (err) {
       setStatusIsError(true);
@@ -104,14 +178,16 @@ export function ProspectWorkflowPanel({
   }
 
   async function registerExternalContract() {
+    if (!commercialReady || !isContractConfirmationReady) return;
     await runAction(
       () =>
         api.post(`/prospects/${prospect.idProspecto}/contracts`, {
           planId: Number(contractPlanId),
           fechaInicio: contractConfirmationDate || undefined,
           observacionContrato: contractObservation.trim() || undefined,
+          comuna: contractComuna.trim() || undefined,
         }),
-      'Contratación confirmada. El prospecto queda como cliente pendiente de firma.',
+      'Contratación confirmada',
       true,
     );
   }
@@ -152,8 +228,11 @@ export function ProspectWorkflowPanel({
             <h3>{prospect.nombreCompleto}</h3>
             <p>{prospect.rut ?? 'RUT no registrado'}</p>
           </div>
-          <StatusBadge value={prospect.estadoPipeline} />
+          <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
         </header>
+        {requiresReview && (
+          <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
+        )}
         <dl className="prospect-overview-data">
           <div>
             <dt>Teléfono</dt>
@@ -173,64 +252,42 @@ export function ProspectWorkflowPanel({
           </div>
           <div>
             <dt>Dirección</dt>
-            <dd>{prospect.direccion?.trim() || 'Sin dirección registrada'}</dd>
+            <dd>{[prospect.direccion, prospect.comuna, prospect.region].filter(Boolean).join(', ') || 'Sin dirección registrada'}</dd>
           </div>
         </dl>
       </section>
 
       <div className="workflow-grid prospect-action-grid">
-        {permissions.verifyFeasibility && (
-          <section className="prospect-action-card prospect-action-card-blue">
-            <header className="prospect-action-header">
-              <span className="prospect-action-icon" aria-hidden="true">
-                <Wrench size={19} strokeWidth={1.8} />
-              </span>
-              <div>
-                <h4>Factibilidad técnica</h4>
-                <p>Define si el prospecto puede avanzar a cotización.</p>
-              </div>
-            </header>
-            <label>
-              Resultado
-              <select
-                value={feasibilityResult}
-                disabled={isFinal}
-                onChange={(event) => setFeasibilityResult(event.target.value as 'Factible' | 'No Factible')}
-              >
-                <option value="Factible">Factible</option>
-                <option value="No Factible">No factible</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={isFinal}
-              onClick={() =>
-                void runAction(
-                  () => api.post(`/prospects/${prospect.idProspecto}/feasibility`, { resultado: feasibilityResult }),
-                  'Factibilidad registrada',
-                )
-              }
-            >
-              Registrar factibilidad
-            </button>
-            {isNoFactible && <p className="alert">El prospecto no factible no puede avanzar a cotización ni contrato externo.</p>}
+        {(canVerify || permissions.generateQuotes || permissions.contractPlans) && prospect.empresa && (
+          <section className="prospect-action-card prospect-coverage-card">
+            <CoveragePicker
+              key={prospect.idProspecto}
+              presentation="summary"
+              idEmpresa={prospect.empresa.idEmpresa}
+              direccion={[prospect.direccion, prospect.comuna, prospect.region, 'Chile'].filter(Boolean).join(', ')}
+              value={location}
+              onChange={setLocation}
+              onResult={setCoverage}
+              autoGeocode={Boolean(canVerify && !isWorkflowLocked && !isQuoted && prospect.direccion && prospect.comuna && prospect.region)}
+              disabled={!canVerify || isWorkflowLocked || isQuoted}
+            />
+            {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>
         )}
 
-        {permissions.generateQuotes && (
-          <section className="prospect-action-card prospect-action-card-violet">
+        {permissions.generateQuotes && commercialReady && planOptions.length > 0 && (
+          <section className="prospect-commercial-section prospect-quote-section">
             <header className="prospect-action-header">
               <span className="prospect-action-icon" aria-hidden="true">
                 <FileClock size={19} strokeWidth={1.8} />
               </span>
               <div>
                 <h4>Generar cotización</h4>
-                <p>Crea el PDF de cotización solo después de factibilidad positiva.</p>
               </div>
             </header>
-            <label>
+            <div className="prospect-quote-fields"><label>
               Plan a cotizar
-              <select value={quotePlanId} disabled={!isFactible || isFinal} onChange={(event) => setQuotePlanId(event.target.value)}>
+              <select aria-label="Plan a cotizar" value={quotePlanId} disabled={!isFactible || isWorkflowLocked} onChange={(event) => setQuotePlanId(event.target.value)}>
                 <option value="">Seleccionar plan</option>
                 {planOptions.map((plan) => (
                   <option key={plan.idPlan} value={plan.idPlan}>
@@ -239,52 +296,51 @@ export function ProspectWorkflowPanel({
                 ))}
               </select>
             </label>
-            <button type="button" disabled={!quotePlanId || !isFactible || isFinal} onClick={() => void generateQuote()}>
+            <button type="button" disabled={!quotePlanId || !isFactible || isWorkflowLocked} onClick={() => void generateQuote()}>
               Generar cotización
             </button>
+            </div>
+            {planSummary(quotePlanId, planOptions)}
           </section>
         )}
 
-        {permissions.contractPlans && (
-          <section className="prospect-action-card prospect-action-card-contract prospect-action-card-orange">
+        {permissions.contractPlans && commercialReady && isQuoted && contractPlanOptions.length > 0 && (
+          <section className="prospect-commercial-section prospect-contract-section">
             <header className="prospect-action-header">
               <span className="prospect-action-icon" aria-hidden="true">
                 <HandCoins size={19} strokeWidth={1.8} />
               </span>
               <div>
                 <h4>Confirmar contratación</h4>
-                <p>Confirma manualmente el plan aceptado; la firma se gestionará en Clientes.</p>
               </div>
             </header>
-            <div className="prospect-contract-fields">
+            <div className="prospect-contract-layout"><div className="prospect-contract-details">
               <label>
                 Plan aceptado
-                <select value={contractPlanId} disabled={!isQuoted || isFinal} onChange={(event) => setContractPlanId(event.target.value)}>
+                <select aria-label="Plan aceptado" value={contractPlanId} disabled={!isQuoted || isWorkflowLocked} onChange={(event) => setContractPlanId(event.target.value)}>
                   <option value="">Seleccionar plan</option>
-                  {planOptions.map((plan) => (
+                  {contractPlanOptions.map((plan) => (
                     <option key={plan.idPlan} value={plan.idPlan}>
                       {planOptionLabel(plan)}
                     </option>
                   ))}
                 </select>
               </label>
-              <label>
-                Fecha de confirmación
-                <input
-                  type="date"
-                  value={contractConfirmationDate}
-                  disabled={!isQuoted || isFinal}
-                  onChange={(event) => setContractConfirmationDate(event.target.value)}
-                />
-              </label>
+              {planSummary(contractPlanId, contractPlanOptions)}
+              <div className="prospect-contract-address"><MapPin size={18} aria-hidden="true" /><span>{prospect.direccion || 'Sin dirección registrada'}</span></div>
+              <label>Comuna de instalación<input maxLength={80} value={contractComuna} disabled={!isQuoted || isWorkflowLocked} onChange={event => setContractComuna(event.target.value)} /></label>
               <label>
                 Observación
                 <textarea
                   value={contractObservation}
-                  disabled={!isQuoted || isFinal}
+                  placeholder="Añadir una observación"
+                  maxLength={500}
+                  disabled={!isQuoted || isWorkflowLocked}
                   onChange={(event) => setContractObservation(event.target.value)}
                 />
               </label>
+            </div>
+            <ContractDateCalendar value={contractConfirmationDate} onChange={setContractConfirmationDate} disabled={!isQuoted || isWorkflowLocked} />
             </div>
             <button
               type="button"
@@ -297,6 +353,12 @@ export function ProspectWorkflowPanel({
         )}
       </div>
 
+        {pendingContract && permissions.manageContracts && !requiresReview && (
+          <section className="prospect-action-card prospect-action-card-contract">
+            <header className="prospect-action-header"><div><h4>Confirmar firma de contrato</h4><p>Al confirmar, la persona pasa a Pendiente de activacion. No se crea cliente ni servicio todavia.</p></div></header>
+            <button type="button" onClick={() => void runAction(() => api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}), 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Confirmar firma</button>
+          </section>
+        )}
       {permissions.recordProspectLoss && !isFinal && (
         <div className="button-row">
           <button type="button" className="prospect-loss-trigger" onClick={() => setLossOpen(true)}>

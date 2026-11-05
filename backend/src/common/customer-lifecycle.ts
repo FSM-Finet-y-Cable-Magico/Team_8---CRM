@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 
 export const ACTIVE_CUSTOMER_STATUS = 'Activo';
 export const LOST_PROSPECT_PIPELINE_STATUS = 'Perdido';
+export const SIGNED_CONTRACT_STATES = ['Firmado', 'Activo', 'Suspendido', 'Moroso'];
 
 export function activeProspectWhere(
   companyScope: Prisma.ProspectoWhereInput,
@@ -9,22 +10,26 @@ export function activeProspectWhere(
   return {
     AND: [
       companyScope,
-      { idCliente: null },
       {
         OR: [
           { estadoPipeline: null },
           { estadoPipeline: { not: LOST_PROSPECT_PIPELINE_STATUS } },
         ],
       },
+      // Historical labels are not evidence of conversion. Keep unlinked records
+      // visible for review rather than silently dropping them from both lists.
+      { idCliente: null },
+      { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
     ],
   };
 }
 
 export function activeCustomerWhere(
   companyScope: Prisma.ClienteWhereInput,
+  serviceScope: Prisma.ServicioContratadoWhereInput,
 ): Prisma.ClienteWhereInput {
   return {
-    AND: [companyScope, { estado: ACTIVE_CUSTOMER_STATUS }],
+    AND: [companyScope, { servicios: { some: { ...serviceScope, estadoOperativo: ACTIVE_CUSTOMER_STATUS } } }],
   };
 }
 
@@ -55,4 +60,27 @@ export function resolveCustomerLifecycleStatus(input: {
   if (!hasOperationalRelationship && (services.includes('Baja') || contracts.includes('Baja'))) return 'Baja';
 
   return input.currentStatus;
+}
+
+export function pendingActivationWhere(
+  companyScope: { idEmpresa: number },
+): Prisma.ProspectoWhereInput {
+  return {
+    AND: [
+      companyScope,
+      {
+        contratos: {
+          some: {
+            ...companyScope,
+            estado: { in: SIGNED_CONTRACT_STATES },
+            // An existing customer may be awaiting activation of another contract.
+            // Established, suspended or retired services are not pending activations.
+            servicios: {
+              none: { estadoOperativo: { notIn: ['Pendiente Instalacion', 'Instalacion Programada'] } },
+            },
+          },
+        },
+      },
+    ],
+  };
 }

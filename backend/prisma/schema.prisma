@@ -8,39 +8,66 @@ datasource db {
 }
 
 model Empresa {
-  idEmpresa  Int                  @id @default(autoincrement()) @map("id_empresa")
-  nombre     String               @db.VarChar(100)
-  rutEmpresa String?              @unique @map("rut_empresa") @db.VarChar(12)
-  esquemaDb  String?              @map("esquema_db") @db.VarChar(50)
-  usuarios   Usuario[]
-  clientes   Cliente[]
-  prospectos Prospecto[]
-  planes     Plan[]
-  servicios  ServicioContratado[]
-  solicitudes SolicitudCliente[]
-  zonasPago   ZonaPago[]
+  operacionesImputacion OperacionImputacionCuota[]
+  idEmpresa                  Int                          @id @default(autoincrement()) @map("id_empresa")
+  nombre                     String                       @db.VarChar(100)
+  rutEmpresa                 String?                      @unique @map("rut_empresa") @db.VarChar(12)
+  esquemaDb                  String?                      @map("esquema_db") @db.VarChar(50)
+  usuarios                   Usuario[]
+  clientes                   Cliente[]
+  prospectos                 Prospecto[]
+  planes                     Plan[]
+  servicios                  ServicioContratado[]
+  solicitudes                SolicitudCliente[]
+  zonasPago                  ZonaPago[]
+  eventosGestionComercial    EventoGestionComercial[]
+  conveniosPago              ConvenioPago[]
+  prorrogasPago              ProrrogaPago[]
+  cambiosCondicionPago       CambioCondicionPago[]
+  cargosAdicionales          CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro          ServicioRetiroSolicitud[]
+  integracionesActivacionG1  IntegracionActivacionG1[]
+  garantiasComerciales       GarantiaComercial[]
+  plantillasNotificacion     PlantillaNotificacion[]
+  documentosTributarios      DocumentoTributarioExterno[]
+  intencionesTributarias     TaxEmissionIntent[]
+  trabajosTributarios        TaxPaymentJob[]
+  resultadosWifiG2           IntegracionResultadoWifiG2[]
+  logsNotificacion           LogNotificacion[]
 
   @@map("empresa")
 }
 
 model Usuario {
-  idUsuario          Int            @id @default(autoincrement()) @map("id_usuario")
-  idEmpresa          Int?           @map("id_empresa")
-  nombreCompleto     String         @map("nombre_completo") @db.VarChar(80)
-  nombreUsuario      String?        @unique @map("nombre_usuario") @db.VarChar(50)
-  email              String?        @unique @db.VarChar(120)
-  passwordHash       String         @map("password_hash") @db.VarChar(72)
-  activo             Boolean?       @default(true)
-  fechaCreacion      DateTime?      @default(now()) @map("fecha_creacion")
-  esPasswordTemporal Boolean?       @default(true) @map("es_password_temporal")
-  intentosFallidos   Int?           @default(0) @map("intentos_fallidos")
-  empresa            Empresa?       @relation(fields: [idEmpresa], references: [idEmpresa])
-  usuarioRoles       UsuarioRol[]
-  auditorias         LogAuditoria[]
-  prospectos         Prospecto[]
-  solicitudesRegistradas SolicitudCliente[]
-  observacionesOperativas ObservacionOperativa[]
-  contratosDigitalesGenerados ContratoDigital[]
+  operacionesImputacion OperacionImputacionCuota[]
+  idUsuario                        Int                          @id @default(autoincrement()) @map("id_usuario")
+  idEmpresa                        Int?                         @map("id_empresa")
+  nombreCompleto                   String                       @map("nombre_completo") @db.VarChar(150)
+  nombreUsuario                    String?                      @unique @map("nombre_usuario") @db.VarChar(50)
+  email                            String?                      @unique @db.VarChar(150)
+  passwordHash                     String                       @map("password_hash") @db.VarChar(255)
+  versionSesion                    Int?                         @default(0) @map("version_sesion")
+  activo                           Boolean?                     @default(true)
+  fechaCreacion                    DateTime?                    @default(now()) @map("fecha_creacion") @db.Timestamptz(6)
+  esPasswordTemporal               Boolean?                     @default(true) @map("es_password_temporal")
+  intentosFallidos                 Int?                         @default(0) @map("intentos_fallidos")
+  empresa                          Empresa?                     @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  usuarioRoles                     UsuarioRol[]
+  auditorias                       LogAuditoria[]
+  prospectos                       Prospecto[]
+  solicitudesRegistradas           SolicitudCliente[]
+  observacionesOperativas          ObservacionOperativa[]
+  contratosDigitalesGenerados      ContratoDigital[]
+  eventosGestionResponsable        EventoGestionComercial[]
+  conveniosRegistrados             ConvenioPago[]               @relation("ConvenioResponsable")
+  conveniosAprobados               ConvenioPago[]               @relation("ConvenioAprobador")
+  prorrogasRegistradas             ProrrogaPago[]
+  cambiosCondicionRegistrados      CambioCondicionPago[]
+  cargosAdicionalesRegistrados     CargoAdicional[]
+  solicitudesRetiroRegistradas     ServicioRetiroSolicitud[]
+  garantiasComercialesResponsable  GarantiaComercial[]
+  documentosTributariosRegistrados DocumentoTributarioExterno[]
 
   @@map("usuario")
 }
@@ -58,99 +85,128 @@ model UsuarioRol {
   idUsuarioRol    Int       @id @default(autoincrement()) @map("id_usuario_rol")
   idUsuario       Int?      @map("id_usuario")
   idRol           Int       @map("id_rol")
-  fechaAsignacion DateTime? @default(now()) @map("fecha_asignacion") @db.Date
-  usuario         Usuario?  @relation(fields: [idUsuario], references: [idUsuario])
-  rol             Rol       @relation(fields: [idRol], references: [idRol])
+  fechaAsignacion DateTime? @default(now()) @map("fecha_asignacion") @db.Timestamptz(6)
+  usuario         Usuario?  @relation(fields: [idUsuario], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
+  rol             Rol       @relation(fields: [idRol], references: [idRol], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([idUsuario, idRol])
   @@map("usuario_rol")
 }
 
 model LogAuditoria {
+  operacionImputacion OperacionImputacionCuota?
   idLog             BigInt    @id @default(autoincrement()) @map("id_log")
   idUsuario         Int?      @map("id_usuario")
   accion            String    @db.VarChar(100)
-  entidadAfectada   String?   @map("entidad_afectada") @db.VarChar(80)
+  entidadAfectada   String?   @map("entidad_afectada") @db.VarChar(100)
   idEntidadAfectada Int?      @map("id_entidad_afectada")
   valorAnterior     Json?     @map("valor_anterior")
   valorNuevo        Json?     @map("valor_nuevo")
-  ipOrigen          String?   @map("ip_origen") @db.Inet
-  fechaHora         DateTime? @default(now()) @map("fecha_hora")
-  usuario           Usuario?  @relation(fields: [idUsuario], references: [idUsuario])
+  ipOrigen          String?   @map("ip_origen") @db.VarChar(45)
+  fechaHora         DateTime? @default(now()) @map("fecha_hora") @db.Timestamptz(6)
+  usuario           Usuario?  @relation(fields: [idUsuario], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("log_auditoria")
 }
 
 model Cliente {
-  idCliente          Int                  @id @default(autoincrement()) @map("id_cliente")
-  idEmpresa          Int?                 @map("id_empresa")
-  rut                String?              @unique @db.VarChar(12)
-  nombreCompleto     String               @map("nombre_completo") @db.VarChar(120)
-  email              String?              @db.VarChar(120)
-  telefono           String?              @db.VarChar(20)
-  passwordPortalHash String?              @map("password_portal_hash") @db.VarChar(72)
-  estado             String               @db.VarChar(40)
-  esConflictivo      Boolean?             @default(false) @map("es_conflictivo")
-  importadoMasivo    Boolean?             @default(false) @map("importado_masivo")
-  obsConflictivo     String?              @map("obs_conflictivo")
-  origenContacto     String?              @map("origen_contacto") @db.VarChar(40)
-  datosTecnicos      Json?                @map("datos_tecnicos")
-  fechaCreacion      DateTime?            @default(now()) @map("fecha_creacion")
-  empresa            Empresa?             @relation(fields: [idEmpresa], references: [idEmpresa])
-  prospectos         Prospecto[]
-  contratos          Contrato[]
-  direcciones        DireccionServicio[]
-  servicios          ServicioContratado[]
-  solicitudes        SolicitudCliente[]
-  contratosDigitales ContratoDigital[]
-  cambiosPlan        HistorialCambioPlan[]
+  idCliente                  Int                          @id @default(autoincrement()) @map("id_cliente")
+  idEmpresa                  Int?                         @map("id_empresa")
+  rut                        String?                      @unique @db.VarChar(12)
+  nombreCompleto             String                       @map("nombre_completo") @db.VarChar(120)
+  email                      String?                      @db.VarChar(120)
+  telefono                   String?                      @db.VarChar(20)
+  passwordPortalHash         String?                      @map("password_portal_hash") @db.VarChar(72)
+  estado                     String                       @db.VarChar(40)
+  esConflictivo              Boolean?                     @default(false) @map("es_conflictivo")
+  importadoMasivo            Boolean?                     @default(false) @map("importado_masivo")
+  obsConflictivo             String?                      @map("obs_conflictivo")
+  origenContacto             String?                      @map("origen_contacto") @db.VarChar(40)
+  datosTecnicos              Json?                        @map("datos_tecnicos")
+  fechaCreacion              DateTime?                    @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  empresa                    Empresa?                     @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  prospectos                 Prospecto[]
+  contratos                  Contrato[]
+  direcciones                DireccionServicio[]
+  servicios                  ServicioContratado[]
+  solicitudes                SolicitudCliente[]
+  contratosDigitales         ContratoDigital[]
+  cambiosPlan                HistorialCambioPlan[]
+  eventosGestionComercial    EventoGestionComercial[]
+  conveniosPago              ConvenioPago[]
+  prorrogasPago              ProrrogaPago[]
+  cambiosCondicionPago       CambioCondicionPago[]
+  cargosAdicionales          CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro          ServicioRetiroSolicitud[]
+  integracionesActivacionG1  IntegracionActivacionG1[]
+  garantiasComerciales       GarantiaComercial[]
+  documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("cliente")
 }
 
 model Prospecto {
-  idProspecto          Int          @id @default(autoincrement()) @map("id_prospecto")
-  idEmpresa            Int?         @map("id_empresa")
-  idUsuarioComercial   Int?         @map("id_usuario_comercial")
-  idCliente            Int?         @map("id_cliente")
-  rut                  String?      @db.VarChar(12)
-  nombreCompleto       String?      @map("nombre_completo") @db.VarChar(120)
-  email                String?      @db.VarChar(120)
-  telefono             String?      @db.VarChar(20)
-  direccion            String?      @db.VarChar(200)
-  estadoPipeline       String?      @map("estado_pipeline") @db.VarChar(30)
-  motivoPerdida        String?      @map("motivo_perdida") @db.VarChar(30)
-  observacionPerdida   String?      @map("observacion_perdida")
-  fechaPerdida         DateTime?    @map("fecha_perdida")
-  idUsuarioPerdida     Int?         @map("id_usuario_perdida")
-  origenContacto       String?      @map("origen_contacto") @db.VarChar(40)
-  tiempoConversionDias Int?         @map("tiempo_conversion_dias")
-  fechaCreacion        DateTime?    @map("fecha_creacion")
-  fechaConversion      DateTime?    @map("fecha_conversion") @db.Date
-  empresa              Empresa?     @relation(fields: [idEmpresa], references: [idEmpresa])
-  usuarioComercial     Usuario?     @relation(fields: [idUsuarioComercial], references: [idUsuario])
-  cliente              Cliente?     @relation(fields: [idCliente], references: [idCliente])
-  cotizaciones         Cotizacion[]
+  idProspecto                Int                        @id @default(autoincrement()) @map("id_prospecto")
+  idEmpresa                  Int?                       @map("id_empresa")
+  idUsuarioComercial         Int?                       @map("id_usuario_comercial")
+  idCliente                  Int?                       @map("id_cliente")
+  rut                        String?                    @db.VarChar(12)
+  nombreCompleto             String?                    @map("nombre_completo") @db.VarChar(120)
+  email                      String?                    @db.VarChar(120)
+  telefono                   String?                    @db.VarChar(20)
+  direccion                  String?                    @db.VarChar(200)
+  comuna                     String?                    @db.VarChar(80)
+  region                     String?                    @db.VarChar(80)
+  latitud                    Float?                     @db.DoublePrecision
+  longitud                   Float?                     @db.DoublePrecision
+  idZonaPago                 Int?                       @map("id_zona_pago")
+  idPlanInteres              Int?                       @map("id_plan_interes")
+  estadoPipeline             String?                    @map("estado_pipeline") @db.VarChar(30)
+  motivoPerdida              String?                    @map("motivo_perdida") @db.VarChar(30)
+  observacionPerdida         String?                    @map("observacion_perdida")
+  fechaPerdida               DateTime?                  @map("fecha_perdida") @db.Timestamp(6)
+  idUsuarioPerdida           Int?                       @map("id_usuario_perdida")
+  origenContacto             String?                    @map("origen_contacto") @db.VarChar(40)
+  tiempoConversionDias       Int?                       @map("tiempo_conversion_dias")
+  clasificacionComercial     String?                    @default("PROSPECTO") @map("clasificacion_comercial") @db.VarChar(40)
+  disponibleRemarketing      Boolean?                   @default(false) @map("disponible_remarketing")
+  fechaCreacion              DateTime?                  @map("fecha_creacion") @db.Timestamp(6)
+  fechaConversion            DateTime?                  @map("fecha_conversion") @db.Date
+  empresa                    Empresa?                   @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  usuarioComercial           Usuario?                   @relation(fields: [idUsuarioComercial], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
+  cliente                    Cliente?                   @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  cotizaciones               Cotizacion[]
+  contratos                  Contrato[]
+  ordenesTrabajo             OrdenTrabajo[]
+  zonaPago                   ZonaPago?                  @relation(fields: [idZonaPago], references: [idZonaPago], onDelete: SetNull, onUpdate: Cascade)
+  planInteres                Plan?                      @relation("ProspectoPlanInteres", fields: [idPlanInteres], references: [idPlan], onDelete: SetNull, onUpdate: Cascade)
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
 
+  @@index([idEmpresa, idZonaPago])
+  @@index([idEmpresa, idPlanInteres])
+  @@index([idEmpresa, clasificacionComercial])
   @@map("prospecto")
 }
 
 model Plan {
-  idPlan          Int          @id @default(autoincrement()) @map("id_plan")
-  idEmpresa       Int?         @map("id_empresa")
-  nombreComercial String       @map("nombre_comercial") @db.VarChar(100)
-  tipoPlan        String       @map("tipo_plan") @db.VarChar(20)
-  tipoCliente     String       @map("tipo_cliente") @db.VarChar(20)
-  velocidadMbps   Int?         @map("velocidad_mbps")
-  precioMensual   Decimal      @map("precio_mensual") @db.Decimal(10, 2)
-  descripcion     String?
-  activo          Boolean?     @default(true)
-  empresa         Empresa?     @relation(fields: [idEmpresa], references: [idEmpresa])
-  cotizaciones    Cotizacion[]
-  contratos       Contrato[]
-  preciosZona     PlanZonaPrecio[]
-  cambiosPlanAnteriores HistorialCambioPlan[] @relation("PlanAnterior")
-  cambiosPlanNuevos     HistorialCambioPlan[] @relation("PlanNuevo")
+  idPlan                     Int                        @id @default(autoincrement()) @map("id_plan")
+  idEmpresa                  Int?                       @map("id_empresa")
+  nombreComercial            String                     @map("nombre_comercial") @db.VarChar(100)
+  tipoPlan                   String                     @map("tipo_plan") @db.VarChar(40)
+  tipoCliente                String                     @map("tipo_cliente") @db.VarChar(20)
+  velocidadMbps              Int?                       @map("velocidad_mbps")
+  precioMensual              Decimal                    @map("precio_mensual") @db.Decimal(10, 2)
+  descripcion                String?
+  activo                     Boolean?                   @default(true)
+  empresa                    Empresa?                   @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  cotizaciones               Cotizacion[]
+  contratos                  Contrato[]
+  preciosZona                PlanZonaPrecio[]
+  cambiosPlanAnteriores      HistorialCambioPlan[]      @relation("PlanAnterior")
+  cambiosPlanNuevos          HistorialCambioPlan[]      @relation("PlanNuevo")
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  prospectosInteres          Prospecto[]                @relation("ProspectoPlanInteres")
 
   @@map("plan")
 }
@@ -160,73 +216,213 @@ model Cotizacion {
   idProspecto            Int?       @map("id_prospecto")
   idPlan                 Int?       @map("id_plan")
   pdfUrl                 String?    @map("pdf_url")
-  fechaEnvio             DateTime?  @map("fecha_envio")
+  fechaEnvio             DateTime?  @map("fecha_envio") @db.Timestamp(6)
   factibilidadVerificada Boolean?   @default(false) @map("factibilidad_verificada")
-  prospecto              Prospecto? @relation(fields: [idProspecto], references: [idProspecto])
-  plan                   Plan?      @relation(fields: [idPlan], references: [idPlan])
+  prospecto              Prospecto? @relation(fields: [idProspecto], references: [idProspecto], onDelete: NoAction, onUpdate: NoAction)
+  plan                   Plan?      @relation(fields: [idPlan], references: [idPlan], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("cotizacion")
 }
 
 model Contrato {
-  idContrato      Int                  @id @default(autoincrement()) @map("id_contrato")
-  idCliente       Int?                 @map("id_cliente")
-  idPlan          Int?                 @map("id_plan")
-  idEmpresa       Int?                 @map("id_empresa")
-  idZonaPago      Int?                 @map("id_zona_pago")
-  fechaInicio     DateTime             @map("fecha_inicio") @db.Date
-  diaVencimiento  Int                  @map("dia_vencimiento") @db.SmallInt
-  estado          String               @db.VarChar(40)
-  fechaSuspension DateTime?            @map("fecha_suspension") @db.Date
-  proveedorContrato     String?        @map("proveedor_contrato") @db.VarChar(40)
-  numeroContratoExterno String?        @map("numero_contrato_externo") @db.VarChar(80)
-  folioContratoExterno  String?        @map("folio_contrato_externo") @db.VarChar(80)
-  urlContratoPdf        String?        @map("url_contrato_pdf")
-  fechaGeneracionContrato DateTime?    @map("fecha_generacion_contrato") @db.Date
-  fechaEnvioCliente     DateTime?      @map("fecha_envio_cliente") @db.Date
-  observacionContrato   String?        @map("observacion_contrato")
-  fechaFirmaManual      DateTime?      @map("fecha_firma_manual") @db.Date
-  idUsuarioFirmaManual  Int?           @map("id_usuario_firma_manual")
-  observacionFirmaManual String?       @map("observacion_firma_manual")
-  cliente         Cliente?             @relation(fields: [idCliente], references: [idCliente])
-  plan            Plan?                @relation(fields: [idPlan], references: [idPlan])
-  zonaPago        ZonaPago?            @relation(fields: [idZonaPago], references: [idZonaPago])
-  facturas        Factura[]
-  servicios       ServicioContratado[]
-  cambiosPlan     HistorialCambioPlan[]
-  contratosDigitales ContratoDigital[]
+  idContrato              Int        @id @default(autoincrement()) @map("id_contrato")
+  idCliente               Int?       @map("id_cliente")
+  idProspecto             Int?       @map("id_prospecto")
+  idPlan                  Int?       @map("id_plan")
+  idEmpresa               Int?       @map("id_empresa")
+  idZonaPago              Int?       @map("id_zona_pago")
+  fechaInicio             DateTime   @map("fecha_inicio") @db.Date
+  diaVencimiento          Int        @map("dia_vencimiento") @db.SmallInt
+  estado                  String     @db.VarChar(40)
+  fechaSuspension         DateTime?  @map("fecha_suspension") @db.Date
+  proveedorContrato       String?    @map("proveedor_contrato") @db.VarChar(40)
+  numeroContratoExterno   String?    @map("numero_contrato_externo") @db.VarChar(80)
+  folioContratoExterno    String?    @map("folio_contrato_externo") @db.VarChar(80)
+  urlContratoPdf          String?    @map("url_contrato_pdf")
+  fechaGeneracionContrato DateTime?  @map("fecha_generacion_contrato") @db.Date
+  fechaEnvioCliente       DateTime?  @map("fecha_envio_cliente") @db.Date
+  observacionContrato     String?    @map("observacion_contrato")
+  fechaFirmaManual        DateTime?  @map("fecha_firma_manual") @db.Date
+  idUsuarioFirmaManual    Int?       @map("id_usuario_firma_manual")
+  observacionFirmaManual  String?    @map("observacion_firma_manual")
+  direccionInstalacion    String?    @map("direccion_instalacion") @db.VarChar(200)
+  comunaInstalacion       String?    @map("comuna_instalacion") @db.VarChar(80)
+  ciudadInstalacion       String?    @map("ciudad_instalacion") @db.VarChar(80)
+  plan                    Plan?      @relation(fields: [idPlan], references: [idPlan], onDelete: NoAction, onUpdate: NoAction)
+  cliente                 Cliente?   @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  prospecto               Prospecto? @relation(fields: [idProspecto], references: [idProspecto], onDelete: NoAction, onUpdate: NoAction)
+
+  zonaPago                   ZonaPago?                    @relation(fields: [idZonaPago], references: [idZonaPago], onDelete: NoAction, onUpdate: NoAction)
+  facturas                   Factura[]
+  servicios                  ServicioContratado[]
+  cambiosPlan                HistorialCambioPlan[]
+  contratosDigitales         ContratoDigital[]
+  eventosGestionComercial    EventoGestionComercial[]
+  conveniosPago              ConvenioPago[]
+  prorrogasPago              ProrrogaPago[]
+  cambiosCondicionPago       CambioCondicionPago[]
+  cargosAdicionales          CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro          ServicioRetiroSolicitud[]
+  integracionesActivacionG1  IntegracionActivacionG1[]
+  garantiasComerciales       GarantiaComercial[]
+  documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("contrato")
 }
 
 model Factura {
-  idFactura       Int       @id @default(autoincrement()) @map("id_factura")
-  idContrato      Int?      @map("id_contrato")
-  periodoMes      Int       @map("periodo_mes") @db.SmallInt
-  periodoAnio     Int       @map("periodo_anio") @db.SmallInt
-  monto           Decimal?  @db.Decimal(10, 2)
-  fechaEmision    DateTime? @map("fecha_emision") @db.Date
-  fechaLimitePago DateTime  @map("fecha_limite_pago") @db.Date
-  estado          String    @db.VarChar(20)
-  contrato        Contrato? @relation(fields: [idContrato], references: [idContrato])
-  pagos           Pago[]
+  operacionesImputacion OperacionImputacionCuota[]
+  idFactura               Int                          @id @default(autoincrement()) @map("id_factura")
+  idContrato              Int?                         @map("id_contrato")
+  periodoMes              Int                          @map("periodo_mes") @db.SmallInt
+  periodoAnio             Int                          @map("periodo_anio") @db.SmallInt
+  monto                   Decimal?                     @db.Decimal(10, 2)
+  fechaEmision            DateTime?                    @map("fecha_emision") @db.Date
+  fechaLimitePago         DateTime                     @map("fecha_limite_pago") @db.Date
+  estado                  String                       @db.VarChar(20)
+  tipoDocumento           String?                      @map("tipo_documento") @db.VarChar(30)
+  folioExterno            String?                      @map("folio_externo") @db.VarChar(80)
+  contrato                Contrato?                    @relation(fields: [idContrato], references: [idContrato], onDelete: NoAction, onUpdate: NoAction)
+  pagos                   Pago[]
+  eventosGestionComercial EventoGestionComercial[]
+  conveniosPago           ConvenioPago[]
+  prorrogasPago           ProrrogaPago[]
+  cambiosCondicionPago    CambioCondicionPago[]
+  documentosTributarios   DocumentoTributarioExterno[]
+  intencionesTributarias  TaxEmissionIntent[]
+  trabajosTributarios     TaxPaymentJob[]
 
+  @@index([folioExterno])
   @@map("factura")
 }
 
 model Pago {
+  operacionesImputacion OperacionImputacionCuota[]
   idPago             Int      @id @default(autoincrement()) @map("id_pago")
   idFactura          Int?     @map("id_factura")
   idCliente          Int?     @map("id_cliente")
   monto              Decimal  @db.Decimal(10, 2)
-  fechaPago          DateTime @map("fecha_pago")
+  fechaPago          DateTime @map("fecha_pago") @db.Timestamp(6)
   codigoTransaccion  String?  @unique @map("codigo_transaccion") @db.VarChar(100)
+  codigoAutorizacion String?  @map("codigo_autorizacion") @db.VarChar(100)
   pasarela           String   @db.VarChar(30)
   tokenTransaccional String?  @map("token_transaccional") @db.VarChar(200)
   comprobantePdfUrl  String?  @map("comprobante_pdf_url")
-  factura            Factura? @relation(fields: [idFactura], references: [idFactura])
+  comprobanteEstado  String   @default("PENDIENTE") @map("comprobante_estado") @db.VarChar(20)
+  factura            Factura? @relation(fields: [idFactura], references: [idFactura], onDelete: NoAction, onUpdate: NoAction)
+  intencionesTributarias TaxEmissionIntent[]
+  trabajosTributarios TaxPaymentJob[]
 
   @@map("pago")
+}
+
+model TaxEmissionIntent {
+  idIntencion      String   @id @default(uuid()) @map("id_intencion") @db.Uuid
+  idEmpresa        Int      @map("id_empresa")
+  idFactura        Int      @map("id_factura")
+  idPago           Int?     @map("id_pago")
+  businessKey      String   @map("business_key") @db.VarChar(120)
+  policyVersion    String   @map("policy_version") @db.VarChar(64)
+  ambiente         String   @db.VarChar(20)
+  proveedor        String   @default("FACTURACION_CL") @db.VarChar(30)
+  tipoDte          Int      @map("tipo_dte")
+  formato          Int
+  fingerprint      String   @db.Char(64)
+  folioEsperado    String   @map("folio_esperado") @db.VarChar(10)
+  estado           String   @default("PENDIENTE") @db.VarChar(30)
+  intentos         Int      @default(0)
+  claimId          String?  @map("claim_id") @db.Uuid
+  folio            String?  @db.VarChar(10)
+  ultimoError      String?  @map("ultimo_error") @db.VarChar(64)
+  artefactoUrl     String?  @map("artefacto_url")
+  artefactoEstado  String   @default("PENDIENTE") @map("artefacto_estado") @db.VarChar(30)
+  emailEstado     String   @default("PENDIENTE") @map("email_estado") @db.VarChar(30)
+  fechaEmailInicio DateTime? @map("fecha_email_inicio") @db.Timestamptz(3)
+  emailIntentos    Int      @default(0) @map("email_intentos")
+  fechaProximoEmail DateTime? @map("fecha_proximo_email") @db.Timestamptz(3)
+  ultimoErrorEmail String?  @map("ultimo_error_email") @db.VarChar(64)
+  fechaCreacion    DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  fechaInicio      DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  fechaEnvio       DateTime? @map("fecha_envio") @db.Timestamptz(3)
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, map: "tax_intent_company_fk")
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, map: "tax_intent_invoice_fk")
+  pago            Pago?    @relation(fields: [idPago], references: [idPago], onDelete: Restrict, map: "tax_intent_payment_fk")
+
+  @@unique([idEmpresa, ambiente, businessKey])
+  @@index([idEmpresa, estado, fechaActualizacion])
+  @@map("tax_emission_intent")
+}
+
+// Immutable local payment outbox. Contains no API credentials or provider responses.
+model TaxPaymentJob {
+  idTrabajo       String   @id @default(uuid()) @map("id_trabajo") @db.Uuid
+  idEmpresa       Int      @map("id_empresa")
+  idFactura       Int      @map("id_factura")
+  idPago          Int      @unique @map("id_pago")
+  idCliente       Int      @map("id_cliente")
+  monto           Decimal  @db.Decimal(10, 2)
+  ambiente        String   @default("sandbox") @db.VarChar(20)
+  policyVersion   String   @map("policy_version") @db.VarChar(64)
+  profileHash     String   @map("profile_hash") @db.Char(64)
+  documento       Bytes?
+  tipoDte         Int?     @map("tipo_dte")
+  formato         Int?
+  folioEsperado   String?  @map("folio_esperado") @db.VarChar(10)
+  email           String?  @db.VarChar(120)
+  nombreCliente   String   @map("nombre_cliente") @db.VarChar(120)
+  estado          String   @default("PENDIENTE") @db.VarChar(30)
+  ultimoError     String?  @map("ultimo_error") @db.VarChar(64)
+  fechaCreacion   DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
+  empresa         Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict)
+  factura         Factura  @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict)
+  pago            Pago     @relation(fields: [idPago], references: [idPago], onDelete: Restrict)
+
+  @@index([estado, fechaCreacion])
+  @@map("tax_payment_job")
+}
+
+model DocumentoTributarioExterno {
+  idDocumento        Int      @id @default(autoincrement()) @map("id_documento")
+  idEmpresa          Int      @map("id_empresa")
+  tipoDocumento      String   @map("tipo_documento") @db.VarChar(20)
+  folioONumero       String   @map("folio_o_numero") @db.VarChar(80)
+  folioNormalizado   String   @map("folio_normalizado") @db.VarChar(80)
+  emisorProveedor    String   @map("emisor_proveedor") @db.VarChar(160)
+  emisorNormalizado  String   @map("emisor_normalizado") @db.VarChar(160)
+  fechaEmision       DateTime @map("fecha_emision") @db.Date
+  montoNeto          Decimal? @map("monto_neto") @db.Decimal(14, 2)
+  montoExento        Decimal? @map("monto_exento") @db.Decimal(14, 2)
+  iva                Decimal? @db.Decimal(14, 2)
+  montoTotal         Decimal  @map("monto_total") @db.Decimal(14, 2)
+  urlDocumento       String?  @map("url_documento")
+  referenciaExterna  String?  @map("referencia_externa") @db.VarChar(200)
+  estado             String   @default("REGISTRADO") @db.VarChar(20)
+  fuente             String   @default("EXTERNO_MANUAL") @db.VarChar(30)
+  idCliente          Int?     @map("id_cliente")
+  idContrato         Int?     @map("id_contrato")
+  idFactura          Int?     @map("id_factura")
+  idCargoAdicional   Int?     @map("id_cargo_adicional")
+  idUsuarioRegistro  Int      @map("id_usuario_registro")
+  fechaRegistro      DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(6)
+  fechaActualizacion DateTime @updatedAt @map("fecha_actualizacion") @db.Timestamptz(6)
+
+  empresa         Empresa         @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente         Cliente?        @relation(fields: [idCliente], references: [idCliente], onDelete: SetNull, onUpdate: Cascade)
+  contrato        Contrato?       @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  factura         Factura?        @relation(fields: [idFactura], references: [idFactura], onDelete: SetNull, onUpdate: Cascade)
+  cargoAdicional  CargoAdicional? @relation(fields: [idCargoAdicional], references: [idCargo], onDelete: SetNull, onUpdate: Cascade)
+  usuarioRegistro Usuario         @relation(fields: [idUsuarioRegistro], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([idEmpresa, tipoDocumento, emisorNormalizado, folioNormalizado], map: "documento_tributario_externo_identidad_key")
+  @@index([idEmpresa, fechaEmision], map: "documento_tributario_externo_empresa_fecha_idx")
+  @@index([idCliente, fechaEmision], map: "documento_tributario_externo_cliente_fecha_idx")
+  @@index([idContrato], map: "documento_tributario_externo_contrato_idx")
+  @@index([idFactura], map: "documento_tributario_externo_factura_idx")
+  @@index([idCargoAdicional], map: "documento_tributario_externo_cargo_idx")
+  @@index([idEmpresa, estado], map: "documento_tributario_externo_empresa_estado_idx")
+  @@map("documento_tributario_externo")
 }
 
 model DireccionServicio {
@@ -236,7 +432,7 @@ model DireccionServicio {
   comuna            String               @db.VarChar(80)
   ciudad            String?              @db.VarChar(80)
   esPrincipal       Boolean?             @default(true) @map("es_principal")
-  cliente           Cliente?             @relation(fields: [idCliente], references: [idCliente])
+  cliente           Cliente?             @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
   servicios         ServicioContratado[]
 
   @@map("direccion_servicio")
@@ -250,49 +446,71 @@ model OrdenTrabajo {
   idTecnicoExterno    Int?                @map("id_tecnico_externo")
   idDireccion         Int?                @map("id_direccion")
   idServicio          Int?                @map("id_servicio")
+  idProspecto         Int?                @map("id_prospecto")
   idTicket            Int?                @unique @map("id_ticket")
   codigoSeguimiento   String?             @unique @map("codigo_seguimiento") @db.VarChar(32)
   tipoOt              String              @map("tipo_ot") @db.VarChar(20)
   prioridad           String              @db.VarChar(10)
   estado              String              @db.VarChar(25)
-  fechaCreacion       DateTime?           @map("fecha_creacion")
-  fechaProgramada     DateTime?           @map("fecha_programada") @db.Date
-  fechaCompletada     DateTime?           @map("fecha_completada")
+  fechaCreacion       DateTime?           @map("fecha_creacion") @db.Timestamp(6)
+  fechaProgramada     DateTime?           @map("fecha_programada") @db.Timestamptz(6)
+  fechaCompletada     DateTime?           @map("fecha_completada") @db.Timestamp(6)
   potenciaOpticaDbm   Decimal?            @map("potencia_optica_dbm") @db.Decimal(5, 2)
   observaciones       String?
   resueltoRemotamente Boolean?            @default(false) @map("resuelto_remotamente")
-  servicio            ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  servicio            ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
+  prospecto           Prospecto?          @relation(fields: [idProspecto], references: [idProspecto], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("orden_trabajo")
 }
 
 model CategoriaFalla {
   idCategoria Int    @id @default(autoincrement()) @map("id_categoria")
-  nombre      String @db.VarChar(80)
+  nombre      String @unique @db.VarChar(80)
   slaHoras    Int?   @map("sla_horas") @db.SmallInt
 
   @@map("categoria_falla")
 }
 
 model Ticket {
-  idTicket            Int                 @id @default(autoincrement()) @map("id_ticket")
-  idCliente           Int?                @map("id_cliente")
-  idEmpresa           Int?                @map("id_empresa")
-  idServicio          Int?                @map("id_servicio")
-  idUsuarioAsignado   Int?                @map("id_usuario_asignado")
-  idCategoria         Int                 @map("id_categoria")
-  idConversacionBot   Int?                @unique @map("id_conversacion_bot")
-  codigoSeguimiento   String?             @unique @map("codigo_seguimiento") @db.VarChar(20)
-  prioridad           String              @db.VarChar(10)
-  estado              String              @db.VarChar(20)
+  idTicket            Int                          @id @default(autoincrement()) @map("id_ticket")
+  idCliente           Int?                         @map("id_cliente")
+  idEmpresa           Int?                         @map("id_empresa")
+  idServicio          Int?                         @map("id_servicio")
+  idUsuarioAsignado   Int?                         @map("id_usuario_asignado")
+  idCategoria         Int                          @map("id_categoria")
+  idConversacionBot   Int?                         @unique @map("id_conversacion_bot")
+  codigoSeguimiento   String?                      @unique @map("codigo_seguimiento") @db.VarChar(20)
+  prioridad           String                       @db.VarChar(10)
+  estado              String                       @db.VarChar(20)
   descripcion         String?
-  fechaCreacion       DateTime?           @default(now()) @map("fecha_creacion")
-  fechaCierre         DateTime?           @map("fecha_cierre")
-  origen              String?             @db.VarChar(20)
-  resueltoRemotamente Boolean?            @default(false) @map("resuelto_remotamente")
-  servicio            ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  fechaCreacion       DateTime?                    @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  fechaCierre         DateTime?                    @map("fecha_cierre") @db.Timestamp(6)
+  origen              String?                      @db.VarChar(20)
+  resueltoRemotamente Boolean?                     @default(false) @map("resuelto_remotamente")
+  servicio            ServicioContratado?          @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
+  resultadosWifiG2    IntegracionResultadoWifiG2[]
 
   @@map("ticket")
+}
+
+model IntegracionResultadoWifiG2 {
+  idResultado            BigInt   @id @default(autoincrement()) @map("id_resultado")
+  requestId              String   @unique @map("request_id") @db.VarChar(100)
+  traceId                String?  @map("trace_id") @db.VarChar(100)
+  idEmpresa              Int      @map("id_empresa")
+  idTicket               Int      @map("id_ticket")
+  payloadHash            String   @map("payload_hash") @db.VarChar(64)
+  exito                  Boolean
+  resultadoTecnico       String   @map("resultado_tecnico")
+  estadoTicketResultante String   @map("estado_ticket_resultante") @db.VarChar(20)
+  fechaRecepcion         DateTime @default(now()) @map("fecha_recepcion") @db.Timestamptz(6)
+  empresa                Empresa  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  ticket                 Ticket   @relation(fields: [idTicket], references: [idTicket], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idTicket, fechaRecepcion], map: "integracion_resultado_wifi_g2_ticket_fecha_idx")
+  @@index([idEmpresa, fechaRecepcion], map: "integracion_resultado_wifi_g2_empresa_fecha_idx")
+  @@map("integracion_resultado_wifi_g2")
 }
 
 model TipoEquipo {
@@ -308,24 +526,24 @@ model TipoEquipo {
 }
 
 model UnidadEquipo {
-  idUnidad           Int                 @id @default(autoincrement()) @map("id_unidad")
-  idTipoEquipo       Int?                @map("id_tipo_equipo")
-  idEmpresa          Int?                @map("id_empresa")
-  numeroSerie        String              @unique @map("numero_serie") @db.VarChar(80)
-  modelo             String?             @db.VarChar(80)
-  estado             String              @db.VarChar(30)
-  fechaAdquisicion   DateTime?           @map("fecha_adquisicion") @db.Date
-  fechaVencGarantia  DateTime?           @map("fecha_venc_garantia") @db.Date
-  diagnosticoTecnico String?             @map("diagnostico_tecnico")
-  idClienteInstalado Int?                @map("id_cliente_instalado")
-  idServicio         Int?                @map("id_servicio")
-  idBodegaActual     Int?                @map("id_bodega_actual")
-  numeroPoste        String?             @map("numero_poste") @db.VarChar(30)
-  idCajaNap          Int?                @map("id_caja_nap")
-  modalidadAsignacion String?            @map("modalidad_asignacion") @db.VarChar(30)
-  valorArriendoMensual Decimal?          @map("valor_arriendo_mensual") @db.Decimal(10, 2)
-  fechaInicioAsignacion DateTime?        @map("fecha_inicio_asignacion") @db.Date
-  servicio           ServicioContratado? @relation(fields: [idServicio], references: [idServicio])
+  idUnidad              Int                 @id @default(autoincrement()) @map("id_unidad")
+  idTipoEquipo          Int?                @map("id_tipo_equipo")
+  idEmpresa             Int?                @map("id_empresa")
+  numeroSerie           String              @unique @map("numero_serie") @db.VarChar(80)
+  modelo                String?             @db.VarChar(80)
+  estado                String              @db.VarChar(30)
+  fechaAdquisicion      DateTime?           @map("fecha_adquisicion") @db.Date
+  fechaVencGarantia     DateTime?           @map("fecha_venc_garantia") @db.Date
+  diagnosticoTecnico    String?             @map("diagnostico_tecnico")
+  idClienteInstalado    Int?                @map("id_cliente_instalado")
+  idServicio            Int?                @map("id_servicio")
+  idBodegaActual        Int?                @map("id_bodega_actual")
+  numeroPoste           String?             @map("numero_poste") @db.VarChar(30)
+  idCajaNap             Int?                @map("id_caja_nap")
+  modalidadAsignacion   String?             @map("modalidad_asignacion") @db.VarChar(30)
+  valorArriendoMensual  Decimal?            @map("valor_arriendo_mensual") @db.Decimal(10, 2)
+  fechaInicioAsignacion DateTime?           @map("fecha_inicio_asignacion") @db.Date
+  servicio              ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("unidad_equipo")
 }
@@ -333,7 +551,7 @@ model UnidadEquipo {
 model Bodega {
   idBodega  Int      @id @default(autoincrement()) @map("id_bodega")
   idEmpresa Int?     @map("id_empresa")
-  nombre    String   @db.VarChar(60)
+  nombre    String   @db.VarChar(100)
   direccion String?  @db.VarChar(200)
   activa    Boolean? @default(true)
 
@@ -351,7 +569,7 @@ model MovimientoInventario {
   idUsuario        Int?      @map("id_usuario")
   tipoMovimiento   String?   @map("tipo_movimiento") @db.VarChar(30)
   cantidad         Decimal?  @default(1) @db.Decimal(10, 2)
-  fecha            DateTime?
+  fecha            DateTime? @db.Timestamp(6)
   referenciaId     Int?      @map("referencia_id")
 
   @@map("movimiento_inventario")
@@ -364,7 +582,7 @@ model HistorialEstadoEquipo {
   estadoAnterior String?   @map("estado_anterior") @db.VarChar(30)
   estadoNuevo    String?   @map("estado_nuevo") @db.VarChar(30)
   motivo         String?
-  fechaHora      DateTime? @default(now()) @map("fecha_hora")
+  fechaHora      DateTime? @default(now()) @map("fecha_hora") @db.Timestamp(6)
 
   @@map("historial_estado_equipo")
 }
@@ -376,33 +594,41 @@ model HistorialOt {
   estadoAnterior String?   @map("estado_anterior") @db.VarChar(25)
   estadoNuevo    String?   @map("estado_nuevo") @db.VarChar(25)
   observaciones  String?
-  fechaHora      DateTime? @map("fecha_hora")
+  fechaHora      DateTime? @map("fecha_hora") @db.Timestamp(6)
 
   @@map("historial_ot")
 }
 
 model ServicioContratado {
-  idServicio      Int      @id @default(autoincrement()) @map("id_servicio")
-  idCliente       Int      @map("id_cliente")
-  idEmpresa       Int?     @map("id_empresa")
-  idContrato      Int?     @map("id_contrato")
-  idDireccion     Int?     @map("id_direccion")
-  idZonaPago      Int?     @map("id_zona_pago")
-  tipoServicio    String   @map("tipo_servicio") @db.VarChar(40)
-  estadoOperativo String   @map("estado_operativo") @db.VarChar(30)
+  idServicio      Int       @id @default(autoincrement()) @map("id_servicio")
+  idCliente       Int       @map("id_cliente")
+  idEmpresa       Int?      @map("id_empresa")
+  idContrato      Int?      @map("id_contrato")
+  idDireccion     Int?      @map("id_direccion")
+  idZonaPago      Int?      @map("id_zona_pago")
+  tipoServicio    String    @map("tipo_servicio") @db.VarChar(40)
+  estadoOperativo String    @map("estado_operativo") @db.VarChar(30)
   observaciones   String?
-  datosTecnicos   Json?    @map("datos_tecnicos")
-  fechaCreacion   DateTime @default(now()) @map("fecha_creacion")
+  datosTecnicos   Json?     @map("datos_tecnicos")
+  fechaCreacion   DateTime? @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  fechaActivacion DateTime? @map("fecha_activacion") @db.Timestamp(6)
 
-  cliente   Cliente            @relation(fields: [idCliente], references: [idCliente])
-  empresa   Empresa?           @relation(fields: [idEmpresa], references: [idEmpresa])
-  contrato  Contrato?          @relation(fields: [idContrato], references: [idContrato])
-  direccion DireccionServicio? @relation(fields: [idDireccion], references: [idDireccion])
-  zonaPago  ZonaPago?          @relation(fields: [idZonaPago], references: [idZonaPago])
-  equipos   UnidadEquipo[]
-  tickets   Ticket[]
-  ordenes   OrdenTrabajo[]
-  solicitudes SolicitudCliente[]
+  cliente                    Cliente                    @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  empresa                    Empresa?                   @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  contrato                   Contrato?                  @relation(fields: [idContrato], references: [idContrato], onDelete: NoAction, onUpdate: NoAction)
+  direccion                  DireccionServicio?         @relation(fields: [idDireccion], references: [idDireccion], onDelete: NoAction, onUpdate: NoAction)
+  zonaPago                   ZonaPago?                  @relation(fields: [idZonaPago], references: [idZonaPago], onDelete: NoAction, onUpdate: NoAction)
+  equipos                    UnidadEquipo[]
+  tickets                    Ticket[]
+  ordenes                    OrdenTrabajo[]
+  solicitudes                SolicitudCliente[]
+  eventosGestionComercial    EventoGestionComercial[]
+  conveniosPago              ConvenioPago[]
+  cargosAdicionales          CargoAdicional[]
+  integracionesInstalacionG3 IntegracionInstalacionG3[]
+  solicitudesRetiro          ServicioRetiroSolicitud[]
+  integracionesActivacionG1  IntegracionActivacionG1[]
+  garantiasComerciales       GarantiaComercial[]
 
   @@map("servicio_contratado")
 }
@@ -421,13 +647,13 @@ model SolicitudCliente {
   descripcion       String?
   observaciones     String?
   idUsuarioRegistro Int?      @map("id_usuario_registro")
-  fechaCreacion     DateTime? @default(now()) @map("fecha_creacion")
-  fechaCierre       DateTime? @map("fecha_cierre")
+  fechaCreacion     DateTime? @default(now()) @map("fecha_creacion") @db.Timestamp(6)
+  fechaCierre       DateTime? @map("fecha_cierre") @db.Timestamp(6)
 
-  cliente  Cliente?             @relation(fields: [idCliente], references: [idCliente])
-  servicio ServicioContratado?  @relation(fields: [idServicio], references: [idServicio])
-  empresa  Empresa?             @relation(fields: [idEmpresa], references: [idEmpresa])
-  usuarioRegistro Usuario?      @relation(fields: [idUsuarioRegistro], references: [idUsuario])
+  cliente         Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  servicio        ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: NoAction, onUpdate: NoAction)
+  empresa         Empresa?            @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  usuarioRegistro Usuario?            @relation(fields: [idUsuarioRegistro], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("solicitud_cliente")
 }
@@ -441,83 +667,404 @@ model ObservacionOperativa {
   idUsuario     Int?      @map("id_usuario")
   observacion   String
   visibilidad   String?   @default("Interna") @db.VarChar(20)
-  fechaCreacion DateTime? @default(now()) @map("fecha_creacion")
+  fechaCreacion DateTime? @default(now()) @map("fecha_creacion") @db.Timestamp(6)
 
-  usuario Usuario? @relation(fields: [idUsuario], references: [idUsuario])
+  usuario Usuario? @relation(fields: [idUsuario], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("observacion_operativa")
 }
 
 model ZonaPago {
-  idZonaPago              Int                  @id @default(autoincrement()) @map("id_zona_pago")
-  idEmpresa               Int?                 @map("id_empresa")
-  nombreZona              String               @map("nombre_zona") @db.VarChar(80)
-  comuna                  String?              @db.VarChar(80)
-  descripcion             String?
-  diaVencimientoSugerido  Int?                 @map("dia_vencimiento_sugerido") @db.SmallInt
-  activo                  Boolean?             @default(true)
+  idZonaPago             Int       @id @default(autoincrement()) @map("id_zona_pago")
+  idEmpresa              Int?      @map("id_empresa")
+  nombreZona             String    @map("nombre_zona") @db.VarChar(80)
+  comuna                 String?   @db.VarChar(80)
+  descripcion            String?
+  diaVencimientoSugerido Int?      @map("dia_vencimiento_sugerido") @db.SmallInt
+  activo                 Boolean?  @default(true)
+  tipoZona               String?   @default("COBERTURA_GENERAL") @map("tipo_zona") @db.VarChar(30)
+  idZonaPadre            Int?      @map("id_zona_padre")
+  poligonoGeojson        Json?     @map("poligono_geojson")
+  centroLat              Float?    @map("centro_lat") @db.DoublePrecision
+  centroLng              Float?    @map("centro_lng") @db.DoublePrecision
+  prioridad              Int       @default(0)
+  fuenteCobertura        String?   @default("MANUAL") @map("fuente_cobertura") @db.VarChar(30)
+  fechaInicio            DateTime? @map("fecha_inicio") @db.Date
+  fechaFin               DateTime? @map("fecha_fin") @db.Date
 
-  empresa   Empresa?              @relation(fields: [idEmpresa], references: [idEmpresa])
-  precios   PlanZonaPrecio[]
-  contratos Contrato[]
-  servicios ServicioContratado[]
+  empresa    Empresa?             @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: NoAction, onUpdate: NoAction)
+  precios    PlanZonaPrecio[]
+  contratos  Contrato[]
+  servicios  ServicioContratado[]
+  prospectos Prospecto[]
+  zonaPadre  ZonaPago?            @relation("JerarquiaZonaPago", fields: [idZonaPadre], references: [idZonaPago], onDelete: Restrict, onUpdate: Cascade)
+  zonasHijas ZonaPago[]           @relation("JerarquiaZonaPago")
 
+  @@index([idEmpresa, tipoZona, activo])
+  @@index([idZonaPadre])
+  @@index([fechaInicio, fechaFin])
   @@map("zona_pago")
 }
 
+model IntegracionInstalacionG3 {
+  idIntegracion             Int       @id @default(autoincrement()) @map("id_integracion")
+  idEmpresa                 Int       @map("id_empresa")
+  idProspecto               Int?      @map("id_prospecto")
+  idCliente                 Int?      @map("id_cliente")
+  idContrato                Int       @map("id_contrato")
+  idPlan                    Int       @map("id_plan")
+  idServicio                Int?      @map("id_servicio")
+  requestId                 String    @unique @map("request_id") @db.Uuid
+  traceId                   String    @map("trace_id") @db.Uuid
+  idOtG3                    String?   @map("id_ot_g3") @db.VarChar(100)
+  codigoOtG3                String?   @map("codigo_ot_g3") @db.VarChar(100)
+  estadoIntegracion         String    @default("PENDIENTE_ENVIO") @map("estado_integracion") @db.VarChar(30)
+  estadoOtG3                String?   @map("estado_ot_g3") @db.VarChar(50)
+  estadoOriginalG3          String?   @map("estado_original_g3") @db.VarChar(100)
+  fechaSolicitud            DateTime  @default(now()) @map("fecha_solicitud") @db.Timestamp(6)
+  ultimoIntento             DateTime? @map("ultimo_intento") @db.Timestamp(6)
+  fechaUltimaSincronizacion DateTime? @map("fecha_ultima_sincronizacion") @db.Timestamp(6)
+  intentos                  Int       @default(0)
+  ultimoErrorSanitizado     String?   @map("ultimo_error_sanitizado")
+  payloadHash               String    @map("payload_hash") @db.VarChar(64)
+  payloadSnapshot           Json      @map("payload_snapshot")
+  fechaCierreProcesado      DateTime? @map("fecha_cierre_procesado") @db.Timestamp(6)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  empresa   Empresa                     @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  prospecto Prospecto?                  @relation(fields: [idProspecto], references: [idProspecto], onDelete: SetNull, onUpdate: Cascade)
+  cliente   Cliente?                    @relation(fields: [idCliente], references: [idCliente], onDelete: SetNull, onUpdate: Cascade)
+  contrato  Contrato                    @relation(fields: [idContrato], references: [idContrato], onDelete: Restrict, onUpdate: Cascade)
+  plan      Plan                        @relation(fields: [idPlan], references: [idPlan], onDelete: Restrict, onUpdate: Cascade)
+  servicio  ServicioContratado?         @relation(fields: [idServicio], references: [idServicio], onDelete: SetNull, onUpdate: Cascade)
+  eventos   IntegracionEventoEntrante[]
+
+  @@index([idEmpresa, estadoIntegracion, fechaSolicitud])
+  @@index([idEmpresa, idOtG3])
+  @@index([idEmpresa, codigoOtG3])
+  @@index([idContrato, fechaSolicitud])
+  @@map("integracion_instalacion_g3")
+}
+
+model IntegracionEventoEntrante {
+  idEvento          Int      @id @default(autoincrement()) @map("id_evento")
+  idIntegracion     Int      @map("id_integracion")
+  source            String   @db.VarChar(30)
+  eventType         String   @map("event_type") @db.VarChar(50)
+  externalReference String   @map("external_reference") @db.VarChar(120)
+  payloadHash       String   @map("payload_hash") @db.VarChar(64)
+  processedAt       DateTime @default(now()) @map("processed_at") @db.Timestamp(6)
+  result            Json?
+
+  integracion IntegracionInstalacionG3 @relation(fields: [idIntegracion], references: [idIntegracion], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([idIntegracion, eventType])
+  @@index([externalReference, payloadHash])
+  @@map("integracion_evento_entrante")
+}
+
+model IntegracionActivacionG1 {
+  // GLOBAL_SCHEMA_CHANGE_PROPOSED: requiere aprobacion intergrupo y SQL separado.
+  payloadSnapshot       Json?     @map("payload_snapshot") @db.JsonB
+  idIntegracion         Int       @id @default(autoincrement()) @map("id_integracion")
+  idEmpresa             Int       @map("id_empresa")
+  idCliente             Int       @map("id_cliente")
+  idServicio            Int       @map("id_servicio")
+  idContrato            Int       @map("id_contrato")
+  idOtG3                String    @map("id_ot_g3") @db.VarChar(100)
+  numeroSerie           String?   @map("numero_serie") @db.VarChar(80)
+  numerosSerie          String[]  @default([]) @map("numeros_serie")
+  eventId               String    @unique @map("event_id") @db.VarChar(120)
+  traceId               String    @map("trace_id") @db.VarChar(120)
+  estadoIntegracion     String    @default("PENDIENTE_ENVIO") @map("estado_integracion") @db.VarChar(50)
+  intentos              Int       @default(0)
+  ultimoIntento         DateTime? @map("ultimo_intento") @db.Timestamp(6)
+  ultimoErrorSanitizado String?   @map("ultimo_error_sanitizado") @db.VarChar(500)
+  payloadHash           String    @map("payload_hash") @db.VarChar(64)
+  respuestaEstadoG1     Json?     @map("respuesta_estado_g1")
+  fechaCompletado       DateTime? @map("fecha_completado") @db.Timestamp(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  empresa  Empresa            @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente  Cliente            @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  servicio ServicioContratado @relation(fields: [idServicio], references: [idServicio], onDelete: Restrict, onUpdate: Cascade)
+  contrato Contrato           @relation(fields: [idContrato], references: [idContrato], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, estadoIntegracion, createdAt])
+  @@index([idServicio, createdAt])
+  @@map("integracion_activacion_g1")
+}
+
+model GarantiaComercial {
+  idGarantia           Int      @id @default(autoincrement()) @map("id_garantia")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idServicio           Int      @map("id_servicio")
+  idContrato           Int      @map("id_contrato")
+  numeroSerieEquipo    String?  @map("numero_serie_equipo") @db.VarChar(80)
+  tipo                 String   @db.VarChar(60)
+  fechaInicio          DateTime @map("fecha_inicio") @db.Date
+  fechaTermino         DateTime @map("fecha_termino") @db.Date
+  cobertura            String
+  monto                Decimal? @db.Decimal(12, 2)
+  observaciones        String?
+  estado               String   @default("ACTIVA") @db.VarChar(20)
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  empresa     Empresa            @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente            @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  servicio    ServicioContratado @relation(fields: [idServicio], references: [idServicio], onDelete: Restrict, onUpdate: Cascade)
+  contrato    Contrato           @relation(fields: [idContrato], references: [idContrato], onDelete: Restrict, onUpdate: Cascade)
+  responsable Usuario            @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, estado, fechaTermino])
+  @@index([idCliente, fechaInicio])
+  @@index([idServicio, estado])
+  @@map("garantia_comercial")
+}
+
+model ServicioRetiroSolicitud {
+  idSolicitudRetiro     Int      @id @default(autoincrement()) @map("id_solicitud_retiro")
+  idEmpresa             Int      @map("id_empresa")
+  idCliente             Int      @map("id_cliente")
+  idServicio            Int      @map("id_servicio")
+  idContrato            Int?     @map("id_contrato")
+  motivo                String
+  fechaSolicitada       DateTime @map("fecha_solicitada") @db.Date
+  estado                String   @default("REGISTRADA") @db.VarChar(30)
+  estadoDespachoTecnico String   @default("BLOQUEADO_CONTRATO_G3") @map("estado_despacho_tecnico") @db.VarChar(40)
+  idUsuarioResponsable  Int      @map("id_usuario_responsable")
+  observaciones         String?
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  empresa     Empresa            @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente            @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  servicio    ServicioContratado @relation(fields: [idServicio], references: [idServicio], onDelete: Restrict, onUpdate: Cascade)
+  contrato    Contrato?          @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  responsable Usuario            @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, estado, fechaSolicitada], map: "solicitud_retiro_empresa_estado_fecha_idx")
+  @@index([idServicio, createdAt])
+  @@map("solicitud_retiro_servicio")
+}
+
+model EventoGestionComercial {
+  idEvento             Int      @id @default(autoincrement()) @map("id_evento")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idServicio           Int?     @map("id_servicio")
+  idContrato           Int?     @map("id_contrato")
+  idFactura            Int?     @map("id_factura")
+  tipo                 String   @db.VarChar(40)
+  canal                String   @db.VarChar(20)
+  estadoGestion        String   @default("REGISTRADO") @map("estado_gestion") @db.VarChar(30)
+  fecha                DateTime @db.Timestamptz(6)
+  observacion          String?
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: SetNull, onUpdate: Cascade)
+  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  factura     Factura?            @relation(fields: [idFactura], references: [idFactura], onDelete: SetNull, onUpdate: Cascade)
+  responsable Usuario             @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, tipo, fecha])
+  @@index([idCliente, fecha])
+  @@index([idFactura])
+  @@map("evento_gestion_comercial")
+}
+
+model ConvenioPago {
+  operacionesImputacion OperacionImputacionCuota[]
+  idConvenio           Int       @id @default(autoincrement()) @map("id_convenio")
+  idEmpresa            Int       @map("id_empresa")
+  idCliente            Int       @map("id_cliente")
+  idServicio           Int?      @map("id_servicio")
+  idContrato           Int?      @map("id_contrato")
+  idFactura            Int?      @map("id_factura")
+  montoComprometido    Decimal   @map("monto_comprometido") @db.Decimal(12, 2)
+  cantidadCuotas       Int       @map("cantidad_cuotas") @db.SmallInt
+  condiciones          String
+  fechaInicio          DateTime  @map("fecha_inicio") @db.Date
+  estado               String    @default("PENDIENTE") @db.VarChar(20)
+  idUsuarioResponsable Int       @map("id_usuario_responsable")
+  idUsuarioAprobador   Int?      @map("id_usuario_aprobador")
+  fechaRegistro        DateTime  @default(now()) @map("fecha_registro") @db.Timestamptz(6)
+  fechaAprobacion      DateTime? @map("fecha_aprobacion") @db.Timestamptz(6)
+
+  empresa     Empresa             @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente             @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  servicio    ServicioContratado? @relation(fields: [idServicio], references: [idServicio], onDelete: SetNull, onUpdate: Cascade)
+  contrato    Contrato?           @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  factura     Factura?            @relation(fields: [idFactura], references: [idFactura], onDelete: SetNull, onUpdate: Cascade)
+  responsable Usuario             @relation("ConvenioResponsable", fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+  aprobador   Usuario?            @relation("ConvenioAprobador", fields: [idUsuarioAprobador], references: [idUsuario], onDelete: SetNull, onUpdate: Cascade)
+  cuotas      CuotaConvenioPago[]
+
+  @@index([idEmpresa, estado, fechaInicio])
+  @@index([idCliente, estado])
+  @@index([idFactura])
+  @@map("convenio_pago")
+}
+
+model CuotaConvenioPago {
+  imputaciones ImputacionCuota[]
+  idCuota          Int       @id @default(autoincrement()) @map("id_cuota")
+  idConvenio       Int       @map("id_convenio")
+  numero           Int       @db.SmallInt
+  monto            Decimal   @db.Decimal(12, 2)
+  fechaVencimiento DateTime  @map("fecha_vencimiento") @db.Date
+  estado           String    @default("PENDIENTE") @db.VarChar(20)
+  fechaPago        DateTime? @map("fecha_pago") @db.Date
+
+  convenio ConvenioPago @relation(fields: [idConvenio], references: [idConvenio], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([idConvenio, numero])
+  @@index([fechaVencimiento, estado])
+  @@map("cuota_convenio_pago")
+}
+
+model ProrrogaPago {
+  idProrroga           Int      @id @default(autoincrement()) @map("id_prorroga")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idContrato           Int?     @map("id_contrato")
+  idFactura            Int      @map("id_factura")
+  fechaOriginal        DateTime @map("fecha_original") @db.Date
+  nuevaFecha           DateTime @map("nueva_fecha") @db.Date
+  motivo               String
+  estado               String   @default("APROBADA") @db.VarChar(20)
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  fechaRegistro        DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(6)
+
+  empresa     Empresa   @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente   @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  contrato    Contrato? @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  factura     Factura   @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, onUpdate: Cascade)
+  responsable Usuario   @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, estado, nuevaFecha])
+  @@index([idFactura, fechaRegistro])
+  @@map("prorroga_pago")
+}
+
+model CambioCondicionPago {
+  idCambio             Int      @id @default(autoincrement()) @map("id_cambio")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idContrato           Int?     @map("id_contrato")
+  idFactura            Int?     @map("id_factura")
+  tipoCambio           String   @map("tipo_cambio") @db.VarChar(30)
+  valorAnterior        String   @map("valor_anterior") @db.VarChar(40)
+  valorNuevo           String   @map("valor_nuevo") @db.VarChar(40)
+  justificacion        String
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  fechaRegistro        DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(6)
+
+  empresa     Empresa   @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente     Cliente   @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  contrato    Contrato? @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  factura     Factura?  @relation(fields: [idFactura], references: [idFactura], onDelete: SetNull, onUpdate: Cascade)
+  responsable Usuario   @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idEmpresa, tipoCambio, fechaRegistro])
+  @@index([idCliente, fechaRegistro])
+  @@map("cambio_condicion_pago")
+}
+
+model CargoAdicional {
+  idCargo              Int      @id @default(autoincrement()) @map("id_cargo")
+  idEmpresa            Int      @map("id_empresa")
+  idCliente            Int      @map("id_cliente")
+  idContrato           Int?     @map("id_contrato")
+  idServicio           Int?     @map("id_servicio")
+  tipo                 String   @db.VarChar(30)
+  monto                Decimal  @db.Decimal(12, 2)
+  fecha                DateTime @db.Date
+  estado               String   @default("PENDIENTE_FACTURACION") @db.VarChar(30)
+  afectaSaldo          Boolean  @default(false) @map("afecta_saldo")
+  observacion          String?
+  idUsuarioResponsable Int      @map("id_usuario_responsable")
+  fechaRegistro        DateTime @default(now()) @map("fecha_registro") @db.Timestamptz(6)
+
+  empresa               Empresa                      @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  cliente               Cliente                      @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  contrato              Contrato?                    @relation(fields: [idContrato], references: [idContrato], onDelete: SetNull, onUpdate: Cascade)
+  servicio              ServicioContratado?          @relation(fields: [idServicio], references: [idServicio], onDelete: SetNull, onUpdate: Cascade)
+  responsable           Usuario                      @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+  documentosTributarios DocumentoTributarioExterno[]
+
+  @@index([idEmpresa, estado, fecha])
+  @@index([idCliente, fechaRegistro])
+  @@map("cargo_adicional")
+}
+
 model PlanZonaPrecio {
-  idPlanZonaPrecio Int      @id @default(autoincrement()) @map("id_plan_zona_precio")
-  idPlan           Int      @map("id_plan")
-  idZonaPago       Int      @map("id_zona_pago")
-  precioMensual    Decimal  @map("precio_mensual") @db.Decimal(10, 2)
-  valorInstalacion Decimal? @map("valor_instalacion") @db.Decimal(10, 2)
-  activo           Boolean? @default(true)
+  idPlanZonaPrecio Int       @id @default(autoincrement()) @map("id_plan_zona_precio")
+  idPlan           Int       @map("id_plan")
+  idZonaPago       Int       @map("id_zona_pago")
+  precioMensual    Decimal   @map("precio_mensual") @db.Decimal(10, 2)
+  valorInstalacion Decimal?  @map("valor_instalacion") @db.Decimal(10, 2)
+  activo           Boolean?  @default(true)
+  fechaInicio      DateTime? @map("fecha_inicio") @db.Date
+  fechaFin         DateTime? @map("fecha_fin") @db.Date
 
-  plan     Plan     @relation(fields: [idPlan], references: [idPlan])
-  zonaPago ZonaPago @relation(fields: [idZonaPago], references: [idZonaPago])
+  plan     Plan     @relation(fields: [idPlan], references: [idPlan], onDelete: NoAction, onUpdate: NoAction)
+  zonaPago ZonaPago @relation(fields: [idZonaPago], references: [idZonaPago], onDelete: NoAction, onUpdate: NoAction)
 
+  @@index([idPlan, idZonaPago])
+  @@index([idZonaPago, activo, fechaInicio, fechaFin])
   @@map("plan_zona_precio")
 }
 
 model HistorialCambioPlan {
-  idCambioPlan       Int       @id @default(autoincrement()) @map("id_cambio_plan")
-  idContrato         Int       @map("id_contrato")
-  idCliente          Int?      @map("id_cliente")
-  idEmpresa          Int?      @map("id_empresa")
-  idPlanAnterior     Int?      @map("id_plan_anterior")
-  idPlanNuevo        Int       @map("id_plan_nuevo")
-  fechaEfectiva      DateTime  @map("fecha_efectiva") @db.Date
-  motivo             String
-  observaciones      String?
-  precioAnterior     Decimal?  @map("precio_anterior") @db.Decimal(10, 2)
-  precioNuevo        Decimal?  @map("precio_nuevo") @db.Decimal(10, 2)
-  idUsuarioRegistro  Int?      @map("id_usuario_registro")
-  fechaRegistro      DateTime? @default(now()) @map("fecha_registro")
+  idCambioPlan      Int       @id @default(autoincrement()) @map("id_cambio_plan")
+  idContrato        Int       @map("id_contrato")
+  idCliente         Int?      @map("id_cliente")
+  idEmpresa         Int?      @map("id_empresa")
+  idPlanAnterior    Int?      @map("id_plan_anterior")
+  idPlanNuevo       Int       @map("id_plan_nuevo")
+  fechaEfectiva     DateTime  @map("fecha_efectiva") @db.Date
+  motivo            String
+  observaciones     String?
+  precioAnterior    Decimal?  @map("precio_anterior") @db.Decimal(10, 2)
+  precioNuevo       Decimal?  @map("precio_nuevo") @db.Decimal(10, 2)
+  idUsuarioRegistro Int?      @map("id_usuario_registro")
+  fechaRegistro     DateTime? @default(now()) @map("fecha_registro") @db.Timestamp(6)
+  estadoCambio      String    @default("Aplicado") @map("estado_cambio") @db.VarChar(20)
+  fechaAplicacion   DateTime? @map("fecha_aplicacion") @db.Timestamp(6)
 
-  contrato      Contrato @relation(fields: [idContrato], references: [idContrato])
-  cliente       Cliente? @relation(fields: [idCliente], references: [idCliente])
-  planAnterior  Plan?    @relation("PlanAnterior", fields: [idPlanAnterior], references: [idPlan])
-  planNuevo     Plan     @relation("PlanNuevo", fields: [idPlanNuevo], references: [idPlan])
+  contrato     Contrato @relation(fields: [idContrato], references: [idContrato], onDelete: NoAction, onUpdate: NoAction)
+  cliente      Cliente? @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  planAnterior Plan?    @relation("PlanAnterior", fields: [idPlanAnterior], references: [idPlan], onDelete: NoAction, onUpdate: NoAction)
+  planNuevo    Plan     @relation("PlanNuevo", fields: [idPlanNuevo], references: [idPlan], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("historial_cambio_plan")
 }
 
 model ContratoDigital {
-  idContratoDigital Int       @id @default(autoincrement()) @map("id_contrato_digital")
-  idContrato        Int       @map("id_contrato")
-  idCliente         Int?      @map("id_cliente")
-  idEmpresa         Int?      @map("id_empresa")
-  urlDocumento      String    @map("url_documento")
-  hashDocumento     String    @map("hash_documento") @db.VarChar(128)
-  estadoFirma       String    @map("estado_firma") @db.VarChar(30)
-  fechaGeneracion   DateTime? @default(now()) @map("fecha_generacion")
-  fechaFirma        DateTime? @map("fecha_firma")
-  idUsuarioGenerador Int?     @map("id_usuario_generador")
-  version           Int       @default(1)
+  idContratoDigital  Int       @id @default(autoincrement()) @map("id_contrato_digital")
+  idContrato         Int       @map("id_contrato")
+  idCliente          Int?      @map("id_cliente")
+  idEmpresa          Int?      @map("id_empresa")
+  urlDocumento       String    @map("url_documento")
+  hashDocumento      String    @map("hash_documento") @db.VarChar(128)
+  estadoFirma        String    @map("estado_firma") @db.VarChar(30)
+  fechaGeneracion    DateTime? @default(now()) @map("fecha_generacion") @db.Timestamp(6)
+  fechaFirma         DateTime? @map("fecha_firma") @db.Timestamp(6)
+  idUsuarioGenerador Int?      @map("id_usuario_generador")
+  version            Int       @default(1)
 
-  contrato Contrato @relation(fields: [idContrato], references: [idContrato])
-  cliente  Cliente? @relation(fields: [idCliente], references: [idCliente])
-  usuarioGenerador Usuario? @relation(fields: [idUsuarioGenerador], references: [idUsuario])
+  contrato         Contrato @relation(fields: [idContrato], references: [idContrato], onDelete: NoAction, onUpdate: NoAction)
+  cliente          Cliente? @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  usuarioGenerador Usuario? @relation(fields: [idUsuarioGenerador], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("contrato_digital")
 }
@@ -528,41 +1075,56 @@ model PlantillaNotificacion {
   canal          String   @db.VarChar(20)
   contenidoTexto String?  @map("contenido_texto")
   activa         Boolean? @default(true)
+  idEmpresa      Int?     @map("id_empresa")
+  empresa        Empresa? @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: SetNull, onUpdate: Cascade)
 
+  @@index([idEmpresa])
   @@map("plantilla_notificacion")
 }
 
 model LogNotificacion {
   idNotificacion BigInt    @id @default(autoincrement()) @map("id_notificacion")
-  idCliente       Int?      @map("id_cliente")
-  idPlantilla     Int?      @map("id_plantilla")
-  canal           String?   @db.VarChar(20)
-  fechaEnvio      DateTime? @map("fecha_envio")
-  estadoEnvio     String?   @map("estado_envio") @db.VarChar(20)
+  idCliente      Int?      @map("id_cliente")
+  idPlantilla    Int?      @map("id_plantilla")
+  canal          String?   @db.VarChar(20)
+  fechaEnvio     DateTime? @map("fecha_envio") @db.Timestamp(6)
+  estadoEnvio    String?   @map("estado_envio") @db.VarChar(30)
+  idEmpresa      Int?      @map("id_empresa")
+  proveedor      String?   @db.VarChar(20)
+  correlationId  String?   @unique @map("correlation_id") @db.Uuid
+  payloadHash    String?   @map("payload_hash") @db.Char(64)
+  providerMessageId String? @unique @map("provider_message_id") @db.VarChar(512)
+  mensaje        Json?
+  intentos       Int       @default(0)
+  fechaInicio    DateTime? @map("fecha_inicio") @db.Timestamptz(3)
+  ultimoError    String?   @map("ultimo_error") @db.VarChar(64)
+  empresa        Empresa?  @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade, map: "log_notificacion_id_empresa_fkey")
+
+  @@index([proveedor, estadoEnvio, fechaEnvio])
 
   @@map("log_notificacion")
 }
 
 model StockConsumible {
-  idStock             Int     @id @default(autoincrement()) @map("id_stock")
-  idTipoEquipo        Int?    @map("id_tipo_equipo")
-  idBodega            Int?    @map("id_bodega")
-  cantidadDisponible  Decimal @map("cantidad_disponible") @db.Decimal(10, 2)
-  umbralMinimo        Decimal? @map("umbral_minimo") @db.Decimal(10, 2)
+  idStock            Int      @id @default(autoincrement()) @map("id_stock")
+  idTipoEquipo       Int?     @map("id_tipo_equipo")
+  idBodega           Int?     @map("id_bodega")
+  cantidadDisponible Decimal? @map("cantidad_disponible") @db.Decimal(10, 2)
+  umbralMinimo       Decimal? @map("umbral_minimo") @db.Decimal(10, 2)
 
   @@map("stock_consumible")
 }
 
 model CajaNap {
-  idCajaNap        Int      @id @default(autoincrement()) @map("id_caja_nap")
-  idEmpresa        Int?     @map("id_empresa")
-  idMufa           Int?     @map("id_mufa")
-  identificadorUnico String? @unique @map("identificador_unico") @db.VarChar(50)
-  numeroPoste      String?  @map("numero_poste") @db.VarChar(30)
-  zona             String?  @db.VarChar(80)
-  capacidadPuertos Int?     @map("capacidad_puertos") @db.SmallInt
-  latitud          Decimal? @db.Decimal(9, 6)
-  longitud         Decimal? @db.Decimal(9, 6)
+  idCajaNap          Int      @id @default(autoincrement()) @map("id_caja_nap")
+  idEmpresa          Int?     @map("id_empresa")
+  idMufa             Int?     @map("id_mufa")
+  identificadorUnico String?  @unique @map("identificador_unico") @db.VarChar(50)
+  numeroPoste        String?  @map("numero_poste") @db.VarChar(30)
+  zona               String?  @db.VarChar(80)
+  capacidadPuertos   Int?     @map("capacidad_puertos") @db.SmallInt
+  latitud            Decimal? @db.Decimal(9, 6)
+  longitud           Decimal? @db.Decimal(9, 6)
 
   @@map("caja_nap")
 }
@@ -597,18 +1159,18 @@ model EvidenciaFoto {
   urlCloudinary String    @map("url_cloudinary")
   formato       String?   @db.VarChar(5)
   tamanoKb      Int?      @map("tamano_kb")
-  fechaSubida   DateTime? @map("fecha_subida")
+  fechaSubida   DateTime? @map("fecha_subida") @db.Timestamp(6)
 
   @@map("evidencia_foto")
 }
 
 model TransferenciaEquipo {
-  idTransferencia   Int       @id @default(autoincrement()) @map("id_transferencia")
-  idEmpresaOrigen   Int?      @map("id_empresa_origen")
-  idEmpresaDestino  Int?      @map("id_empresa_destino")
-  idUsuarioRegistro Int?      @map("id_usuario_registro")
+  idTransferencia    Int       @id @default(autoincrement()) @map("id_transferencia")
+  idEmpresaOrigen    Int?      @map("id_empresa_origen")
+  idEmpresaDestino   Int?      @map("id_empresa_destino")
+  idUsuarioRegistro  Int?      @map("id_usuario_registro")
   fechaTransferencia DateTime? @map("fecha_transferencia") @db.Date
-  observaciones     String?
+  observaciones      String?
 
   @@map("transferencia_equipo")
 }
@@ -622,24 +1184,14 @@ model UsoMaterialOt {
 
   @@map("uso_material_ot")
 }
-model SesionPortal {
-  idSesion        BigInt    @id @default(autoincrement()) @map("id_sesion")
-  idCliente       Int?      @map("id_cliente")
-  token           String    @db.VarChar(255)
-  fechaInicio     DateTime? @map("fecha_inicio")
-  fechaExpiracion DateTime? @map("fecha_expiracion")
-  ipOrigen        String?   @map("ip_origen") @db.Inet
-
-  @@map("sesion_portal")
-}
 
 model IntentoFallido {
   idIntento      BigInt    @id @default(autoincrement()) @map("id_intento")
   idEmpresa      Int?      @map("id_empresa")
-  ipAddress      String    @map("ip_address") @db.Inet
-  rutIntentado   String?   @map("rut_intentado") @db.VarChar(12)
-  timestamp      DateTime? @default(now())
-  bloqueadoHasta DateTime? @map("bloqueado_hasta")
+  ipAddress      String    @map("ip_address") @db.VarChar(45)
+  rutIntentado   String?   @map("rut_intentado") @db.VarChar(50)
+  timestamp      DateTime? @default(now()) @db.Timestamp(6)
+  bloqueadoHasta DateTime? @map("bloqueado_hasta") @db.Timestamp(6)
 
   @@map("intento_fallido")
 }
@@ -649,7 +1201,7 @@ model CredencialesTvip {
   idContrato       Int?      @unique @map("id_contrato")
   usuarioTvip      String?   @map("usuario_tvip") @db.VarChar(80)
   passwordTvipHash String?   @map("password_tvip_hash") @db.VarChar(72)
-  fechaGeneracion  DateTime? @map("fecha_generacion")
+  fechaGeneracion  DateTime? @map("fecha_generacion") @db.Timestamp(6)
 
   @@map("credenciales_tvip")
 }
@@ -659,7 +1211,7 @@ model Olt {
   idEmpresa Int?    @map("id_empresa")
   nombre    String? @db.VarChar(80)
   ubicacion String? @db.VarChar(200)
-  ipGestion String? @map("ip_gestion") @db.Inet
+  ipGestion String? @map("ip_gestion") @db.VarChar(45)
 
   @@map("olt")
 }
@@ -675,7 +1227,7 @@ model TarjetaPon {
 
 model Mufa {
   idMufa        Int     @id @default(autoincrement()) @map("id_mufa")
-  idTarjetaPon Int?    @map("id_tarjeta_pon")
+  idTarjetaPon  Int?    @map("id_tarjeta_pon")
   identificador String? @db.VarChar(50)
   ubicacion     String? @db.VarChar(200)
 
@@ -686,7 +1238,7 @@ model PuertoNap {
   idPuerto          Int     @id @default(autoincrement()) @map("id_puerto")
   idCajaNap         Int?    @map("id_caja_nap")
   numeroPuerto      Int?    @map("numero_puerto") @db.SmallInt
-  estado            String? @db.VarChar(10)
+  estado            String? @db.VarChar(20)
   idClienteAsociado Int?    @map("id_cliente_asociado")
 
   @@map("puerto_nap")
@@ -698,7 +1250,7 @@ model MonitoreoOnt {
   idCliente         Int?      @map("id_cliente")
   idCajaNap         Int?      @map("id_caja_nap")
   potenciaActualDbm Decimal?  @map("potencia_actual_dbm") @db.Decimal(5, 2)
-  timestampMedicion DateTime? @default(now()) @map("timestamp_medicion")
+  timestampMedicion DateTime? @default(now()) @map("timestamp_medicion") @db.Timestamp(6)
   estadoConexion    String?   @map("estado_conexion") @db.VarChar(15)
 
   @@map("monitoreo_ont")
@@ -708,7 +1260,50 @@ model HistorialConexionOnt {
   idHistorialOnt BigInt    @id @default(autoincrement()) @map("id_historial_ont")
   idUnidad       Int?      @map("id_unidad")
   evento         String?   @db.VarChar(15)
-  timestamp      DateTime? @default(now())
+  timestamp      DateTime? @default(now()) @db.Timestamp(6)
 
   @@map("historial_conexion_ont")
+}
+
+model OperacionImputacionCuota {
+  idOperacion Int @id @default(autoincrement()) @map("id_operacion")
+  idEmpresa Int @map("id_empresa")
+  idPago Int @map("id_pago")
+  idConvenio Int @map("id_convenio")
+  idFactura Int @map("id_factura")
+  idUsuario Int @map("id_usuario")
+  idAuditoria BigInt @unique @map("id_auditoria")
+  clave String @db.VarChar(100)
+  hash String @db.Char(64)
+  tipo String @db.VarChar(10)
+  motivo String @db.VarChar(250)
+  fecha DateTime @default(now()) @db.Timestamptz(6)
+  empresa Empresa @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade)
+  pago Pago @relation(fields: [idPago], references: [idPago], onDelete: Restrict, onUpdate: Cascade)
+  convenio ConvenioPago @relation(fields: [idConvenio], references: [idConvenio], onDelete: Restrict, onUpdate: Cascade)
+  factura Factura @relation(fields: [idFactura], references: [idFactura], onDelete: Restrict, onUpdate: Cascade)
+  usuario Usuario @relation(fields: [idUsuario], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
+  auditoria LogAuditoria @relation(fields: [idAuditoria], references: [idLog], onDelete: Restrict, onUpdate: Cascade)
+  detalles ImputacionCuota[]
+  @@unique([idEmpresa, clave])
+  @@index([idPago])
+  @@index([idConvenio])
+  @@index([idFactura])
+  @@map("operacion_imputacion_cuota")
+}
+
+model ImputacionCuota {
+  idImputacion Int @id @default(autoincrement()) @map("id_imputacion")
+  idOperacion Int @map("id_operacion")
+  idCuota Int @map("id_cuota")
+  monto Decimal @db.Decimal(12, 2)
+  idOriginal Int? @map("id_original")
+  operacion OperacionImputacionCuota @relation(fields: [idOperacion], references: [idOperacion], onDelete: Restrict, onUpdate: Cascade)
+  cuota CuotaConvenioPago @relation(fields: [idCuota], references: [idCuota], onDelete: Restrict, onUpdate: Cascade)
+  original ImputacionCuota? @relation("Compensaciones", fields: [idOriginal], references: [idImputacion], onDelete: Restrict, onUpdate: Cascade)
+  compensaciones ImputacionCuota[] @relation("Compensaciones")
+  @@unique([idOperacion, idCuota])
+  @@index([idCuota])
+  @@index([idOriginal])
+  @@map("imputacion_cuota")
 }
