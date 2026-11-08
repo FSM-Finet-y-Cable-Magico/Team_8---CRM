@@ -47,7 +47,9 @@ function persistence(customerStatus = 'Moroso') {
   const models = (tables: typeof state): any => Object.fromEntries(Object.keys(tables).map(name => [name, {
     findUnique: jest.fn(async ({ where }: any) => tables[name].find(row => matches(row, where)) ?? null),
     findFirst: jest.fn(async ({ where }: any) => tables[name].find(row => matches(row, where)) ?? null),
-    findMany: jest.fn(async ({ where = {} }: any = {}) => tables[name].filter(row => matches(row, where))),
+    findMany: jest.fn(async ({ where = {} }: any = {}) => tables[name].filter(row => matches(row, where))
+      // Prisma entrega Date; el almacén JSON sintético conserva su serialización.
+      .map(row => name === 'ordenTrabajo' ? { ...row, fechaCompletada: row.fechaCompletada ? new Date(row.fechaCompletada) : null } : row)),
     update: jest.fn(async ({ where, data }: any) => {
       writes.push(`${name}.update`);
       const row = tables[name].find(value => matches(value, where));
@@ -63,6 +65,8 @@ function persistence(customerStatus = 'Moroso') {
     }),
   }]));
   const db = models(state);
+  // La lectura histórica vigente consulta cierre_equipos, no inventario físico.
+  db.$queryRaw = jest.fn().mockResolvedValue([]);
   db.$transaction = jest.fn(async (callback: (tx: any) => Promise<any>) => {
     const draft = clone(state);
     const result = await callback(models(draft));
@@ -102,6 +106,44 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
   const protectedState = () => clone(Object.fromEntries(['cliente', 'contrato', 'servicioContratado', 'ordenTrabajo', 'historialOt']
     .map(name => [name, store.state[name]])));
   const assertNoTechnicalWrites = () => expect(store.writes.filter(name => !name.startsWith('ticket.') && !name.startsWith('logAuditoria.'))).toEqual([]);
+
+  it('catálogo HTTP conserva técnicos, IDs y SLA y distingue las siete atenciones por nombre', async () => {
+    await start();
+    const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+      'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+    store.state.categoriaFalla.push(...names.map((nombre, i) => ({ idCategoria: 731 + i * 13,
+      nombre: nombre.toUpperCase(), slaHoras: 12 })), { idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    store.state.ticket[0].idCategoria = 309;
+    store.state.ticket[0].estado = 'DERIVADO_OT';
+    const before = clone(store.state);
+    for (const company of [1, 2]) {
+      const { body } = await send('get', 'tickets/categories', company).expect(200);
+      expect(body.filter((row: any) => row.nombreAtencion).map((row: any) => row.nombreAtencion)).toEqual(names);
+      expect(body.find((row: any) => row.idCategoria === 309)).toEqual({ idCategoria: 309,
+        nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2, nombreAtencion: null });
+    }
+    const { body } = await send('get', 'tickets', 1).expect(200);
+    expect(body[0].categoria).toEqual({ idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('alta HTTP conserva el ID numérico y rechaza categorías técnicas o nombres libres', async () => {
+    await start();
+    Object.assign(store.state.cliente[0], { rut: '11111111-1', contratos: [], servicios: [] });
+    store.state.categoriaFalla.push({ idCategoria: 914, nombre: 'CONSULTA GENERAL', slaHoras: 12 },
+      { idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    const body = { rut: '11111111-1', idCategoria: 914, prioridad: 'Media', descripcion: 'Consulta sintética QA' };
+    const before = protectedState();
+    await send('post', 'tickets', 1, { ...body, idCategoria: 309 }).expect(400);
+    await send('post', 'tickets', 1, { ...body, idCategoria: 'Consulta general' }).expect(400);
+    await send('post', 'tickets', 1, { ...body, categoria: 'Consulta general' }).expect(400);
+    expect(store.writes).toEqual([]);
+    const created = await send('post', 'tickets', 1, body).expect(201);
+    expect(created.body).toMatchObject({ idCategoria: 914, idEmpresa: 1, estado: 'Abierto' });
+    expect(protectedState()).toEqual(before);
+    expect(store.writes).toEqual(['ticket.create', 'logAuditoria.create']);
+  });
 
   it.each([1, 2].flatMap(company => ['Activo', 'Moroso', 'Suspendido'].flatMap(estado =>
     ['Activo', 'En Mantencion'].map(observed => ({ company, estado, observed })))))

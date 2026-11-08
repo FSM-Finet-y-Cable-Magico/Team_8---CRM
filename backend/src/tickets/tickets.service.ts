@@ -8,6 +8,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
+import { ticketAttentionCatalog } from './ticket-attention-categories';
 import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
@@ -26,8 +27,10 @@ export class TicketsService {
     private readonly auditService: AuditService,
   ) {}
 
-  categories() {
-    return this.prisma.categoriaFalla.findMany({ orderBy: { idCategoria: 'asc' } });
+  async categories() {
+    const categories = await this.prisma.categoriaFalla.findMany({ orderBy: { idCategoria: 'asc' } });
+    // Catálogo completo para históricos; la proyección solo limita las altas CRM.
+    return ticketAttentionCatalog(categories);
   }
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -314,10 +317,14 @@ export class TicketsService {
       throw new BadRequestException('El cliente indicado no existe');
     }
 
-    const categoria = await this.prisma.categoriaFalla.findUnique({ where: { idCategoria: dto.idCategoria } });
+    const categoria = (await this.categories()).find(category => category.idCategoria === dto.idCategoria);
 
     if (!categoria) {
       throw new BadRequestException('Categoria seleccionada invalida');
+    }
+
+    if (!categoria.nombreAtencion) {
+      throw new BadRequestException('Selecciona una categoría oficial de atención disponible; las categorías técnicas o ambiguas no admiten nuevas altas comerciales');
     }
 
     const servicio = dto.idServicio

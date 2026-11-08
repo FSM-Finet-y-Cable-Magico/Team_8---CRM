@@ -71,6 +71,58 @@ async function harness(t, name, props) {
     change: async (node, value) => { await act(async () => node.props.onChange({ target: { value } })); } };
 }
 
+test('alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del catálogo', async t => {
+  const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+    'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+  const categories = [...names.map((nombreAtencion, i) => ({ idCategoria: 410 + i * 19,
+    nombre: nombreAtencion.toUpperCase(), nombreAtencion, slaHoras: 12 })),
+  { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null, slaHoras: 2 }];
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 309,
+    estado: 'DERIVADO_OT', categoria: categories[7] }], categories, permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  const select = form.findAllByType('select')[0];
+  const options = select.findAllByType('option').slice(1);
+  assert.deepEqual(options.map(textOf), names);
+  assert.deepEqual(options.map(node => node.props.value), categories.slice(0, 7).map(row => row.idCategoria));
+  assert.match(ctx.text(), /FIBRA_CORTADA/); // Listado y modal históricos, no opción de alta.
+  assert.equal(ctx.calls.length, 0);
+  await ctx.change(form.findAllByType('input')[0], '11111111-1');
+  await ctx.change(select, String(categories[4].idCategoria));
+  await ctx.change(form.findByType('textarea'), 'Consulta de cobro sintética');
+  await ctx.submit('Crear ticket');
+  assert.deepEqual(ctx.calls, [['post', '/tickets', { rut: '11111111-1', idCategoria: categories[4].idCategoria,
+    idServicio: undefined, prioridad: 'Media', descripcion: 'Consulta de cobro sintética' }]]);
+});
+
+test('catálogo incompleto no inventa categorías y selección técnica manipulada no envía POST', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
+    { idCategoria: 807, nombre: 'Consulta general', nombreAtencion: 'Consulta general' },
+    { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.match(textOf(form), /categorías oficiales no disponibles/);
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 2);
+  await ctx.change(form.findAllByType('input')[0], '11111111-1');
+  await ctx.change(form.findAllByType('select')[0], '309');
+  await ctx.change(form.findByType('textarea'), 'Consulta sintética QA');
+  assert.equal(ctx.button('Crear ticket').props.disabled, true);
+  await ctx.submit('Crear ticket');
+  assert.equal(ctx.calls.length, 0);
+  assert.match(ctx.text(), /Selecciona una categoría oficial/);
+});
+
+test('catálogo de backend anterior sin clasificación no ofrece IDs supuestos y conserva histórico', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
+    { idCategoria: 309, nombre: 'FIBRA_CORTADA' },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 1);
+  assert.equal(ctx.button('Crear ticket').props.disabled, true);
+  // El modal conserva la categoría histórica actual aunque no figure en el catálogo.
+  assert.ok(ctx.tree.root.findAllByType('option').some(node => node.props.value === String(ticket.idCategoria) && textOf(node) === 'Soporte QA'));
+  assert.equal(ctx.calls.length, 0);
+});
+
 test('Tickets separa gestion, seguimiento y resolucion con mensajes de produccion', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [{ idCategoria: 1, nombre: 'Soporte QA' }], permissions });
   assert.match(ctx.text(), /Sin orden técnica asociada/);

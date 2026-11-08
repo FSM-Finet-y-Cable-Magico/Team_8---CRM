@@ -27,6 +27,7 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
+  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion));
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -75,8 +76,8 @@ export function TicketsPanel({
             return;
           }
 
-          if (!createForm.idCategoria) {
-            setStatus('Selecciona una categoría de falla.');
+          if (!attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)) {
+            setStatus('Selecciona una categoría oficial de atención disponible.');
             return;
           }
 
@@ -151,13 +152,14 @@ export function TicketsPanel({
           Categoría
           <select value={createForm.idCategoria} onChange={(event) => setCreateForm({ ...createForm, idCategoria: event.target.value })}>
             <option value="">Seleccionar</option>
-            {categories.map((category) => (
+            {attentionCategories.map((category) => (
               <option key={category.idCategoria} value={category.idCategoria}>
-                {category.nombre}
+                {category.nombreAtencion}
               </option>
             ))}
           </select>
         </label>
+        {attentionCategories.length < 7 && <p className="inline-status" role="status">Hay categorías oficiales no disponibles en el catálogo. Solicita su revisión al administrador; no se sustituirán por categorías técnicas.</p>}
         <label>
           Prioridad
           <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>
@@ -175,7 +177,7 @@ export function TicketsPanel({
             required
           />
         </label>
-        <button disabled={!createForm.idCategoria}>Crear ticket</button>
+        <button disabled={!attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)}>Crear ticket</button>
         {status && <p className="inline-status">{status}</p>}
       </form>}
 

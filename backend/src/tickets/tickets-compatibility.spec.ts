@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { CustomersService } from '../customers/customers.service';
 import { rutLookupVariants } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
+import { TICKET_ATTENTION_NAMES, ticketAttentionCatalog } from './ticket-attention-categories';
 import { TicketsService } from './tickets.service';
 
 const operator = { idUsuario: 7, idEmpresa: 2, email: null, nombreCompleto: 'QA', roles: ['Soporte'] };
@@ -19,7 +20,8 @@ function setup(estado = 'Abierto') {
     contrato: { findFirst: jest.fn(), update: jest.fn() },
     servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 20, idCliente: 5, idEmpresa: 2, idContrato: 30,
       contrato: { idContrato: 30, idCliente: 5, idEmpresa: 2 } }), update: jest.fn() },
-    categoriaFalla: { findUnique: jest.fn().mockResolvedValue({ idCategoria: 1 }), findMany: jest.fn().mockResolvedValue([]) },
+    categoriaFalla: { findUnique: jest.fn().mockResolvedValue({ idCategoria: 1, nombre: 'Consulta general' }),
+      findMany: jest.fn().mockResolvedValue([{ idCategoria: 1, nombre: 'Consulta general' }]) },
     ticket: { findUnique: jest.fn().mockResolvedValue(ticket), findMany: jest.fn().mockResolvedValue([ticket]),
       update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...ticket, ...data })),
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idTicket: 10, ...data })) },
@@ -33,6 +35,69 @@ function setup(estado = 'Abierto') {
 }
 
 describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
+  // Lista independiente de la implementación: contrato de atención G8/G2,
+  // Documento 0, Tabla 11.9 ratificada para este cambio (no prueba del proveedor real).
+  const attentionNames = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+    'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+
+  it('G8 conserva exactamente las siete categorías del contrato de atención G2/G8', () => {
+    expect([...TICKET_ATTENTION_NAMES]).toEqual(attentionNames);
+  });
+
+  it('proyecta IDs y SLA reales sin modificar el catálogo ni ocultar categorías técnicas', async () => {
+    const { service, prisma } = setup();
+    const rows = [...attentionNames.map((name, index) => Object.freeze({ idCategoria: 803 + index * 17,
+      nombre: index % 2 ? name.toUpperCase() : name.toLowerCase(), slaHoras: 6 + index })),
+    Object.freeze({ idCategoria: 93, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 }),
+    Object.freeze({ idCategoria: 94, nombre: 'FIBRA_CORTADA', slaHoras: 4 })];
+    const before = JSON.stringify(rows);
+    prisma.categoriaFalla.findMany.mockResolvedValue(rows);
+    const catalog = await service.categories();
+    expect(catalog.map(row => row.nombreAtencion).filter(Boolean)).toEqual(attentionNames);
+    expect(catalog.map(({ nombreAtencion: _label, ...row }) => row)).toEqual(rows);
+    expect(catalog[7].nombreAtencion).toBeNull();
+    expect(JSON.stringify(rows)).toBe(before);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it.each(attentionNames)('crea atención %s con el ID de la base, no por posición', async name => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 914, nombre: name.toUpperCase(), slaHoras: 9 }]);
+    await expect(service.create({ ...request, idCategoria: 914 }, operator)).resolves.toMatchObject({ idCategoria: 914, idEmpresa: 2 });
+    expect(prisma.ticket.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idCategoria: 914 }) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ categoria: name.toUpperCase() }) }));
+  });
+
+  it.each(['FIBRA_CORTADA', 'CAMBIO_CREDENCIALES_WIFI', 'Facturacion y cobro', 'Consulta QA'])
+  ('rechaza alta comercial con categoría técnica o no oficial %s sin escritura', async nombre => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 1, nombre }]);
+    await expect(service.create(request, operator)).rejects.toThrow('categoría oficial');
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('no inventa IDs ausentes ni escoge entre nombres ambiguos por capitalización', async () => {
+    const { service, prisma } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 600, nombre: 'Consulta general' },
+      { idCategoria: 601, nombre: 'CONSULTA GENERAL' }]);
+    expect((await service.categories()).every(category => category.nombreAtencion === null)).toBe(true);
+    await expect(service.create({ ...request, idCategoria: 600 }, operator)).rejects.toThrow('categoría oficial');
+    await expect(service.create(request, operator)).rejects.toThrow('Categoria seleccionada invalida');
+    expect(ticketAttentionCatalog([])).toEqual([]);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it('histórico técnico sigue legible por su ID y nombre aunque no admita alta comercial', async () => {
+    const { service, prisma } = setup('DERIVADO_OT');
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 1, nombre: 'FIBRA_CORTADA', slaHoras: 4 }]);
+    const listed = await service.list(operator);
+    expect(listed[0]).toMatchObject({ idCategoria: 1, categoria: { idCategoria: 1, nombre: 'FIBRA_CORTADA', slaHoras: 4 }, soloLecturaTecnica: true });
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
   it('consulta grafias validadas sin modificar la normalizacion ni aceptar RUT invalido', () => {
     expect(rutLookupVariants('11.111.111-1')).toEqual(['11111111-1', '111111111', '11.111.111-1', '11.111.1111']);
     expect(rutLookupVariants('12345670k')).toEqual(expect.arrayContaining(['12345670-K', '12345670K', '12.345.670-k']));
