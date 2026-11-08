@@ -42,11 +42,13 @@ describe('P0-07A datos faltantes y consulta de cierre pendiente', () => {
     const c = missing(); c.audit.record.mockRejectedValue(new Error('QA audit failure'));
     await expect(c.service.completeInstallationData(20, supplement, user)).rejects.toThrow('QA audit failure');
   });
-  it.each([true, false])('409 de cierre requiere correlacion independiente: %s', async matches => {
+  it.each([
+    ['PENDIENTE', true], ['PENDIENTE', false], ['EN_CURSO', true], ['EN_CURSO', false],
+  ] as const)('409 de cierre requiere correlacion independiente en %s: %s', async (estado, matches) => {
     const c = setup(); await c.service.requestInstallation({ idContrato: 20 }, user);
     const t = c.getStored(); const snapshot = JSON.stringify(t.payloadSnapshot);
     c.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_CONFLICTO_CONSULTA', 409, false, 'Conflicto consulta'));
-    c.client.getWorkOrder.mockResolvedValue({ data: { id_ot: 901, id_empresa: 1, request_id: matches ? t.requestId : 'different', trace_id: t.traceId, estado: 'PENDIENTE' } });
+    c.client.getWorkOrder.mockResolvedValue({ data: { id_ot: 901, id_empresa: 1, request_id: matches ? t.requestId : 'different', trace_id: t.traceId, estado } });
     if (matches) await expect(c.service.reconcile(1, user)).resolves.toMatchObject({ available: false });
     else await expect(c.service.reconcile(1, user)).rejects.toMatchObject({ status: 409 });
     expect(JSON.stringify(c.getStored().payloadSnapshot)).toBe(snapshot);
@@ -504,6 +506,36 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     await expect(context.service.detail(1, user)).resolves.toMatchObject({ estadoIntegracion: 'EN_SEGUIMIENTO', estadoOtG3: 'EN_SEGUIMIENTO' });
     expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
   });
+  it.each([1, 2])('GET detalle EN_CURSO conserva seguimiento sin activar en empresa %s', async idEmpresa => {
+    const context = setup();
+    context.contract.idEmpresa = idEmpresa;
+    context.contract.plan.idEmpresa = idEmpresa;
+    context.contract.prospecto.idEmpresa = idEmpresa;
+    context.client.createInstallation.mockResolvedValue({
+      status: 201, durationMs: 12, data: { id_ot: 901, estado: 'PENDIENTE', id_empresa: idEmpresa },
+    });
+    const operator = { ...user, idEmpresa };
+    await context.service.requestInstallation({ idProspecto: 10 }, operator);
+    const snapshot = JSON.stringify(context.getStored().payloadSnapshot);
+    const hash = context.getStored().payloadHash;
+    const { idCliente, idServicio } = context.getStored();
+    context.client.getWorkOrder.mockResolvedValue({
+      status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: idEmpresa, estado: 'EN_CURSO' },
+    });
+    const result = await context.service.detail(1, operator);
+    expect(result).toMatchObject({
+      estadoIntegracion: 'ENVIADA', estadoOtG3: 'EN_CURSO', estadoPresentacion: 'EN_CURSO',
+      estadoOriginalG3: null, ultimoErrorSanitizado: null,
+    });
+    expect(context.getStored()).toMatchObject({ estadoOtG3: 'EN_CURSO', estadoIntegracion: 'ENVIADA', idEmpresa, idCliente, idServicio, fechaCierreProcesado: null });
+    expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', idEmpresa);
+    expect(JSON.stringify(context.getStored().payloadSnapshot)).toBe(snapshot);
+    expect(context.getStored().payloadHash).toBe(hash);
+    expect(context.closure.process).not.toHaveBeenCalled();
+    expect(context.closure.recoverPostClosure).not.toHaveBeenCalled();
+    expect(context.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+  });
   it('GET detalle usa la empresa 2 persistida y no una constante', async () => {
     const context = setup();
     await context.service.requestInstallation({ idProspecto: 10 }, user);
@@ -521,6 +553,48 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     expect(context.client.getWorkOrder).toHaveBeenCalledWith('901', 1);
     expect(result).toMatchObject({ detalle: null, ultimoErrorSanitizado: 'G3 respondio con una empresa diferente.' });
     expect(context.getStored().estadoOtG3).toBe('PENDIENTE');
+  });
+  it.each(['id_ot', 'request_id', 'trace_id', 'id_contrato', 'id_prospecto', 'id_plan'])
+    ('GET detalle no acepta %s ajeno aunque coincida la empresa', async field => {
+      const context = setup();
+      await context.service.requestInstallation({ idProspecto: 10 }, user);
+      const snapshot = JSON.stringify(context.getStored().payloadSnapshot);
+      context.client.getWorkOrder.mockResolvedValue({
+        status: 200, durationMs: 4,
+        data: { id_ot: 901, id_empresa: 1, estado: 'EN_CURSO', id_tecnico: 44,
+          [field]: ['request_id', 'trace_id'].includes(field) ? 'referencia-ajena' : 999 },
+      });
+      const result = await context.service.detail(1, user);
+      expect(result).toMatchObject({ detalle: null, estadoOtG3: 'PENDIENTE',
+        ultimoErrorSanitizado: 'G3 respondio con referencias que no corresponden a la solicitud.' });
+      expect(JSON.stringify(context.getStored().payloadSnapshot)).toBe(snapshot);
+      expect(context.closure.process).not.toHaveBeenCalled();
+      expect(context.closure.recoverPostClosure).not.toHaveBeenCalled();
+    });
+  it('GET detalle conserva el ID tecnico como referencia exclusiva de G3', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    const tracking = context.getStored();
+    context.client.getWorkOrder.mockResolvedValue({
+      status: 200, durationMs: 4, data: { id_ot: 901, id_empresa: 1, estado: 'EN_CURSO', id_tecnico: 44,
+        request_id: tracking.requestId, trace_id: tracking.traceId, id_contrato: 20, id_prospecto: 10, id_plan: 7 },
+    });
+    const result = await context.service.detail(1, user);
+    expect(result).toMatchObject({ estadoOtG3: 'EN_CURSO', detalle: { idTecnicoG3: 44 } });
+    expect(context.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(context.closure.process).not.toHaveBeenCalled();
+    expect(context.contract).not.toHaveProperty('idTecnico');
+  });
+  it.each([0, -1, 1.5, '44', {}])('GET detalle no interpreta un ID tecnico invalido como ID local %#', async idTecnico => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    context.client.getWorkOrder.mockResolvedValue({
+      status: 200, durationMs: 4,
+      data: { id_ot: 901, id_empresa: 1, estado: 'EN_CURSO', id_tecnico: idTecnico },
+    });
+    await expect(context.service.detail(1, user)).resolves.toMatchObject({ detalle: { idTecnicoG3: null } });
+    expect(context.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(context.closure.process).not.toHaveBeenCalled();
   });
   it('GET detalle informativo no hace retroceder una integracion COMPLETADA', async () => {
     const context = setup();
@@ -655,7 +729,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     context.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_TIMEOUT', null, true, 'Timeout'));
     await expect(context.service.reconcile(1, user)).rejects.toThrow('Timeout'); expect(context.closure.process).not.toHaveBeenCalled();
   });
-  it('44. reconciliacion no procesa estados distintos de COMPLETADA si un backend legacy los expone', async () => {
+  it.each(['ASIGNADA', 'EN_CURSO'])('44. reconciliacion no procesa %s como COMPLETADA si un backend legacy lo expone', async estado => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
     const tracking = context.getStored();
     context.client.getWorkOrderClosure.mockResolvedValue({
@@ -664,7 +738,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
       data: {
         id_ot: 901, request_id: tracking.requestId, trace_id: tracking.traceId,
         id_empresa: 1, id_prospecto: 10, id_contrato: 20, id_plan: 7,
-        equipos_instalados: [], equipos_retirados: [], estado: 'ASIGNADA',
+        equipos_instalados: [], equipos_retirados: [], estado,
       },
     });
     await expect(context.service.reconcile(1, user)).resolves.toMatchObject({ available: false });

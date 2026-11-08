@@ -85,6 +85,19 @@ describe('Etapa 4 - activación G1 post G3', () => {
     expect(getStored().eventId).toBe(firstEvent);
     expect(client.sendActivation).toHaveBeenCalledTimes(1);
   });
+  it('no convierte el tecnico de G3 en identidad, rol o asignacion de G1', async () => {
+    const { service, client, tracking, closure } = setup();
+    closure.id_tecnico = 44;
+    closure.tecnico = { id_usuario: 999, rol: 'Terreno' };
+    closure.resultado_tecnico.id_tecnico = 44;
+    await service.afterG3Completion(tracking, { idCliente: 30, idServicio: 50 }, closure);
+    const payload = client.sendActivation.mock.calls[0][0];
+    expect(Object.keys(payload).sort()).toEqual([
+      'equipos', 'event_id', 'id_cliente', 'id_contrato', 'id_empresa', 'id_ot',
+      'id_servicio', 'rut_cliente', 'trace_id',
+    ]);
+    expect(payload).toMatchObject({ id_empresa: 1, id_contrato: 20, id_ot: 901, id_servicio: 50 });
+  });
 
   it('acepta una respuesta 200 duplicada sin crear otro tracking ni reenviar', async () => {
     const { service, client, tracking, closure, getStored } = setup();
