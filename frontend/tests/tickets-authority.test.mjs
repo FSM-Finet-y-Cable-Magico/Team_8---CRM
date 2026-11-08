@@ -9,6 +9,9 @@ import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
+const formatting = {};
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/formatting.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(formatting);
 const textOf = node => typeof node === 'string' ? node : (node.children ?? []).map(textOf).join('');
 const permissions = { createTickets: true, classifyTickets: true, updateTicketStatus: true, diagnoseTickets: true, registerTechnicalNotes: true };
 const ticket = { idTicket: 1, idEmpresa: 2, idCliente: 100, idServicio: 2, idCategoria: 1,
@@ -28,7 +31,7 @@ async function harness(t, name, props) {
   const mocks = {
     '../../api': { api, apiErrorMessage: error => error.message },
     '../../constants': { rutPattern: /^[0-9]+-[0-9kK]$/ },
-    '../../lib': { normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
+    '../../lib': { ...formatting, normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
       normalizeWorkOrderValue: value => (value ?? '').toLowerCase(), formatDateTime: value => value ?? '-',
       formatDateOnly: value => value ?? '-', formatConnectionType: value => value ?? '-' },
     '../../shared/components': {
@@ -46,7 +49,7 @@ async function harness(t, name, props) {
     new Function('require', 'exports', outputText)(name => {
       if (name.endsWith('.css')) return {};
       if (mocks[name]) return mocks[name];
-      if (name.startsWith('./')) return load(resolve(dirname(file), name + (name.endsWith('ticket-presentation') ? '.ts' : '.tsx')));
+      if (name.startsWith('.')) return load(resolve(dirname(file), name + (name.endsWith('ticket-presentation') ? '.ts' : '.tsx')));
       return require(name);
     }, exports);
     return exports;
@@ -167,6 +170,23 @@ test('panel sin permisos permite consultar antecedentes sin ofrecer edicion', as
   assert.match(ctx.text(), /Nota historica/);
   assert.equal(ctx.calls.length, 0);
 });
+
+for (const estado of ['COMPLETADA', 'EN_CURSO', 'CANCELADA']) {
+  test(`OT INSTALACION ${estado}: antecedente técnico de solo lectura sin asignación oficial ni cierre automático`, async t => {
+    const ctx = await harness(t, 'WorkOrdersPanel', { workOrders: [{ idOt: 2, idEmpresa: 1, idServicio: null,
+      idCliente: null, tipoOt: 'INSTALACION', estado, prioridad: 'Media', antecedenteTecnico: {
+        idOt: 2, idEmpresa: 1, fechaCompletada: estado === 'COMPLETADA' ? '2026-10-02T12:00:00Z' : null,
+        potenciaOpticaDbm: -19.5, resueltoRemotamente: false,
+        equiposDeclarados: { instalados: ['ONT-DECLARADA-OT-2'], retirados: [] },
+      } }] });
+    assert.match(ctx.text(), /ONT-DECLARADA-OT-2/);
+    assert.match(ctx.text(), /no acreditan asignación oficial/);
+    if (estado === 'COMPLETADA') assert.match(ctx.text(), /Instalación completada/);
+    else assert.doesNotMatch(ctx.text(), /Instalación completada/);
+    if (estado === 'CANCELADA') assert.match(ctx.text(), /Instalación no completada/);
+    assert.equal(ctx.calls.length, 0);
+  });
+}
 
 test('guardar cambios envia solo campos editados y mantiene los contratos existentes', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [{ idCategoria: 2, nombre: 'Internet lento' }], permissions });

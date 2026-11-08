@@ -34,6 +34,21 @@ export function normalizeWorkOrderValue(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+// Read semantics shared by history, dashboard, work orders and service views.
+// A terminal/cancelled order is not evidence of a completed installation.
+export function isInstallationWorkOrder(value?: string | null) {
+  return typeof value === 'string' && ['instalacion', 'instalación'].includes(value.toLowerCase());
+}
+export function isCompletedWorkOrder(value?: string | null) {
+  return typeof value === 'string' && value.toLowerCase() === 'completada';
+}
+export function isTerminalWorkOrder(value?: string | null) {
+  return typeof value === 'string' && ['completada', 'cerrada', 'cancelada'].includes(value.toLowerCase());
+}
+export function isInProgressWorkOrder(value?: string | null) {
+  return ['en curso', 'en progreso'].includes(normalizeWorkOrderValue(value).replace(/_/g, ' '));
+}
+
 export function formatWorkOrderValue(value?: string | null) {
   const normalized = normalizeWorkOrderValue(value);
   const knownLabels: Record<string, string> = {
@@ -56,6 +71,9 @@ export function formatWorkOrderValue(value?: string | null) {
     cerrada: 'Cerrada',
     cancelada: 'Cancelada',
     'en progreso': 'En progreso',
+    en_curso: 'En curso',
+    asignada: 'Asignada',
+    pendiente_aprobacion: 'Pendiente de aprobación',
   };
 
   if (!normalized) {

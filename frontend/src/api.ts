@@ -23,6 +23,14 @@ export type Company = {
   nombre: string;
 };
 
+export type WorkOrderTechnicalEvidence = {
+  fuente: 'OT_PERSISTIDA'; idOt: number; idEmpresa: number | null;
+  fechaCompletada: string | null; idTecnicoRegistrado: number | null; idTecnicoExterno: number | null;
+  potenciaOpticaDbm: number | null; resueltoRemotamente: boolean | null;
+  equiposDeclarados: { instalados: string[] | null; retirados: string[] | null } | null;
+  asignacionInventarioConfirmada: false;
+};
+
 export type InstallationHistory = {
   scope: string;
   fuente: 'G8_PERSISTIDO';
@@ -32,6 +40,7 @@ export type InstallationHistory = {
     estado: 'COMPLETADA';
     clasificacionFecha: 'REQUIERE_REVISION' | 'PENDIENTE_FECHA_TECNICA' | 'FECHA_TECNICA_CONFIRMADA';
     fechasTecnicasOriginales: string[]; ordenesLocales: number[];
+    antecedentesTecnicos?: WorkOrderTechnicalEvidence[];
     solicitudesG3: Array<{ idIntegracion: number; requestId: string; traceId: string; fechaCierreProcesado: string }>;
   }>;
 };
@@ -326,6 +335,7 @@ export type CustomerService = {
     fechaProcesamiento: string | null;
     idTecnico: number | null;
     idTecnicoG3: number | null;
+    antecedenteTecnico?: WorkOrderTechnicalEvidence;
     tecnico?: {
       idUsuario: number;
       nombreCompleto: string;
@@ -721,6 +731,7 @@ export type Ticket = {
 };
 
 export type WorkOrder = {
+  antecedenteTecnico?: WorkOrderTechnicalEvidence;
   idOt: number;
   idProspecto?: number | null;
   idEmpresa: number | null;

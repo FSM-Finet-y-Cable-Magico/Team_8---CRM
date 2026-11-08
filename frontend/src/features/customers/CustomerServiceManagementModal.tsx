@@ -16,6 +16,7 @@ import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { ContractDocuments } from './ContractDocuments';
 import { PlanChangeHistory } from './PlanChangeHistory';
 import { HistoricalG3Closure } from './HistoricalG3Closure';
+import { WorkOrderTechnicalEvidence } from '../installations/WorkOrderTechnicalEvidence';
 import './service-management.css';
 
 type CustomerContract = NonNullable<Customer['contratos']>[number];
@@ -144,7 +145,7 @@ export function CustomerServiceManagementModal({
     setEquipmentStatus('Consultando equipos…');
     setWarrantyStatus('Cargando garantías…');
     api.get<G1EquipmentResponse<G1Unit[]>>(`/integrations/g1/services/${service.idServicio}/equipment`)
-      .then(({ data }) => { if (active) { setG1Equipment(data.data); setEquipmentStatus(data.data.length ? '' : 'No hay equipos registrados para este servicio.'); } })
+      .then(({ data }) => { if (active) { setG1Equipment(data.data); setEquipmentStatus(data.data.length ? '' : 'Sin asignación oficial confirmada para este servicio.'); } })
       .catch(() => { if (active) { setG1Equipment([]); setEquipmentStatus('No se pudieron consultar los equipos. Vuelve a abrir el servicio para intentarlo nuevamente.'); } });
     api.get<CommercialWarranty[]>('/commercial-warranties', { params: { idServicio: service.idServicio } })
       .then(({ data }) => { if (active) { setWarranties(data); setWarrantyStatus(''); } })
@@ -215,7 +216,7 @@ export function CustomerServiceManagementModal({
   const installationCode = installation?.codigoSeguimiento
     ?? (installation?.idOt != null
       ? `OT #${installation.idOt}`
-      : 'Pendiente');
+      : 'Sin OT correlacionada con este servicio');
   const resultadoLlamadaG3 = service.datosTecnicos?.resultadoLlamadaG3;
   const resueltoRemotamenteG3 = service.datosTecnicos?.resueltoRemotamenteG3;
   const materialesG3 = service.datosTecnicos?.materialesG3;
@@ -274,6 +275,7 @@ export function CustomerServiceManagementModal({
             <div className="service-details-content">
               <section className="service-subsection">
                 <h3>Datos de instalación</h3>
+                {!installation && <p className="service-muted">Sin antecedente de instalación correlacionado con este servicio. Esto no demuestra que no exista una instalación histórica; consulta el historial de instalaciones.</p>}
                 <dl className="customer-readonly-details">
                   <div><dt>Técnico instalador</dt><dd>{installationTechnician}</dd></div>
                   <div><dt>Fecha de instalación</dt><dd>{installation?.fechaCompletada ? formatDateOnly(installation.fechaCompletada) : 'No registrada'}</dd></div>
@@ -285,12 +287,13 @@ export function CustomerServiceManagementModal({
                   {typeof resultadoLlamadaG3 === 'string' && <div><dt>Resultado de llamada</dt><dd>{resultadoLlamadaG3}</dd></div>}
                   {typeof resueltoRemotamenteG3 === 'boolean' && <div><dt>Resuelto remotamente</dt><dd>{resueltoRemotamenteG3 ? 'Sí' : 'No'}</dd></div>}
                   {Array.isArray(materialesG3) && <div><dt>Materiales utilizados</dt><dd>{materialesG3.length} registro(s)</dd></div>}
-                  <div><dt>Asignación de equipos</dt><dd>{service.integracionG1?.estadoIntegracion ? formatWorkOrderValue(service.integracionG1.estadoIntegracion.replace(/_/g, ' ')) : 'Sin activación registrada'}</dd></div>
+                  <div><dt>Seguimiento de activación de inventario</dt><dd>{service.integracionG1?.estadoIntegracion ? formatWorkOrderValue(service.integracionG1.estadoIntegracion.replace(/_/g, ' ')) : 'Sin evento de activación registrado; esto no determina si existió una instalación.'}</dd></div>
                 </dl>
                 {service.integracionG1?.ultimoErrorSanitizado && <p className="inline-status">No se pudo actualizar la asignación de equipos.</p>}
               </section>
               <section className="service-subsection">
-                <h3>Equipos instalados</h3>
+                <h3>Equipos asignados oficialmente</h3>
+                <p className="service-muted">La asignación la confirma Inventario y Bodega. Un equipo declarado en una OT no acredita su asignación al servicio.</p>
                 {equipmentStatus && <p className="service-muted" role="status">{equipmentStatus}</p>}
                 {g1Equipment.map(unit => <dl className="customer-readonly-details service-record" key={unit.id_unidad ?? unit.numero_serie}>
                   <div><dt>Equipo</dt><dd>{g1Type(unit)}</dd></div>
@@ -302,6 +305,7 @@ export function CustomerServiceManagementModal({
                   <div><dt>Vencimiento de la garantía</dt><dd>{unit.garantia?.fecha_vencimiento ? formatDateOnly(unit.garantia.fecha_vencimiento) : 'No registrado'}</dd></div>
                 </dl>)}
               </section>
+              <WorkOrderTechnicalEvidence evidence={installation?.antecedenteTecnico} />
               {open && installation?.fuente === 'G3' && installation.estado === 'COMPLETADA' && <HistoricalG3Closure key={service.idServicio} idServicio={service.idServicio} />}
             </div>
           </details>

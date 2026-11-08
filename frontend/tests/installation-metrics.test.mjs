@@ -9,8 +9,11 @@ import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/features/dashboard/DashboardHome.tsx', import.meta.url), 'utf8');
 const exports = {};
+const formatting = {};
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/formatting.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(formatting);
 const mocks = {
-  '../../lib': { expiryAlertKey: () => '', expiryUrgency: () => '', formatDateOnly: v => v },
+  '../../lib': { ...formatting, expiryAlertKey: () => '', expiryUrgency: () => '', formatDateOnly: v => v },
   '../../shared/components': {
     DashboardStatCard: ({ label, value, description }) => React.createElement('article', { 'data-label': label, 'data-value': value }, description),
     ExpiryBadge: () => null, ExpiryCustomerCard: () => null, Modal: () => null, QuickActionCard: () => null,
@@ -21,11 +24,11 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
 } }).outputText;
 new Function('require', 'exports', compiled)(name => name in mocks ? mocks[name] : require(name), exports);
 
-async function render(metricas, check) {
+async function render(metricas, check, workOrders = []) {
   let tree;
   await act(async () => { tree = create(React.createElement(exports.DashboardHome, {
     summary: { metricas: { clientes: 0, prospectos: 0, instalacionesPendientes: 0, ...metricas } },
-    prospects: [], customers: [], tickets: [], workOrders: [], billingOverview: null, permissions: {}, onNavigate: () => {},
+    prospects: [], customers: [], tickets: [], workOrders, billingOverview: null, permissions: {}, onNavigate: () => {},
   })); });
   try { check(tree); } finally { await act(async () => tree.unmount()); }
 }
@@ -41,6 +44,17 @@ test('CU47 presents effective-date total without adding undated completions to p
     assert.match(rendered, /ni representan trabajo pendiente de ejecución/);
     assert.match(rendered, /Por fecha técnica efectiva \(Santiago\)/);
   });
+});
+
+test('gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar reparación ni cancelación como completadas', async () => {
+  await render({ instalacionesMensuales: 1, instalacionesPendientes: 1 }, tree => {
+    const legend = tree.root.findByProps({ className: 'installation-chart-legend' });
+    assert.deepEqual(legend.findAllByType('strong').map(node => Number(node.children.join(''))), [1, 1, 1]);
+  }, [
+    { tipoOt: 'INSTALACION', estado: 'COMPLETADA' }, { tipoOt: 'REPARACION', estado: 'COMPLETADA' },
+    { tipoOt: 'INSTALACION', estado: 'EN_CURSO' }, { tipoOt: 'Instalacion', estado: 'Cancelada' },
+    { tipoOt: 'Instalacion', estado: 'Cerrada' },
+  ]);
 });
 
 test('inconsistent installation evidence is visible and older summary responses remain compatible', async () => {

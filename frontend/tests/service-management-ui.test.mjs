@@ -7,6 +7,9 @@ import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
+const evidenceExports = {};
+new Function('require', 'exports', ts.transpileModule(readFileSync(new URL('../src/features/installations/WorkOrderTechnicalEvidence.tsx', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText)(require, evidenceExports);
 const source = readFileSync(new URL('../src/features/customers/CustomerServiceManagementModal.tsx', import.meta.url), 'utf8');
 const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
 const text = node => typeof node === 'string' ? node : (node.children ?? []).map(text).join('');
@@ -22,7 +25,7 @@ async function harness(t, options = {}) {
       calls.push(['get', path, params]);
       if (path.includes('/equipment')) {
         if (options.failEquipment) throw Error('G1 interno');
-        return { data: { data: [{ id_unidad: 1, numero_serie: 'SERIE-20', tipo_equipo: 'Router', estado: 'Instalado', garantia: { vigente: true } }] } };
+        return { data: { data: options.emptyEquipment ? [] : [{ id_unidad: 1, numero_serie: 'SERIE-20', tipo_equipo: 'Router', estado: 'Instalado', garantia: { vigente: true } }] } };
       }
       return { data: [{ idGarantia: 30, tipo: 'Garantía comercial', fechaInicio: '2026-01-01', fechaTermino: '2027-01-01', cobertura: 'Soporte', monto: null, estado: 'ACTIVA' }] };
     },
@@ -37,6 +40,7 @@ async function harness(t, options = {}) {
     './ContractDocuments': { ContractDocuments: () => React.createElement('p', {}, 'Documentos disponibles') },
     './PlanChangeHistory': { PlanChangeHistory: () => React.createElement('p', {}, 'Historial disponible') },
     './HistoricalG3Closure': { HistoricalG3Closure: () => React.createElement('p', {}, 'Antecedentes disponibles') },
+    '../installations/WorkOrderTechnicalEvidence': evidenceExports,
   };
   const exports = {};
   new Function('require', 'exports', output)(name => name.endsWith('.css') ? {} : mocks[name] ?? require(name), exports);
@@ -64,6 +68,27 @@ test('acciones en orden y sin iconos; datos completos disponibles en tres seccio
   assert.doesNotMatch(h.text(), /Fuente:|G1|G3|G8|Legado local/);
   await h.click('Observaciones');
   assert.deepEqual(h.observed, [{ tipoEntidad: 'Servicio', idEntidad: 20, idCliente: 10, idEmpresa: 1, label: 'Servicio 20' }]);
+});
+
+test('cero equipos oficiales no oculta la instalación ni promueve una serie declarada a inventario', async t => {
+  const h = await harness(t, { emptyEquipment: true, service: { integracionG1: null, instalacion: { ...service.instalacion,
+    antecedenteTecnico: { idOt: 99, fechaCompletada: '2026-10-02', equiposDeclarados: { instalados: ['SOLO-DECLARADA-OT'], retirados: [] }, resueltoRemotamente: null } } } });
+  assert.match(h.text(), /Sin asignación oficial confirmada/);
+  assert.match(h.text(), /esto no determina si existió una instalación/);
+  assert.match(h.text(), /SOLO-DECLARADA-OT/);
+  assert.match(h.text(), /no acreditan asignación oficial/);
+  assert.match(h.text(), /2026-10-02/);
+  const official = h.tree.root.findAllByType('section').find(node => node.children.some(child => child.type === 'h3' && text(child) === 'Equipos asignados oficialmente'));
+  assert.doesNotMatch(text(official), /SOLO-DECLARADA-OT/);
+  assert.equal(h.calls.filter(call => call[0] !== 'get').length, 0);
+});
+
+test('sin tracking ni OT correlacionada no concluye que nunca existió instalación', async t => {
+  const h = await harness(t, { emptyEquipment: true, service: { instalacion: null, integracionG1: null } });
+  assert.match(h.text(), /Sin OT correlacionada con este servicio/);
+  assert.match(h.text(), /no demuestra que no exista una instalación histórica/);
+  assert.match(h.text(), /Sin asignación oficial confirmada/);
+  assert.equal(h.calls.filter(call => call[0] !== 'get').length, 0);
 });
 
 test('modificar plan conserva seleccion por empresa, fecha, observacion y endpoint', async t => {

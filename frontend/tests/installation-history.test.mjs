@@ -6,9 +6,12 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
+const evidenceExports = {};
+new Function('require', 'exports', ts.transpileModule(readFileSync(new URL('../src/features/installations/WorkOrderTechnicalEvidence.tsx', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText)(require, evidenceExports);
 function harness(get) {
   const exports = {};
-  const mocks = { '../../api': { api: { get } }, '../../shared/components': { TablePagination: () => null } };
+  const mocks = { '../../api': { api: { get } }, '../../shared/components': { TablePagination: () => null }, './WorkOrderTechnicalEvidence': evidenceExports };
   const source = readFileSync(new URL('../src/features/installations/InstallationHistoryPanel.tsx', import.meta.url), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   new Function('require', 'exports', code)(name => name in mocks ? mocks[name] : require(name), exports);
@@ -55,5 +58,21 @@ test('preserva detalle de OT local sin mezclar una OT de igual numero de otra em
   const text = JSON.stringify(tree.toJSON());
   assert.match(text, /LOCAL-QA/); assert.match(text, /Tecnico QA/); assert.match(text, /Visita programada/);
   assert.doesNotMatch(text, /NO-MEZCLAR|AJENO/);
+  await act(async () => tree.unmount());
+});
+
+test('OT histórica completada sin servicio conserva fecha y equipos solo como declaración de la orden', async () => {
+  const historical = { ...row(1, '2026-10-02T12:00:00.000Z'), key: '1:2', idOt: '2', fuente: 'LEGACY_LOCAL',
+    idContrato: null, idServicio: null, ordenesLocales: [2], solicitudesG3: [], antecedentesTecnicos: [{
+      idEmpresa: 1, idOt: 2, fechaCompletada: '2026-10-02T12:00:00.000Z', idTecnicoRegistrado: 8,
+      idTecnicoExterno: null, potenciaOpticaDbm: -19.5, resueltoRemotamente: false,
+      equiposDeclarados: { instalados: ['ONT-DECLARADA-QA'], retirados: [] }, asignacionInventarioConfirmada: false,
+    }] };
+  const Component = harness(async () => ({ data: { items: [historical] } }));
+  let tree; await act(async () => { tree = create(React.createElement(Component, { scope: '1' })); });
+  const rendered = JSON.stringify(tree.toJSON());
+  assert.equal(tree.root.findByType('tbody').findAllByType('tr').length, 1);
+  for (const value of ['Histórica / local', 'Sin contrato correlacionado', 'Sin servicio correlacionado', 'ONT-DECLARADA-QA', '2026-10-02T12:00:00.000Z', 'no acreditan asignación oficial']) assert.ok(rendered.includes(value), value);
+  assert.doesNotMatch(rendered, /Tracking #|Cierre de solicitud G8/);
   await act(async () => tree.unmount());
 });

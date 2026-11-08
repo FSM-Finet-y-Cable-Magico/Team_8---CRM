@@ -37,6 +37,18 @@ function setup(company = 1) {
 }
 
 describe('Lectura histórica G3 sin reconciliar ni persistir', () => {
+  it.each(['COMPLETADA', 'Completada'])('acepta cierre histórico %s solo con instalación y referencias coincidentes', async estado => {
+    const ctx = setup();
+    ctx.client.getWorkOrderClosure.mockResolvedValue({ data: { ...closureData, estado, tipo_ot: 'INSTALACION' } });
+    expect((await ctx.read()).estadoConsulta).toBe('DISPONIBLE');
+    ctx.assertNoWrites();
+  });
+  it('no acepta una reparación como cierre histórico de instalación aunque repita sus referencias', async () => {
+    const ctx = setup();
+    ctx.client.getWorkOrderClosure.mockResolvedValue({ data: { ...closureData, estado: 'COMPLETADA', tipo_ot: 'REPARACION' } });
+    expect((await ctx.read()).estadoConsulta).toBe('NO_VALIDADO');
+    ctx.assertNoWrites();
+  });
   afterEach(() => jest.restoreAllMocks());
   beforeEach(() => jest.spyOn(global, 'fetch').mockRejectedValue(new Error('Real traffic prohibited')));
 

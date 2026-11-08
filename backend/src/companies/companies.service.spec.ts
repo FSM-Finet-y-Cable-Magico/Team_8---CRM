@@ -63,7 +63,8 @@ describe('CompaniesService CU47 integrado', () => {
         estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: { not: null } }),
     }));
     expect(prisma.ordenTrabajo.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ idEmpresa: company ?? { not: null }, tipoOt: 'Instalacion', estado: 'Completada' }),
+      where: expect.objectContaining({ idEmpresa: company ?? { not: null }, tipoOt: { in: ['Instalacion', 'Instalación'], mode: 'insensitive' },
+        estado: { equals: 'Completada', mode: 'insensitive' } }),
     }));
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), { isolationLevel: 'RepeatableRead' });
   });
