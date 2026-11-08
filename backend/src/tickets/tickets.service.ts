@@ -1,10 +1,14 @@
 ﻿import { BadRequestException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { ConflictException } from '@nestjs/common';
+import { Prisma, Ticket } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { companyResponse } from '../common/company-response';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
-import { validateRut } from '../rut/rut.util';
+import { rutLookupVariants, validateRut } from '../rut/rut.util';
+import { ticketStateCompatibility } from './ticket-ownership';
+import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
 import { RegisterDiagnosisDto } from './dto/register-diagnosis.dto';
@@ -79,10 +83,11 @@ export class TicketsService {
 
       return {
         ...ticket,
+        ...ticketStateCompatibility(ticket.estado),
         cliente: ticket.idCliente ? customerById.get(ticket.idCliente) ?? null : null,
         categoria: categoryById.get(ticket.idCategoria) ?? null,
         workOrders: ticketWorkOrders,
-        hasOpenWorkOrder: ticketWorkOrders.some((order) => order.estado !== 'Completada'),
+        hasOpenWorkOrder: ticketWorkOrders.some((order) => !isCompletedTicketWorkOrder(order.estado)),
         observacionesTecnicas: this.extractTechnicalNotes(ticket.descripcion),
       };
     }), currentUser);
@@ -95,10 +100,23 @@ export class TicketsService {
       throw new BadRequestException(rut.reason ?? 'RUT invalido');
     }
 
-    const cliente = await this.prisma.cliente.findUnique({
-      where: { rut: rut.normalized },
+    const candidates = await this.prisma.cliente.findMany({
+      where: {
+        rut: { in: rutLookupVariants(dto.rut), mode: 'insensitive' },
+        ...(!isAdministrator(currentUser.roles) ? { OR: [
+          { idEmpresa: this.companyScope(currentUser, 'consolidado').idEmpresa },
+          { contratos: { some: { idEmpresa: currentUser.idEmpresa! } } },
+          { servicios: { some: { idEmpresa: currentUser.idEmpresa! } } },
+        ] } : {}),
+      },
       include: { contratos: { select: { idEmpresa: true } }, servicios: { select: { idEmpresa: true } } },
+      take: 2,
     });
+
+    if (candidates.length > 1) {
+      throw new ConflictException('La identidad requiere revision comercial; no se asociaron ni fusionaron clientes');
+    }
+    const cliente = candidates[0];
 
     if (!cliente) {
       throw new BadRequestException('El RUT no corresponde a un cliente existente');
@@ -138,16 +156,14 @@ export class TicketsService {
 
   async updateCategory(idTicket: number, dto: UpdateTicketCategoryDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    this.assertCrmWrite(ticket.estado);
     const category = await this.prisma.categoriaFalla.findUnique({ where: { idCategoria: dto.idCategoria } });
 
     if (!category) {
       throw new BadRequestException('Categoria seleccionada invalida');
     }
 
-    const updated = await this.prisma.ticket.update({
-      where: { idTicket },
-      data: { idCategoria: dto.idCategoria },
-    });
+    const updated = await this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -163,10 +179,8 @@ export class TicketsService {
 
   async updatePriority(idTicket: number, dto: UpdateTicketPriorityDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
-    const updated = await this.prisma.ticket.update({
-      where: { idTicket },
-      data: { prioridad: dto.prioridad },
-    });
+    this.assertCrmWrite(ticket.estado);
+    const updated = await this.updateCrmTicket(ticket, { prioridad: dto.prioridad });
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -182,10 +196,11 @@ export class TicketsService {
 
   async updateStatus(idTicket: number, dto: UpdateTicketStatusDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    this.assertCrmWrite(ticket.estado);
     const currentIndex = TICKET_STATUSES.indexOf(ticket.estado);
     const nextIndex = TICKET_STATUSES.indexOf(dto.estado);
 
-    if (nextIndex < currentIndex) {
+    if (nextIndex < 0 || nextIndex < currentIndex) {
       throw new BadRequestException('Transicion de estado invalida');
     }
 
@@ -193,13 +208,10 @@ export class TicketsService {
       await this.assertNoPendingWorkOrderForClosure(idTicket);
     }
 
-    const updated = await this.prisma.ticket.update({
-      where: { idTicket },
-      data: {
-        estado: dto.estado,
-        fechaCierre: dto.estado === 'Cerrado' ? new Date() : ticket.fechaCierre,
-        descripcion: dto.comentario ? `${ticket.descripcion ?? ''}\nComentario: ${dto.comentario}` : ticket.descripcion,
-      },
+    const updated = await this.updateCrmTicket(ticket, {
+      estado: dto.estado,
+      fechaCierre: dto.estado === 'Cerrado' ? new Date() : ticket.fechaCierre,
+      descripcion: dto.comentario ? `${ticket.descripcion ?? ''}\nComentario: ${dto.comentario}` : ticket.descripcion,
     });
 
     await this.auditService.record({
@@ -216,6 +228,7 @@ export class TicketsService {
 
   async registerDiagnosis(idTicket: number, dto: RegisterDiagnosisDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    this.assertCrmWrite(ticket.estado);
     await this.assertNoPendingWorkOrderForClosure(idTicket);
 
     if (!dto.causaRaiz.trim()) {
@@ -233,14 +246,11 @@ export class TicketsService {
       .join('\n');
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const updatedTicket = await tx.ticket.update({
-        where: { idTicket },
-        data: {
-          estado: 'Resuelto',
-          descripcion: `${ticket.descripcion ?? ''}\n\nDiagnostico tecnico:\n${diagnosis}`,
-          fechaCierre: new Date(),
-        },
-      });
+      const updatedTicket = await this.updateCrmTicket(ticket, {
+        estado: 'Resuelto',
+        descripcion: `${ticket.descripcion ?? ''}\n\nDiagnostico tecnico:\n${diagnosis}`,
+        fechaCierre: new Date(),
+      }, tx);
 
       // The diagnosis is ticket evidence, never authority over financial state or an OT.
       await this.auditService.record({
@@ -270,12 +280,10 @@ export class TicketsService {
 
   async addTechnicalNote(idTicket: number, dto: TechnicalNoteDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
+    this.assertCrmWrite(ticket.estado);
     const block = this.technicalNoteBlock(dto.observacion, currentUser.nombreCompleto);
-    const updated = await this.prisma.ticket.update({
-      where: { idTicket },
-      data: {
-        descripcion: `${ticket.descripcion ?? ''}\n\n${block}`.trim(),
-      },
+    const updated = await this.updateCrmTicket(ticket, {
+      descripcion: `${ticket.descripcion ?? ''}\n\n${block}`.trim(),
     });
 
     await this.auditService.record({
@@ -398,7 +406,7 @@ export class TicketsService {
     const pendingOrder = await this.prisma.ordenTrabajo.findFirst({
       where: {
         idTicket,
-        estado: { not: 'Completada' },
+        estado: { notIn: [...COMPLETED_TICKET_WORK_ORDER_STATES] },
       },
     });
 
@@ -406,6 +414,29 @@ export class TicketsService {
       throw new BadRequestException(
         'La OT asociada no consta completada. G3 administra su cierre tecnico; la recepcion de cierres de reparacion esta pendiente de ratificacion. Puedes registrar observaciones sin cerrar el ticket',
       );
+    }
+  }
+
+  private assertCrmWrite(estado: string) {
+    if (ticketStateCompatibility(estado).soloLecturaTecnica) {
+      throw new ConflictException({
+        code: 'G3_TICKET_READ_ONLY',
+        message: 'Ticket tecnico o de estado no reconocido: solo consulta en G8. La sincronizacion de cambios requiere un contrato ratificado con G3.',
+      });
+    }
+  }
+
+  private async updateCrmTicket(ticket: Ticket, data: Prisma.TicketUpdateInput, tx: Prisma.TransactionClient = this.prisma) {
+    try {
+      // Do not overwrite a state/company changed by FSM after authorization.
+      return await tx.ticket.update({
+        where: { idTicket: ticket.idTicket, idEmpresa: ticket.idEmpresa, estado: ticket.estado }, data,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new ConflictException('El ticket cambio durante la operacion; vuelve a consultarlo antes de modificarlo');
+      }
+      throw error;
     }
   }
 

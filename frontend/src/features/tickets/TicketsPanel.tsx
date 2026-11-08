@@ -207,7 +207,7 @@ export function TicketsPanel({
                     <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
                   </td>
                   <td className="operational-badge-column">
-                    <StatusBadge value={formatWorkOrderValue(ticket.estado)} />
+                    <StatusBadge value={ticket.estadoPresentacion ?? formatWorkOrderValue(ticket.estado)} />
                   </td>
                   <td>
                     <button

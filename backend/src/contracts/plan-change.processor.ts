@@ -1,22 +1,33 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ContractsService } from './contracts.service';
 
 @Injectable()
 export class PlanChangeProcessor implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private running = false;
+  private stopped = false;
+  private readonly enabled: boolean;
   private lastSchemaWarning = 0;
   private readonly logger = new Logger(PlanChangeProcessor.name);
-  constructor(private readonly contracts: ContractsService) {}
+  constructor(private readonly contracts: ContractsService, config: ConfigService) {
+    // Preserve the existing default; only the explicit environment value opts out.
+    this.enabled = config.get<string>('PLAN_CHANGE_PROCESSOR_ENABLED') !== 'false';
+  }
 
   onModuleInit() {
+    if (!this.enabled || this.stopped || this.timer) return;
     void this.tick();
     this.timer = setInterval(() => void this.tick(), 60_000);
     this.timer.unref();
   }
-  onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+  onModuleDestroy() {
+    this.stopped = true;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
   private async tick() {
-    if (this.running) return;
+    if (!this.enabled || this.stopped || this.running) return;
     this.running = true;
     try { await this.contracts.applyDuePlanChanges(); this.lastSchemaWarning = 0; }
     catch (error) {

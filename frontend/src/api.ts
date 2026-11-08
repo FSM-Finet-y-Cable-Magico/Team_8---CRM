@@ -701,6 +701,9 @@ export type TicketCategory = {
 };
 
 export type Ticket = {
+  vocabularioEstado?: 'G8' | 'G3' | 'DESCONOCIDO';
+  estadoPresentacion?: string;
+  soloLecturaTecnica?: boolean;
   idTicket: number;
   idCliente: number | null;
   idServicio: number | null;

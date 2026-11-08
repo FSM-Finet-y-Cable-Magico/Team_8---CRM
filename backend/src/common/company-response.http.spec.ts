@@ -68,6 +68,9 @@ function fixture(companies = [1, 2]) {
   const matches = (row: any, where: any = {}): boolean => Object.entries(where).every(([key, condition]: [string, any]) => {
     if (condition === undefined) return true;
     if (key === 'OR') return condition.some((clause: any) => matches(row, clause));
+    if (condition && typeof condition === 'object' && 'some' in condition) {
+      return Array.isArray(row[key]) && row[key].some((child: any) => matches(child, condition.some));
+    }
     if (condition && typeof condition === 'object' && 'in' in condition) return condition.in.includes(row[key]);
     return row[key] === condition;
   });

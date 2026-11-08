@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
+import { rutLookupVariants } from '../rut/rut.util';
 import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 
@@ -218,12 +219,31 @@ export class CustomersService {
       throw new BadRequestException('Debe informar un criterio de busqueda');
     }
 
+    // Preserve the existing numeric-contract search precedence.
     const contractId = /^\d+$/.test(normalizedTerm) ? Number(normalizedTerm) : null;
     const customerByContract = contractId && Number.isSafeInteger(contractId) && contractId <= 2147483647
       ? await this.prisma.contrato.findFirst({
           where: { idContrato: contractId, ...companyFilter },
         })
       : null;
+    const rutVariants = rutLookupVariants(normalizedTerm);
+    if (!customerByContract?.idCliente && rutVariants.length) {
+      const candidates = await this.prisma.cliente.findMany({
+        where: { AND: [
+          { rut: { in: rutVariants, mode: 'insensitive' } },
+          this.companyScope(currentUser, 'consolidado'),
+        ] },
+        include: { contratos: { where: companyFilter, select: { idEmpresa: true } } },
+        take: 2,
+      });
+      if (candidates.length > 1) {
+        throw new BadRequestException('La identidad requiere revision comercial; no se asociaron ni fusionaron clientes');
+      }
+      const customer = candidates[0];
+      if (!customer) throw new NotFoundException('Cliente no encontrado');
+      if (!this.canAccessCustomer(customer, currentUser)) throw new BadRequestException('El cliente no pertenece a tu empresa');
+      return this.visibleCustomer(customer, idEmpresa);
+    }
 
     const cliente = customerByContract?.idCliente
       ? await this.prisma.cliente.findUnique({
@@ -294,6 +314,9 @@ export class CustomersService {
       { rut: { contains: normalizedRut, mode: 'insensitive' } },
       { nombreCompleto: { contains: term, mode: 'insensitive' } },
     ];
+
+    const variants = rutLookupVariants(term);
+    if (variants.length) alternatives.push({ rut: { in: variants, mode: 'insensitive' } });
 
     if (normalizedPhone.length >= 4) {
       alternatives.push({ telefono: { contains: normalizedPhone } });

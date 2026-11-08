@@ -39,6 +39,7 @@ function persistence(customerStatus = 'Moroso') {
     if (key === 'OR') return condition.some((clause: any) => matches(row, clause));
     if (condition && typeof condition === 'object') {
       if ('in' in condition) return condition.in.includes(row[key]);
+      if ('notIn' in condition) return !condition.notIn.includes(row[key]);
       if ('not' in condition) return row[key] !== condition.not;
     }
     return row[key] === condition;
@@ -131,6 +132,51 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(500);
     expect(store.state).toEqual(before);
     assertNoTechnicalWrites();
+  });
+
+  it('OT COMPLETADA no aparece abierta y admite solo el cierre comercial autorizado', async () => {
+    for (const company of [1, 2]) for (const action of ['diagnosis', 'Resuelto', 'Cerrado']) {
+      await start('Moroso');
+      store.state.ordenTrabajo[company - 1].estado = 'COMPLETADA';
+      const before = protectedState();
+      const listed = await send('get', 'tickets', company).expect(200);
+      expect(listed.body[0]).toMatchObject({ hasOpenWorkOrder: false });
+      expect(listed.body[0].workOrders[0].estado).toBe('COMPLETADA');
+      expect(store.writes).toEqual([]);
+      expect(protectedState()).toEqual(before);
+      if (action === 'diagnosis') await send('post', `tickets/${company}/diagnosis`, company, diagnosis).expect(201);
+      else await send('patch', `tickets/${company}/status`, company, { estado: action }).expect(200);
+      expect(protectedState()).toEqual(before);
+      assertNoTechnicalWrites();
+      await app.close();
+    }
+  });
+
+  it('OT finalizada no oculta otra EN_CURSO, cancelada o de estado no reconocido', async () => {
+    await start('Suspendido');
+    store.state.ordenTrabajo[0].estado = 'COMPLETADA';
+    store.state.ordenTrabajo.push({ ...store.state.ordenTrabajo[0], idOt: 3, estado: 'EN_CURSO' });
+    for (const state of ['EN_CURSO', 'CANCELADA', 'PENDIENTE_APROBACION', 'desconocido', 'completada']) {
+      store.state.ordenTrabajo[2].estado = state;
+      const before = clone(store.state);
+      const listed = await send('get', 'tickets', 1).expect(200);
+      expect(listed.body[0].hasOpenWorkOrder).toBe(true);
+      await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(400);
+      await send('patch', 'tickets/1/status', 1, { estado: 'Cerrado' }).expect(400);
+      expect(store.state).toEqual(before);
+      expect(store.writes).toEqual([]);
+    }
+  });
+
+  it('ticket tecnico sigue solo lectura aunque todas sus OT esten COMPLETADA', async () => {
+    await start();
+    store.state.ordenTrabajo[0].estado = 'COMPLETADA';
+    store.state.ticket[0].estado = 'RESUELTO';
+    const before = clone(store.state);
+    await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(409);
+    await send('patch', 'tickets/1/status', 1, { estado: 'Cerrado' }).expect(409);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
   });
 
   it('diagnostico sin OT sigue resolviendo solo el ticket', async () => {
@@ -240,6 +286,30 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     const orders = await send('get', 'work-orders', company).expect(200);
     expect(orders.body).toHaveLength(1);
     expect(orders.body[0].idEmpresa).toBe(company);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('ticket G3 compartido: API permite consulta y rechaza ediciones incluso administrador', async () => {
+    await start();
+    store.state.ticket[0].estado = 'DERIVADO_OT';
+    store.state.ticket[0].origen = 'CRM';
+    const before = clone(store.state);
+    const visible = await send('get', 'tickets', 1).expect(200);
+    expect(visible.body[0]).toMatchObject({ estado: 'DERIVADO_OT', estadoPresentacion: 'Derivado a OT',
+      vocabularioEstado: 'G3', soloLecturaTecnica: true });
+    for (const role of ['Soporte', 'Administrador']) {
+      for (const [path, method, body] of [
+        ['category', 'patch', { idCategoria: 2 }], ['priority', 'patch', { prioridad: 'Alta' }],
+        ['status', 'patch', { estado: 'Resuelto' }], ['diagnosis', 'post', diagnosis],
+        ['technical-notes', 'post', { observacion: 'Nota QA' }],
+      ] as const) {
+        const response = await send(method, `tickets/1/${path}`, 1, body, role).expect(409);
+        expect(response.body.code).toBe('G3_TICKET_READ_ONLY');
+      }
+    }
+    await send('patch', 'tickets/1/status', 2, { estado: 'Resuelto' }).expect(400);
+    await send('post', 'tickets/1/diagnosis', 1, diagnosis, 'JEFE_TECNICO').expect(403);
     expect(store.state).toEqual(before);
     expect(store.writes).toEqual([]);
   });

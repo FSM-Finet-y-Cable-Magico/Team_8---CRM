@@ -4,7 +4,7 @@ import { api, apiErrorMessage, type Ticket, type TicketCategory } from '../../ap
 import { formatDateTime, formatWorkOrderValue } from '../../lib';
 import type { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
-import { PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
+import { isCompletedTicketWorkOrder, isTechnicalTicketReadOnly, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
 import './ticket-management.css';
 
 type Tab = 'management' | 'activity' | 'resolution';
@@ -32,20 +32,21 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
   const close = useRef(onClose);
   close.current = onClose;
 
-  const order = ticket.workOrders?.find(item => item.estado !== 'Completada') ?? ticket.workOrders?.[0];
-  const hasOpenOrder = Boolean(ticket.hasOpenWorkOrder || ticket.workOrders?.some(item => item.estado !== 'Completada'));
+  const order = ticket.workOrders?.find(item => !isCompletedTicketWorkOrder(item.estado)) ?? ticket.workOrders?.[0];
+  const technicalReadOnly = isTechnicalTicketReadOnly(ticket);
+  const hasOpenOrder = Boolean(ticket.hasOpenWorkOrder || ticket.workOrders?.some(item => !isCompletedTicketWorkOrder(item.estado)));
   const closureBlocked = hasOpenOrder && ['Resuelto', 'Cerrado'].includes(draft.status);
   const categoryChanged = permissions.classifyTickets && draft.category !== saved.category;
   const priorityChanged = permissions.classifyTickets && draft.priority !== saved.priority;
   const statusChanged = permissions.updateTicketStatus && draft.status !== saved.status;
   const hasChanges = categoryChanged || priorityChanged || statusChanged;
-  const canManage = permissions.classifyTickets || permissions.updateTicketStatus;
+  const canManage = !technicalReadOnly && (permissions.classifyTickets || permissions.updateTicketStatus);
   const resolved = ['Resuelto', 'Cerrado'].includes(saved.status);
   const { report, activities } = ticketContent(ticket);
   const tabs = [
     { id: 'management' as const, label: 'Gestión', icon: SlidersHorizontal },
     { id: 'activity' as const, label: 'Seguimiento', icon: MessageSquare },
-    ...(permissions.diagnoseTickets ? [{ id: 'resolution' as const, label: 'Resolución', icon: CheckCircle2 }] : []),
+    ...(!technicalReadOnly && permissions.diagnoseTickets ? [{ id: 'resolution' as const, label: 'Resolución', icon: CheckCircle2 }] : []),
   ];
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
 
   async function saveManagement(event: FormEvent) {
     event.preventDefault();
-    if (!hasChanges || (statusChanged && closureBlocked) || !startSaving()) return;
+    if (technicalReadOnly || !hasChanges || (statusChanged && closureBlocked) || !startSaving()) return;
     const completed: string[] = [];
     try {
       // The existing API has separate endpoints. Track each success so a retry
@@ -102,7 +103,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
 
   async function saveNote(event: FormEvent) {
     event.preventDefault();
-    if (!permissions.registerTechnicalNotes || note.trim().length < 3 || !startSaving()) return;
+    if (technicalReadOnly || !permissions.registerTechnicalNotes || note.trim().length < 3 || !startSaving()) return;
     try {
       await api.post(`/tickets/${ticket.idTicket}/technical-notes`, { observacion: note.trim() });
       setNote(''); setFeedback({ kind: 'success', text: 'Observación agregada al seguimiento.' }); onChanged();
@@ -112,7 +113,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
 
   async function saveDiagnosis(event: FormEvent) {
     event.preventDefault();
-    if (!permissions.diagnoseTickets || hasOpenOrder || resolved || !diagnosis.causaRaiz.trim() || !startSaving()) return;
+    if (technicalReadOnly || !permissions.diagnoseTickets || hasOpenOrder || resolved || !diagnosis.causaRaiz.trim() || !startSaving()) return;
     try {
       await api.post(`/tickets/${ticket.idTicket}/diagnosis`, diagnosis);
       setSaved(current => ({ ...current, status: 'Resuelto' }));
@@ -134,7 +135,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
         <header className="ticket-overview-heading">
           <span className="ticket-overview-icon"><ClipboardList size={22} aria-hidden="true" /></span>
           <div><p>Ticket de soporte</p><h3>{ticket.codigoSeguimiento ?? `Ticket ${ticket.idTicket}`}</h3></div>
-          <StatusBadge value={formatWorkOrderValue(saved.status)} />
+          <StatusBadge value={technicalReadOnly ? ticket.estadoPresentacion ?? formatWorkOrderValue(saved.status) : formatWorkOrderValue(saved.status)} />
         </header>
         <dl className="ticket-context">
           <div><dt>Cliente</dt><dd>{ticket.cliente?.nombreCompleto ?? 'Sin cliente asociado'}</dd></div>
@@ -143,6 +144,8 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
         </dl>
         <div className="ticket-report"><strong>Problema reportado</strong><p>{report || 'Sin descripción registrada.'}</p></div>
       </section>
+
+      {technicalReadOnly && <p className="ticket-notice" role="status">Solo consulta: este ticket se gestiona desde operaciones técnicas. Puedes revisar su estado y seguimiento aquí.</p>}
 
       <div className="ticket-tabs" role="tablist" aria-label="Secciones del ticket">
         {tabs.map(({ id, label, icon: Icon }, index) => <button key={id} id={`ticket-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls={`ticket-panel-${id}`} tabIndex={tab === id ? 0 : -1}
@@ -180,7 +183,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
       {tab === 'activity' && <div id="ticket-panel-activity" role="tabpanel" aria-labelledby="ticket-tab-activity">
         <div className="ticket-panel-content">
           <header className="ticket-section-heading"><h3>Seguimiento del caso</h3><p>Consulta los avances y registra nuevas observaciones.</p></header>
-          {permissions.registerTechnicalNotes && <form className="ticket-note-form" onSubmit={saveNote}>
+          {!technicalReadOnly && permissions.registerTechnicalNotes && <form className="ticket-note-form" onSubmit={saveNote}>
             <label>Nueva observación<textarea maxLength={1000} rows={3} value={note} onChange={event => setNote(event.target.value)} placeholder="Describe la gestión realizada o el próximo paso" disabled={busy} required minLength={3} /></label>
             <div><span className="ticket-muted">La observación se añade al historial.</span><button type="submit" disabled={busy || note.trim().length < 3}><MessageSquare size={16} aria-hidden="true" />{busy ? 'Guardando…' : 'Agregar observación'}</button></div>
           </form>}
@@ -191,7 +194,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
         </div>{footer()}
       </div>}
 
-      {tab === 'resolution' && permissions.diagnoseTickets && <form id="ticket-panel-resolution" role="tabpanel" aria-labelledby="ticket-tab-resolution" onSubmit={saveDiagnosis}>
+      {tab === 'resolution' && !technicalReadOnly && permissions.diagnoseTickets && <form id="ticket-panel-resolution" role="tabpanel" aria-labelledby="ticket-tab-resolution" onSubmit={saveDiagnosis}>
         <div className="ticket-panel-content">
           <header className="ticket-section-heading"><h3>{resolved ? 'Ticket resuelto' : 'Registra la solución'}</h3><p>{resolved ? 'Puedes consultar el diagnóstico y los avances en Seguimiento.' : 'Al guardar el diagnóstico, el ticket quedará resuelto.'}</p></header>
           {resolved ? <div className="ticket-empty ticket-resolved"><CheckCircle2 size={28} aria-hidden="true" /><strong>{saved.status === 'Cerrado' ? 'Este ticket ya está cerrado' : 'La atención de este ticket ha finalizado'}</strong><button type="button" className="secondary" onClick={() => setTab('activity')}>Ver seguimiento</button></div> : <>

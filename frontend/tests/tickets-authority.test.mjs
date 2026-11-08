@@ -80,8 +80,29 @@ test('Tickets separa gestion, seguimiento y resolucion con mensajes de produccio
   assert.equal(ctx.calls.length, 0);
 });
 
+test('ticket compartido G3 conserva estado y consulta sin ofrecer escrituras ni otro POST', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'DERIVADO_OT', origen: 'CRM',
+    estadoPresentacion: 'Derivado a OT', soloLecturaTecnica: true }], categories: [], permissions });
+  assert.match(ctx.text(), /Derivado a OT/);
+  assert.match(ctx.text(), /Solo consulta/);
+  assert.equal(ctx.button('Resolución'), undefined);
+  assert.equal(ctx.button('Guardar cambios'), undefined);
+  await ctx.click('Seguimiento1');
+  assert.match(ctx.text(), /Nota historica/);
+  assert.equal(ctx.button('Agregar observación'), undefined);
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('backend anterior no convierte EN_PROGRESO ni estado desconocido en opcion CRM editable', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'EN_PROGRESO' }], categories: [], permissions });
+  assert.match(ctx.text(), /Solo consulta/);
+  assert.equal(ctx.button('Guardar cambios'), undefined);
+  assert.equal(ctx.button('Resolución'), undefined);
+  assert.equal(ctx.calls.length, 0);
+});
+
 test('diagnostico conserva payload compatible y anuncia la resolucion', async t => {
-  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [], permissions });
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estadoPresentacion: 'En progreso' }], categories: [], permissions });
   await ctx.click('Resolución');
   assert.match(ctx.text(), /ticket quedará resuelto/);
   await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
@@ -92,6 +113,7 @@ test('diagnostico conserva payload compatible y anuncia la resolucion', async t 
   assert.deepEqual(ctx.calls, [['post', '/tickets/1/diagnosis', { causaRaiz: 'Causa QA', descripcionProblema: 'Problema QA',
     accionesRealizadas: 'Acciones QA', estadoFinalServicio: 'En Mantencion', observaciones: '' }]]);
   assert.match(ctx.text(), /El ticket está resuelto/);
+  assert.match(textOf(ctx.tree.root.findByProps({ className: 'ticket-overview-heading' })), /Resuelto/);
   assert.equal(ctx.button('Guardar y resolver ticket'), undefined);
   assert.equal(ctx.refreshed(), 1);
 });
@@ -198,6 +220,37 @@ test('cambiar o reabrir un ticket limpia los borradores anteriores', async t => 
   await ctx.click('Gestionar');
   await ctx.click('Seguimiento1');
   assert.equal(ctx.field('Nueva observación').props.value, '');
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('OT COMPLETADA no bloquea el diagnostico comercial ni cambia el estado tecnico por lectura', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, hasOpenWorkOrder: false,
+    workOrders: [{ idOt: 80, estado: 'COMPLETADA' }] }], categories: [], permissions });
+  assert.equal(ctx.calls.length, 0);
+  await ctx.click('Resolución');
+  await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, false);
+  await ctx.submit('Guardar y resolver ticket');
+  assert.deepEqual(ctx.calls.map(call => call.slice(0, 2)), [['post', '/tickets/1/diagnosis']]);
+});
+
+test('OT COMPLETADA secundaria no oculta EN_CURSO ni habilita cierre', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, workOrders: [
+    { idOt: 80, estado: 'COMPLETADA' }, { idOt: 81, estado: 'EN_CURSO' },
+  ] }], categories: [], permissions });
+  const order = ctx.tree.root.findByProps({ 'aria-label': 'Orden técnica asociada' });
+  assert.match(textOf(order), /Orden #81/);
+  await ctx.click('Resolución');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, true);
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('la equivalencia visual no ignora un bloqueo conservador informado por backend', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, hasOpenWorkOrder: true,
+    workOrders: [{ idOt: 80, estado: 'COMPLETADA' }] }], categories: [], permissions });
+  await ctx.click('Resolución');
+  await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, true);
   assert.equal(ctx.calls.length, 0);
 });
 

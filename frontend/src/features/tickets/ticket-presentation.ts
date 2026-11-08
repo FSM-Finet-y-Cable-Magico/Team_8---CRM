@@ -7,6 +7,18 @@ export type TicketActivity = {
   date?: string;
 };
 
+// Conservative fallback for an older backend: never translate a FSM state
+// into a writable CRM state, including tickets whose origin is CRM.
+export function isTechnicalTicketReadOnly(ticket: Ticket) {
+  return ticket.soloLecturaTecnica === true ||
+    !['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'].includes(ticket.estado);
+}
+
+// Do not equate cancellation, unknown values or other spellings with completion.
+export function isCompletedTicketWorkOrder(estado: unknown) {
+  return estado === 'Completada' || estado === 'COMPLETADA';
+}
+
 // Older tickets keep their report and subsequent entries in the same field.
 // Separate them for display without changing the stored content.
 export function ticketContent(ticket: Ticket) {

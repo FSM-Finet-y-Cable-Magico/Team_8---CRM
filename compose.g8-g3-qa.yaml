@@ -1,0 +1,69 @@
+# QA only. Use an explicit --env-file and this file alone; never combine with the
+# financial instance's Compose files. No database service, builds or migrations.
+name: finet-g8-g3-qa
+services:
+  backend:
+    image: ${QA_BACKEND_IMAGE:?required approved G8 image digest}
+    command: ["node", "dist/main.js"]
+    restart: "no"
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: ${QA_DATABASE_URL:?required dedicated G8 QA credential for finet_global_validacion}
+      JWT_SECRET: ${QA_JWT_SECRET:?required new private QA secret}
+      FRONTEND_URL: ${QA_FRONTEND_ORIGIN:?required approved QA HTTPS origin}
+      PLAN_CHANGE_PROCESSOR_ENABLED: "false"
+      G3_INTEGRATION_ENABLED: "true"
+      G3_API_URL: ${QA_G3_API_URL:?required authorized G3 QA origin}
+      G3_API_KEY: ${QA_G3_API_KEY:?required dedicated outbound G3 QA key}
+      G3_REQUEST_TIMEOUT_MS: "8000"
+      G8_INTEGRATION_API_KEYS: ${QA_G8_INTEGRATION_API_KEYS:?required approved inbound G3 QA key hashes and company scopes}
+      G1_INTEGRATION_ENABLED: "false"
+      G1_API_URL: ""
+      G1_API_KEY: ""
+      MAIL_PROVIDER: disabled
+      SMTP_COMPANIES: "[]"
+      BILLING_NOTIFICATION_MODE: disabled
+      FACTURACION_CL_INTEGRATION_ENABLED: "false"
+      FACTURACION_CL_PRODUCTION_ENABLED: "false"
+      FACTURACION_CL_DELIVERY_ENABLED: "false"
+      FACTURACION_CL_COMPANIES: "[]"
+      FACTURACION_CL_PROFILES: "[]"
+      WHATSAPP_PROVIDER: disabled
+      WHATSAPP_COMPANIES: "[]"
+      GEOCODING_PROVIDER: MANUAL
+      GEOCODING_API_URL: ""
+      TOMODAT_COMPANY_ID: ""
+      TOMODAT_API_URL: ""
+      TOMODAT_API_TOKEN: ""
+    ports:
+      - "127.0.0.1:${QA_BACKEND_PORT:-18808}:3000"
+    volumes:
+      - qa_generated:/app/generated
+    networks: [qa]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  frontend:
+    profiles: [ui]
+    # Must be built with VITE_API_URL pointing to the QA API, never production.
+    image: ${QA_FRONTEND_IMAGE:?required approved frontend QA image digest}
+    restart: "no"
+    environment:
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:${QA_FRONTEND_PORT:-18809}:8080"
+    networks: [qa]
+volumes:
+  qa_generated: {}
+networks:
+  qa: {}

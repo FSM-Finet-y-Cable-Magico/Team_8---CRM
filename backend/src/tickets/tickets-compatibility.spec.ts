@@ -1,0 +1,176 @@
+import { BadRequestException, ConflictException, GoneException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { CustomersService } from '../customers/customers.service';
+import { rutLookupVariants } from '../rut/rut.util';
+import { ticketStateCompatibility } from './ticket-ownership';
+import { TicketsService } from './tickets.service';
+
+const operator = { idUsuario: 7, idEmpresa: 2, email: null, nombreCompleto: 'QA', roles: ['Soporte'] };
+const admin = { ...operator, roles: ['Administrador'] };
+const request = { rut: '11111111-1', idCategoria: 1, idServicio: 20, prioridad: 'Media' as const, descripcion: 'QA sintetico' };
+
+function setup(estado = 'Abierto') {
+  const customer = { idCliente: 5, idEmpresa: 1, estado: 'Moroso', rut: '111111111',
+    contratos: [{ idEmpresa: 2 }], servicios: [{ idEmpresa: 2 }] };
+  const ticket = { idTicket: 10, idCliente: 5, idEmpresa: 2, idCategoria: 1,
+    estado, origen: 'CRM', descripcion: 'Reporte QA', fechaCierre: null };
+  const prisma = {
+    cliente: { findMany: jest.fn().mockResolvedValue([customer]), findUnique: jest.fn().mockResolvedValue(customer), update: jest.fn() },
+    contrato: { findFirst: jest.fn(), update: jest.fn() },
+    servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 20, idCliente: 5, idEmpresa: 2, idContrato: 30,
+      contrato: { idContrato: 30, idCliente: 5, idEmpresa: 2 } }), update: jest.fn() },
+    categoriaFalla: { findUnique: jest.fn().mockResolvedValue({ idCategoria: 1 }), findMany: jest.fn().mockResolvedValue([]) },
+    ticket: { findUnique: jest.fn().mockResolvedValue(ticket), findMany: jest.fn().mockResolvedValue([ticket]),
+      update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...ticket, ...data })),
+      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idTicket: 10, ...data })) },
+    ordenTrabajo: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation(callback => callback(prisma));
+  const audit = { record: jest.fn() };
+  return { prisma, audit, ticket, customer, service: new TicketsService(prisma as never, audit as never),
+    customers: new CustomersService(prisma as never, audit as never) };
+}
+
+describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
+  it('consulta grafias validadas sin modificar la normalizacion ni aceptar RUT invalido', () => {
+    expect(rutLookupVariants('11.111.111-1')).toEqual(['11111111-1', '111111111', '11.111.111-1', '11.111.1111']);
+    expect(rutLookupVariants('12345670k')).toEqual(expect.arrayContaining(['12345670-K', '12345670K', '12.345.670-k']));
+    expect(rutLookupVariants('11111111-2')).toEqual([]);
+  });
+
+  it('conserva estado original, distingue DERIVADO_OT de Escalado y falla cerrado ante desconocidos', () => {
+    expect(ticketStateCompatibility('DERIVADO_OT')).toEqual({ vocabularioEstado: 'G3', estadoPresentacion: 'Derivado a OT', soloLecturaTecnica: true });
+    expect(ticketStateCompatibility('Escalado')).toMatchObject({ vocabularioEstado: 'G8', soloLecturaTecnica: false });
+    expect(ticketStateCompatibility('NUEVO_ESTADO')).toMatchObject({ vocabularioEstado: 'DESCONOCIDO', soloLecturaTecnica: true });
+    expect(ticketStateCompatibility('Abierto')).not.toHaveProperty('propietario');
+  });
+
+  it('lista la fila compartida existente sin duplicarla, conserva empresa y estado G3', async () => {
+    const { service, prisma, ticket } = setup('EN_PROGRESO');
+    const before = JSON.stringify(ticket);
+    const result = await service.list(operator);
+    expect(result[0]).toMatchObject({ idTicket: 10, idEmpresa: 2, estado: 'EN_PROGRESO',
+      vocabularioEstado: 'G3', estadoPresentacion: 'En progreso', soloLecturaTecnica: true });
+    expect(prisma.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 2 } }));
+    expect(JSON.stringify(ticket)).toBe(before);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it('bloquea todas las escrituras G8 sobre estados G3 incluso origen CRM y administrador', async () => {
+    for (const state of ['ABIERTO', 'EN_PROGRESO', 'DERIVADO_OT', 'RESUELTO', 'DESCONOCIDO']) {
+      const { service, prisma, audit } = setup(state);
+      for (const user of [operator, admin]) {
+        for (const action of [
+          () => service.updateCategory(10, { idCategoria: 1 }, user),
+          () => service.updatePriority(10, { prioridad: 'Alta' }, user),
+          () => service.updateStatus(10, { estado: 'Resuelto' }, user),
+          () => service.addTechnicalNote(10, { observacion: 'QA' }, user),
+          () => service.registerDiagnosis(10, {} as never, user),
+        ]) await expect(action()).rejects.toBeInstanceOf(ConflictException);
+      }
+      expect(prisma.ticket.update).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    }
+  });
+
+  it('autoriza empresa antes de revelar restricciones del ticket tecnico', async () => {
+    const { service, prisma } = setup('RESUELTO');
+    await expect(service.updateStatus(10, { estado: 'Abierto' }, { ...operator, idEmpresa: 1 }))
+      .rejects.toThrow('El ticket no pertenece a tu empresa');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('mantiene soporte para cliente compartido moroso y RUT compacto sin activar ni fusionar identidades', async () => {
+    const { service, prisma } = setup();
+    await expect(service.create(request, operator)).resolves.toMatchObject({ idCliente: 5, idEmpresa: 2, estado: 'Abierto' });
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {
+      rut: { in: rutLookupVariants(request.rut), mode: 'insensitive' },
+      OR: [{ idEmpresa: 2 }, { contratos: { some: { idEmpresa: 2 } } }, { servicios: { some: { idEmpresa: 2 } } }],
+    }, take: 2 }));
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+    expect(prisma.contrato.update).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.update).not.toHaveBeenCalled();
+    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(prisma.ticket.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('identidad ambigua o RUT invalido no crea ticket ni toma el primer registro', async () => {
+    const { service, prisma, customer } = setup();
+    prisma.cliente.findMany.mockResolvedValue([customer, { ...customer, idCliente: 6, rut: '11111111-1' }]);
+    await expect(service.create(request, operator)).rejects.toBeInstanceOf(ConflictException);
+    prisma.cliente.findMany.mockClear();
+    await expect(service.create({ ...request, rut: '11111111-2' }, operator)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.cliente.findMany).not.toHaveBeenCalled();
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it('coincidencia RUT no autoriza otra empresa ni un servicio ajeno', async () => {
+    const { service, prisma, customer } = setup();
+    customer.contratos = []; customer.servicios = [];
+    await expect(service.create(request, operator)).rejects.toThrow('El cliente no pertenece a tu empresa');
+    customer.contratos = [{ idEmpresa: 2 }];
+    prisma.servicioContratado.findUnique.mockResolvedValue({ idServicio: 20, idCliente: 5, idEmpresa: 1 } as never);
+    await expect(service.create(request, operator)).rejects.toThrow('El servicio contratado no pertenece a tu empresa');
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it('detecta duplicados historicos con puntos y K sin escoger ni reescribir identidades', async () => {
+    const { service, customers, prisma, customer } = setup();
+    const historical = [
+      { ...customer, rut: '12.345.670-k' },
+      { ...customer, idCliente: 6, rut: '12345670K' },
+    ];
+    const before = JSON.stringify(historical);
+    prisma.cliente.findMany.mockImplementation(async ({ where }: any) => {
+      const values = (where.rut ?? where.AND[0].rut).in.map((value: string) => value.toUpperCase());
+      return historical.filter(row => values.includes(row.rut.toUpperCase()));
+    });
+    await expect(service.create({ ...request, rut: '12345670-K' }, operator)).rejects.toBeInstanceOf(ConflictException);
+    await expect(customers.findByRutOrContract('12.345.670-K', operator)).rejects.toThrow('La identidad requiere revision comercial');
+    expect(JSON.stringify(historical)).toBe(before);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+    expect(prisma.contrato.update).not.toHaveBeenCalled();
+  });
+
+  it('conserva consultas autorizadas de RUT compacto, detecta ambiguedad y oculta datos globales', async () => {
+    const { customers, prisma, customer } = setup();
+    await expect(customers.findByRutOrContract('11.111.111-1', operator)).resolves.toMatchObject({
+      idCliente: 5, idEmpresa: null, estado: 'Restringido por empresa', datosTecnicos: null,
+    });
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [
+      { rut: { in: rutLookupVariants(request.rut), mode: 'insensitive' } },
+      { OR: [{ idEmpresa: 2 }, { contratos: { some: { idEmpresa: 2 } } }] },
+    ] } }));
+    prisma.cliente.findMany.mockResolvedValue([customer, { ...customer, idCliente: 6 }]);
+    await expect(customers.findByRutOrContract('111111111', admin)).rejects.toThrow('La identidad requiere revision comercial');
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+  });
+
+  it('conserva precedencia de contrato numerico autorizado aunque tenga formato de RUT compacto', async () => {
+    const { customers, prisma } = setup();
+    prisma.contrato.findFirst.mockResolvedValue({ idContrato: 111111111, idCliente: 5 });
+    await expect(customers.findByRutOrContract('111111111', operator)).resolves.toMatchObject({ idCliente: 5 });
+    expect(prisma.contrato.findFirst).toHaveBeenCalledWith({ where: { idContrato: 111111111, idEmpresa: 2 } });
+    expect(prisma.cliente.findMany).not.toHaveBeenCalled();
+  });
+
+  it('revalida estado y empresa al escribir y no audita exito tras conflicto concurrente', async () => {
+    const { service, prisma, audit } = setup('En progreso');
+    prisma.ticket.update.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('QA concurrent update', {
+      code: 'P2025', clientVersion: '5.22.0',
+    }));
+    await expect(service.updatePriority(10, { prioridad: 'Alta' }, operator)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.ticket.update).toHaveBeenCalledWith({ where: { idTicket: 10, idEmpresa: 2, estado: 'En progreso' }, data: { prioridad: 'Alta' } });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('no anuncia una OT ni deriva automaticamente el mismo ticket compartido', async () => {
+    const { service, prisma } = setup('DERIVADO_OT');
+    await expect(service.createWorkOrder(10, {} as never, operator)).rejects.toBeInstanceOf(GoneException);
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+  });
+});

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { IntegracionInstalacionG3, Prisma } from '@prisma/client';
 import { serviceTypeFromPlan } from '../common/service-type';
 import { canActivateService } from '../services/service-activation.policy';
-import { validateRut } from '../rut/rut.util';
+import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { installationSnapshot } from './g3-integration.utils';
 
 @Injectable()
@@ -58,7 +58,9 @@ export class InstallationActivationService {
       || (customer && validateRut(customer.rut ?? '').normalized !== identity.normalized)) {
       throw new BadRequestException('La identidad del cliente no corresponde a la solicitud');
     }
-    if (!customer && await tx.cliente.findUnique({ where: { rut: payload.persona.rut } })) {
+    if (!customer && await tx.cliente.findFirst({
+      where: { rut: { in: rutLookupVariants(payload.persona.rut), mode: 'insensitive' } },
+    })) {
       throw new ConflictException('La identidad existente requiere vinculacion contractual explicita');
     }
 
