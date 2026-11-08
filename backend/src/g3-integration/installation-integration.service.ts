@@ -156,6 +156,7 @@ export class InstallationIntegrationService {
     try {
       const response = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
+      this.validateDetailReferences(response.data, tracking);
       const state = normalizeG3State(response.data.estado);
       const terminal = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
       const updated = terminal
@@ -595,6 +596,25 @@ export class InstallationIntegrationService {
     }
   }
 
+  private validateDetailReferences(response: G3WorkOrderResponse, tracking: {
+    idOtG3: string | null; requestId: string; traceId: string;
+    idContrato: number; idProspecto: number | null; idPlan: number | null;
+  }) {
+    // Legacy details may omit correlation fields; supplied references must agree.
+    // An external technician ID is never interpreted as a local or G1 user ID.
+    const references: Array<[unknown, unknown]> = [
+      [response.request_id, tracking.requestId], [response.trace_id, tracking.traceId],
+      [response.id_contrato, tracking.idContrato], [response.id_prospecto, tracking.idProspecto],
+      [response.id_plan, tracking.idPlan],
+    ];
+    if ((response.id_ot !== undefined && tracking.idOtG3 !== null
+      && String(response.id_ot) !== tracking.idOtG3)
+      || references.some(([received, expected]) => received !== undefined && received !== expected)) {
+      throw new G3IntegrationError('G3_RESPONSE_CORRELATION_INVALID', 502, false,
+        'G3 respondio con referencias que no corresponden a la solicitud.');
+    }
+  }
+
   private normalizeError(error: unknown) {
     if (error instanceof G3IntegrationError) return error;
     if (error instanceof BadRequestException || error instanceof ForbiddenException || error instanceof NotFoundException) throw error;
@@ -642,7 +662,7 @@ export class InstallationIntegrationService {
         estadoOriginalG3: normalizeG3State(detail.estado).known ? null : normalizeG3State(detail.estado).original,
         fecha: detail.fecha ?? null,
         fechaCompletada: detail.fecha_completada ?? null,
-        idTecnicoG3: detail.id_tecnico ?? null,
+        idTecnicoG3: positiveId(detail.id_tecnico) ? detail.id_tecnico : null,
         potenciaOpticaDbm: detail.potencia_optica_dbm ?? null,
         resultadoLlamada: detail.resultado_llamada ?? null,
         resueltoRemotamente: detail.resuelto_remotamente ?? null,
