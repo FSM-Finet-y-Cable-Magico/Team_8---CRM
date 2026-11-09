@@ -39,3 +39,34 @@ describe('GET historial usa autenticacion y roles reales, sin ruta S2S', () => {
     expect(history.list).toHaveBeenCalledWith(expect.objectContaining({ idEmpresa: 2, roles: ['Comercial'] }), '1');
   });
 });
+
+describe('GET historial proyecta OT global sin activación ni correlación inventada', () => {
+  let app: INestApplication;
+  const prisma = {
+    usuario: { findUnique: jest.fn().mockResolvedValue({ idUsuario: 1, idEmpresa: 1, activo: true, versionSesion: 0,
+      usuarioRoles: [{ rol: { nombreRol: 'Comercial' } }] }) },
+    ordenTrabajo: { findMany: jest.fn().mockResolvedValue([{ idOt: 2, idEmpresa: 1, tipoOt: 'INSTALACION', estado: 'COMPLETADA',
+      idServicio: null, idCliente: null, servicio: null, fechaCompletada: new Date('2026-10-02T12:00:00Z') }]) },
+    integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([]) },
+    $queryRaw: jest.fn().mockResolvedValue([{ idOt: 2, idEmpresa: 1, cierreEquipos: { instalados: [{ numero_serie: 'ONT-OT-QA' }], retirados: [] } }]),
+    $transaction: jest.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+  };
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({ controllers: [InstallationHistoryController], providers: [
+      InstallationHistoryService, { provide: PrismaService, useValue: prisma },
+      { provide: JwtService, useValue: { verifyAsync: jest.fn().mockResolvedValue({ idUsuario: 1, versionSesion: 0 }) } },
+    ] }).compile();
+    app = module.createNestApplication(); await app.init();
+  });
+  afterAll(async () => app.close());
+  it('devuelve fecha técnica, serie de OT y relaciones nulas sin hacer una activación', async () => {
+    const response = await request(app.getHttpServer()).get('/integrations/g3/installation-history?scope=2').set('Authorization', 'Bearer synthetic').expect(200);
+    expect(response.body.scope).toBe('1');
+    expect(response.body.items).toHaveLength(1);
+    expect(response.body.items[0]).toMatchObject({ idOt: '2', fuente: 'LEGACY_LOCAL', idServicio: null, idContrato: null,
+      fechasTecnicasOriginales: ['2026-10-02T12:00:00.000Z'], solicitudesG3: [],
+      antecedentesTecnicos: [{ equiposDeclarados: { instalados: ['ONT-OT-QA'] }, asignacionInventarioConfirmada: false }] });
+    expect(prisma.ordenTrabajo.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ idEmpresa: 1 }) }));
+    expect(prisma).not.toHaveProperty('unidadEquipo');
+  });
+});

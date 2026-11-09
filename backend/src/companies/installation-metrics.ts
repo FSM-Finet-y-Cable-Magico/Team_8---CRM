@@ -1,4 +1,5 @@
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
+import { isCompletedWorkOrder, isInstallationType } from '../common/work-order-read';
 
 type Contract = { idContrato: number; idEmpresa: number | null; idCliente: number | null };
 type Service = {
@@ -6,6 +7,7 @@ type Service = {
   contrato: Contract | null; datosTecnicos: unknown;
 };
 export type LocalInstallation = {
+  tipoOt: string; estado: string;
   idOt: number; idEmpresa: number | null; idServicio: number | null; idCliente: number | null;
   fechaCompletada: Date | null; servicio: Service | null;
 };
@@ -55,6 +57,10 @@ export function installationMetrics(local: LocalInstallation[], g3: G3Installati
     orders.set(key, [...(orders.get(key) ?? []), row]);
   };
   for (const row of local) {
+    // A pending mirror may validate references of an already confirmed tracking;
+    // it must never become independent evidence of a completed installation.
+    if (!isInstallationType(row.tipoOt) || (!isCompletedWorkOrder(row.estado)
+      && !g3.some(remote => remote.idEmpresa === row.idEmpresa && orderId(remote.idOtG3) === orderId(row.idOt)))) continue;
     const invalid = row.idServicio !== (row.servicio?.idServicio ?? null)
       || Boolean(row.servicio && !serviceConsistent(row.servicio, row.idEmpresa!, row.idCliente));
     const date = row.fechaCompletada && Number.isFinite(row.fechaCompletada.getTime())

@@ -4,6 +4,7 @@ import { AuthUser } from '../common/auth.types';
 import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
+import { COMPLETED_ORDER_FILTER, INSTALLATION_TYPE_FILTER, NON_TERMINAL_ORDER_FILTER } from '../common/work-order-read';
 import { PrismaService } from '../prisma/prisma.service';
 import { installationMetrics } from './installation-metrics';
 
@@ -59,8 +60,8 @@ export class CompaniesService {
       this.prisma.ordenTrabajo.count({
         where: {
           ...companyFilter,
-          tipoOt: 'Instalacion',
-          estado: { notIn: ['Completada', 'Cerrada', 'Cancelada'] },
+          tipoOt: INSTALLATION_TYPE_FILTER,
+          estado: NON_TERMINAL_ORDER_FILTER,
         },
       }),
       this.prisma.ticket.count({
@@ -246,8 +247,8 @@ export class CompaniesService {
     // and undated completions must remain visible rather than silently disappear.
     const [local, remote] = await this.prisma.$transaction([
       this.prisma.ordenTrabajo.findMany({
-        where: { idEmpresa: companyFilter.idEmpresa ?? { not: null }, tipoOt: 'Instalacion', estado: 'Completada' },
-        select: { idOt: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
+        where: { idEmpresa: companyFilter.idEmpresa ?? { not: null }, tipoOt: INSTALLATION_TYPE_FILTER, estado: COMPLETED_ORDER_FILTER },
+        select: { idOt: true, tipoOt: true, estado: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
           servicio: { select: service } },
       }),
       this.prisma.integracionInstalacionG3.findMany({

@@ -13,7 +13,7 @@ function load(file,mocks) {
     if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.startsWith('.'))throw Error(name);return require(name);
   },exports);return exports;
 }
-async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled'}={}) {
+async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
   t.mock.timers.enable({apis:['setTimeout']});
   const saved={window:globalThis.window,document:globalThis.document,ResizeObserver:globalThis.ResizeObserver};
   const events=new EventTarget();
@@ -31,18 +31,32 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     polygon:p=>({bindTooltip(){return this;},addTo(g){g.map.zones.push(p);return this;}}),
     circleMarker:p=>({bindTooltip(){return this;},addTo(g){g.map.pins.push(p);return this;}}),latLngBounds:p=>p};
   const zone=n=>({idZonaPago:n,idEmpresa:n,activo:true,nombreZona:'Zona '+n,tipoZona:'COBERTURA_GENERAL',poligonoGeojson:{type:'Polygon',coordinates:[[[n,0],[n,1],[n+0.1,1],[n,0]]]}});
-  let persisted={idProspecto:10,idCliente:null,nombreCompleto:'QA',empresa:{idEmpresa:company},estadoPipeline:state,
-    latitud:outside?-35:-33.475,longitud:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:[]};
+  let persisted={idProspecto:10,idCliente:null,nombreCompleto:'QA',empresa:{idEmpresa:company},estadoPipeline:g2?(requiresReview?'NUEVO':'Prospecto Nuevo'):state,
+    requiereRevisionComercial:requiresReview,revisionOrigenG2Disponible:g2&&requiresReview&&reviewAvailable,origenContacto:null,
+    direccion:g2?'Calle QA':null,comuna:null,region:null,
+    latitud:g2?null:outside?-35:-33.475,longitud:g2?null:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:existingContract?[{idContrato:20,estado:'Firmado'}]:[]};
   const api={get:async(path,options)=>{calls.push({path,options});
     if(path==='/coverage/status')return {data:{configurado:true}};
     if(path==='/coverage/zones')return {data:[zone(1),zone(2),{...zone(1),idZonaPago:3,activo:false}]};
     if(path==='/qa.pdf')return {data:new Blob(['%PDF-qa'])};throw Error(path);},
     post:async(path,body)=>{calls.push({path,body});
+      if(path==='/coverage/geocode'){
+        if(geocodeFailure)throw Error('QA geocoding unavailable');
+        return {data:{candidatos:[],mensaje:'Sin resultados QA'}};
+      }
+      if(path.endsWith('/g2-review')){
+        if(reviewFailure||!reviewAvailable||body.confirmarOrigenG2!==true)throw Error('QA review rejected');
+        persisted={...persisted,estadoPipeline:'Prospecto Nuevo',requiereRevisionComercial:false,revisionOrigenG2Disponible:false};return {data:persisted};
+      }
       if(path==='/coverage/check')return {data:{estado:coverageOutside?'NO_FACTIBLE':'FACTIBLE',motivo:'QA',consultadoEn:'2026-10-28',
-        coberturaComercial:!coverageOutside,zona:null,microzona:null,cajas:[],planes:coverageOutside?[]:[{idPlan:body.idEmpresa,nombre:'QA',precioAplicable:19990},{idPlan:3,nombre:'Inactivo',precioAplicable:1},{idPlan:4,nombre:'Sin cotizar',precioAplicable:1}]}};
+        coberturaComercial:!coverageOutside,zona:null,microzona:null,cajas:[],planes:coverageOutside||noPlans?[]:[{idPlan:body.idEmpresa,nombre:'QA',precioAplicable:19990},{idPlan:3,nombre:'Inactivo',precioAplicable:1},{idPlan:4,nombre:'Sin cotizar',precioAplicable:1}]}};
       if(path.endsWith('/feasibility/tomodat')){persisted={...persisted,...body,idZonaPago:null,estadoPipeline:coverageOutside?'No Factible':'Factible'};return {data:persisted};}
       if(path.endsWith('/quotes')){persisted={...persisted,estadoPipeline:'Cotizacion Enviada',cotizaciones:[{idCotizacion:1,idPlan:body.planId,fechaEnvio:'2026-10-28'}]};return {data:{pdfUrl:'/qa.pdf',envioEmail:emailDelivery}};}
       if(path.endsWith('/contracts'))return {data:{contrato:{idContrato:20,estado:'Pendiente firma contrato'}}};throw Error(path);
+    },patch:async(path,body)=>{calls.push({path,body});
+      if(locationFailure)throw Error('QA location conflict');
+      if(!path.endsWith('/location'))throw Error(path);
+      persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion'))};return {data:persisted};
     }};
   const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
@@ -51,7 +65,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     ...mocks,'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
   props={prospect:persisted,plans:[{idPlan:1,idEmpresa:1,activo:true,nombreComercial:'Internet QA 1'},{idPlan:2,idEmpresa:2,activo:true,nombreComercial:'Internet QA 2'},
     {idPlan:3,idEmpresa:company,activo:false,nombreComercial:'Inactivo'},{idPlan:4,idEmpresa:company,activo:true,nombreComercial:'Sin cotizar'}],
-    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
+    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:g2&&commercial},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
   const mount=()=>create(React.createElement(Workflow,props),{createNodeMock:()=>({})});
   await act(async()=>{tree=mount();});
   const tick=async()=>{await act(async()=>{t.mock.timers.tick(350);});await act(async()=>{t.mock.timers.tick(0);});};await tick();
@@ -64,8 +78,96 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     outside:value=>{coverageOutside=value;},
     refresh:async()=>{await act(async()=>events.dispatchEvent(new Event('focus')));await tick();},
     optionIds:index=>tree.root.findAllByType('select')[index]?.findAllByType('option').map(o=>o.props.value).filter(Boolean)??[],
-    text:()=>JSON.stringify(tree.toJSON())};
+    text:()=>JSON.stringify(tree.toJSON()),persisted:()=>persisted,
+    changeField:async(label,value)=>{const text=node=>typeof node==='string'?node:(node.children??[]).map(text).join('');
+      const field=tree.root.findAllByType('label').find(node=>text(node).startsWith(label)).findByType('input');
+      await act(async()=>field.props.onChange({target:{value}}));},
+    confirmOrigin:async()=>{await act(async()=>tree.root.findByProps({type:'checkbox'}).props.onChange({target:{checked:true}}));}};
 }
+
+test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo → cotización → contratación', async t => {
+  const h=await harness(t,{g2:true});
+  assert.equal(h.button('Aprobar revisión G2').props.disabled,true);
+  assert.equal(h.button('Editar ubicación'),undefined);
+  assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
+  await h.confirmOrigin();
+  await act(async()=>{h.button('Aprobar revisión G2').props.onClick();h.button('Aprobar revisión G2').props.onClick();});
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/g2-review')).length,1);
+  assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
+  assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().origenContacto,null);
+  await act(async()=>h.button('Editar ubicación').props.onClick());
+  await h.changeField('Comuna','Comuna QA');await h.changeField('Región','Región QA');
+  await h.changeField('Latitud','-33.475');await h.changeField('Longitud','-70.675');
+  await act(async()=>h.button('Ubicar punto').props.onClick());
+  await act(async()=>h.button('Guardar ubicación').props.onClick());await h.tick();await h.tick();
+  assert.equal(h.persisted().comuna,'Comuna QA');assert.equal(h.persisted().region,'Región QA');
+  assert.equal(h.persisted().estadoPipeline,'Factible');
+  assert.ok(h.calls.some(c=>c.path==='/coverage/check'));
+  assert.ok(h.calls.some(c=>c.path.endsWith('/feasibility/tomodat')));
+  assert.deepEqual(h.optionIds(0),[1,4]);
+  await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());
+  await h.select(1,1);await act(async()=>h.button('Confirmar contratación').props.onClick());
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/contracts')).length,1);
+  assert.equal(h.persisted().idCliente,null);
+  assert.ok(h.calls.every(c=>!c.path.includes('install-orders')&&!c.path.includes('g3')));
+});
+
+for(const options of [{g2:true,reviewAvailable:false},{g2:true,commercial:false},
+  {requiresReview:true,state:'Servicio Activo',reviewAvailable:false}])test('revisión sin evidencia/permisos o histórico no se desbloquea: '+JSON.stringify(options),async t=>{
+  const h=await harness(t,options);assert.equal(h.button('Aprobar revisión G2'),undefined);
+  assert.equal(h.button('Editar ubicación'),undefined);assert.equal(h.button('Generar cotización'),undefined);
+  assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')||c.path.endsWith('/g2-review')).length,0);
+});
+
+test('rechazo de revisión y coordenadas ausentes no anuncian éxito ni envían escrituras',async t=>{
+  const h=await harness(t,{g2:true,reviewFailure:true});await h.confirmOrigin();
+  await act(async()=>h.button('Aprobar revisión G2').props.onClick());
+  assert.equal(h.persisted().estadoPipeline,'NUEVO');assert.equal(h.button('Editar ubicación'),undefined);
+  assert.ok(h.text().includes('QA error'));
+});
+
+test('ubicación ausente tras revisión exige coordenadas y no infiere comuna o región',async t=>{
+  const h=await harness(t,{g2:true});await h.confirmOrigin();await act(async()=>h.button('Aprobar revisión G2').props.onClick());
+  await act(async()=>h.button('Editar ubicación').props.onClick());await act(async()=>h.button('Guardar ubicación').props.onClick());
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/location')).length,0);
+  assert.equal(h.persisted().comuna,null);assert.equal(h.persisted().region,null);
+  assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
+});
+
+test('prospecto G2 ya recuperado abre editor: clic persiste ubicación antes de factibilidad y conserva al recargar',async t=>{
+  const h=await harness(t,{g2:true,requiresReview:false});
+  assert.equal(h.button('Aprobar revisión G2'),undefined);
+  assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,1);
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
+  const location=h.calls.findIndex(c=>c.path.endsWith('/location'));
+  const feasibility=h.calls.findIndex(c=>c.path.endsWith('/feasibility/tomodat'));
+  assert.ok(location>=0&&feasibility>location);
+  assert.equal(h.persisted().estadoPipeline,'Factible');assert.equal(h.persisted().comuna,null);
+  await h.remount();assert.equal(h.persisted().latitud,-33.475);assert.deepEqual(h.optionIds(0),[1,4]);
+});
+
+for(const options of [{existingContract:true},{commercial:false}])test('contrato o permisos insuficientes conservan resumen y el mapa no escribe: '+JSON.stringify(options),async t=>{
+  const h=await harness(t,{g2:true,requiresReview:false,...options});
+  assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,0);
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/location')||c.path.includes('/feasibility')).length,0);
+});
+
+for(const options of [{outside:true},{noPlans:true},{locationFailure:true}])test('cobertura negativa, falta de planes o conflicto no habilitan contratación: '+JSON.stringify(options),async t=>{
+  const h=await harness(t,{g2:true,requiresReview:false,...options});
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
+  assert.equal(h.button('Generar cotización'),undefined);assert.equal(h.button('Confirmar contratación'),undefined);
+  if(options.locationFailure)assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
+});
+
+test('error de geocodificación conserva selección manual y no inventa factibilidad ni geografía',async t=>{
+  const h=await harness(t,{g2:true,requiresReview:false,geocodeFailure:true});
+  await act(async()=>h.button('Ubicar dirección').props.onClick());
+  assert.ok(h.text().includes('Selecciona el punto manualmente'));
+  assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().comuna,null);assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
+  assert.equal(h.persisted().estadoPipeline,'Factible');assert.equal(h.persisted().region,null);
+});
 test('React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nueva sesión recupera cotización persistida',async t=>{
   const h=await harness(t);assert.deepEqual(h.optionIds(0),[1,4]);assert.deepEqual(h.optionIds(1),[]);
   await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());

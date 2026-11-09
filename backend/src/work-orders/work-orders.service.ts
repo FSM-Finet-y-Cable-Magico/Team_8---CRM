@@ -9,6 +9,7 @@ import {
 } from '../common/install-order-metadata';
 import { isAdministrator } from '../common/roles';
 import { serviceTypeFromPlan } from '../common/service-type';
+import { persistedOrderTechnicalData, readDeclaredOrderEquipment } from '../common/work-order-read';
 import { PrismaService } from '../prisma/prisma.service';
 import { canActivateService } from '../services/service-activation.policy';
 import { CompleteInstallOrderDto } from './dto/complete-install-order.dto';
@@ -96,6 +97,7 @@ export class WorkOrdersService {
     const customerById = new Map(customers.map((customer) => [customer.idCliente, customer]));
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
     const ticketById = new Map(tickets.map((ticket) => [ticket.idTicket, ticket]));
+    const declaredEquipment = await readDeclaredOrderEquipment(this.prisma, orders);
 
     for (const prospect of prospects) {
       const key = `${prospect.idCliente}:${prospect.idEmpresa}`;
@@ -111,6 +113,7 @@ export class WorkOrdersService {
 
       return {
         ...order,
+        antecedenteTecnico: persistedOrderTechnicalData(order, declaredEquipment.get(`${order.idEmpresa}:${order.idOt}`)),
         tipoConexion: metadata.tipoConexion,
         horaVisita,
         observacionesAgenda: metadata.observacionesAgenda,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type InstallationHistory, type WorkOrder } from '../../api';
 import { TablePagination } from '../../shared/components';
+import { WorkOrderTechnicalEvidence } from './WorkOrderTechnicalEvidence';
 
 export function InstallationHistoryPanel({ scope, revision, localOrders = [], onLoaded }: {
   scope: string; revision: unknown; localOrders?: WorkOrder[]; onLoaded?: (scope: string, keys: string[]) => void;
@@ -36,15 +37,16 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], on
       <div className="table-wrap"><table><thead><tr><th>Empresa / OT</th><th>Fuente y referencias</th><th>Contrato / Servicio</th><th>Fecha técnica original</th><th>Solicitud y cierre técnico</th></tr></thead>
         <tbody>{items.slice((page - 1) * pageSize, page * pageSize).map(row => <tr key={row.key}>
           <td>Empresa {row.idEmpresa} / OT {row.idOt ?? 'Sin referencia'}<br />Completada</td>
-          <td>{row.fuente}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
+          <td>{row.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin tracking G8–G3 confirmado' : 'Cierre de solicitud G8–G3 confirmado'}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
             {localOrders.filter(order => order.idEmpresa === row.idEmpresa && row.ordenesLocales.includes(order.idOt)).map(order => <div key={order.idOt}>
               <p>{order.codigoSeguimiento ?? `OT ${order.idOt}`} · {order.prioridad} · {order.estado}</p>
               <p>{order.prospecto?.nombreCompleto ?? order.cliente?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</p>
               <p>Visita programada: {order.fechaProgramada ?? 'Sin fecha'} {order.horaVisita ?? ''}</p>
               <p>Técnico local: {order.tecnico?.nombreCompleto ?? 'Sin asignar'}</p>
             </div>)}
-          </details> : <p>Sin OT local</p>}</td>
-          <td>{row.idContrato ?? 'Por revisar'} / {row.idServicio ?? 'No registrado'}</td>
+          </details> : <p>Sin OT local</p>}
+            {row.antecedentesTecnicos?.map(evidence => <WorkOrderTechnicalEvidence key={`${evidence.idEmpresa}:${evidence.idOt}`} evidence={evidence} />)}</td>
+          <td>{row.idContrato ?? 'Sin contrato correlacionado'} / {row.idServicio ?? 'Sin servicio correlacionado'}</td>
           <td>{row.clasificacionFecha === 'REQUIERE_REVISION' ? 'Requiere revisión de fecha o relaciones'
             : row.clasificacionFecha === 'PENDIENTE_FECHA_TECNICA' ? 'Pendiente de fecha técnica'
               : row.fechasTecnicasOriginales.map(date => <div key={date}>{date}</div>)}</td>

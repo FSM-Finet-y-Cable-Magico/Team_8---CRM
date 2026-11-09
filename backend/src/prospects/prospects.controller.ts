@@ -16,6 +16,7 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { ProspectsService } from './prospects.service';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
 import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
@@ -44,6 +45,12 @@ export class ProspectsController {
   @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   create(@Body() dto: CreateProspectDto, @CurrentUser() user: AuthUser) {
     return this.prospectsService.create(dto, user);
+  }
+
+  @Post(':id/g2-review')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
+  reviewG2Prospect(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewG2ProspectDto, @CurrentUser() user: AuthUser) {
+    return this.prospectsService.reviewG2Prospect(id, dto, user);
   }
 
   @Patch(':id/pipeline')

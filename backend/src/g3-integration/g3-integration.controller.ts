@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -11,6 +12,16 @@ import { G3ClosureProcessor } from './g3-closure.processor';
 import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
+import { independentRepairAcknowledgement, installationClosure } from './g3-closure-contract';
+
+function receiveApprovedClosure(processor: G3ClosureProcessor, dto: G3ClosureDto, response?: Response) {
+  const acknowledgement = independentRepairAcknowledgement(dto);
+  if (acknowledgement) {
+    response?.status(200);
+    return acknowledgement;
+  }
+  return processor.process(installationClosure(dto), 'WEBHOOK');
+}
 
 @Controller('integrations/g3')
 export class G3IntegrationController {
@@ -87,8 +98,8 @@ export class G3IntegrationController {
   @UseGuards(IntegrationApiKeyGuard)
   @IntegrationGroups('G3')
   @IntegrationCompanyScope('body')
-  receiveClosure(@Body() dto: G3ClosureDto) {
-    return this.closureProcessor.process(dto, 'WEBHOOK');
+  receiveClosure(@Body() dto: G3ClosureDto, @Res({ passthrough: true }) response?: Response) {
+    return receiveApprovedClosure(this.closureProcessor, dto, response);
   }
 }
 
@@ -103,11 +114,12 @@ export class G3CanonicalWebhookController {
   receiveClosure(
     @Param('idOt', ParseIntPipe) idOt: number,
     @Body() dto: G3ClosureDto,
+    @Res({ passthrough: true }) response?: Response,
   ) {
     if (dto.id_ot !== undefined && dto.id_ot !== idOt) {
       throw new BadRequestException('El id_ot de la ruta no coincide con el payload');
     }
-    return this.closureProcessor.process({ ...dto, id_ot: idOt }, 'WEBHOOK');
+    return receiveApprovedClosure(this.closureProcessor, { ...dto, id_ot: idOt }, response);
   }
 }
 

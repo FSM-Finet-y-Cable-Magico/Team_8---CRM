@@ -48,19 +48,20 @@ describe('ServicesService', () => {
       fechaCreacion: new Date('2026-10-07T00:00:00.000Z'),
       cliente: { idCliente: 34 },
       empresa: { idEmpresa: 1 },
-      contrato: { idContrato: 22, idEmpresa: 1, plan: { idPlan: 1, idEmpresa: 1 } },
+      contrato: { idContrato: 22, idEmpresa: 1, idCliente: 34, plan: { idPlan: 1, idEmpresa: 1 } },
       direccion: null,
       zonaPago: null,
       equipos: [],
       tickets: [],
-      ordenes: localOrders,
+      ordenes: localOrders.map(order => ({ idServicio: 3, idCliente: 34, ...order })),
       solicitudes: [],
     };
     const prisma = {
       cliente: { findUnique: jest.fn().mockResolvedValue({ idCliente: 34, idEmpresa: 1, contratos: [{ idEmpresa: 1 }] }) },
       servicioContratado: { findMany: jest.fn().mockResolvedValue([record]) },
-      integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue(g3) },
-      integracionActivacionG1: { findMany: jest.fn().mockResolvedValue(g1) },
+      integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue(g3.map(row => ({ idCliente: 34, ...row }))) },
+      integracionActivacionG1: { findMany: jest.fn().mockResolvedValue(g1.map(row => ({ idCliente: 34, ...row }))) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       usuario: { findMany: jest.fn().mockResolvedValue([{ idUsuario: 9, nombreCompleto: 'Tecnico Local' }]) },
     };
     return {
@@ -74,6 +75,7 @@ describe('ServicesService', () => {
     const context = serviceContextSetup({
       datosTecnicos: {
         fuenteInstalacion: 'G3',
+        idOtG3: '53',
         fechaCompletadaG3: '2026-10-07T12:00:00.000Z',
         idTecnicoG3: 77,
         potenciaOpticaDbm: -19.4,
@@ -119,6 +121,40 @@ describe('ServicesService', () => {
       fuente: 'LEGACY_LOCAL', idOt: 8, fechaCompletada: completedAt,
       tecnico: { idUsuario: 9, nombreCompleto: 'Tecnico Local' },
     }));
+  });
+
+  it('lee INSTALACION/COMPLETADA vinculada explícitamente sin inferir una activación G1', async () => {
+    const ctx = serviceContextSetup({ localOrders: [{ idOt: 2, idEmpresa: 1, idTecnico: null,
+      tipoOt: 'INSTALACION', estado: 'COMPLETADA', fechaCompletada: new Date('2026-10-02T12:00:00Z') }] });
+    ctx.prisma.$queryRaw.mockResolvedValue([{ idOt: 2, idEmpresa: 1, cierreEquipos: { instalados: [{ numero_serie: 'ONT-DECLARADA' }], retirados: [] } }]);
+    const [result] = await ctx.service.listByCustomer(34, comercial);
+    expect(result.instalacion).toMatchObject({ fuente: 'LEGACY_LOCAL', idOt: 2,
+      antecedenteTecnico: { equiposDeclarados: { instalados: ['ONT-DECLARADA'] }, asignacionInventarioConfirmada: false } });
+    expect(result.integracionG1).toBeNull();
+  });
+
+  it.each([{ idServicio: null }, { idServicio: 99 }, { idEmpresa: 2 }, { idCliente: 99 },
+    { tipoOt: 'REPARACION' }, { estado: 'PENDIENTE_APROBACION' }, { estado: 'CANCELADA' }])('no atribuye OT contradictoria o no completada: %j', async wrong => {
+    const ctx = serviceContextSetup({ localOrders: [{ idOt: 2, idEmpresa: 1, tipoOt: 'INSTALACION', estado: 'COMPLETADA', ...wrong }] });
+    expect((await ctx.service.listByCustomer(34, comercial))[0].instalacion).toBeNull();
+    expect(ctx.prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each(['company', 'contract', 'customer', 'pending'])('no presenta tracking de instalación contradictorio: %s', async field => {
+    const tracking = { idIntegracion: 2, idEmpresa: 1, idContrato: 22, idCliente: 34, idServicio: 3, idOtG3: '53',
+      estadoIntegracion: 'COMPLETADA', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: new Date() };
+    if (field === 'company') tracking.idEmpresa = 2;
+    if (field === 'contract') tracking.idContrato = 99;
+    if (field === 'customer') tracking.idCliente = 99;
+    if (field === 'pending') tracking.estadoOtG3 = 'EN_CURSO';
+    const ctx = serviceContextSetup({ g3: [tracking] });
+    expect((await ctx.service.listByCustomer(34, comercial))[0].instalacion).toBeNull();
+  });
+
+  it('no atribuye fecha o técnico de otra OT guardados en datos técnicos del servicio', async () => {
+    const ctx = serviceContextSetup({ datosTecnicos: { fuenteInstalacion: 'G3', idOtG3: '99', fechaCompletadaG3: '2026-10-02T12:00:00Z', idTecnicoG3: 8 },
+      g3: [{ idIntegracion: 2, idEmpresa: 1, idContrato: 22, idServicio: 3, idOtG3: '53', estadoOtG3: 'COMPLETADA', fechaCierreProcesado: new Date() }] });
+    expect((await ctx.service.listByCustomer(34, comercial))[0].instalacion).toMatchObject({ idOt: '53', fechaCompletada: null, idTecnicoG3: null });
   });
 
   it('representa un cierre G3 aunque no existan datos tecnicos opcionales', async () => {

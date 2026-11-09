@@ -68,6 +68,15 @@ function setup(idEmpresa = 1) {
 }
 
 describe('G3ClosureProcessor approval-only', () => {
+  it.each([{ tipo_ot: 'REPARACION' }, { estado: 'EN_CURSO' }, { estado: 'PENDIENTE_APROBACION' }])
+    ('no permite activar por una entrada interna fuera de contrato %j', async extra => {
+      const { processor, completed, prisma, activation, g1 } = setup();
+      await expect(processor.process({ ...completed, ...extra } as never, 'WEBHOOK')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.integracionInstalacionG3.findUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(activation.activate).not.toHaveBeenCalled();
+      expect(g1.afterG3Completion).not.toHaveBeenCalled();
+    });
   it('trackingHint no permite un request_id diferente en reconciliacion', async () => {
     const { processor, completed, activation, prisma, g1 } = setup();
     await expect(processor.process({ ...completed, request_id: 'otra-solicitud' }, 'RECONCILIACION', 1))
@@ -263,7 +272,7 @@ describe('G3ClosureProcessor approval-only', () => {
       potencia_optica_dbm: -19.4,
       resultado_llamada: 'CONTACTADO',
       resuelto_remotamente: false,
-      materiales: [{ nombre: 'Conector' }],
+      materiales: [{ id_tipo_equipo: 7, nombre: 'Conector', cantidad: 1 }],
     };
 
     await processor.process(enriched, 'WEBHOOK');

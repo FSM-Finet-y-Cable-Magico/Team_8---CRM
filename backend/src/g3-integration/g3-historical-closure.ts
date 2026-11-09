@@ -1,5 +1,6 @@
 import { IntegracionInstalacionG3 } from '@prisma/client';
 import { isISO8601 } from 'class-validator';
+import { isCompletedWorkOrder, isInstallationType } from '../common/work-order-read';
 
 export type HistoricalClosureData = {
   fechaCompletada: string | null;
@@ -46,7 +47,8 @@ export function historicalClosureData(raw: unknown, tracking: IntegracionInstala
     || !tracking.requestId || data.request_id !== tracking.requestId
     || !tracking.traceId || data.trace_id !== tracking.traceId
     // A closure may omit estado; if supplied it must confirm completion.
-    || (data.estado !== undefined && data.estado !== 'COMPLETADA')) return null;
+    || (data.estado !== undefined && !isCompletedWorkOrder(data.estado))
+    || (data.tipo_ot !== undefined && !isInstallationType(data.tipo_ot))) return null;
 
   return {
     fechaCompletada: typeof data.fecha_completada === 'string'

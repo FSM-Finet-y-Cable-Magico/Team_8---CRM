@@ -13,7 +13,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { type BillingOverview, type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
-import { expiryAlertKey, expiryUrgency, formatDateOnly } from '../../lib';
+import { expiryAlertKey, expiryUrgency, formatDateOnly, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder, isInProgressWorkOrder } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import {
   DashboardStatCard,
@@ -102,7 +102,7 @@ export function DashboardHome({
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
   const [selectedAlertKey, setSelectedAlertKey] = useState<string | null>(null);
   const pendingInstallations = workOrders.filter(
-    (order) => order.tipoOt === 'Instalacion' && !['Completada', 'Cerrada', 'Cancelada'].includes(order.estado),
+    (order) => isInstallationWorkOrder(order.tipoOt) && !isTerminalWorkOrder(order.estado),
   ).length;
   const openTickets = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
   const overdueBalance = billingOverview?.morosos.reduce((total, invoice) => total + Number(invoice.saldo ?? 0), 0) ?? 0;
@@ -226,10 +226,10 @@ export function DashboardHome({
     ? customers.find((customer) => customer.idCliente === selectedAlert.idCliente) ?? null
     : null;
   const completedInstallations = workOrders.filter(
-    (order) => order.tipoOt === 'Instalacion' && ['Completada', 'Cerrada'].includes(order.estado),
+    (order) => isInstallationWorkOrder(order.tipoOt) && isCompletedWorkOrder(order.estado),
   ).length;
   const inProgressInstallations = workOrders.filter(
-    (order) => order.tipoOt === 'Instalacion' && ['En progreso', 'En curso'].includes(order.estado),
+    (order) => isInstallationWorkOrder(order.tipoOt) && isInProgressWorkOrder(order.estado),
   ).length;
   const installationSegments = [
     { label: 'Pendientes', value: Number(summary?.metricas.instalacionesPendientes ?? pendingInstallations), tone: 'pending' },

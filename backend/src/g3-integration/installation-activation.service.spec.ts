@@ -27,6 +27,7 @@ function setup(existing = false) {
     },
     cliente: {
       findUnique: jest.fn().mockResolvedValue(existing ? customer : null),
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(customer), update: jest.fn().mockResolvedValue(customer),
     },
     direccionServicio: {
@@ -85,11 +86,49 @@ describe('Etapa 3 - activacion comercial desde G3', () => {
 
   it('un RUT existente sin contrato vinculado no autoriza asociar ni duplicar cliente', async () => {
     const { service, tx, tracking, customer } = setup();
-    tx.cliente.findUnique.mockResolvedValue(customer);
+    tx.cliente.findFirst.mockResolvedValue(customer);
     await expect(service.activate(tx as never, tracking, {})).rejects.toThrow('vinculacion contractual explicita');
     assertNoWrites(tx);
   });
 
+  it('un RUT compacto existente sin vinculo contractual bloquea duplicacion antes de cualquier escritura', async () => {
+    const { service, tx, tracking, customer } = setup();
+    tx.cliente.findFirst.mockImplementation(async ({ where }: any) => where.rut.in.includes('123456785') ? customer : null);
+    await expect(service.activate(tx as never, tracking, {})).rejects.toThrow('vinculacion contractual explicita');
+    assertNoWrites(tx);
+  });
+  it('cliente vinculado con RUT compacto activa solo su servicio y conserva el estado financiero global', async () => {
+    const { service, tx, tracking, customer } = setup(true);
+    customer.rut = '123456785'; customer.estado = 'Moroso';
+    await service.activate(tx as never, tracking, {});
+    expect(customer.estado).toBe('Moroso');
+    expect(customer.rut).toBe('123456785');
+    expect(tx.cliente.create).not.toHaveBeenCalled();
+    expect(tx.cliente.update).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.update).toHaveBeenCalled();
+  });
+  it('bloquea duplicados con puntos y K antes de cualquier escritura y con una sola consulta', async () => {
+    const { service, tx, tracking, customer } = setup();
+    tracking.payloadSnapshot.persona.rut = '12345670-K';
+    tracking.payloadHash = sha256Payload(tracking.payloadSnapshot);
+    customer.rut = '12.345.670-k';
+    tx.cliente.findFirst.mockImplementation(async ({ where }: any) => where.rut.in.includes(customer.rut) ? customer : null);
+    await expect(service.activate(tx as never, tracking, {})).rejects.toThrow('vinculacion contractual explicita');
+    expect(tx.cliente.findFirst).toHaveBeenCalledTimes(1);
+    assertNoWrites(tx);
+  });
+  it('cliente vinculado con puntos y K conserva identidad, empresa principal y estado global', async () => {
+    const { service, tx, tracking, customer } = setup(true);
+    tracking.payloadSnapshot.persona.rut = '12345670-K';
+    tracking.payloadHash = sha256Payload(tracking.payloadSnapshot);
+    customer.rut = '12.345.670-k'; customer.estado = 'Suspendido';
+    const before = { ...customer };
+    await service.activate(tx as never, tracking, {});
+    expect(customer).toEqual(before);
+    expect(tx.cliente.create).not.toHaveBeenCalled();
+    expect(tx.cliente.update).not.toHaveBeenCalled();
+    expect(tx.servicioContratado.update).toHaveBeenCalled();
+  });
   it('una referencia explicita inexistente no recurre al RUT', async () => {
     const { service, tx, tracking } = setup(true);
     tx.cliente.findUnique.mockResolvedValue(null);

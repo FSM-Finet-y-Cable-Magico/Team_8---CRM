@@ -12,6 +12,7 @@ import {
 import { isAdministrator } from '../common/roles';
 import { serviceTypeFromPlan } from '../common/service-type';
 import { generateWorkOrderCode } from '../common/work-order-code';
+import { isCompletedWorkOrder, isInstallationType, persistedOrderTechnicalData, readDeclaredOrderEquipment } from '../common/work-order-read';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttachEquipmentDto } from './dto/attach-equipment.dto';
 import { CreateServiceInstallOrderDto } from './dto/create-service-install-order.dto';
@@ -755,6 +756,7 @@ export class ServicesService {
             idIntegracion: true,
             idEmpresa: true,
             idContrato: true,
+            idCliente: true,
             idServicio: true,
             idOtG3: true,
             codigoOtG3: true,
@@ -770,6 +772,7 @@ export class ServicesService {
             idIntegracion: true,
             idEmpresa: true,
             idContrato: true,
+            idCliente: true,
             idServicio: true,
             estadoIntegracion: true,
             ultimoErrorSanitizado: true,
@@ -780,11 +783,14 @@ export class ServicesService {
       ])
       : [[], []];
     const serviceById = new Map(services.map((service) => [service.idServicio, service]));
+    const consistentContract = (service: ServiceWithRelations) => service.contrato?.idContrato === service.idContrato
+      && service.contrato?.idEmpresa === service.idEmpresa && service.contrato?.idCliente === service.idCliente;
     const g3ByService = new Map<number, (typeof g3Installations)[number]>();
     for (const installation of g3Installations) {
       if (!installation.idServicio || g3ByService.has(installation.idServicio)) continue;
       const service = serviceById.get(installation.idServicio);
-      if (service && installation.idEmpresa === service.idEmpresa && installation.idContrato === service.idContrato) {
+      if (service && consistentContract(service) && installation.idEmpresa === service.idEmpresa && installation.idContrato === service.idContrato
+        && installation.idCliente === service.idCliente && installation.estadoOtG3 === 'COMPLETADA' && installation.fechaCierreProcesado) {
         g3ByService.set(installation.idServicio, installation);
       }
     }
@@ -792,7 +798,8 @@ export class ServicesService {
     for (const activation of g1Activations) {
       if (g1ByService.has(activation.idServicio)) continue;
       const service = serviceById.get(activation.idServicio);
-      if (service && activation.idEmpresa === service.idEmpresa && activation.idContrato === service.idContrato) {
+      if (service && consistentContract(service) && activation.idEmpresa === service.idEmpresa && activation.idContrato === service.idContrato
+        && activation.idCliente === service.idCliente) {
         g1ByService.set(activation.idServicio, activation);
       }
     }
@@ -800,8 +807,10 @@ export class ServicesService {
     for (const service of services) {
       const installation = service.ordenes
         .filter((order) =>
-          this.normalizeStatus(order.tipoOt) === 'instalacion' &&
-          this.normalizeStatus(order.estado) === 'completada',
+          isInstallationType(order.tipoOt) && isCompletedWorkOrder(order.estado)
+          && order.idEmpresa === service.idEmpresa && order.idServicio === service.idServicio
+          && (order.idCliente === null || order.idCliente === service.idCliente)
+          && consistentContract(service),
         )
         .sort((left, right) => {
           const leftDate = left.fechaCompletada?.getTime() ?? left.fechaCreacion?.getTime() ?? 0;
@@ -827,6 +836,7 @@ export class ServicesService {
       })
       : [];
     const technicianById = new Map(technicians.map((technician) => [technician.idUsuario, technician]));
+    const declaredEquipment = await readDeclaredOrderEquipment(this.prisma, [...completedInstallationByService.values()]);
 
     return services.map((service) => {
       const localInstallation = completedInstallationByService.get(service.idServicio);
@@ -840,12 +850,14 @@ export class ServicesService {
         && !Array.isArray(technicalData.resultadoInstalacion)
         ? technicalData.resultadoInstalacion as Record<string, Prisma.JsonValue>
         : {};
-      const fechaCompletadaG3 = typeof technicalData.fechaCompletadaG3 === 'string'
+      const sameTechnicalOrder = technicalData.fuenteInstalacion === 'G3'
+        && String(technicalData.idOtG3) === g3Installation?.idOtG3;
+      const fechaCompletadaG3 = !sameTechnicalOrder ? null : typeof technicalData.fechaCompletadaG3 === 'string'
         ? technicalData.fechaCompletadaG3
         : typeof g3Result.fecha_completada === 'string'
           ? g3Result.fecha_completada
           : null;
-      const idTecnicoG3 = typeof technicalData.idTecnicoG3 === 'number'
+      const idTecnicoG3 = !sameTechnicalOrder ? null : typeof technicalData.idTecnicoG3 === 'number'
         ? technicalData.idTecnicoG3
         : typeof g3Result.id_tecnico === 'number'
           ? g3Result.id_tecnico
@@ -876,6 +888,8 @@ export class ServicesService {
               idTecnico: localInstallation.idTecnico,
               idTecnicoG3: null,
               tecnico: localInstallation.idTecnico ? technicianById.get(localInstallation.idTecnico) ?? null : null,
+              antecedenteTecnico: persistedOrderTechnicalData(localInstallation,
+                declaredEquipment.get(`${localInstallation.idEmpresa}:${localInstallation.idOt}`)),
             }
             : null,
         integracionG1: g1Activation

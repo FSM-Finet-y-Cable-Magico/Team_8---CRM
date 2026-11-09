@@ -174,6 +174,26 @@ describe('integración S2S G2', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'RECIBIR_RESULTADO_WIFI_G2' }), tx);
   });
 
+  it.each([915, 2027])('WiFi usa el ID real %s de la categoría del ticket sin depender de un ID reservado', async idCategoria => {
+    const { service, prisma, tx, billing } = setup();
+    prisma.ticket.findUnique.mockResolvedValue({ idTicket: 50, idEmpresa: 1, idCliente: 10, idServicio: 70,
+      idCategoria, estado: 'En progreso' });
+    prisma.categoriaFalla.findUnique.mockResolvedValue({ idCategoria, nombre: 'CAMBIO_CREDENCIALES_WIFI', tipo: 'INTERNA' } as never);
+    await expect(service.registerWifiResult(50, wifiDto)).resolves.toMatchObject({ estado_ticket: 'Resuelto', duplicate: false });
+    expect(prisma.categoriaFalla.findUnique).toHaveBeenCalledWith({ where: { idCategoria } });
+    expect(tx.ticket.update).toHaveBeenCalledTimes(1);
+    expect(billing.registerIntegrationPayment).not.toHaveBeenCalled();
+  });
+
+  it.each(['Asistente virtual', 'Consulta general', 'cambio_credenciales_wifi'])
+  ('resultado WiFi no acepta la categoría %s como sustituto del nombre exacto', async nombre => {
+    const { service, prisma, tx } = setup();
+    prisma.categoriaFalla.findUnique.mockResolvedValue({ idCategoria: 5, nombre });
+    await expect(service.registerWifiResult(50, wifiDto)).rejects.toThrow('CAMBIO_CREDENCIALES_WIFI');
+    expect(tx.ticket.update).not.toHaveBeenCalled();
+    expect(tx.integracionResultadoWifiG2.create).not.toHaveBeenCalled();
+  });
+
   it('el retry exacto WiFi es idempotente y no vuelve a actualizar el Ticket', async () => {
     const { service, tx } = setup();
     await service.registerWifiResult(50, wifiDto);

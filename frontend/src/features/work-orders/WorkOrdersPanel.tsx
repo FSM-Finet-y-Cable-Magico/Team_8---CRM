@@ -7,15 +7,18 @@ import {
   formatDateTime,
   formatWorkOrderValue,
   normalizeWorkOrderValue,
+  isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder,
 } from '../../lib';
 import { HistoryBox, Modal, StatusBadge } from '../../shared/components';
+import { WorkOrderTechnicalEvidence } from '../installations/WorkOrderTechnicalEvidence';
 
 export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
-  const selectedOrderIsInstallation = normalizeWorkOrderValue(selectedOrder?.tipoOt) === 'instalacion';
-  const selectedOrderIsCompleted = normalizeWorkOrderValue(selectedOrder?.estado) === 'completada';
+  const selectedOrderIsInstallation = isInstallationWorkOrder(selectedOrder?.tipoOt);
+  const selectedOrderIsCompleted = isCompletedWorkOrder(selectedOrder?.estado);
+  const selectedOrderIsTerminal = isTerminalWorkOrder(selectedOrder?.estado);
   const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
 
   function ownerLabel(order: WorkOrder) {
@@ -180,6 +183,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
               </dl>
             </section>
 
+            <WorkOrderTechnicalEvidence evidence={selectedOrder.antecedenteTecnico} />
             {selectedOrderIsInstallation ? (
               <section className="work-order-completion">
                 <div className="work-order-section-heading">
@@ -189,11 +193,11 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
                       : <Wrench size={21} strokeWidth={1.8} />}
                   </span>
                   <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : 'Instalación pendiente de cierre'}</h3>
+                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : selectedOrderIsTerminal ? 'Instalación no completada' : 'Instalación pendiente de cierre'}</h3>
                     <p>
                       {selectedOrderIsCompleted
                         ? 'Consulta los antecedentes registrados de esta instalación.'
-                        : 'El cierre de esta instalación aún no está registrado.'}
+                        : selectedOrderIsTerminal ? 'Una OT cerrada o cancelada no acredita por sí sola una instalación completada.' : 'El cierre de esta instalación aún no está registrado.'}
                     </p>
                   </div>
                 </div>
