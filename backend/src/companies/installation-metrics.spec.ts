@@ -5,11 +5,17 @@ const service = { idServicio: 50, idEmpresa: 1, idContrato: 10, idCliente: 30, c
 const g3 = (date?: string): G3Installation => ({ idEmpresa: 1, idOtG3: '901', idContrato: 10,
   idServicio: 50, idCliente: 30, contrato: contract, servicio: { ...service,
     datosTecnicos: { fuenteInstalacion: 'G3', idOtG3: '901', ...(date ? { fechaCompletadaG3: date } : {}) } } });
-const local = (): LocalInstallation => ({ idOt: 901, idEmpresa: 1, idServicio: 50, idCliente: 30,
+const local = (): LocalInstallation => ({ tipoOt: 'Instalacion', estado: 'Completada', idOt: 901, idEmpresa: 1, idServicio: 50, idCliente: 30,
   servicio: service, fechaCompletada: new Date('2026-11-02T14:00:00Z') });
 const metrics = (locals: LocalInstallation[], remote: G3Installation[]) => installationMetrics(locals, remote, '2026-11', '2026-11-03');
 
 describe('CU47 fecha técnica, identidad y atribución empresarial', () => {
+  it('cuenta INSTALACION/COMPLETADA sin servicio una vez y excluye reparaciones y estados no completados', () => {
+    const row = { ...local(), idOt: 2, tipoOt: 'INSTALACION', estado: 'COMPLETADA', idServicio: null, idCliente: null, servicio: null };
+    expect(metrics([row, row, { ...row, idOt: 1, tipoOt: 'REPARACION' },
+      { ...row, idOt: 3, estado: 'EN_CURSO' }, { ...row, idOt: 4, estado: 'CANCELADA' }, { ...row, idOt: 5, estado: 'Cerrada' }], []))
+      .toEqual({ instalacionesMensuales: 1, instalacionesSinFechaTecnica: 0, instalacionesRequierenRevision: 0 });
+  });
   it('cuenta cierre G3 sin OT local; reintentos de la misma OT no suman', () => {
     const row = g3('2026-11-02T14:00:00Z');
     expect(metrics([], [row, row]).instalacionesMensuales).toBe(1);

@@ -9,6 +9,9 @@ import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
+const formatting = {};
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/formatting.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(formatting);
 const textOf = node => typeof node === 'string' ? node : (node.children ?? []).map(textOf).join('');
 const permissions = { createTickets: true, classifyTickets: true, updateTicketStatus: true, diagnoseTickets: true, registerTechnicalNotes: true };
 const ticket = { idTicket: 1, idEmpresa: 2, idCliente: 100, idServicio: 2, idCategoria: 1,
@@ -28,7 +31,7 @@ async function harness(t, name, props) {
   const mocks = {
     '../../api': { api, apiErrorMessage: error => error.message },
     '../../constants': { rutPattern: /^[0-9]+-[0-9kK]$/ },
-    '../../lib': { normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
+    '../../lib': { ...formatting, normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
       normalizeWorkOrderValue: value => (value ?? '').toLowerCase(), formatDateTime: value => value ?? '-',
       formatDateOnly: value => value ?? '-', formatConnectionType: value => value ?? '-' },
     '../../shared/components': {
@@ -46,7 +49,7 @@ async function harness(t, name, props) {
     new Function('require', 'exports', outputText)(name => {
       if (name.endsWith('.css')) return {};
       if (mocks[name]) return mocks[name];
-      if (name.startsWith('./')) return load(resolve(dirname(file), name + (name.endsWith('ticket-presentation') ? '.ts' : '.tsx')));
+      if (name.startsWith('.')) return load(resolve(dirname(file), name + (name.endsWith('ticket-presentation') ? '.ts' : '.tsx')));
       return require(name);
     }, exports);
     return exports;
@@ -68,6 +71,94 @@ async function harness(t, name, props) {
     change: async (node, value) => { await act(async () => node.props.onChange({ target: { value } })); } };
 }
 
+test('alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del catálogo', async t => {
+  const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+    'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+  const categories = [...names.map((nombreAtencion, i) => ({ idCategoria: 410 + i * 19,
+    nombre: nombreAtencion.toUpperCase(), nombreAtencion, slaHoras: 12, tipo: 'ATENCION', tipoDisponible: true })),
+  { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null, slaHoras: 2, tipo: 'TECNICA', tipoDisponible: true },
+  { idCategoria: 990, nombre: 'CAMBIO_CREDENCIALES_WIFI', nombreAtencion: null, tipo: 'INTERNA', tipoDisponible: true },
+  { idCategoria: 991, nombre: 'Asistente virtual', nombreAtencion: null, tipo: 'INTERNA', tipoDisponible: true }];
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 309,
+    estado: 'DERIVADO_OT', categoria: categories[7] }], categories, permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  const select = form.findAllByType('select')[0];
+  const options = select.findAllByType('option').slice(1);
+  assert.deepEqual(options.map(textOf), names);
+  assert.deepEqual(options.map(node => node.props.value), categories.slice(0, 7).map(row => row.idCategoria));
+  assert.match(ctx.text(), /FIBRA_CORTADA/); // Listado y modal históricos, no opción de alta.
+  assert.equal(ctx.calls.length, 0);
+  await ctx.change(form.findAllByType('input')[0], '11111111-1');
+  await ctx.change(select, String(categories[4].idCategoria));
+  await ctx.change(form.findByType('textarea'), 'Consulta de cobro sintética');
+  await ctx.submit('Crear ticket');
+  assert.deepEqual(ctx.calls, [['post', '/tickets', { rut: '11111111-1', idCategoria: categories[4].idCategoria,
+    idServicio: undefined, prioridad: 'Media', descripcion: 'Consulta de cobro sintética' }]]);
+});
+
+test('catálogo incompleto no inventa categorías y selección técnica manipulada no envía POST', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
+    { idCategoria: 807, nombre: 'Consulta general', nombreAtencion: 'Consulta general' },
+    { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.match(textOf(form), /categorías oficiales no disponibles/);
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 2);
+  await ctx.change(form.findAllByType('input')[0], '11111111-1');
+  await ctx.change(form.findAllByType('select')[0], '309');
+  await ctx.change(form.findByType('textarea'), 'Consulta sintética QA');
+  assert.equal(ctx.button('Crear ticket').props.disabled, true);
+  await ctx.submit('Crear ticket');
+  assert.equal(ctx.calls.length, 0);
+  assert.match(ctx.text(), /Selecciona una categoría oficial/);
+});
+
+test('tipo clasificado bloquea selección comercial técnica o interna aunque llegue una etiqueta inconsistente', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 991,
+    categoria: { nombre: 'Asistente virtual' } }], categories: [
+    { idCategoria: 800, nombre: 'Consulta general', nombreAtencion: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true },
+    { idCategoria: 801, nombre: 'Mudanza', nombreAtencion: 'Mudanza', tipo: 'TECNICA', tipoDisponible: true },
+    { idCategoria: 802, nombre: 'Baja de servicio', nombreAtencion: 'Baja de servicio', tipo: 'INTERNA', tipoDisponible: true },
+    { idCategoria: 803, nombre: 'Falla de TV', nombreAtencion: 'Falla de TV', tipo: null, tipoDisponible: true },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  const options = form.findAllByType('select')[0].findAllByType('option').slice(1);
+  assert.deepEqual(options.map(node => node.props.value), [800]);
+  assert.match(ctx.text(), /Asistente virtual/); // Históricos internos siguen legibles.
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('catálogo de backend anterior sin clasificación no ofrece IDs supuestos y conserva histórico', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
+    { idCategoria: 309, nombre: 'FIBRA_CORTADA' },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 1);
+  assert.equal(ctx.button('Crear ticket').props.disabled, true);
+  // El modal conserva la categoría histórica actual aunque no figure en el catálogo.
+  assert.ok(ctx.tree.root.findAllByType('option').some(node => node.props.value === String(ticket.idCategoria) && textOf(node) === 'Soporte QA'));
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('gestión excluye internas de opciones manuales y conserva la categoría actual sin cambiarla', async t => {
+  const categories = [
+    { idCategoria: 800, nombre: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true },
+    { idCategoria: 801, nombre: 'FIBRA_CORTADA', tipo: 'TECNICA', tipoDisponible: true },
+    { idCategoria: 990, nombre: 'CAMBIO_CREDENCIALES_WIFI', tipo: 'INTERNA', tipoDisponible: true },
+    { idCategoria: 991, nombre: 'Asistente virtual', tipo: 'INTERNA', tipoDisponible: true },
+  ];
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 991,
+    categoria: categories[3] }], categories, permissions });
+  const form = ctx.tree.root.findByProps({ id: 'ticket-panel-management' });
+  const options = form.findAllByType('select')[0].findAllByType('option');
+  assert.deepEqual(options.filter(node => !node.props.disabled).map(node => node.props.value), [800, 801]);
+  assert.ok(options.some(node => node.props.disabled && node.props.value === '991' && textOf(node) === 'Asistente virtual'));
+  assert.equal(ctx.calls.length, 0);
+  await ctx.change(form.findAllByType('select')[1], 'Alta');
+  await ctx.submit('Guardar cambios');
+  assert.deepEqual(ctx.calls, [['patch', '/tickets/1/priority', { prioridad: 'Alta' }]]);
+});
+
 test('Tickets separa gestion, seguimiento y resolucion con mensajes de produccion', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [{ idCategoria: 1, nombre: 'Soporte QA' }], permissions });
   assert.match(ctx.text(), /Sin orden técnica asociada/);
@@ -80,8 +171,29 @@ test('Tickets separa gestion, seguimiento y resolucion con mensajes de produccio
   assert.equal(ctx.calls.length, 0);
 });
 
+test('ticket compartido G3 conserva estado y consulta sin ofrecer escrituras ni otro POST', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'DERIVADO_OT', origen: 'CRM',
+    estadoPresentacion: 'Derivado a OT', soloLecturaTecnica: true }], categories: [], permissions });
+  assert.match(ctx.text(), /Derivado a OT/);
+  assert.match(ctx.text(), /Solo consulta/);
+  assert.equal(ctx.button('Resolución'), undefined);
+  assert.equal(ctx.button('Guardar cambios'), undefined);
+  await ctx.click('Seguimiento1');
+  assert.match(ctx.text(), /Nota historica/);
+  assert.equal(ctx.button('Agregar observación'), undefined);
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('backend anterior no convierte EN_PROGRESO ni estado desconocido en opcion CRM editable', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'EN_PROGRESO' }], categories: [], permissions });
+  assert.match(ctx.text(), /Solo consulta/);
+  assert.equal(ctx.button('Guardar cambios'), undefined);
+  assert.equal(ctx.button('Resolución'), undefined);
+  assert.equal(ctx.calls.length, 0);
+});
+
 test('diagnostico conserva payload compatible y anuncia la resolucion', async t => {
-  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [], permissions });
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estadoPresentacion: 'En progreso' }], categories: [], permissions });
   await ctx.click('Resolución');
   assert.match(ctx.text(), /ticket quedará resuelto/);
   await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
@@ -92,6 +204,7 @@ test('diagnostico conserva payload compatible y anuncia la resolucion', async t 
   assert.deepEqual(ctx.calls, [['post', '/tickets/1/diagnosis', { causaRaiz: 'Causa QA', descripcionProblema: 'Problema QA',
     accionesRealizadas: 'Acciones QA', estadoFinalServicio: 'En Mantencion', observaciones: '' }]]);
   assert.match(ctx.text(), /El ticket está resuelto/);
+  assert.match(textOf(ctx.tree.root.findByProps({ className: 'ticket-overview-heading' })), /Resuelto/);
   assert.equal(ctx.button('Guardar y resolver ticket'), undefined);
   assert.equal(ctx.refreshed(), 1);
 });
@@ -146,6 +259,23 @@ test('panel sin permisos permite consultar antecedentes sin ofrecer edicion', as
   assert.equal(ctx.calls.length, 0);
 });
 
+for (const estado of ['COMPLETADA', 'EN_CURSO', 'CANCELADA']) {
+  test(`OT INSTALACION ${estado}: antecedente técnico de solo lectura sin asignación oficial ni cierre automático`, async t => {
+    const ctx = await harness(t, 'WorkOrdersPanel', { workOrders: [{ idOt: 2, idEmpresa: 1, idServicio: null,
+      idCliente: null, tipoOt: 'INSTALACION', estado, prioridad: 'Media', antecedenteTecnico: {
+        idOt: 2, idEmpresa: 1, fechaCompletada: estado === 'COMPLETADA' ? '2026-10-02T12:00:00Z' : null,
+        potenciaOpticaDbm: -19.5, resueltoRemotamente: false,
+        equiposDeclarados: { instalados: ['ONT-DECLARADA-OT-2'], retirados: [] },
+      } }] });
+    assert.match(ctx.text(), /ONT-DECLARADA-OT-2/);
+    assert.match(ctx.text(), /no acreditan asignación oficial/);
+    if (estado === 'COMPLETADA') assert.match(ctx.text(), /Instalación completada/);
+    else assert.doesNotMatch(ctx.text(), /Instalación completada/);
+    if (estado === 'CANCELADA') assert.match(ctx.text(), /Instalación no completada/);
+    assert.equal(ctx.calls.length, 0);
+  });
+}
+
 test('guardar cambios envia solo campos editados y mantiene los contratos existentes', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [{ idCategoria: 2, nombre: 'Internet lento' }], permissions });
   // Creation and management have labels in common; scope fields to the modal tab.
@@ -198,6 +328,37 @@ test('cambiar o reabrir un ticket limpia los borradores anteriores', async t => 
   await ctx.click('Gestionar');
   await ctx.click('Seguimiento1');
   assert.equal(ctx.field('Nueva observación').props.value, '');
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('OT COMPLETADA no bloquea el diagnostico comercial ni cambia el estado tecnico por lectura', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, hasOpenWorkOrder: false,
+    workOrders: [{ idOt: 80, estado: 'COMPLETADA' }] }], categories: [], permissions });
+  assert.equal(ctx.calls.length, 0);
+  await ctx.click('Resolución');
+  await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, false);
+  await ctx.submit('Guardar y resolver ticket');
+  assert.deepEqual(ctx.calls.map(call => call.slice(0, 2)), [['post', '/tickets/1/diagnosis']]);
+});
+
+test('OT COMPLETADA secundaria no oculta EN_CURSO ni habilita cierre', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, workOrders: [
+    { idOt: 80, estado: 'COMPLETADA' }, { idOt: 81, estado: 'EN_CURSO' },
+  ] }], categories: [], permissions });
+  const order = ctx.tree.root.findByProps({ 'aria-label': 'Orden técnica asociada' });
+  assert.match(textOf(order), /Orden #81/);
+  await ctx.click('Resolución');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, true);
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('la equivalencia visual no ignora un bloqueo conservador informado por backend', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, hasOpenWorkOrder: true,
+    workOrders: [{ idOt: 80, estado: 'COMPLETADA' }] }], categories: [], permissions });
+  await ctx.click('Resolución');
+  await ctx.change(ctx.field('Causa raíz'), 'Causa QA');
+  assert.equal(ctx.button('Guardar y resolver ticket').props.disabled, true);
   assert.equal(ctx.calls.length, 0);
 });
 

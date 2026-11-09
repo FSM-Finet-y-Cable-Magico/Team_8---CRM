@@ -32,6 +32,13 @@ export type G3InstallationPayload = {
 };
 
 export type G3WorkOrderResponse = {
+  origen_integracion?: {
+    request_id?: string;
+    trace_id?: string;
+    id_prospecto?: number;
+    id_contrato?: number;
+    id_plan?: number;
+  } | null;
   id_ot?: string | number;
   codigo_ot?: string;
   tipo?: string;
@@ -89,6 +96,13 @@ export class G3IntegrationError extends Error {
 export type G3ClosureSource = 'WEBHOOK' | 'RECONCILIACION';
 
 export type G3ClosurePayload = {
+  tipo_ot?: 'INSTALACION';
+  clave_idempotencia?: string;
+  usuario_tecnico?: string | null;
+  cliente?: { rut: string | null; nombre: string } | null;
+  direccion?: { direccion_completa: string; comuna: string } | null;
+  categoria_falla?: { id_categoria: number; nombre: string } | null;
+  categoria_falla_otro?: string | null;
   id_ot: number;
   request_id: string;
   trace_id: string;

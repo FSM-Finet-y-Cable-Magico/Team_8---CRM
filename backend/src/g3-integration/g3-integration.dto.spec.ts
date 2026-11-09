@@ -16,6 +16,23 @@ const closurePayload = {
 };
 
 describe('G3ClosureDto approval-only', () => {
+  it('acepta campos tecnicos del constructor sin exigir identidades de G8 para el tecnico', async () => {
+    const dto = plainToInstance(G3ClosureDto, { ...closurePayload, tipo_ot: 'INSTALACION',
+      fecha_completada: '2026-11-08T12:00:00.000Z', id_tecnico: null, usuario_tecnico: null,
+      potencia_optica_dbm: 0, resultado_llamada: '', resuelto_remotamente: false,
+      materiales: [{ id_tipo_equipo: 7, nombre: '', cantidad: 1.5 }],
+      cliente: { rut: null, nombre: 'QA' }, direccion: { direccion_completa: 'QA', comuna: 'QA' },
+      categoria_falla: { id_categoria: 3, nombre: 'QA' }, categoria_falla_otro: null });
+    await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+  });
+
+  it('referencias nulas solo son admisibles en la envolvente de una reparacion explicita', async () => {
+    const body = { ...closurePayload, request_id: null, trace_id: null, id_contrato: null, id_prospecto: null, id_plan: null };
+    const repair = plainToInstance(G3ClosureDto, { ...body, tipo_ot: 'REPARACION' });
+    await expect(validate(repair, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+    const install = plainToInstance(G3ClosureDto, { ...body, tipo_ot: 'INSTALACION' });
+    expect((await validate(install)).map(error => error.property)).toEqual(expect.arrayContaining(['request_id', 'trace_id', 'id_contrato', 'id_prospecto', 'id_plan']));
+  });
   it('acepta el payload contractual sin campo estado', async () => {
     const dto = plainToInstance(G3ClosureDto, closurePayload);
     await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);

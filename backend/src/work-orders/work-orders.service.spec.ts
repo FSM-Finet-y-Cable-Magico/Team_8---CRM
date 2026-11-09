@@ -14,6 +14,21 @@ const terreno: AuthUser = {
 };
 
 describe('WorkOrdersService', () => {
+  it('lista antecedentes técnicos de OT global sin servicio sin crear activación ni atribuir inventario', async () => {
+    const order = { idOt: 2, idEmpresa: 1, idCliente: null, idProspecto: null, idServicio: null, idTecnico: null,
+      idTicket: null, tipoOt: 'INSTALACION', estado: 'COMPLETADA', observaciones: null,
+      fechaCompletada: new Date('2026-10-02T12:00:00Z'), potenciaOpticaDbm: -19.5 };
+    const prisma = { ordenTrabajo: { findMany: jest.fn().mockResolvedValue([order]) },
+      $queryRaw: jest.fn().mockResolvedValue([{ idOt: 2, idEmpresa: 1, cierreEquipos: { instalados: [{ numero_serie: 'SOLO-OT-2' }], retirados: [] } }]) };
+    const audit = { record: jest.fn() };
+    const service = new WorkOrdersService(prisma as never, audit as never);
+    const [result] = await service.list(terreno);
+    expect(result).toMatchObject({ idOt: 2, idServicio: null, estado: 'COMPLETADA', antecedenteTecnico: {
+      fechaCompletada: '2026-10-02T12:00:00.000Z', potenciaOpticaDbm: -19.5,
+      equiposDeclarados: { instalados: ['SOLO-OT-2'] }, asignacionInventarioConfirmada: false } });
+    expect(order).not.toHaveProperty('antecedenteTecnico');
+    expect(audit.record).not.toHaveBeenCalled();
+  });
   it('cancela una agenda existente y devuelve el servicio a pendiente de instalación', async () => {
     const order = {
       idOt: 20,
@@ -50,6 +65,7 @@ describe('WorkOrdersService', () => {
 
   it('expone tipo de conexion, hora y tecnico asignado en la vista de ordenes', async () => {
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       ordenTrabajo: {
         findMany: jest.fn().mockResolvedValue([
           {

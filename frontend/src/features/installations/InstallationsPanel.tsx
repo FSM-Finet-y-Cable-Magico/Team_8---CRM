@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { type InventoryUnit, type Prospect, type WorkOrder } from '../../api';
-import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
+import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder } from '../../lib';
 import { Modal, StatusBadge, TablePagination } from '../../shared/components';
 import { InstallOrderForm } from './InstallOrderForm';
 import { InstallationCompletionForm } from './InstallationCompletionForm';
@@ -29,13 +29,13 @@ export function InstallationsPanel({
   onChanged: () => void;
 }) {
   const installationOrders = useMemo(
-    () => workOrders.filter((order) => normalizeWorkOrderValue(order.tipoOt) === 'instalacion'),
+    () => workOrders.filter((order) => isInstallationWorkOrder(order.tipoOt)),
     [workOrders],
   );
   const installationProspects = useMemo(() => {
     const openProspectIds = new Set(
       installationOrders
-        .filter((order) => !['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado)))
+        .filter((order) => !isTerminalWorkOrder(order.estado))
         .map((order) => order.idProspecto ?? order.prospecto?.idProspecto)
         .filter((id): id is number => Boolean(id)),
     );
@@ -75,14 +75,14 @@ export function InstallationsPanel({
     return map;
   }, [allProspects]);
   const pendingInstallationOrders = useMemo(
-    () => installationOrders.filter((order) => !confirmedKeys.has(`${order.idEmpresa}:${order.idOt}`) && !['completada', 'cerrada', 'cancelada'].includes(normalizeWorkOrderValue(order.estado))),
+    () => installationOrders.filter((order) => !confirmedKeys.has(`${order.idEmpresa}:${order.idOt}`) && !isTerminalWorkOrder(order.estado)),
     [installationOrders, confirmedKeys],
   );
   const selectedCompletionOrder = pendingInstallationOrders.find((order) => order.idOt === completionOrderId) ?? null;
   const historyStatusOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.estado)).filter(Boolean))].sort();
   const historyPriorityOptions = [...new Set(installationOrders.map((order) => normalizeWorkOrderValue(order.prioridad)).filter(Boolean))].sort();
   const filteredInstallationOrders = installationOrders.filter((order) => (
-    normalizeWorkOrderValue(order.estado) !== 'completada'
+    !isCompletedWorkOrder(order.estado)
     && !confirmedKeys.has(`${order.idEmpresa}:${order.idOt}`)
     && (!historyStatusFilter || normalizeWorkOrderValue(order.estado) === historyStatusFilter)
     && (!historyPriorityFilter || normalizeWorkOrderValue(order.prioridad) === historyPriorityFilter)

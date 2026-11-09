@@ -36,6 +36,18 @@ export function validateRut(input: string): RutValidationResult {
   return { input: original, normalized, valid: true };
 }
 
+// Lookup only: do not rewrite stored identity or treat a RUT as company access.
+export function rutLookupVariants(input: string): string[] {
+  const result = validateRut(input);
+  if (!result.valid || !result.normalized) return [];
+  const [body, verifier] = result.normalized.split('-');
+  const dottedBody = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const variants = [result.normalized, `${body}${verifier}`, `${dottedBody}-${verifier}`, `${dottedBody}${verifier}`];
+  // findUnique is case-sensitive; historical lowercase k must not hide duplicates.
+  if (verifier === 'K') variants.push(...variants.map(value => value.replace(/K$/, 'k')));
+  return [...new Set(variants)];
+}
+
 function calculateVerifier(body: string) {
   let multiplier = 2;
   let sum = 0;

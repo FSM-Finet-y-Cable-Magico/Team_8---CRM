@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, Prospecto } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -13,7 +13,7 @@ import { isAdministrator } from '../common/roles';
 import { generateWorkOrderCode } from '../common/work-order-code';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { validateRut } from '../rut/rut.util';
+import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
@@ -24,6 +24,8 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
+import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidate, readG2OriginAudits } from './g2-prospect-review';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { CoverageResult } from '../coverage/coverage.types';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
@@ -70,6 +72,7 @@ export class ProspectsService {
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
+        _count: G2_REVIEW_RELATION_COUNTS,
         empresa: true,
         cotizaciones: {
           where: { factibilidadVerificada: true, fechaEnvio: { not: null } },
@@ -94,8 +97,10 @@ export class ProspectsService {
         },
       },
     });
-    return prospects.map((prospect) => ({
+    const evidenceRows = await readG2OriginAudits(this.prisma, prospects.filter(isG2ProspectReviewCandidate).map(p => p.idProspecto));
+    return prospects.map(({ _count, ...prospect }) => ({
       ...prospect,
+      revisionOrigenG2Disponible: isG2ProspectReviewCandidate({ ...prospect, _count }) && g2OriginEvidence(prospect, evidenceRows) !== null,
       cotizaciones: (prospect.cotizaciones ?? [])
         .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa && quote.plan?.activo !== false)
         .map(({ idCotizacion, idPlan, fechaEnvio }) => ({ idCotizacion, idPlan, fechaEnvio })),
@@ -234,6 +239,61 @@ export class ProspectsService {
     return { ...prospect, cobertura };
   }
 
+  async reviewG2Prospect(idProspecto: number, dto: ReviewG2ProspectDto, currentUser: AuthUser) {
+    if (!isAdministrator(currentUser.roles) && !currentUser.roles.includes('Comercial')) {
+      throw new ForbiddenException('La revisión requiere permisos comerciales');
+    }
+    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    if (dto.confirmarOrigenG2 !== true) {
+      throw new BadRequestException('Confirma la revisión comercial de la solicitud G2 y su empresa');
+    }
+    try {
+      return await this.prisma.$transaction(async tx => {
+        // Serialize against confirmations and FK-dependent insertions on this prospect.
+        await tx.$executeRaw`SELECT id_prospecto FROM public.prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+        const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto }, include: { _count: G2_REVIEW_RELATION_COUNTS } });
+        if (current.idEmpresa !== prospect.idEmpresa
+          || (!isAdministrator(currentUser.roles) && current.idEmpresa !== currentUser.idEmpresa)) {
+          throw new ConflictException('El ámbito empresarial del prospecto cambió; vuelve a consultarlo');
+        }
+        if (!isG2ProspectReviewCandidate(current)) {
+          throw new ConflictException('El prospecto no acredita una solicitud G2 nueva y sin relaciones. Requiere revisión comercial especializada');
+        }
+        const evidence = g2OriginEvidence(current, await readG2OriginAudits(tx, [idProspecto]));
+        if (!evidence) throw new ConflictException('Falta evidencia original de creación y privacidad de G2; no se recuperó el prospecto');
+        const variants = current.rut ? rutLookupVariants(current.rut) : [];
+        if (variants.length && await tx.cliente.findFirst({ where: {
+          rut: { in: variants, mode: 'insensitive' },
+          OR: [{ idEmpresa: current.idEmpresa }, { contratos: { some: { idEmpresa: current.idEmpresa } } },
+            { servicios: { some: { idEmpresa: current.idEmpresa } } }],
+        }, select: { idCliente: true } })) {
+          throw new ConflictException('Existe una identidad comercial relacionada; no se fusionaron ni reasignaron registros');
+        }
+        const updated = await tx.prospecto.update({ where: {
+          idProspecto, idEmpresa: current.idEmpresa, estadoPipeline: 'NUEVO', clasificacionComercial: 'PROSPECTO',
+          origenContacto: current.origenContacto, idCliente: null, fechaConversion: null, fechaPerdida: null,
+          motivoPerdida: null, tiempoConversionDias: null,
+          contratos: { none: {} }, cotizaciones: { none: {} }, ordenesTrabajo: { none: {} },
+          integracionesInstalacionG3: { none: {} },
+        }, data: { estadoPipeline: INITIAL_PIPELINE_STATUS }, include: { empresa: true } });
+        await this.auditService.record({
+          idUsuario: currentUser.idUsuario, accion: 'REVISAR_SOLICITUD_G2', entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
+          valorAnterior: { estadoPipeline: current.estadoPipeline, clasificacionComercial: current.clasificacionComercial },
+          valorNuevo: { estadoPipeline: INITIAL_PIPELINE_STATUS, idEmpresa: current.idEmpresa,
+            evidenciasOrigenG2: evidence, origenConfirmadoPorComercial: true },
+        }, tx);
+        return { ...updated, requiereRevisionComercial: false, revisionOrigenG2Disponible: false };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10_000, timeout: 20_000 });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError
+        && (['P2025', 'P2034'].includes(error.code)
+          || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code))))) {
+        throw new ConflictException('El prospecto cambió durante la revisión; vuelve a consultar antes de aprobar');
+      }
+      throw error;
+    }
+  }
+
   async updatePipeline(idProspecto: number, dto: UpdatePipelineDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const nextStatus = dto.estadoPipeline.trim();
@@ -283,6 +343,7 @@ export class ProspectsService {
         observaciones: dto.observaciones,
       },
       currentUser,
+      prospect,
       cobertura,
     );
     return { ...updated, cobertura };
@@ -291,35 +352,27 @@ export class ProspectsService {
   async verifyTomodat(idProspecto: number, location: CoverageLocationDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (!isAdministrator(currentUser.roles) && !currentUser.roles.includes('Comercial')
+      && (location.latitud !== prospect.latitud || location.longitud !== prospect.longitud)) {
+      throw new ForbiddenException('La edición de ubicación requiere permisos comerciales');
+    }
     const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, location, currentUser);
-    const locatedProspect = await this.prisma.prospecto.update({
-      where: { idProspecto },
-      data: {
-        latitud: location.latitud,
-        longitud: location.longitud,
-        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
-      },
-      include: { empresa: true },
-    });
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
-      entidadAfectada: 'prospecto',
-      idEntidadAfectada: idProspecto,
-      valorAnterior: { latitud: prospect.latitud, longitud: prospect.longitud, idZonaPago: prospect.idZonaPago },
-      valorNuevo: { latitud: location.latitud, longitud: location.longitud, idZonaPago: locatedProspect.idZonaPago },
-    });
     const updated = await this.saveFeasibility(
       idProspecto,
       { resultado: cobertura.coberturaComercial ? 'Factible' : 'No Factible' },
       currentUser,
+      prospect,
       cobertura,
+      location,
     );
     return { ...updated, cobertura };
   }
 
   async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    if (prospect.estadoPipeline === 'NUEVO') {
+      throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
+    }
     const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
@@ -328,6 +381,13 @@ export class ProspectsService {
         throw new BadRequestException('La ubicacion contratada requiere revision contractual. Para una comuna ausente utiliza Completar datos de instalacion.');
       }
       const previous = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+      if (previous.idEmpresa !== prospect.idEmpresa || previous.idCliente !== prospect.idCliente
+        || previous.estadoPipeline !== prospect.estadoPipeline || previous.direccion !== prospect.direccion
+        || previous.comuna !== prospect.comuna || previous.region !== prospect.region
+        || previous.latitud !== prospect.latitud || previous.longitud !== prospect.longitud) {
+        throw new ConflictException('El prospecto cambió durante la edición de ubicación; vuelve a consultarlo');
+      }
+      if (previous.idCliente != null) throw new BadRequestException('La ubicación de clientes convertidos requiere su flujo autorizado');
       const updated = await tx.prospecto.update({
         where: { idProspecto },
         data: {
@@ -345,12 +405,14 @@ export class ProspectsService {
         accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
         entidadAfectada: 'prospecto',
         idEntidadAfectada: idProspecto,
-        valorAnterior: { latitud: previous.latitud, longitud: previous.longitud, idZonaPago: previous.idZonaPago },
+        valorAnterior: { latitud: previous.latitud, longitud: previous.longitud, idZonaPago: previous.idZonaPago,
+          comuna: previous.comuna ?? null, region: previous.region ?? null },
         valorNuevo: {
           latitud: updated.latitud,
           longitud: updated.longitud,
           idZonaPago: updated.idZonaPago,
           estadoCobertura: cobertura.estado,
+          comuna: updated.comuna ?? null, region: updated.region ?? null,
         },
       }, tx);
       return { ...updated, cobertura };
@@ -363,8 +425,7 @@ export class ProspectsService {
     }
   }
 
-  private async saveFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser, cobertura?: CoverageResult) {
-    const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+  private async saveFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser, prospect: Prospecto, cobertura?: CoverageResult, location?: CoverageLocationDto) {
     this.assertFeasibilityStage(prospect.estadoPipeline);
 
     if (!prospect.direccion?.trim()) {
@@ -376,20 +437,38 @@ export class ProspectsService {
     const lossReason = prospect.motivoPerdida;
 
     const updated = await this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT id_prospecto FROM public.prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+      const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+      if (current.idEmpresa !== prospect.idEmpresa || current.idCliente !== prospect.idCliente
+        || current.estadoPipeline !== prospect.estadoPipeline || current.direccion !== prospect.direccion
+        || current.comuna !== prospect.comuna || current.region !== prospect.region
+        || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud) {
+        throw new ConflictException('El prospecto cambió durante la consulta de cobertura; vuelve a consultar');
+      }
+      if (current.idCliente != null || await tx.contrato.findFirst({ where: { idProspecto } })) {
+        throw new BadRequestException('La factibilidad contratada requiere su flujo autorizado; no se modificó la ubicación');
+      }
       // A negative recheck invalidates previous positive checks used by installation scheduling.
       await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
-      return tx.prospecto.update({
+      const result = await tx.prospecto.update({
         where: { idProspecto, estadoPipeline: prospect.estadoPipeline },
         data: {
           estadoPipeline: nextStatus,
           motivoPerdida: lossReason,
+          ...(location ? { latitud: location.latitud, longitud: location.longitud,
+            idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null } : {}),
           ...(dto.resultado === 'Factible' ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         },
         include: { empresa: true },
       });
-    });
-
-    await this.auditService.record({
+      if (location && (current.latitud !== location.latitud || current.longitud !== location.longitud || current.idZonaPago !== result.idZonaPago)) {
+        await this.auditService.record({ idUsuario: currentUser.idUsuario, accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+          entidadAfectada: 'prospecto', idEntidadAfectada: idProspecto,
+          valorAnterior: { latitud: current.latitud, longitud: current.longitud, idZonaPago: current.idZonaPago },
+          valorNuevo: { latitud: location.latitud, longitud: location.longitud, idZonaPago: result.idZonaPago },
+        }, tx);
+      }
+      await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'VERIFICAR_FACTIBILIDAD',
       entidadAfectada: 'prospecto',
@@ -402,13 +481,15 @@ export class ProspectsService {
         origen: cobertura ? 'COBERTURA_COMERCIAL' : 'Manual',
         ...(cobertura ? { direccion: prospect.direccion, cobertura } : {}),
       },
+      }, tx);
+      return result;
     });
-
     return updated;
   }
 
   async generateQuote(idProspecto: number, dto: GenerateQuoteDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    if (prospect.estadoPipeline === 'NUEVO') throw new BadRequestException('La solicitud G2 requiere revisión comercial antes de cotizar');
 
     if (prospect.latitud === null || prospect.latitud === undefined || prospect.longitud === null || prospect.longitud === undefined) {
       throw new BadRequestException('El prospecto debe tener una ubicacion valida antes de cotizar');
@@ -544,6 +625,7 @@ export class ProspectsService {
 
   async contractPlan(idProspecto: number, dto: ContractPlanDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    if (prospect.estadoPipeline === 'NUEVO') throw new BadRequestException('La solicitud G2 requiere revisión comercial antes de contratar');
     const plan = await this.prisma.plan.findUnique({ where: { idPlan: dto.planId } });
 
     if (!plan || plan.activo === false || plan.idEmpresa !== prospect.idEmpresa) {

@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InstallationActivationService } from './installation-activation.service';
 import { G1ActivationService } from '../g1-integration/g1-activation.service';
 import { G3ClosurePayload, G3ClosureSource } from './g3-integration.types';
+import { installationClosure } from './g3-closure-contract';
 import { closureResult, PostClosureWork, publicClosureResult, validatePostClosure } from './post-closure-work';
 import {
   externalWorkOrderId,
@@ -24,6 +25,7 @@ export class G3ClosureProcessor {
   async process(payload: G3ClosurePayload, source: G3ClosureSource, trackingHintId?: number) {
     const record = payload as Record<string, unknown>;
     this.assertContractPayload(record);
+    installationClosure(record);
     const tracking = trackingHintId
       ? await this.prisma.integracionInstalacionG3.findUnique({ where: { idIntegracion: trackingHintId } })
       : await this.resolveTracking(record);
@@ -239,6 +241,12 @@ export class G3ClosureProcessor {
   }
 
   private assertContractPayload(payload: Record<string, unknown>) {
+    if (payload.tipo_ot !== undefined && payload.tipo_ot !== 'INSTALACION') {
+      throw new BadRequestException('El procesador comercial solo admite cierres de instalacion');
+    }
+    if (payload.estado !== undefined) {
+      throw new BadRequestException('El estado no es evidencia contractual de cierre aprobado');
+    }
     const requiredStrings = ['request_id', 'trace_id'];
     for (const field of requiredStrings) {
       const value = payload[field];
@@ -277,7 +285,7 @@ export class G3ClosureProcessor {
     }
     const resultadoLlamada = payload.resultado_llamada;
     if (resultadoLlamada !== undefined && resultadoLlamada !== null
-      && (typeof resultadoLlamada !== 'string' || !resultadoLlamada.trim())) {
+      && (typeof resultadoLlamada !== 'string' || (resultadoLlamada !== '' && !resultadoLlamada.trim()))) {
       throw new BadRequestException('El cierre contiene resultado_llamada invalido');
     }
     const resueltoRemotamente = payload.resuelto_remotamente;

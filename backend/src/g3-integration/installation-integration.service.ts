@@ -6,12 +6,12 @@ import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { ACCESS_ROLES } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
-import { validateRut } from '../rut/rut.util';
+import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { G3ClosureProcessor } from './g3-closure.processor';
+import { installationClosureFromReconciliation } from './g3-closure-contract';
 import { historicalClosureData, HistoricalClosureView, numericWorkOrderId, positiveId } from './g3-historical-closure';
 import { CompleteG3InstallationDataDto, RequestG3InstallationDto } from './g3-integration.dto';
 import {
-  G3ClosurePayload,
   G3InstallationPayload,
   G3IntegrationClient,
   G3IntegrationError,
@@ -202,33 +202,18 @@ export class InstallationIntegrationService {
     try {
       const response = await this.client.getWorkOrderClosure(externalId, tracking.idEmpresa);
       this.validateResponseCompany(response.data, tracking.idEmpresa);
+      const legacyState: unknown = response.data.estado;
       if (!response.data.id_ot || !response.data.request_id
-        || (response.data.estado && response.data.estado.trim().toUpperCase() !== 'COMPLETADA')) {
+        || (legacyState !== undefined && (typeof legacyState !== 'string' || legacyState.trim().toUpperCase() !== 'COMPLETADA'))) {
         const updated = await this.prisma.integracionInstalacionG3.update({
           where: { idIntegracion },
           data: { fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: null },
         });
         return { available: false, tracking: this.toView(updated) };
       }
-      const closure = {
-        id_ot: Number(response.data.id_ot),
-        request_id: response.data.request_id,
-        trace_id: response.data.trace_id,
-        id_empresa: response.data.id_empresa,
-        id_prospecto: response.data.id_prospecto,
-        id_contrato: response.data.id_contrato,
-        id_plan: response.data.id_plan,
-        equipos_instalados: response.data.equipos_instalados,
-        equipos_retirados: response.data.equipos_retirados,
-        ...(response.data.fecha_completada === undefined ? {} : { fecha_completada: response.data.fecha_completada }),
-        ...(response.data.id_tecnico === undefined ? {} : { id_tecnico: response.data.id_tecnico }),
-        ...(response.data.potencia_optica_dbm === undefined ? {} : { potencia_optica_dbm: response.data.potencia_optica_dbm }),
-        ...(response.data.resultado_llamada === undefined ? {} : { resultado_llamada: response.data.resultado_llamada }),
-        ...(response.data.resuelto_remotamente === undefined ? {} : { resuelto_remotamente: response.data.resuelto_remotamente }),
-        ...(response.data.materiales === undefined ? {} : { materiales: response.data.materiales }),
-      };
+      const closure = installationClosureFromReconciliation(response.data as Record<string, unknown>);
       const result = await this.closureProcessor.process(
-        closure as G3ClosurePayload,
+        closure,
         'RECONCILIACION',
         tracking.idIntegracion,
       );
@@ -247,10 +232,13 @@ export class InstallationIntegrationService {
       if (failure.code === 'G3_CONFLICTO_CONSULTA') {
         try {
           const detail = await this.client.getWorkOrder(externalId, tracking.idEmpresa);
+          this.validateDetailReferences(detail.data, tracking);
           const state = normalizeG3State(detail.data.estado);
+          const origin = detail.data.origen_integracion;
           if (detail.data.id_empresa === tracking.idEmpresa
             && String(detail.data.id_ot) === String(externalId)
-            && detail.data.request_id === tracking.requestId && detail.data.trace_id === tracking.traceId
+            && (detail.data.request_id ?? origin?.request_id) === tracking.requestId
+            && (detail.data.trace_id ?? origin?.trace_id) === tracking.traceId
             && state.known && ['PENDIENTE', 'ASIGNADA', 'EN_CURSO', 'PENDIENTE_CLIENTE_AUSENTE'].includes(state.state)) {
             const updated = await this.updateNonTerminalTracking(idIntegracion, {
               fechaUltimaSincronizacion: new Date(), ultimoErrorSanitizado: 'El cierre G3 aun no esta disponible.',
@@ -510,7 +498,9 @@ export class InstallationIntegrationService {
     if (customer && validateRut(customer.rut ?? '').normalized !== rutResult.normalized) {
       throw new BadRequestException('La identidad del cliente no corresponde al prospecto');
     }
-    if (!customer && await db.cliente.findUnique({ where: { rut: rutResult.normalized } })) {
+    if (!customer && await db.cliente.findFirst({
+      where: { rut: { in: rutLookupVariants(rutResult.normalized), mode: 'insensitive' } },
+    })) {
       throw new BadRequestException('La identidad existente requiere vinculacion contractual explicita');
     }
     const name = prospect?.nombreCompleto?.trim() || customer?.nombreCompleto?.trim();
@@ -607,6 +597,18 @@ export class InstallationIntegrationService {
       [response.id_contrato, tracking.idContrato], [response.id_prospecto, tracking.idProspecto],
       [response.id_plan, tracking.idPlan],
     ];
+    const origin = response.origen_integracion;
+    if (origin !== undefined && origin !== null) {
+      if (typeof origin !== 'object' || Array.isArray(origin)) {
+        throw new G3IntegrationError('G3_RESPONSE_CORRELATION_INVALID', 502, false,
+          'G3 respondio con referencias que no corresponden a la solicitud.');
+      }
+      references.push(
+        [origin.request_id, tracking.requestId], [origin.trace_id, tracking.traceId],
+        [origin.id_contrato, tracking.idContrato], [origin.id_prospecto, tracking.idProspecto],
+        [origin.id_plan, tracking.idPlan],
+      );
+    }
     if ((response.id_ot !== undefined && tracking.idOtG3 !== null
       && String(response.id_ot) !== tracking.idOtG3)
       || references.some(([received, expected]) => received !== undefined && received !== expected)) {

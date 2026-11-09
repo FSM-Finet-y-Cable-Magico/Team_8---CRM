@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AuthUser } from '../common/auth.types';
 import { todayDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
+import { INSTALLATION_TYPE_FILTER, isCompletedWorkOrder, isInstallationType, persistedOrderTechnicalData, readDeclaredOrderEquipment } from '../common/work-order-read';
 import { installationMetrics } from '../companies/installation-metrics';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -23,8 +24,9 @@ export class InstallationHistoryService {
     // Same evidence and snapshot semantics as CU47. No provider, activation or write.
     const [local, remote] = await this.prisma.$transaction([
       this.prisma.ordenTrabajo.findMany({
-        where: { idEmpresa: company ?? { not: null }, tipoOt: 'Instalacion' },
-        select: { idOt: true, estado: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
+        where: { idEmpresa: company ?? { not: null }, tipoOt: INSTALLATION_TYPE_FILTER },
+        select: { idOt: true, tipoOt: true, estado: true, idEmpresa: true, idServicio: true, idCliente: true, fechaCompletada: true,
+          idTecnico: true, idTecnicoExterno: true, potenciaOpticaDbm: true, resueltoRemotamente: true,
           servicio: { select: service } },
         orderBy: { idOt: 'desc' },
       }),
@@ -51,8 +53,9 @@ export class InstallationHistoryService {
       const key = `${row.idEmpresa}:${row.idOt}`;
       // A pending/cancelled legacy mirror is a reference, not another installation.
       // Standalone local work is included here only after its own confirmed closure.
-      if (row.estado === 'Completada' || groups.has(key)) group(key).local.push(row);
+      if (isInstallationType(row.tipoOt) && (isCompletedWorkOrder(row.estado) || groups.has(key))) group(key).local.push(row);
     }
+    const equipment = await readDeclaredOrderEquipment(this.prisma, [...groups.values()].flatMap(rows => rows.local));
     const today = todayDateOnly();
     const items = [...groups.entries()].map(([key, rows]) => {
       const metric = installationMetrics(rows.local, rows.remote, today.slice(0, 7), today);
@@ -76,6 +79,7 @@ export class InstallationHistoryService {
         clasificacionFecha: review ? 'REQUIERE_REVISION' as const : missing ? 'PENDIENTE_FECHA_TECNICA' as const : 'FECHA_TECNICA_CONFIRMADA' as const,
         fechasTecnicasOriginales: g3 ? [...new Set(dates)] : !review && !missing && legacy?.fechaCompletada ? [legacy.fechaCompletada.toISOString()] : [],
         ordenesLocales: rows.local.map(row => row.idOt),
+        antecedentesTecnicos: rows.local.map(row => persistedOrderTechnicalData(row, equipment.get(`${row.idEmpresa}:${row.idOt}`))),
         solicitudesG3: rows.remote.map(row => ({ idIntegracion: row.idIntegracion, requestId: row.requestId,
           traceId: row.traceId, fechaCierreProcesado: row.fechaCierreProcesado })),
       };

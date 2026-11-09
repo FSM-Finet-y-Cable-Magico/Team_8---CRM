@@ -97,7 +97,7 @@ function setup() {
   const advisoryLock = jest.fn();
   const lockTails = new Map<string, Promise<void>>();
   const prisma = {
-    cliente: { findUnique: jest.fn().mockResolvedValue(null) },
+    cliente: { findUnique: jest.fn().mockResolvedValue(null), findFirst: jest.fn().mockResolvedValue(null) },
     contrato: { findFirst: jest.fn().mockResolvedValue(contract), findUnique: jest.fn().mockResolvedValue(contract) },
     servicioContratado: { findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
@@ -288,7 +288,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
 
   it('no usa coincidencia de RUT para vincular automaticamente un cliente', async () => {
     const context = setup();
-    context.prisma.cliente.findUnique.mockResolvedValue({ idCliente: 30, idEmpresa: 1 });
+    context.prisma.cliente.findFirst.mockResolvedValue({ idCliente: 30, idEmpresa: 1 });
     await expect(context.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow('vinculacion contractual explicita');
     expect(context.prisma.$transaction).not.toHaveBeenCalled();
     expect(context.client.createInstallation).not.toHaveBeenCalled();
@@ -571,6 +571,75 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
       expect(context.closure.process).not.toHaveBeenCalled();
       expect(context.closure.recoverPostClosure).not.toHaveBeenCalled();
     });
+  it('GET detalle acepta origen_integracion vigente y conserva EN_CURSO sin activar', async () => {
+    const context = setup();
+    await context.service.requestInstallation({ idProspecto: 10 }, user);
+    const tracking = context.getStored();
+    context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: {
+      id_ot: 901, id_empresa: 1, estado: 'EN_CURSO',
+      origen_integracion: { request_id: tracking.requestId, trace_id: tracking.traceId,
+        id_contrato: 20, id_prospecto: 10, id_plan: 7 },
+    } });
+    await expect(context.service.detail(1, user)).resolves.toMatchObject({ estadoOtG3: 'EN_CURSO', ultimoErrorSanitizado: null });
+    expect(context.closure.process).not.toHaveBeenCalled();
+  });
+  it('GET detalle rechaza referencias anidadas ajenas, malformadas o contradictorias con las directas', async () => {
+    for (const field of ['request_id', 'trace_id', 'id_contrato', 'id_prospecto', 'id_plan', 'malformado']) {
+      const context = setup();
+      await context.service.requestInstallation({ idProspecto: 10 }, user);
+      const tracking = context.getStored();
+      const before = JSON.stringify(tracking.payloadSnapshot);
+      context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: {
+        id_ot: 901, id_empresa: 1, estado: 'EN_CURSO', request_id: tracking.requestId,
+        trace_id: tracking.traceId, id_contrato: 20, id_prospecto: 10, id_plan: 7,
+        origen_integracion: field === 'malformado' ? 'invalid' : {
+          [field]: ['request_id', 'trace_id'].includes(field) ? 'referencia-ajena' : 999,
+        },
+      } });
+      await expect(context.service.detail(1, user)).resolves.toMatchObject({ detalle: null, estadoOtG3: 'PENDIENTE',
+        ultimoErrorSanitizado: 'G3 respondio con referencias que no corresponden a la solicitud.' });
+      expect(JSON.stringify(context.getStored().payloadSnapshot)).toBe(before);
+      expect(context.closure.process).not.toHaveBeenCalled();
+    }
+  });
+  it('RUT compacto existente sin vinculo contractual bloquea la solicitud antes de tracking y POST', async () => {
+    const context = setup();
+    context.prisma.cliente.findFirst.mockImplementation(async ({ where }: any) => where.rut.in.includes('123456785') ? { idCliente: 99 } : null);
+    await expect(context.service.requestInstallation({ idProspecto: 10 }, user)).rejects.toThrow('vinculacion contractual explicita');
+    expect(context.getStored()).toBeNull();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+    expect(context.closure.process).not.toHaveBeenCalled();
+  });
+  it('RUT historico con puntos y K bloquea duplicacion antes de tracking y POST', async () => {
+    const context = setup();
+    context.contract.prospecto.rut = '12345670-K';
+    context.prisma.cliente.findFirst.mockImplementation(async ({ where }: any) =>
+      where.rut.in.includes('12.345.670-k') ? { idCliente: 99 } : null);
+    await expect(context.service.requestInstallation({ idProspecto: 10 }, user)).rejects.toThrow('vinculacion contractual explicita');
+    expect(context.prisma.cliente.findFirst).toHaveBeenCalledTimes(1);
+    expect(context.prisma.$transaction).not.toHaveBeenCalled();
+    expect(context.getStored()).toBeNull();
+    expect(context.client.createInstallation).not.toHaveBeenCalled();
+    expect(context.closure.process).not.toHaveBeenCalled();
+  });
+  it('409 de cierre pendiente usa correlacion anidada vigente y nunca acepta referencias contradictorias', async () => {
+    for (const matches of [true, false]) {
+      const context = setup();
+      await context.service.requestInstallation({ idProspecto: 10 }, user);
+      const tracking = context.getStored();
+      context.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_CONFLICTO_CONSULTA', 409, false, 'Conflicto consulta'));
+      context.client.getWorkOrder.mockResolvedValue({ status: 200, durationMs: 4, data: {
+        id_ot: 901, id_empresa: 1, estado: 'EN_CURSO',
+        ...(matches ? {} : { trace_id: tracking.traceId }),
+        origen_integracion: { request_id: tracking.requestId, trace_id: matches ? tracking.traceId : 'trace-ajeno',
+          id_contrato: 20, id_prospecto: 10, id_plan: 7 },
+      } });
+      if (matches) await expect(context.service.reconcile(1, user)).resolves.toMatchObject({ available: false });
+      else await expect(context.service.reconcile(1, user)).rejects.toMatchObject({ status: 409 });
+      expect(context.closure.process).not.toHaveBeenCalled();
+      expect(context.client.createInstallation).toHaveBeenCalledTimes(1);
+    }
+  });
   it('GET detalle conserva el ID tecnico como referencia exclusiva de G3', async () => {
     const context = setup();
     await context.service.requestInstallation({ idProspecto: 10 }, user);
@@ -702,7 +771,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
         equipos_instalados: [], equipos_retirados: [],
         fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77,
         potencia_optica_dbm: -19.4, resultado_llamada: 'CONTACTADO',
-        resuelto_remotamente: false, materiales: [{ nombre: 'Conector' }],
+        resuelto_remotamente: false, materiales: [{ id_tipo_equipo: 7, nombre: 'Conector', cantidad: 1 }],
       },
     });
 
@@ -711,7 +780,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     expect(context.closure.process).toHaveBeenCalledWith(expect.objectContaining({
       fecha_completada: '2026-10-07T12:00:00.000Z', id_tecnico: 77,
       potencia_optica_dbm: -19.4, resultado_llamada: 'CONTACTADO',
-      resuelto_remotamente: false, materiales: [{ nombre: 'Conector' }],
+      resuelto_remotamente: false, materiales: [{ id_tipo_equipo: 7, nombre: 'Conector', cantidad: 1 }],
     }), 'RECONCILIACION', 1);
   });
   it('41. GET cierre aun no disponible no activa', async () => {
@@ -729,7 +798,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
     context.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_TIMEOUT', null, true, 'Timeout'));
     await expect(context.service.reconcile(1, user)).rejects.toThrow('Timeout'); expect(context.closure.process).not.toHaveBeenCalled();
   });
-  it.each(['ASIGNADA', 'EN_CURSO'])('44. reconciliacion no procesa %s como COMPLETADA si un backend legacy lo expone', async estado => {
+  it.each(['ASIGNADA', 'EN_CURSO', 'PENDIENTE_APROBACION', '', null, 0])('44. reconciliacion no procesa %s como COMPLETADA si un backend legacy lo expone', async estado => {
     const context = setup(); await context.service.requestInstallation({ idProspecto: 10 }, user);
     const tracking = context.getStored();
     context.client.getWorkOrderClosure.mockResolvedValue({

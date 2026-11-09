@@ -39,6 +39,7 @@ function persistence(customerStatus = 'Moroso') {
     if (key === 'OR') return condition.some((clause: any) => matches(row, clause));
     if (condition && typeof condition === 'object') {
       if ('in' in condition) return condition.in.includes(row[key]);
+      if ('notIn' in condition) return !condition.notIn.includes(row[key]);
       if ('not' in condition) return row[key] !== condition.not;
     }
     return row[key] === condition;
@@ -46,7 +47,9 @@ function persistence(customerStatus = 'Moroso') {
   const models = (tables: typeof state): any => Object.fromEntries(Object.keys(tables).map(name => [name, {
     findUnique: jest.fn(async ({ where }: any) => tables[name].find(row => matches(row, where)) ?? null),
     findFirst: jest.fn(async ({ where }: any) => tables[name].find(row => matches(row, where)) ?? null),
-    findMany: jest.fn(async ({ where = {} }: any = {}) => tables[name].filter(row => matches(row, where))),
+    findMany: jest.fn(async ({ where = {} }: any = {}) => tables[name].filter(row => matches(row, where))
+      // Prisma entrega Date; el almacén JSON sintético conserva su serialización.
+      .map(row => name === 'ordenTrabajo' ? { ...row, fechaCompletada: row.fechaCompletada ? new Date(row.fechaCompletada) : null } : row)),
     update: jest.fn(async ({ where, data }: any) => {
       writes.push(`${name}.update`);
       const row = tables[name].find(value => matches(value, where));
@@ -62,6 +65,13 @@ function persistence(customerStatus = 'Moroso') {
     }),
   }]));
   const db = models(state);
+  // La lectura histórica vigente consulta cierre_equipos, no inventario físico.
+  db.$queryRaw = jest.fn(async (strings: TemplateStringsArray) => {
+    if (!strings.join('').includes('FROM public.categoria_falla AS c')) return [];
+    const tipoDisponible = state.categoriaFalla.some(row => Object.prototype.hasOwnProperty.call(row, 'tipo'));
+    return state.categoriaFalla.map(row => ({ ...row, tipoDisponible,
+      tipo: tipoDisponible ? (Object.prototype.hasOwnProperty.call(row, 'tipo') ? row.tipo : 'INTERNA') : null }));
+  });
   db.$transaction = jest.fn(async (callback: (tx: any) => Promise<any>) => {
     const draft = clone(state);
     const result = await callback(models(draft));
@@ -102,6 +112,69 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     .map(name => [name, store.state[name]])));
   const assertNoTechnicalWrites = () => expect(store.writes.filter(name => !name.startsWith('ticket.') && !name.startsWith('logAuditoria.'))).toEqual([]);
 
+  it('catálogo HTTP conserva técnicos, IDs y SLA y distingue las siete atenciones por nombre', async () => {
+    await start();
+    const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+      'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+    store.state.categoriaFalla.push(...names.map((nombre, i) => ({ idCategoria: 731 + i * 13,
+      nombre: nombre.toUpperCase(), slaHoras: 12 })), { idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    store.state.ticket[0].idCategoria = 309;
+    store.state.ticket[0].estado = 'DERIVADO_OT';
+    const before = clone(store.state);
+    for (const company of [1, 2]) {
+      const { body } = await send('get', 'tickets/categories', company).expect(200);
+      expect(body.filter((row: any) => row.nombreAtencion).map((row: any) => row.nombreAtencion)).toEqual(names);
+      expect(body.find((row: any) => row.idCategoria === 309)).toEqual({ idCategoria: 309,
+        nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2, nombreAtencion: null, tipo: null, tipoDisponible: false });
+    }
+    const { body } = await send('get', 'tickets', 1).expect(200);
+    expect(body[0].categoria).toEqual({ idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('alta HTTP conserva el ID numérico y rechaza categorías técnicas o nombres libres', async () => {
+    await start();
+    Object.assign(store.state.cliente[0], { rut: '11111111-1', contratos: [], servicios: [] });
+    store.state.categoriaFalla.push({ idCategoria: 914, nombre: 'CONSULTA GENERAL', slaHoras: 12 },
+      { idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
+    const body = { rut: '11111111-1', idCategoria: 914, prioridad: 'Media', descripcion: 'Consulta sintética QA' };
+    const before = protectedState();
+    await send('post', 'tickets', 1, { ...body, idCategoria: 309 }).expect(400);
+    await send('post', 'tickets', 1, { ...body, idCategoria: 'Consulta general' }).expect(400);
+    await send('post', 'tickets', 1, { ...body, categoria: 'Consulta general' }).expect(400);
+    expect(store.writes).toEqual([]);
+    const created = await send('post', 'tickets', 1, body).expect(201);
+    expect(created.body).toMatchObject({ idCategoria: 914, idEmpresa: 1, estado: 'Abierto' });
+    expect(protectedState()).toEqual(before);
+    expect(store.writes).toEqual(['ticket.create', 'logAuditoria.create']);
+  });
+
+  it('HTTP: tipo global gobierna las altas sin ocultar categorías históricas ni escribir al consultar', async () => {
+    await start();
+    Object.assign(store.state.cliente[0], { rut: '11111111-1', contratos: [], servicios: [] });
+    store.state.categoriaFalla.push({ idCategoria: 900, nombre: 'Consulta general', tipo: 'ATENCION', slaHoras: 12 },
+      { idCategoria: 901, nombre: 'Mudanza', tipo: 'TECNICA', slaHoras: 4 },
+      { idCategoria: 902, nombre: 'Asistente virtual', tipo: 'INTERNA', slaHoras: 3 });
+    const before = clone(store.state);
+    const catalog = await send('get', 'tickets/categories', 1).expect(200);
+    expect(catalog.body.filter((row: any) => row.nombreAtencion).map((row: any) => row.idCategoria)).toEqual([900]);
+    expect(catalog.body.find((row: any) => row.idCategoria === 902)).toMatchObject({ nombre: 'Asistente virtual', tipo: 'INTERNA', nombreAtencion: null });
+    const body = { rut: '11111111-1', prioridad: 'Media', descripcion: 'Consulta sintética QA' };
+    await send('post', 'tickets', 1, { ...body, idCategoria: 901 }).expect(400);
+    await send('post', 'tickets', 1, { ...body, idCategoria: 902 }).expect(400);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+    const created = await send('post', 'tickets', 1, { ...body, idCategoria: 900 }).expect(201);
+    expect(created.body.idCategoria).toBe(900);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 902 }).expect(400);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 901 }).expect(200);
+    expect(store.state.ticket[0].idCategoria).toBe(901);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 902 }).expect(400);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 901 }).expect(200);
+    expect(store.state.ticket[0].idCategoria).toBe(901);
+  });
+
   it.each([1, 2].flatMap(company => ['Activo', 'Moroso', 'Suspendido'].flatMap(estado =>
     ['Activo', 'En Mantencion'].map(observed => ({ company, estado, observed })))))
   ('diagnostico empresa $company, cliente $estado y observacion $observed: solo ticket y auditoria', async ({ company, estado, observed }) => {
@@ -131,6 +204,51 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(500);
     expect(store.state).toEqual(before);
     assertNoTechnicalWrites();
+  });
+
+  it('OT COMPLETADA no aparece abierta y admite solo el cierre comercial autorizado', async () => {
+    for (const company of [1, 2]) for (const action of ['diagnosis', 'Resuelto', 'Cerrado']) {
+      await start('Moroso');
+      store.state.ordenTrabajo[company - 1].estado = 'COMPLETADA';
+      const before = protectedState();
+      const listed = await send('get', 'tickets', company).expect(200);
+      expect(listed.body[0]).toMatchObject({ hasOpenWorkOrder: false });
+      expect(listed.body[0].workOrders[0].estado).toBe('COMPLETADA');
+      expect(store.writes).toEqual([]);
+      expect(protectedState()).toEqual(before);
+      if (action === 'diagnosis') await send('post', `tickets/${company}/diagnosis`, company, diagnosis).expect(201);
+      else await send('patch', `tickets/${company}/status`, company, { estado: action }).expect(200);
+      expect(protectedState()).toEqual(before);
+      assertNoTechnicalWrites();
+      await app.close();
+    }
+  });
+
+  it('OT finalizada no oculta otra EN_CURSO, cancelada o de estado no reconocido', async () => {
+    await start('Suspendido');
+    store.state.ordenTrabajo[0].estado = 'COMPLETADA';
+    store.state.ordenTrabajo.push({ ...store.state.ordenTrabajo[0], idOt: 3, estado: 'EN_CURSO' });
+    for (const state of ['EN_CURSO', 'CANCELADA', 'PENDIENTE_APROBACION', 'desconocido', 'completada']) {
+      store.state.ordenTrabajo[2].estado = state;
+      const before = clone(store.state);
+      const listed = await send('get', 'tickets', 1).expect(200);
+      expect(listed.body[0].hasOpenWorkOrder).toBe(true);
+      await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(400);
+      await send('patch', 'tickets/1/status', 1, { estado: 'Cerrado' }).expect(400);
+      expect(store.state).toEqual(before);
+      expect(store.writes).toEqual([]);
+    }
+  });
+
+  it('ticket tecnico sigue solo lectura aunque todas sus OT esten COMPLETADA', async () => {
+    await start();
+    store.state.ordenTrabajo[0].estado = 'COMPLETADA';
+    store.state.ticket[0].estado = 'RESUELTO';
+    const before = clone(store.state);
+    await send('post', 'tickets/1/diagnosis', 1, diagnosis).expect(409);
+    await send('patch', 'tickets/1/status', 1, { estado: 'Cerrado' }).expect(409);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
   });
 
   it('diagnostico sin OT sigue resolviendo solo el ticket', async () => {
@@ -240,6 +358,30 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     const orders = await send('get', 'work-orders', company).expect(200);
     expect(orders.body).toHaveLength(1);
     expect(orders.body[0].idEmpresa).toBe(company);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+  });
+
+  it('ticket G3 compartido: API permite consulta y rechaza ediciones incluso administrador', async () => {
+    await start();
+    store.state.ticket[0].estado = 'DERIVADO_OT';
+    store.state.ticket[0].origen = 'CRM';
+    const before = clone(store.state);
+    const visible = await send('get', 'tickets', 1).expect(200);
+    expect(visible.body[0]).toMatchObject({ estado: 'DERIVADO_OT', estadoPresentacion: 'Derivado a OT',
+      vocabularioEstado: 'G3', soloLecturaTecnica: true });
+    for (const role of ['Soporte', 'Administrador']) {
+      for (const [path, method, body] of [
+        ['category', 'patch', { idCategoria: 2 }], ['priority', 'patch', { prioridad: 'Alta' }],
+        ['status', 'patch', { estado: 'Resuelto' }], ['diagnosis', 'post', diagnosis],
+        ['technical-notes', 'post', { observacion: 'Nota QA' }],
+      ] as const) {
+        const response = await send(method, `tickets/1/${path}`, 1, body, role).expect(409);
+        expect(response.body.code).toBe('G3_TICKET_READ_ONLY');
+      }
+    }
+    await send('patch', 'tickets/1/status', 2, { estado: 'Resuelto' }).expect(400);
+    await send('post', 'tickets/1/diagnosis', 1, diagnosis, 'JEFE_TECNICO').expect(403);
     expect(store.state).toEqual(before);
     expect(store.writes).toEqual([]);
   });

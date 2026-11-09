@@ -16,6 +16,14 @@ function setup() {
 }
 
 describe('Etapa 4 - consultas G1 con scope', () => {
+  it('conserva cero equipos oficiales sin fallback a OT ni requerir tracking de activación', async () => {
+    const { service, prisma, client } = setup();
+    client.getEquipmentByService.mockResolvedValue({ status: 200, durationMs: 1, data: [] });
+    await expect(service.equipmentByService(20, support)).resolves.toMatchObject({ fuente: 'G1', data: [] });
+    expect(client.getEquipmentByService).toHaveBeenCalledWith(20, 1);
+    expect(prisma).not.toHaveProperty('integracionActivacionG1');
+    expect(prisma).not.toHaveProperty('ordenTrabajo');
+  });
   it('lista equipos por servicio con garantía física y fuente G1', async () => {
     const { service, client, prisma } = setup();
     await expect(service.equipmentByService(20, support)).resolves.toMatchObject({
@@ -37,6 +45,20 @@ describe('Etapa 4 - consultas G1 con scope', () => {
     const { service, client } = setup();
     await expect(service.equipmentByService(20, { ...support, idEmpresa: 2 })).rejects.toBeInstanceOf(NotFoundException);
     expect(client.getEquipmentByService).not.toHaveBeenCalled();
+  });
+
+  it('cliente compartido no mezcla el scope del servicio de la segunda empresa', async () => {
+    const { service, client, prisma } = setup();
+    prisma.servicioContratado.findUnique.mockResolvedValue({ idServicio: 20, idCliente: 10, idEmpresa: 2 });
+    client.getEquipmentByService.mockResolvedValue({ status: 200, durationMs: 1, data: [] });
+    await expect(service.equipmentByService(20, { ...support, idEmpresa: 2 })).resolves.toMatchObject({ fuente: 'G1', data: [] });
+    expect(client.getEquipmentByService).toHaveBeenCalledWith(20, 2);
+  });
+
+  it('no presenta equipos de otra empresa como asignados al servicio consultado', async () => {
+    const { service, client } = setup();
+    client.getEquipmentByService.mockResolvedValue({ status: 200, durationMs: 1, data: [{ numero_serie: 'OTRA-EMPRESA', id_empresa: 2, estado: 'Instalado en cliente' }] });
+    await expect(service.equipmentByService(20, support)).rejects.toMatchObject({ status: 403 });
   });
 
   it('rechaza respuesta G1 que cruce empresas', async () => {

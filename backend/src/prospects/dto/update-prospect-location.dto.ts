@@ -1,8 +1,9 @@
 import { Type } from 'class-transformer';
-import { IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsDefined, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { CoverageLocationDto } from '../../coverage/coverage.dto';
 
 export class UpdateProspectLocationDto {
+  @IsDefined()
   @ValidateNested()
   @Type(() => CoverageLocationDto)
   ubicacion!: CoverageLocationDto;

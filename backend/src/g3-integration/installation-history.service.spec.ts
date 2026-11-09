@@ -12,12 +12,28 @@ function fixture(date: string | null = '2026-10-01T12:00:00Z', company = 1) {
 }
 type Remote = ReturnType<typeof fixture>;
 function setup(remote: Remote[], local: unknown[] = []) {
-  const prisma = { ordenTrabajo: { findMany: jest.fn().mockResolvedValue(local) },
+  const rows = local.map(row => ({ tipoOt: 'Instalacion', estado: 'Completada', ...(row as object) }));
+  const prisma = { ordenTrabajo: { findMany: jest.fn().mockResolvedValue(rows) }, $queryRaw: jest.fn().mockResolvedValue([]),
     integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue(remote) },
     $transaction: jest.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)) };
   return { prisma, service: new InstallationHistoryService(prisma as unknown as PrismaService) };
 }
 describe('historial persistido de instalaciones', () => {
+  it('OT 2 global sin servicio aparece una vez como histórica, no como tracking G3 ni asignación G1', async () => {
+    const order = { idOt: 2, tipoOt: 'INSTALACION', estado: 'COMPLETADA', idEmpresa: 1, idServicio: null, idCliente: null,
+      servicio: null, fechaCompletada: new Date('2026-10-02T12:00:00Z'), potenciaOpticaDbm: -19.5, idTecnico: 8 };
+    const { service, prisma } = setup([], [order, { ...order, idOt: 1, tipoOt: 'REPARACION' }, { ...order, idOt: 3, tipoOt: 'REPARACION' }]);
+    prisma.$queryRaw.mockResolvedValue([{ idEmpresa: 1, idOt: 2, cierreEquipos: { instalados: [{ numero_serie: 'ONT-OT-QA' }], retirados: [] } }]);
+    const { items } = await service.list(user);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ key: '1:2', fuente: 'LEGACY_LOCAL', idServicio: null, idContrato: null,
+      fechasTecnicasOriginales: ['2026-10-02T12:00:00.000Z'], solicitudesG3: [],
+      antecedentesTecnicos: [{ idOt: 2, potenciaOpticaDbm: -19.5, idTecnicoRegistrado: 8,
+        equiposDeclarados: { instalados: ['ONT-OT-QA'], retirados: [] }, asignacionInventarioConfirmada: false }] });
+    expect(prisma.ordenTrabajo.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idEmpresa: 1,
+      tipoOt: { in: ['Instalacion', 'Instalación'], mode: 'insensitive' } } }));
+    expect(prisma).not.toHaveProperty('unidadEquipo');
+  });
   beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-11-03T12:00:00Z')); });
   afterEach(() => jest.useRealTimers());
   it('expone cierre G3 sin OT local, fecha original y trazas sin payload ni PII', async () => {
