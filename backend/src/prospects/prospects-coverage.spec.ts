@@ -40,6 +40,30 @@ describe('Factibilidad geografica en prospectos', () => {
     return { service, prisma, coverage, audit };
   }
 
+  it('edita datos de contacto sin exigir ubicación ni alterar factibilidad', async () => {
+    const { service, prisma, coverage, audit } = setup();
+    const result = await service.update(7, { nombreCompleto: 'Contacto QA', telefono: '+56900000003', email: null }, user);
+    expect(result).toMatchObject({ nombreCompleto: 'Contacto QA', telefono: '+56900000003', email: null, estadoPipeline: 'Prospecto Nuevo' });
+    expect(coverage.check).not.toHaveBeenCalled();
+    expect(prisma.prospecto.update.mock.calls[0][0].data).not.toHaveProperty('latitud');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DATOS_PROSPECTO' }), prisma);
+  });
+
+  it('rechaza una edición de contacto si se crea un contrato concurrentemente', async () => {
+    const { service, prisma } = setup();
+    prisma.contrato.findFirst.mockResolvedValue({ idContrato: 30 });
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 400 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
+  it('detecta cambios concurrentes del contacto y conserva los datos', async () => {
+    const { service, prisma } = setup();
+    const original = await prisma.prospecto.findUnique();
+    prisma.prospecto.findUniqueOrThrow.mockResolvedValue({ ...original, telefono: '+56900000009' });
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 409 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
   it('crea como Factible dentro de cobertura general y genera evidencia interna', async () => {
     const { service, prisma, coverage, audit } = setup();
     const result = await service.create(input, user);

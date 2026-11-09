@@ -24,6 +24,7 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { UpdateProspectDto } from './dto/update-prospect.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidate, readG2OriginAudits } from './g2-prospect-review';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
@@ -369,11 +370,22 @@ export class ProspectsService {
   }
 
   async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
+    return this.update(idProspecto, dto, currentUser);
+  }
+
+  async update(idProspecto: number, dto: UpdateProspectDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     if (prospect.estadoPipeline === 'NUEVO') {
       throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
     }
-    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
+    this.assertFeasibilityStage(prospect.estadoPipeline);
+    const addressChanged = (dto.direccion !== undefined && dto.direccion.trim() !== prospect.direccion)
+      || (dto.comuna !== undefined && (dto.comuna.trim() || null) !== prospect.comuna)
+      || (dto.region !== undefined && (dto.region.trim() || null) !== prospect.region);
+    if (addressChanged && !dto.ubicacion) throw new BadRequestException('Selecciona la ubicación de la dirección antes de guardar');
+    const cobertura = dto.ubicacion
+      ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
+      : null;
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
@@ -384,16 +396,23 @@ export class ProspectsService {
       if (previous.idEmpresa !== prospect.idEmpresa || previous.idCliente !== prospect.idCliente
         || previous.estadoPipeline !== prospect.estadoPipeline || previous.direccion !== prospect.direccion
         || previous.comuna !== prospect.comuna || previous.region !== prospect.region
-        || previous.latitud !== prospect.latitud || previous.longitud !== prospect.longitud) {
+        || previous.latitud !== prospect.latitud || previous.longitud !== prospect.longitud
+        || previous.nombreCompleto !== prospect.nombreCompleto || previous.telefono !== prospect.telefono
+        || previous.email !== prospect.email || previous.origenContacto !== prospect.origenContacto) {
         throw new ConflictException('El prospecto cambió durante la edición de ubicación; vuelve a consultarlo');
       }
       if (previous.idCliente != null) throw new BadRequestException('La ubicación de clientes convertidos requiere su flujo autorizado');
       const updated = await tx.prospecto.update({
         where: { idProspecto },
         data: {
-          latitud: dto.ubicacion.latitud,
-          longitud: dto.ubicacion.longitud,
-          idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+          ...(dto.ubicacion && cobertura ? {
+            latitud: dto.ubicacion.latitud, longitud: dto.ubicacion.longitud,
+            idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+          } : {}),
+          ...(dto.nombreCompleto !== undefined ? { nombreCompleto: dto.nombreCompleto.trim() } : {}),
+          ...(dto.telefono !== undefined ? { telefono: dto.telefono.trim() } : {}),
+          ...(dto.email !== undefined ? { email: dto.email?.trim().toLowerCase() || null } : {}),
+          ...(dto.origenContacto !== undefined ? { origenContacto: dto.origenContacto.trim() || null } : {}),
           ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
           ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
           ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
@@ -402,17 +421,20 @@ export class ProspectsService {
       });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario,
-        accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+        accion: dto.ubicacion ? 'ACTUALIZAR_UBICACION_PROSPECTO' : 'ACTUALIZAR_DATOS_PROSPECTO',
         entidadAfectada: 'prospecto',
         idEntidadAfectada: idProspecto,
         valorAnterior: { latitud: previous.latitud, longitud: previous.longitud, idZonaPago: previous.idZonaPago,
-          comuna: previous.comuna ?? null, region: previous.region ?? null },
+          comuna: previous.comuna ?? null, region: previous.region ?? null, direccion: previous.direccion,
+          nombreCompleto: previous.nombreCompleto, telefono: previous.telefono, email: previous.email, origenContacto: previous.origenContacto },
         valorNuevo: {
           latitud: updated.latitud,
           longitud: updated.longitud,
           idZonaPago: updated.idZonaPago,
-          estadoCobertura: cobertura.estado,
+          estadoCobertura: cobertura?.estado,
           comuna: updated.comuna ?? null, region: updated.region ?? null,
+          direccion: updated.direccion, nombreCompleto: updated.nombreCompleto,
+          telefono: updated.telefono, email: updated.email, origenContacto: updated.origenContacto,
         },
       }, tx);
       return { ...updated, cobertura };

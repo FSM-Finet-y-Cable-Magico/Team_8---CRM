@@ -1,3 +1,31 @@
+.prospect-workflow .prospect-overview { padding: 22px; border: 0; border-radius: 14px; background: #f7faf8; box-shadow: none; }
+.prospect-name-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.prospect-name-row h3 { overflow-wrap: anywhere; }
+.prospect-workflow .prospect-edit-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; min-width: 30px; min-height: 30px; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: #6d8177; box-shadow: none; }
+.prospect-workflow .prospect-edit-button:hover { color: #247c68; background: #e8f1ec; transform: none; }
+.prospect-edit-button:focus-visible { outline: 2px solid #247c68; outline-offset: 2px; }
+.prospect-edit-form { display: grid; gap: 18px; margin-top: 22px; }
+.prospect-edit-form fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.prospect-edit-form label { display: grid; gap: 7px; min-width: 0; color: #60756a; font-size: .78rem; font-weight: 600; }
+.prospect-edit-form input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #dce6df; border-radius: 8px; background: #fff; color: #263d31; }
+.prospect-field-wide { grid-column: 1 / -1; }
+.prospect-edit-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.prospect-edit-actions button { width: auto; min-height: 38px; padding: 9px 17px; box-shadow: none; }
+.prospect-workflow .prospect-coverage-card { padding: 6px 0 0; border: 0; background: transparent; box-shadow: none; }
+.prospect-workflow .coverage-minimal { display: grid; gap: 14px; min-width: 0; }
+.coverage-minimal .coverage-heading { padding: 0 2px; }
+.coverage-minimal .coverage-heading strong { font-size: .92rem; color: #3b5146; }
+.coverage-minimal .coverage-heading button { width: auto; padding: 8px 12px; font-size: .76rem; box-shadow: none; }
+.coverage-minimal .coverage-map { height: 320px; border-radius: 12px; }
+.coverage-minimal p { margin: 0; font-size: .8rem; }
+.coverage-manual-coordinates summary { cursor: pointer; color: #6d8177; font-size: .75rem; }
+.coverage-manual-coordinates label { font-size: .76rem; color: #60756a; }
+.coverage-manual-coordinates button { width: auto; }
+@media (max-width: 520px) {
+  .prospect-edit-form fieldset { grid-template-columns: 1fr; }
+  .prospect-workflow .prospect-overview { padding: 16px; }
+  .coverage-minimal .coverage-map { height: 260px; }
+}
 .prospect-commercial-section { display: grid; gap: 18px; min-width: 0; padding: 22px 4px 4px; background: transparent; }
 .prospect-commercial-section + .prospect-commercial-section { margin-top: 4px; padding-top: 26px; border-top: 1px solid #e3ebe7; }
 .prospect-commercial-section .prospect-action-header { align-items: center; gap: 12px; }
