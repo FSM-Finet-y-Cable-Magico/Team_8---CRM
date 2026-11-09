@@ -88,6 +88,7 @@ export function DashboardHome({
   billingOverview,
   permissions,
   onNavigate,
+  onOpenPendingInstallations,
 }: {
   summary: Summary | null;
   prospects: Prospect[];
@@ -97,6 +98,7 @@ export function DashboardHome({
   billingOverview: BillingOverview | null;
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
+  onOpenPendingInstallations?: (view: 'activation' | 'agenda') => void;
 }) {
   const [expiryFilter, setExpiryFilter] = useState<'overdue' | 'upcoming'>('upcoming');
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
@@ -116,12 +118,13 @@ export function DashboardHome({
       tab: 'prospects' as Tab,
     },
     {
-      label: 'Pendientes de activacion',
+      label: 'Pendientes de activación',
       value: summary?.metricas.pendientesActivacion ?? 0,
       description: 'Contratos firmados sin servicio activo',
       icon: CalendarPlus,
       tone: 'blue' as const,
       tab: 'customers' as Tab,
+      pendingView: 'activation' as const,
     },
     {
       label: 'Clientes activos',
@@ -134,10 +137,11 @@ export function DashboardHome({
     {
       label: 'Instalaciones pendientes',
       value: summary?.metricas.instalacionesPendientes ?? pendingInstallations,
-      description: 'Por coordinar o finalizar',
+      description: 'Órdenes técnicas abiertas',
       icon: Wrench,
       tone: 'blue' as const,
       tab: 'installations' as Tab,
+      pendingView: 'agenda' as const,
     },
     {
       label: 'Tickets abiertos',
@@ -281,7 +285,10 @@ export function DashboardHome({
 
       <section className="stat-grid">
         {stats.slice(0, 6).map((stat) => (
-          <DashboardStatCard key={stat.label} {...stat} onClick={() => onNavigate(stat.tab)} />
+          <DashboardStatCard key={stat.label} {...stat} onClick={() => {
+            if (stat.pendingView && onOpenPendingInstallations) onOpenPendingInstallations(stat.pendingView);
+            else onNavigate(stat.tab);
+          }} />
         ))}
       </section>
 

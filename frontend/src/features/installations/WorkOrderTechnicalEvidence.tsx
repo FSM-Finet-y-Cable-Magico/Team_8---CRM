@@ -2,7 +2,7 @@ import type { WorkOrderTechnicalEvidence as Evidence } from '../../api';
 
 export function WorkOrderTechnicalEvidence({ evidence }: { evidence?: Evidence }) {
   if (!evidence) return null;
-  return <section aria-label={`Antecedente técnico OT ${evidence.idOt}`}>
+  return <section className="installation-technical-evidence" aria-label={`Antecedente técnico OT ${evidence.idOt}`}>
     <h4>Antecedente técnico de OT {evidence.idOt}</h4>
     <dl>
       <div><dt>Fecha técnica registrada</dt><dd>{evidence.fechaCompletada ?? 'No registrada'}</dd></div>
