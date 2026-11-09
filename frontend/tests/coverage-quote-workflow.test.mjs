@@ -13,7 +13,7 @@ function load(file,mocks) {
     if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.startsWith('.'))throw Error(name);return require(name);
   },exports);return exports;
 }
-async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
+async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,canEdit=false,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
   t.mock.timers.enable({apis:['setTimeout']});
   const saved={window:globalThis.window,document:globalThis.document,ResizeObserver:globalThis.ResizeObserver};
   const events=new EventTarget();
@@ -56,7 +56,10 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     },patch:async(path,body)=>{calls.push({path,body});
       if(locationFailure)throw Error('QA location conflict');
       if(!path.endsWith('/location') && !/^\/prospects\/\d+$/.test(path))throw Error(path);
-      persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion'))};return {data:persisted};
+      const wasQuoted=persisted.estadoPipeline==='Cotizacion Enviada';
+      persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion')),
+        ...(wasQuoted?{estadoPipeline:coverageOutside?'No Factible':'Factible',cotizaciones:[]}: {})};
+      return {data:{...persisted,...(wasQuoted?{cobertura:{coberturaComercial:!coverageOutside,planes:coverageOutside?[]:[{idPlan:company,precioAplicable:19990}]}}:{})}};
     }};
   const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
@@ -65,7 +68,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     ...mocks,'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
   props={prospect:persisted,plans:[{idPlan:1,idEmpresa:1,activo:true,nombreComercial:'Internet QA 1'},{idPlan:2,idEmpresa:2,activo:true,nombreComercial:'Internet QA 2'},
     {idPlan:3,idEmpresa:company,activo:false,nombreComercial:'Inactivo'},{idPlan:4,idEmpresa:company,activo:true,nombreComercial:'Sin cotizar'}],
-    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:g2&&commercial},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
+    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:canEdit||(g2&&commercial)},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
   const mount=()=>create(React.createElement(Workflow,props),{createNodeMock:()=>({})});
   await act(async()=>{tree=mount();});
   const tick=async()=>{await act(async()=>{t.mock.timers.tick(350);});await act(async()=>{t.mock.timers.tick(0);});};await tick();
@@ -211,6 +214,16 @@ test('React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nuev
 test('React: cotizado sin cotización persistida, perdido y NO_FACTIBLE no fabrican autorización',async t=>{
   const h=await harness(t,{state:'Cotizacion Enviada'});assert.deepEqual(h.optionIds(1),[]);
   assert.equal(h.button('Confirmar contratación'),undefined);
+});
+test('React: editar después de cotizar invalida esa cotización y permite emitir otra',async t=>{
+  const h=await harness(t,{state:'Cotizacion Enviada',quoted:true,canEdit:true});
+  await act(async()=>h.button('Editar prospecto').props.onClick());
+  await h.changeField('Teléfono','+56900000007');await h.save();
+  assert.equal(h.persisted().estadoPipeline,'Factible');assert.deepEqual(h.persisted().cotizaciones,[]);
+  assert.ok(h.text().includes('La cotización anterior quedó invalidada'));
+  assert.deepEqual(h.optionIds(0),[1]);assert.equal(h.button('Confirmar contratación'),undefined);
+  await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());
+  assert.equal(h.persisted().estadoPipeline,'Cotizacion Enviada');assert.equal(h.persisted().cotizaciones.length,1);
 });
 test('React: contratación conserva comuna, omite ciudad y envía la fecha elegida en el calendario', async t => {
   const h = await harness(t, { state: 'Cotizacion Enviada', quoted: true });

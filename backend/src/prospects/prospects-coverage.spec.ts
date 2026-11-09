@@ -49,6 +49,31 @@ describe('Factibilidad geografica en prospectos', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DATOS_PROSPECTO' }), prisma);
   });
 
+  it('editar un prospecto cotizado invalida la cotización anterior y reinicia en Factible', async () => {
+    const { service, prisma, coverage, audit } = setup(true, 'Cotizacion Enviada');
+    const original = { ...await prisma.prospecto.findUnique(), latitud: location.latitud, longitud: location.longitud,
+      nombreCompleto: 'Prospecto cotizado', telefono: '+56912345678', email: 'qa@example.invalid', comuna: null, region: null };
+    prisma.prospecto.findUnique.mockResolvedValue(original);
+    prisma.prospecto.findUniqueOrThrow.mockResolvedValue(original);
+    const result = await service.update(7, { nombreCompleto: 'Prospecto actualizado', ubicacion: location }, user);
+
+    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
+    expect(prisma.cotizacion.updateMany).toHaveBeenCalledWith({ where: { idProspecto: 7 }, data: { factibilidadVerificada: false } });
+    expect(prisma.prospecto.update.mock.calls[0][0].data.estadoPipeline).toBe('Factible');
+    expect(result.estadoPipeline).toBe('Factible');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      valorNuevo: expect.objectContaining({ cotizacionesAnterioresInvalidas: true, estadoPipeline: 'Factible' }),
+    }), prisma);
+  });
+
+  it('no permite editar una cotización sin volver a validar la ubicación', async () => {
+    const { service, prisma, coverage } = setup(true, 'Cotizacion Enviada');
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 400 });
+    expect(coverage.check).not.toHaveBeenCalled();
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(prisma.cotizacion.updateMany).not.toHaveBeenCalled();
+  });
+
   it('rechaza una edición de contacto si se crea un contrato concurrentemente', async () => {
     const { service, prisma } = setup();
     prisma.contrato.findFirst.mockResolvedValue({ idContrato: 30 });

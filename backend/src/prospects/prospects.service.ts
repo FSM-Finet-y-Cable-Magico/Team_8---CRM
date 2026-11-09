@@ -375,13 +375,24 @@ export class ProspectsService {
 
   async update(idProspecto: number, dto: UpdateProspectDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const wasQuoted = prospect.estadoPipeline === QUOTE_SENT_PIPELINE_STATUS;
     if (prospect.estadoPipeline === 'NUEVO') {
       throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
     }
-    this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (!wasQuoted) this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (wasQuoted && !dto.ubicacion) {
+      throw new BadRequestException('Vuelve a comprobar la ubicación y cobertura antes de emitir otra cotización');
+    }
     const addressChanged = (dto.direccion !== undefined && dto.direccion.trim() !== prospect.direccion)
       || (dto.comuna !== undefined && (dto.comuna.trim() || null) !== prospect.comuna)
       || (dto.region !== undefined && (dto.region.trim() || null) !== prospect.region);
+    const quoteRelevantDataChanged = (dto.nombreCompleto !== undefined && dto.nombreCompleto.trim() !== prospect.nombreCompleto)
+      || (dto.telefono !== undefined && dto.telefono.trim() !== prospect.telefono)
+      || (dto.email !== undefined && (dto.email?.trim().toLowerCase() || null) !== prospect.email)
+      || (dto.origenContacto !== undefined && (dto.origenContacto.trim() || null) !== prospect.origenContacto)
+      || addressChanged
+      || (dto.ubicacion !== undefined && (dto.ubicacion.latitud !== prospect.latitud || dto.ubicacion.longitud !== prospect.longitud));
+    const restartQuoteFlow = wasQuoted && quoteRelevantDataChanged;
     if (addressChanged && !dto.ubicacion) throw new BadRequestException('Selecciona la ubicación de la dirección antes de guardar');
     const cobertura = dto.ubicacion
       ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
@@ -402,6 +413,11 @@ export class ProspectsService {
         throw new ConflictException('El prospecto cambió durante la edición de ubicación; vuelve a consultarlo');
       }
       if (previous.idCliente != null) throw new BadRequestException('La ubicación de clientes convertidos requiere su flujo autorizado');
+      if (restartQuoteFlow && dto.ubicacion) {
+        // Keep the old quote as history, but prevent it from being used to confirm
+        // a contract after any prospect data has changed.
+        await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      }
       const updated = await tx.prospecto.update({
         where: { idProspecto },
         data: {
@@ -416,6 +432,7 @@ export class ProspectsService {
           ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
           ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
           ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
+          ...(restartQuoteFlow ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
         },
         include: { empresa: true, zonaPago: true },
       });
@@ -435,6 +452,7 @@ export class ProspectsService {
           comuna: updated.comuna ?? null, region: updated.region ?? null,
           direccion: updated.direccion, nombreCompleto: updated.nombreCompleto,
           telefono: updated.telefono, email: updated.email, origenContacto: updated.origenContacto,
+          ...(restartQuoteFlow ? { cotizacionesAnterioresInvalidas: true, estadoPipeline: updated.estadoPipeline } : {}),
         },
       }, tx);
       return { ...updated, cobertura };

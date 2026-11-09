@@ -93,7 +93,8 @@ export function ProspectWorkflowPanel({
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(currentProspect.contratos?.length) || currentProspect.idCliente != null;
   const canVerify = permissions.verifyFeasibility || permissions.createProspects;
-  const canEditProspect = permissions.createProspects && !isWorkflowLocked && !isQuoted && FEASIBILITY_STAGES.includes(currentStatus);
+  const canEditProspect = permissions.createProspects && !isWorkflowLocked
+    && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada');
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
   const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked && !editingProspect && !savingProspect);
   const planOptions = plans.filter((plan) =>
@@ -198,9 +199,18 @@ export function ProspectWorkflowPanel({
         ...(location || addressChanged ? { direccion: prospectForm.direccion.trim(), comuna: prospectForm.comuna.trim(), region: prospectForm.region.trim() } : {}),
         ...(location ? { ubicacion: location } : {}),
       });
-      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data } });
+      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data,
+        ...(currentStatus === 'Cotizacion Enviada' && data.estadoPipeline !== 'Cotizacion Enviada' ? { cotizaciones: [] } : {}) } });
       setCoverage(data.cobertura ?? null); setCoverageSyncError(false);
-      setEditingProspect(false); setStatus('Datos del prospecto guardados.');
+      setQuotePlanId(''); setContractPlanId('');
+      setEditingProspect(false);
+      setStatus(currentStatus === 'Cotizacion Enviada'
+        ? data.estadoPipeline === 'Cotizacion Enviada'
+          ? 'No hubo cambios; la cotización sigue vigente.'
+          : data.estadoPipeline === 'Factible'
+          ? 'Datos guardados. La cotización anterior quedó invalidada; puedes generar una nueva.'
+          : 'Datos guardados. La nueva ubicación no tiene cobertura comercial factible.'
+        : 'Datos del prospecto guardados.');
       changedListener.current();
     } catch (error) { setStatus(apiErrorMessage(error)); setStatusIsError(true); }
     finally { setSavingProspect(false); }
