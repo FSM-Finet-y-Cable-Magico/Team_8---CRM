@@ -11,6 +11,7 @@ const FACTIBLE_STATUSES = ['Factible', 'Cotizacion Enviada', 'Contrato externo r
 const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Aceptado', 'Instalacion Programada', 'Servicio Activo'];
 const FINAL_PROSPECT_STATUSES = ['Perdido'];
 const LOSS_REASONS = ['Precio', 'Sin cobertura', 'Competencia', 'Falta de respuesta', 'Otro'];
+const FEASIBILITY_STAGES = ['Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible'];
 
 export function ProspectWorkflowPanel({
   prospect,
@@ -45,6 +46,12 @@ export function ProspectWorkflowPanel({
   const [synchronized, setSynchronized] = useState<{ source: Prospect; updated: Prospect } | null>(null);
   const [checkingCoverage, setCheckingCoverage] = useState(false);
   const [coverageSyncError, setCoverageSyncError] = useState(false);
+  const [originConfirmed, setOriginConfirmed] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const reviewPending = useRef(false);
+  const [editingLocation, setEditingLocation] = useState(false);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [geography, setGeography] = useState({ direccion: '', comuna: '', region: '' });
   const changedListener = useRef(onChanged);
   changedListener.current = onChanged;
   const currentProspect = synchronized?.source === prospect ? synchronized.updated : prospect;
@@ -59,6 +66,8 @@ export function ProspectWorkflowPanel({
     setCoverage(null);
     setSynchronized(null);
     setCoverageSyncError(false);
+    setOriginConfirmed(false);
+    setEditingLocation(false);
     setContractConfirmationDate(localDateValue());
     setContractObservation('');
     setContractComuna(prospect.comuna ?? '');
@@ -77,15 +86,16 @@ export function ProspectWorkflowPanel({
   }, [coverage]);
 
   const currentStatus = currentProspect.estadoPipeline ?? 'Prospecto Nuevo';
-  const requiresReview = prospect.requiereRevisionComercial === true;
+  const requiresReview = currentProspect.requiereRevisionComercial === true;
   const isFactible = !requiresReview && FACTIBLE_STATUSES.includes(currentStatus);
   const isQuoted = !requiresReview && QUOTED_STATUSES.includes(currentStatus);
   const isFinal = requiresReview || FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
-  const isWorkflowLocked = isFinal || Boolean(pendingContract);
+  const isWorkflowLocked = isFinal || Boolean(currentProspect.contratos?.length) || currentProspect.idCliente != null;
   const canVerify = permissions.verifyFeasibility || permissions.createProspects;
+  const canEditLocation = permissions.createProspects && !isWorkflowLocked && !isQuoted && FEASIBILITY_STAGES.includes(currentStatus);
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
-  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked);
+  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked && !editingLocation && !savingLocation);
   const planOptions = plans.filter((plan) =>
     plan.activo !== false && plan.idEmpresa === prospect.empresa?.idEmpresa && availablePlanIds?.includes(plan.idPlan),
   );
@@ -109,7 +119,8 @@ export function ProspectWorkflowPanel({
 
   useEffect(() => {
     setCoverageSyncError(false);
-    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted) { setCheckingCoverage(false); return; }
+    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted || editingLocation) { setCheckingCoverage(false); return; }
+    if (!hasSavedLocation && !canEditLocation) { setCheckingCoverage(false); setCoverageSyncError(true); return; }
     const nextStatus = coverage.coberturaComercial ? 'Factible' : 'No Factible';
     const zoneId = coverage.microzona?.idZonaPago ?? coverage.zona?.idZonaPago ?? null;
     if (hasSavedLocation && currentStatus === nextStatus && (currentProspect.idZonaPago ?? null) === zoneId) {
@@ -119,9 +130,14 @@ export function ProspectWorkflowPanel({
     setCheckingCoverage(true);
     // Persist only changed feasibility/location; opening or polling a modal must not create repeated checks in the history.
     const timer = window.setTimeout(() => {
-      void api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location, { signal: controller.signal })
-        .then(({ data }) => {
-          if (controller.signal.aborted) return;
+      const persistLocation = hasSavedLocation ? Promise.resolve() : api.patch(`/prospects/${prospect.idProspecto}/location`, { ubicacion: location }, { signal: controller.signal });
+      void persistLocation.then(() => {
+        if (controller.signal.aborted) return null;
+        return api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location, { signal: controller.signal });
+      })
+        .then(result => {
+          if (controller.signal.aborted || !result) return;
+          const { data } = result;
           setSynchronized({ source: prospect, updated: { ...prospect, ...data } });
           changedListener.current();
         })
@@ -131,7 +147,49 @@ export function ProspectWorkflowPanel({
         .finally(() => { if (!controller.signal.aborted) setCheckingCoverage(false); });
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, isWorkflowLocked, isQuoted, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
+  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, canEditLocation, isWorkflowLocked, isQuoted, editingLocation, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
+
+  async function approveG2Review() {
+    if (reviewPending.current || !permissions.createProspects || !currentProspect.revisionOrigenG2Disponible || !originConfirmed) return;
+    reviewPending.current = true;
+    setReviewing(true);
+    setStatus(''); setStatusIsError(false);
+    try {
+      const { data } = await api.post<Prospect>(`/prospects/${prospect.idProspecto}/g2-review`, {
+        confirmarOrigenG2: true,
+      });
+      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data } });
+      setStatus('Revisión aprobada. Completa la ubicación y verifica cobertura antes de cotizar.');
+      changedListener.current();
+    } catch (error) { setStatus(apiErrorMessage(error)); setStatusIsError(true); }
+    finally { reviewPending.current = false; setReviewing(false); }
+  }
+
+  function openLocationEditor() {
+    setGeography({ direccion: currentProspect.direccion ?? '', comuna: currentProspect.comuna ?? '', region: currentProspect.region ?? '' });
+    setEditingLocation(true);
+  }
+
+  async function saveLocation() {
+    if (!canEditLocation || savingLocation) return;
+    if (!geography.direccion.trim() || !location || !Number.isFinite(location.latitud) || !Number.isFinite(location.longitud)
+      || Math.abs(location.latitud) > 90 || Math.abs(location.longitud) > 180) {
+      setStatus('Indica una dirección y coordenadas válidas. Comuna y región deben registrarse explícitamente.');
+      setStatusIsError(true); return;
+    }
+    setSavingLocation(true); setStatusIsError(false);
+    const { latitud, longitud } = location;
+    try {
+      const { data } = await api.patch<Prospect & { cobertura?: CoverageResult }>(`/prospects/${prospect.idProspecto}/location`, {
+        ubicacion: { latitud, longitud }, direccion: geography.direccion.trim(), comuna: geography.comuna.trim(), region: geography.region.trim(),
+      });
+      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data } });
+      setLocation({ latitud, longitud }); setCoverage(data.cobertura ?? null); setCoverageSyncError(false);
+      setEditingLocation(false); setStatus('Ubicación registrada. La factibilidad se determina mediante cobertura comercial.');
+      changedListener.current();
+    } catch (error) { setStatus(apiErrorMessage(error)); setStatusIsError(true); }
+    finally { setSavingLocation(false); }
+  }
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
     setStatus('');
@@ -257,19 +315,40 @@ export function ProspectWorkflowPanel({
         </dl>
       </section>
 
+      {requiresReview && <section className="prospect-action-card" aria-label="Revisión comercial">
+        <p>Este registro requiere revisión comercial y no se habilita automáticamente por su estado histórico.</p>
+        {permissions.createProspects && currentProspect.revisionOrigenG2Disponible && <div className="stack">
+          <p>Existen auditorías originales de solicitud y privacidad de G2. Comprueba la empresa antes de aprobar. Esta acción no acredita factibilidad ni crea contratos o clientes.</p>
+          <label><input type="checkbox" checked={originConfirmed} onChange={event => setOriginConfirmed(event.target.checked)} disabled={reviewing} />Confirmo que verifiqué el origen G2 y la empresa de esta solicitud</label>
+          <button type="button" disabled={reviewing || !originConfirmed} onClick={() => void approveG2Review()}>Aprobar revisión G2</button>
+        </div>}
+      </section>}
+
+      {canEditLocation && <section className="prospect-action-card" aria-label="Datos de ubicación">
+        {!editingLocation ? <button type="button" onClick={openLocationEditor}>Editar ubicación</button> : <div className="stack">
+          <label>Dirección<input maxLength={200} value={geography.direccion} onChange={event => setGeography({ ...geography, direccion: event.target.value })} /></label>
+          <label>Comuna<input maxLength={80} value={geography.comuna} onChange={event => setGeography({ ...geography, comuna: event.target.value })} /></label>
+          <label>Región<input maxLength={80} value={geography.region} onChange={event => setGeography({ ...geography, region: event.target.value })} /></label>
+          <p>Selecciona el domicilio en el mapa o utiliza Ingresar coordenadas antes de guardar.</p>
+          <p>No se deducen comuna ni región de las coordenadas. No se modifican contratos firmados desde este formulario.</p>
+          <button type="button" disabled={savingLocation} onClick={() => void saveLocation()}>Guardar ubicación</button>
+          <button type="button" disabled={savingLocation} onClick={() => setEditingLocation(false)}>Cancelar edición de ubicación</button>
+        </div>}
+      </section>}
+
       <div className="workflow-grid prospect-action-grid">
         {(canVerify || permissions.generateQuotes || permissions.contractPlans) && prospect.empresa && (
           <section className="prospect-action-card prospect-coverage-card">
             <CoveragePicker
               key={prospect.idProspecto}
-              presentation="summary"
+              presentation={canEditLocation ? 'editor' : 'summary'}
               idEmpresa={prospect.empresa.idEmpresa}
-              direccion={[prospect.direccion, prospect.comuna, prospect.region, 'Chile'].filter(Boolean).join(', ')}
+              direccion={[editingLocation ? geography.direccion : currentProspect.direccion, editingLocation ? geography.comuna : currentProspect.comuna, editingLocation ? geography.region : currentProspect.region, 'Chile'].filter(Boolean).join(', ')}
               value={location}
               onChange={setLocation}
               onResult={setCoverage}
-              autoGeocode={Boolean(canVerify && !isWorkflowLocked && !isQuoted && prospect.direccion && prospect.comuna && prospect.region)}
-              disabled={!canVerify || isWorkflowLocked || isQuoted}
+              autoGeocode={Boolean(canEditLocation && !editingLocation && currentProspect.direccion && currentProspect.comuna && currentProspect.region)}
+              disabled={!canEditLocation}
             />
             {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>

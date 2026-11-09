@@ -64,6 +64,7 @@ export type Prospect = {
   ubicacionInstalacion?: { direccion: string | null; comuna: string | null; ciudad: string | null; fuenteComuna: string | null };
   cotizaciones?: Array<{ idCotizacion: number; idPlan: number; fechaEnvio: string }>;
   requiereRevisionComercial?: boolean;
+  revisionOrigenG2Disponible?: boolean;
   idProspecto: number;
   idCliente: number | null;
   rut: string | null;

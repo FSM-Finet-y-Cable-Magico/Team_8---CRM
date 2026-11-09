@@ -11,13 +11,17 @@ describe('Factibilidad geografica en prospectos', () => {
       prospecto: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(prospect),
+        findUniqueOrThrow: jest.fn(),
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
       },
       cliente: { findUnique: jest.fn().mockResolvedValue(null) },
       cotizacion: { updateMany: jest.fn() },
+      contrato: { findFirst: jest.fn().mockResolvedValue(null) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $transaction: jest.fn(),
     };
+    prisma.prospecto.findUniqueOrThrow.mockImplementation(async () => prisma.prospecto.findUnique());
     prisma.$transaction.mockImplementation(callback => callback(prisma));
     const coverage = { check: jest.fn().mockResolvedValue({
       estado: coberturaComercial ? 'FACTIBLE' : 'NO_FACTIBLE',
@@ -82,7 +86,7 @@ describe('Factibilidad geografica en prospectos', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
       accion: 'VERIFICAR_FACTIBILIDAD',
       valorNuevo: expect.objectContaining({ origen: 'COBERTURA_COMERCIAL' }),
-    }));
+    }), prisma);
   });
 
   it('el endpoint manual no puede marcar No Factible un punto dentro de cobertura', async () => {
@@ -128,6 +132,40 @@ describe('Factibilidad geografica en prospectos', () => {
     expect(prisma.cotizacion.updateMany).toHaveBeenCalledWith({ where: { idProspecto: 7 }, data: { factibilidadVerificada: false } });
     const feasibilityUpdate = prisma.prospecto.update.mock.calls.find(call => call[0].data.estadoPipeline === 'No Factible');
     expect(feasibilityUpdate?.[0].data.cotizaciones).toBeUndefined();
+  });
+
+  it('un contrato creado mientras se consulta cobertura bloquea la actualización sin escrituras parciales', async () => {
+    const { service, prisma } = setup();
+    prisma.contrato.findFirst.mockResolvedValue({ idContrato: 30 });
+    await expect(service.verifyTomodat(7, location, user)).rejects.toThrow('factibilidad contratada');
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(prisma.cotizacion.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([{ idEmpresa: 2 }, { estadoPipeline: 'Cotizacion Enviada' }, { latitud: -32 }])
+  ('cambio concurrente durante cobertura %j produce conflicto sin alterar estado', async change => {
+    const { service, prisma } = setup();
+    const original = await prisma.prospecto.findUnique();
+    prisma.prospecto.findUniqueOrThrow.mockResolvedValue({ ...original, ...change });
+    await expect(service.verifyTomodat(7, location, user)).rejects.toMatchObject({ status: 409 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['verifyTomodat', 'verifyFeasibility'] as const)('%s conserva el snapshot previo a consultar cobertura', async method => {
+    const { service, prisma, coverage } = setup();
+    const original = { ...await prisma.prospecto.findUnique(), ...location };
+    prisma.prospecto.findUnique.mockResolvedValue(original);
+    const checked = await coverage.check();
+    coverage.check.mockImplementation(async () => {
+      prisma.prospecto.findUnique.mockResolvedValue({ ...original, comuna: 'Otra comuna' });
+      return checked;
+    });
+    const operation = method === 'verifyTomodat'
+      ? service.verifyTomodat(7, location, user)
+      : service.verifyFeasibility(7, { resultado: 'Factible' }, user);
+    await expect(operation).rejects.toMatchObject({ status: 409 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(prisma.cotizacion.updateMany).not.toHaveBeenCalled();
   });
 
   it.each(['Cotizacion Enviada', 'Pendiente firma', 'Servicio Activo', 'Perdido'])('no retrocede procesos avanzados o cerrados (%s)', async status => {
