@@ -2,6 +2,10 @@
 
 Referencia de código: `4c3c0693275b66e98b1e5f9d623ad9612ac49953`.
 
+Actualización sobre `cccd6a07762b115b2356bba8e115e5c58a865d4b`: lectura de
+`tipo` y exclusión de internas de la clasificación manual. Resultados actuales,
+prueba PostgreSQL y pendientes G2/G3 en [el informe conjunto](g8-ticket-category-types-intergroup.md).
+
 ## Regla aplicada
 
 La lista de atención es la Tabla 11.9 del Documento 0 indicada por el propietario:
@@ -23,6 +27,9 @@ oficiales se muestran mediante una proyección, sin renombrar filas.
 Agrega `nombreAtencion`: etiqueta oficial o `null` para categorías ajenas a la
 lista o con nombre ambiguo. Si dos filas solo difieren por capitalización,
 ninguna se selecciona arbitrariamente para una nueva atención comercial.
+Agrega también `tipo` y `tipoDisponible`. Con la columna presente exige
+`tipo='ATENCION'`; solo una columna realmente ausente conserva la compatibilidad
+por los siete nombres. Un error SQL o un tipo inválido no habilita esa excepción.
 
 El formulario de alta usa únicamente filas con `nombreAtencion` y envía su
 `idCategoria` numérico. `POST /api/tickets` vuelve a consultar el catálogo y
@@ -36,14 +43,15 @@ muestra una advertencia. No se insertan filas ni se inventan asociaciones.
 
 - `TicketsService.list()` sigue resolviendo la categoría histórica por ID,
   independientemente de su elegibilidad para altas comerciales.
-- `TicketManagementModal.tsx` fue revisado y no necesita cambios: recibe el
-  catálogo completo y conserva una opción con la categoría actual cuando esta
-  falta del catálogo recibido. No se reclasifica un ticket al abrirlo.
-- La reclasificación autorizada de tickets existentes conserva su política
-  previa. Los estados técnicos/desconocidos siguen siendo de solo lectura.
+- `TicketManagementModal.tsx` recibe el catálogo completo pero excluye internas
+  de las opciones manuales. La categoría histórica actual sigue visible como
+  opción deshabilitada si no es seleccionable. No se reclasifica al abrirlo.
+- La reclasificación autorizada permite `ATENCION` y `TECNICA`; el backend
+  rechaza `INTERNA` y tipos inválidos. Los estados técnicos/desconocidos del
+  ticket siguen siendo de solo lectura. Cambiar prioridad no cambia categoría.
 - No se cambian tickets, FK, IDs, nombres técnicos, SLA ni esquemas.
 - El contrato G3 continúa usando `id_categoria`. No se modifica ni invoca G3.
-- La categoría técnica `CAMBIO_CREDENCIALES_WIFI` continúa disponible para
+- La categoría interna `CAMBIO_CREDENCIALES_WIFI` continúa disponible para
   consultas y para el resultado WiFi S2S G2 existente; queda fuera del alta
   comercial genérica. No se modifica la integración G2 ni sus operaciones
   financieras.
@@ -59,7 +67,7 @@ Un frontend antiguo contra el backend nuevo puede seguir mostrando categorías
 técnicas, pero el backend rechazará su uso en una nueva atención comercial.
 No actualizar las imágenes Docker como parte de esta corrección local.
 
-## Validación ejecutada
+## Validación inicial del commit cccd6a07
 
 Entorno sintético: mocks de persistencia y servidor HTTP Nest local; sin base
 de datos, `.env` privados, VPS ni proveedores. El runner bloquea destinos
@@ -102,9 +110,11 @@ contiene exactamente una fila por nombre oficial, sin diferencias salvo
 mayúsculas/minúsculas. Consulta propuesta, **no ejecutada**:
 
 ```sql
-SELECT id_categoria, nombre, sla_horas
-FROM public.categoria_falla
-ORDER BY id_categoria;
+SELECT c.id_categoria, c.nombre, c.sla_horas,
+       to_jsonb(c) ? 'tipo' AS tipo_disponible,
+       to_jsonb(c)->>'tipo' AS tipo
+FROM public.categoria_falla c
+ORDER BY c.id_categoria;
 ```
 
 Si falta una categoría o hay ambigüedad, resolver su gobierno con G2/G3 antes

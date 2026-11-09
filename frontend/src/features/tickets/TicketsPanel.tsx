@@ -27,7 +27,8 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
-  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion));
+  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion)
+    && (category.tipo === 'ATENCION' || (category.tipo == null && category.tipoDisponible !== true)));
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {

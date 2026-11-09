@@ -4,7 +4,7 @@ import { api, apiErrorMessage, type Ticket, type TicketCategory } from '../../ap
 import { formatDateTime, formatWorkOrderValue } from '../../lib';
 import type { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
-import { isCompletedTicketWorkOrder, isTechnicalTicketReadOnly, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
+import { isCompletedTicketWorkOrder, isGeneralTicketCategory, isTechnicalTicketReadOnly, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
 import './ticket-management.css';
 
 type Tab = 'management' | 'activity' | 'resolution';
@@ -41,6 +41,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
   const statusChanged = permissions.updateTicketStatus && draft.status !== saved.status;
   const hasChanges = categoryChanged || priorityChanged || statusChanged;
   const canManage = !technicalReadOnly && (permissions.classifyTickets || permissions.updateTicketStatus);
+  const generalCategories = categories.filter(isGeneralTicketCategory);
   const resolved = ['Resuelto', 'Cerrado'].includes(saved.status);
   const { report, activities } = ticketContent(ticket);
   const tabs = [
@@ -163,8 +164,8 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
           {canManage ? <fieldset className="ticket-fields" disabled={busy}>
             {permissions.classifyTickets ? <>
               <label>Categoría<select value={draft.category} onChange={event => setDraft({ ...draft, category: event.target.value })}>
-                {!categories.some(category => String(category.idCategoria) === draft.category) && <option value={draft.category}>{ticket.categoria?.nombre ?? 'Categoría actual'}</option>}
-                {categories.map(category => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+                {!generalCategories.some(category => String(category.idCategoria) === draft.category) && <option value={draft.category} disabled>{ticket.categoria?.nombre ?? 'Categoría actual'}</option>}
+                {generalCategories.map(category => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
               </select></label>
               <label>Prioridad<select value={draft.priority} onChange={event => setDraft({ ...draft, priority: event.target.value })}>{['Alta', 'Media', 'Baja'].map(value => <option key={value}>{value}</option>)}</select></label>
             </> : <div className="ticket-readonly ticket-field-wide"><span>Categoría: <strong>{ticket.categoria?.nombre ?? 'Sin categoría'}</strong></span><span>Prioridad: <StatusBadge value={formatWorkOrderValue(saved.priority)} /></span></div>}

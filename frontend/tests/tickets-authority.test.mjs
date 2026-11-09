@@ -75,8 +75,10 @@ test('alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del 
   const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
     'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
   const categories = [...names.map((nombreAtencion, i) => ({ idCategoria: 410 + i * 19,
-    nombre: nombreAtencion.toUpperCase(), nombreAtencion, slaHoras: 12 })),
-  { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null, slaHoras: 2 }];
+    nombre: nombreAtencion.toUpperCase(), nombreAtencion, slaHoras: 12, tipo: 'ATENCION', tipoDisponible: true })),
+  { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null, slaHoras: 2, tipo: 'TECNICA', tipoDisponible: true },
+  { idCategoria: 990, nombre: 'CAMBIO_CREDENCIALES_WIFI', nombreAtencion: null, tipo: 'INTERNA', tipoDisponible: true },
+  { idCategoria: 991, nombre: 'Asistente virtual', nombreAtencion: null, tipo: 'INTERNA', tipoDisponible: true }];
   const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 309,
     estado: 'DERIVADO_OT', categoria: categories[7] }], categories, permissions });
   const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
@@ -111,6 +113,21 @@ test('catálogo incompleto no inventa categorías y selección técnica manipula
   assert.match(ctx.text(), /Selecciona una categoría oficial/);
 });
 
+test('tipo clasificado bloquea selección comercial técnica o interna aunque llegue una etiqueta inconsistente', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 991,
+    categoria: { nombre: 'Asistente virtual' } }], categories: [
+    { idCategoria: 800, nombre: 'Consulta general', nombreAtencion: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true },
+    { idCategoria: 801, nombre: 'Mudanza', nombreAtencion: 'Mudanza', tipo: 'TECNICA', tipoDisponible: true },
+    { idCategoria: 802, nombre: 'Baja de servicio', nombreAtencion: 'Baja de servicio', tipo: 'INTERNA', tipoDisponible: true },
+    { idCategoria: 803, nombre: 'Falla de TV', nombreAtencion: 'Falla de TV', tipo: null, tipoDisponible: true },
+  ], permissions });
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  const options = form.findAllByType('select')[0].findAllByType('option').slice(1);
+  assert.deepEqual(options.map(node => node.props.value), [800]);
+  assert.match(ctx.text(), /Asistente virtual/); // Históricos internos siguen legibles.
+  assert.equal(ctx.calls.length, 0);
+});
+
 test('catálogo de backend anterior sin clasificación no ofrece IDs supuestos y conserva histórico', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
     { idCategoria: 309, nombre: 'FIBRA_CORTADA' },
@@ -121,6 +138,25 @@ test('catálogo de backend anterior sin clasificación no ofrece IDs supuestos y
   // El modal conserva la categoría histórica actual aunque no figure en el catálogo.
   assert.ok(ctx.tree.root.findAllByType('option').some(node => node.props.value === String(ticket.idCategoria) && textOf(node) === 'Soporte QA'));
   assert.equal(ctx.calls.length, 0);
+});
+
+test('gestión excluye internas de opciones manuales y conserva la categoría actual sin cambiarla', async t => {
+  const categories = [
+    { idCategoria: 800, nombre: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true },
+    { idCategoria: 801, nombre: 'FIBRA_CORTADA', tipo: 'TECNICA', tipoDisponible: true },
+    { idCategoria: 990, nombre: 'CAMBIO_CREDENCIALES_WIFI', tipo: 'INTERNA', tipoDisponible: true },
+    { idCategoria: 991, nombre: 'Asistente virtual', tipo: 'INTERNA', tipoDisponible: true },
+  ];
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, idCategoria: 991,
+    categoria: categories[3] }], categories, permissions });
+  const form = ctx.tree.root.findByProps({ id: 'ticket-panel-management' });
+  const options = form.findAllByType('select')[0].findAllByType('option');
+  assert.deepEqual(options.filter(node => !node.props.disabled).map(node => node.props.value), [800, 801]);
+  assert.ok(options.some(node => node.props.disabled && node.props.value === '991' && textOf(node) === 'Asistente virtual'));
+  assert.equal(ctx.calls.length, 0);
+  await ctx.change(form.findAllByType('select')[1], 'Alta');
+  await ctx.submit('Guardar cambios');
+  assert.deepEqual(ctx.calls, [['patch', '/tickets/1/priority', { prioridad: 'Alta' }]]);
 });
 
 test('Tickets separa gestion, seguimiento y resolucion con mensajes de produccion', async t => {

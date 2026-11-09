@@ -1,4 +1,10 @@
-import type { Ticket } from '../../api';
+import type { Ticket, TicketCategory } from '../../api';
+
+export function isGeneralTicketCategory(category: TicketCategory) {
+  if (['cambio_credenciales_wifi', 'asistente virtual'].includes(category.nombre.toLowerCase())) return false;
+  if (category.tipoDisponible === true || category.tipo != null) return ['ATENCION', 'TECNICA'].includes(category.tipo ?? '');
+  return true; // Catálogo local/anterior sin clasificación: conservar gestión histórica.
+}
 
 export type TicketActivity = {
   kind: 'note' | 'status' | 'diagnosis';

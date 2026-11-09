@@ -66,7 +66,12 @@ function persistence(customerStatus = 'Moroso') {
   }]));
   const db = models(state);
   // La lectura histórica vigente consulta cierre_equipos, no inventario físico.
-  db.$queryRaw = jest.fn().mockResolvedValue([]);
+  db.$queryRaw = jest.fn(async (strings: TemplateStringsArray) => {
+    if (!strings.join('').includes('FROM public.categoria_falla AS c')) return [];
+    const tipoDisponible = state.categoriaFalla.some(row => Object.prototype.hasOwnProperty.call(row, 'tipo'));
+    return state.categoriaFalla.map(row => ({ ...row, tipoDisponible,
+      tipo: tipoDisponible ? (Object.prototype.hasOwnProperty.call(row, 'tipo') ? row.tipo : 'INTERNA') : null }));
+  });
   db.$transaction = jest.fn(async (callback: (tx: any) => Promise<any>) => {
     const draft = clone(state);
     const result = await callback(models(draft));
@@ -120,7 +125,7 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
       const { body } = await send('get', 'tickets/categories', company).expect(200);
       expect(body.filter((row: any) => row.nombreAtencion).map((row: any) => row.nombreAtencion)).toEqual(names);
       expect(body.find((row: any) => row.idCategoria === 309)).toEqual({ idCategoria: 309,
-        nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2, nombreAtencion: null });
+        nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2, nombreAtencion: null, tipo: null, tipoDisponible: false });
     }
     const { body } = await send('get', 'tickets', 1).expect(200);
     expect(body[0].categoria).toEqual({ idCategoria: 309, nombre: 'CAMBIO_CREDENCIALES_WIFI', slaHoras: 2 });
@@ -143,6 +148,31 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
     expect(created.body).toMatchObject({ idCategoria: 914, idEmpresa: 1, estado: 'Abierto' });
     expect(protectedState()).toEqual(before);
     expect(store.writes).toEqual(['ticket.create', 'logAuditoria.create']);
+  });
+
+  it('HTTP: tipo global gobierna las altas sin ocultar categorías históricas ni escribir al consultar', async () => {
+    await start();
+    Object.assign(store.state.cliente[0], { rut: '11111111-1', contratos: [], servicios: [] });
+    store.state.categoriaFalla.push({ idCategoria: 900, nombre: 'Consulta general', tipo: 'ATENCION', slaHoras: 12 },
+      { idCategoria: 901, nombre: 'Mudanza', tipo: 'TECNICA', slaHoras: 4 },
+      { idCategoria: 902, nombre: 'Asistente virtual', tipo: 'INTERNA', slaHoras: 3 });
+    const before = clone(store.state);
+    const catalog = await send('get', 'tickets/categories', 1).expect(200);
+    expect(catalog.body.filter((row: any) => row.nombreAtencion).map((row: any) => row.idCategoria)).toEqual([900]);
+    expect(catalog.body.find((row: any) => row.idCategoria === 902)).toMatchObject({ nombre: 'Asistente virtual', tipo: 'INTERNA', nombreAtencion: null });
+    const body = { rut: '11111111-1', prioridad: 'Media', descripcion: 'Consulta sintética QA' };
+    await send('post', 'tickets', 1, { ...body, idCategoria: 901 }).expect(400);
+    await send('post', 'tickets', 1, { ...body, idCategoria: 902 }).expect(400);
+    expect(store.state).toEqual(before);
+    expect(store.writes).toEqual([]);
+    const created = await send('post', 'tickets', 1, { ...body, idCategoria: 900 }).expect(201);
+    expect(created.body.idCategoria).toBe(900);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 902 }).expect(400);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 901 }).expect(200);
+    expect(store.state.ticket[0].idCategoria).toBe(901);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 902 }).expect(400);
+    await send('patch', 'tickets/1/category', 1, { idCategoria: 901 }).expect(200);
+    expect(store.state.ticket[0].idCategoria).toBe(901);
   });
 
   it.each([1, 2].flatMap(company => ['Activo', 'Moroso', 'Suspendido'].flatMap(estado =>

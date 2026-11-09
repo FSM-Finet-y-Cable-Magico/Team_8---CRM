@@ -8,7 +8,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
-import { ticketAttentionCatalog } from './ticket-attention-categories';
+import { isGeneralTicketCategory, readTicketCategoryCatalog } from './ticket-attention-categories';
 import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
@@ -28,9 +28,8 @@ export class TicketsService {
   ) {}
 
   async categories() {
-    const categories = await this.prisma.categoriaFalla.findMany({ orderBy: { idCategoria: 'asc' } });
     // Catálogo completo para históricos; la proyección solo limita las altas CRM.
-    return ticketAttentionCatalog(categories);
+    return readTicketCategoryCatalog(this.prisma);
   }
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -160,10 +159,14 @@ export class TicketsService {
   async updateCategory(idTicket: number, dto: UpdateTicketCategoryDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
     this.assertCrmWrite(ticket.estado);
-    const category = await this.prisma.categoriaFalla.findUnique({ where: { idCategoria: dto.idCategoria } });
+    const category = (await this.categories()).find(row => row.idCategoria === dto.idCategoria);
 
     if (!category) {
       throw new BadRequestException('Categoria seleccionada invalida');
+    }
+
+    if (!isGeneralTicketCategory(category)) {
+      throw new BadRequestException('La categoría no está disponible para clasificación manual de tickets');
     }
 
     const updated = await this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria });

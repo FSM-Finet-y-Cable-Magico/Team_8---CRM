@@ -710,6 +710,8 @@ export type TicketCategory = {
   slaHoras: number | null;
   // Proyección de creación comercial. Los históricos conservan nombre e ID originales.
   nombreAtencion?: string | null;
+  tipo?: string | null;
+  tipoDisponible?: boolean;
 };
 
 export type Ticket = {

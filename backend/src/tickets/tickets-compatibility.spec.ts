@@ -27,7 +27,14 @@ function setup(estado = 'Abierto') {
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ idTicket: 10, ...data })) },
     ordenTrabajo: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn(),
   };
+  prisma.$queryRaw.mockImplementation(async () => {
+    const rows = await prisma.categoriaFalla.findMany();
+    const tipoDisponible = rows.some((row: any) => Object.prototype.hasOwnProperty.call(row, 'tipo'));
+    return rows.map((row: any) => ({ ...row, tipoDisponible,
+      tipo: tipoDisponible ? (Object.prototype.hasOwnProperty.call(row, 'tipo') ? row.tipo : 'INTERNA') : null }));
+  });
   prisma.$transaction.mockImplementation(callback => callback(prisma));
   const audit = { record: jest.fn() };
   return { prisma, audit, ticket, customer, service: new TicketsService(prisma as never, audit as never),
@@ -54,7 +61,7 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
     prisma.categoriaFalla.findMany.mockResolvedValue(rows);
     const catalog = await service.categories();
     expect(catalog.map(row => row.nombreAtencion).filter(Boolean)).toEqual(attentionNames);
-    expect(catalog.map(({ nombreAtencion: _label, ...row }) => row)).toEqual(rows);
+    expect(catalog.map(({ nombreAtencion: _label, ...row }) => row)).toEqual(rows.map(row => ({ ...row, tipo: null, tipoDisponible: false })));
     expect(catalog[7].nombreAtencion).toBeNull();
     expect(JSON.stringify(rows)).toBe(before);
     expect(prisma.ticket.create).not.toHaveBeenCalled();
@@ -96,6 +103,69 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
     expect(listed[0]).toMatchObject({ idCategoria: 1, categoria: { idCategoria: 1, nombre: 'FIBRA_CORTADA', slaHoras: 4 }, soloLecturaTecnica: true });
     expect(prisma.ticket.create).not.toHaveBeenCalled();
     expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('catálogo global clasificado ofrece ATENCION y conserva TECNICA e INTERNA para históricos', async () => {
+    const { service, prisma } = setup();
+    const rows = [...attentionNames.map((nombre, i) => ({ idCategoria: 430 + i * 23,
+      nombre: nombre.toUpperCase(), tipo: 'ATENCION', slaHoras: 12 })),
+    { idCategoria: 731, nombre: 'FIBRA_CORTADA', tipo: 'TECNICA', slaHoras: 4 },
+    { idCategoria: 915, nombre: 'CAMBIO_CREDENCIALES_WIFI', tipo: 'INTERNA', slaHoras: 3 },
+    { idCategoria: 999, nombre: 'Asistente virtual', tipo: 'INTERNA', slaHoras: 8 }];
+    prisma.categoriaFalla.findMany.mockResolvedValue(rows);
+    const catalog = await service.categories();
+    expect(catalog.filter(row => row.nombreAtencion).map(row => row.nombreAtencion)).toEqual(attentionNames);
+    expect(catalog).toEqual(rows.map((row, i) => ({ ...row, tipoDisponible: true, nombreAtencion: attentionNames[i] ?? null })));
+    expect(prisma.$queryRaw.mock.calls[0][0].join('')).toContain("to_jsonb(c)->>'tipo'");
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['TECNICA', 'INTERNA', 'DESCONOCIDA', 'atencion', null])
+  ('tipo %s no se convierte en ATENCION por el nombre ni habilita altas comerciales', async tipo => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 1, nombre: 'Consulta general', tipo }]);
+    expect((await service.categories())[0]).toMatchObject({ tipo, tipoDisponible: true, nombreAtencion: null });
+    await expect(service.create(request, operator)).rejects.toThrow('categoría oficial');
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('fallo de lectura no se interpreta como ausencia de tipo ni permite creación', async () => {
+    const { service, prisma, audit } = setup();
+    prisma.$queryRaw.mockRejectedValue(new Error('QA catalog unavailable'));
+    await expect(service.create(request, operator)).rejects.toThrow('QA catalog unavailable');
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('ATENCION con nombre ajeno o reservado no se ofrece por su tipo solamente', async () => {
+    const { service, prisma } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue(['Consulta inventada', 'CAMBIO_CREDENCIALES_WIFI', 'Asistente virtual']
+      .map((nombre, i) => ({ idCategoria: 400 + i, nombre, tipo: 'ATENCION' })));
+    expect((await service.categories()).every(row => row.nombreAtencion === null)).toBe(true);
+  });
+
+  it.each(['TECNICA', 'ATENCION'])('clasificación manual admite %s sin convertirla en alta comercial', async tipo => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 811, nombre: 'Falla de Internet', tipo }]);
+    await expect(service.updateCategory(10, { idCategoria: 811 }, operator)).resolves.toMatchObject({ idCategoria: 811 });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CLASIFICAR_TICKET' }));
+  });
+
+  it.each(['INTERNA', 'DESCONOCIDA', null])('clasificación manual no admite tipo %s ni modifica el ticket', async tipo => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 811, nombre: 'Uso reservado', tipo }]);
+    await expect(service.updateCategory(10, { idCategoria: 811 }, operator)).rejects.toThrow('clasificación manual');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it.each(['CAMBIO_CREDENCIALES_WIFI', 'Asistente virtual'])('base sin tipo no ofrece %s para reclasificación manual', async nombre => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 811, nombre }]);
+    await expect(service.updateCategory(10, { idCategoria: 811 }, operator)).rejects.toThrow('clasificación manual');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('consulta grafias validadas sin modificar la normalizacion ni aceptar RUT invalido', () => {
