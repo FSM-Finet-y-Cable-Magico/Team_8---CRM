@@ -53,7 +53,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
             <div><dt>Plan contratado</dt><dd>{contract?.plan?.nombreComercial ?? 'No registrado'}</dd></div>
             <div><dt>Contrato</dt><dd>#{contract?.idContrato ?? '-'}</dd></div>
             <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
-            <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
+            <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaEfectiva ?? contract?.fechaFirmaManual)}</dd></div>
             <div><dt>Dirección de instalación</dt><dd>{addressFor(selectedProspect)}</dd></div>
             <div><dt>Comuna</dt><dd>{selectedProspect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedProspect.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
             <div><dt>Ciudad</dt><dd>{selectedProspect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
@@ -72,7 +72,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
               <tbody>{activations.slice((page - 1) * pageSize, page * pageSize).map(prospect => { const signed = contractFor(prospect); return <tr key={prospect.idProspecto}>
                 <td><strong>{prospect.nombreCompleto ?? '-'}</strong><span>{prospect.rut ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? '-'}</span></td>
                 <td><strong>{signed?.plan?.nombreComercial ?? '-'}</strong><span>Contrato #{signed?.idContrato ?? '-'}</span></td>
-                <td>{formatDateOnly(signed?.fechaFirmaManual)}</td>
+                <td>{formatDateOnly(signed?.fechaFirmaEfectiva ?? signed?.fechaFirmaManual)}</td>
                 <td>{addressFor(prospect)}</td>
                 <td><button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedProspect(prospect)}>Gestionar</button></td>
               </tr>; })}</tbody>

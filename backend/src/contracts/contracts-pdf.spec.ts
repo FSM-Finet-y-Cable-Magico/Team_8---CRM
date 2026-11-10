@@ -34,7 +34,8 @@ function setup() {
     contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
     plan: { findUnique: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
     planZonaPrecio: { findFirst: jest.fn().mockResolvedValue({ precioMensual: '15990' }) },
-    contratoDigital: digital, $queryRaw: jest.fn(),
+    contratoDigital: digital, $queryRaw: jest.fn().mockResolvedValue([]),
+    logAuditoria: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   const prisma = {
     empresa: { findUnique: jest.fn().mockResolvedValue({ nombre: 'FiNet QA' }) },

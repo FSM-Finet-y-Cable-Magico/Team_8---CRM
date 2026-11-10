@@ -456,6 +456,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               workOrders={workOrders}
               inventory={inventory}
               canComplete={permissions.installEquipment}
+               canRequest={permissions.createInstallOrders}
               focusedProspectId={focusedInstallationProspectId}
               onFocusConsumed={() => setFocusedInstallationProspectId(null)}
               onChanged={() => void loadData()}

@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { assignAutomatic } from '../contracts/signature-policy';
+import { effectiveSignatureDates } from '../contracts/signature.repository';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
@@ -63,6 +66,7 @@ export class ProspectsService {
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
     private readonly coverageService: CoverageDomainService,
+    @Optional() private readonly signatureConfig?: ConfigService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -131,13 +135,17 @@ export class ProspectsService {
             servicios: { none: { estadoOperativo: { notIn: ['Pendiente Instalacion', 'Instalacion Programada'] } } },
           },
           include: { plan: true },
-          orderBy: { fechaFirmaManual: 'desc' },
+          orderBy: { idContrato: 'desc' },
         },
       },
     });
+    const effectiveDates = await effectiveSignatureDates(this.prisma, prospects.flatMap(p => p.contratos.map(c => c.idContrato)));
     return prospects.map((prospect) => {
       const contracts = prospect.contratos
         .filter((contract) => contract.idEmpresa === prospect.idEmpresa)
+        .map(contract => ({ ...contract, fechaFirmaEfectiva: effectiveDates.get(contract.idContrato) ?? contract.fechaFirmaManual,
+          origenFirma: effectiveDates.has(contract.idContrato) ? 'ELECTRONICA' : contract.fechaFirmaManual ? 'MANUAL' : 'SIN_FECHA' }))
+        .sort((a,b) => (b.fechaFirmaEfectiva?.getTime() ?? -1) - (a.fechaFirmaEfectiva?.getTime() ?? -1) || b.idContrato-a.idContrato)
         .slice(0, 1)
         .map((contract) => ({
           ...contract,
@@ -806,6 +814,7 @@ export class ProspectsService {
           }).catch((error: unknown) => this.rethrowConcurrentChange(error))
         : await tx.contrato.create({ data: contractData });
 
+      await assignAutomatic(tx, contrato, this.signatureConfig, currentUser.idUsuario);
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {

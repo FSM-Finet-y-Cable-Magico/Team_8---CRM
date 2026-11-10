@@ -1,0 +1,11 @@
+{
+  "diff_check": true,
+  "staging_empty": true,
+  "shared_base_unchanged": true,
+  "source_manifest_matches": true,
+  "head_unchanged": true,
+  "tracked_env_templates_only": true,
+  "private_paths_ignored": true,
+  "correccion-desde-bfeb69a.patch_reverse_check": true,
+  "candidato-desde-develop.patch_reverse_check": true
+}

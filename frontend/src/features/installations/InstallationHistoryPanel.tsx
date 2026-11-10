@@ -55,7 +55,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
     return companies.find(company => company.idEmpresa === row.idEmpresa)?.nombre ?? `Empresa ${row.idEmpresa}`;
   }
   function sourceLabel(row: HistoryRow) {
-    return row.fuente === 'LEGACY_LOCAL' ? 'Histórica / local' : 'Cierre confirmado G3';
+    return row.fuente === 'LEGACY_LOCAL' ? 'Histórica / local' : 'Cierre técnico confirmado';
   }
   function dateLabel(row: HistoryRow) {
     if (row.clasificacionFecha === 'REQUIERE_REVISION') return 'Requiere revisión';
@@ -79,7 +79,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
     {current?.data && <>
       <div className="installation-toolbar">
         <label className="installation-search"><Search size={16} aria-hidden="true" /><input autoFocus type="search" aria-label="Buscar en el historial de instalaciones" placeholder="Buscar cliente, orden o contrato" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} /></label>
-        <label>Origen <select aria-label="Origen del historial" value={source} onChange={event => { setSource(event.target.value); setPage(1); }}><option value="">Todos</option><option value="G3">Cierre confirmado G3</option><option value="LEGACY_LOCAL">Histórica / local</option></select></label>
+        <label>Origen <select aria-label="Origen del historial" value={source} onChange={event => { setSource(event.target.value); setPage(1); }}><option value="">Todos</option><option value="G3">Cierre técnico confirmado</option><option value="LEGACY_LOCAL">Histórica / local</option></select></label>
         <label>Fecha técnica <select aria-label="Fecha técnica" value={filter} onChange={event => { setFilter(event.target.value); setPage(1); }}>
           <option value="">Todas</option><option value="FECHA_TECNICA_CONFIRMADA">Con fecha técnica</option>
           <option value="PENDIENTE_FECHA_TECNICA">Pendiente de fecha técnica</option><option value="REQUIERE_REVISION">Requiere revisión</option>
@@ -124,7 +124,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
         <details className="installation-integration-details">
           <summary>Referencias y fechas originales</summary>
           <div>
-            <p>{selected.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin tracking G8–G3 confirmado' : 'Cierre de solicitud G8–G3 confirmado'}</p>
+            <p>{selected.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin solicitud de instalación confirmada' : 'Cierre de solicitud de instalación confirmado'}</p>
             <p>{selected.ordenesLocales.length ? `OT local: ${selected.ordenesLocales.join(', ')}` : 'Sin OT local'}</p>
             {selected.fechasTecnicasOriginales.map(date => <p key={date}>Fecha técnica original: <time dateTime={date}>{date}</time></p>)}
             {selected.solicitudesG3.length ? selected.solicitudesG3.map(request => <dl className="installation-request-reference" key={request.idIntegracion}>

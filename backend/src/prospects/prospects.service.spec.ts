@@ -141,13 +141,14 @@ describe('ProspectsService', () => {
     const foreign = { idContrato: 91, idEmpresa: 2, estado: 'Firmado', plan: { idEmpresa: 2 } };
     const own = { idContrato: 90, idEmpresa: 1, estado: 'Firmado', plan: { idEmpresa: 1 } };
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ available: false }]),
       empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1 }, { idEmpresa: 2 }]) },
       prospecto: { findMany: jest.fn().mockResolvedValue([{ idProspecto: 10, idEmpresa: 1, contratos: [foreign, own] }]) },
     };
     const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
       {} as MailService, {} as CoverageDomainService);
     const [result] = await service.listPendingActivation(admin);
-    expect(result.contratos).toEqual([own]);
+    expect(result.contratos).toEqual([expect.objectContaining({ ...own, origenFirma: 'SIN_FECHA' })]);
     const args = prisma.prospecto.findMany.mock.calls[0][0];
     expect(args.where.OR).toHaveLength(2);
     expect(args.where.OR[0].AND[0]).toEqual({ idEmpresa: 1 });

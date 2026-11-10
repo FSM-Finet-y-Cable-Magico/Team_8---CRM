@@ -16,7 +16,7 @@ export function isolatedQaEnv(parent = process.env) {
     if (typeof parent[key] === 'string') env[key] = parent[key];
   }
   return Object.assign(env, {
-    NODE_ENV: 'test', CI: 'true',
+    NODE_ENV: 'test', CI: 'true', CONTRACT_SIGNATURE_ENABLED: 'false', RUN_CONTRACT_SIGNATURE_PG_QA: '0',
     DATABASE_URL: 'postgresql://qa:synthetic@127.0.0.1:1/qa_unavailable',
     JWT_SECRET: 'synthetic-qa-only-never-use-in-production-2026',
     CRM_INTEGRATION_TESTS: '0', RUN_DB_INTEGRATION: '0',
