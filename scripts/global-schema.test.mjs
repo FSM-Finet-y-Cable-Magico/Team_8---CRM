@@ -1,5 +1,3 @@
-import {readFileSync} from 'node:fs';
-import {auditPrisma,blockingPrismaDifferences} from './audit-prisma-global.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {parseGlobalSchema,splitSql,normalizeExpression,normalizeCheckExpression,normalizeIndexDefinition} from './global-schema.mjs';
@@ -37,7 +35,7 @@ const postgres18PartialIndexes = [
  {table:'tax_emission_intent',name:'tax_intent_email_pending_idx',observed:"CREATE INDEX tax_intent_email_pending_idx ON public.tax_emission_intent USING btree (id_empresa, email_estado, fecha_proximo_email) WHERE ((estado)::text = 'GENERADO'::text)"},
 ];
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:97,columns:1010,pk:97,fk:234,checks:71,indexes:136});
+ assert.deepEqual(global.counts,{tables:96,columns:982,pk:96,fk:230,checks:63,indexes:132});
  const taxIntent=global.tables.find(table=>table.name==='tax_emission_intent');
  assert.ok(taxIntent);
  assert.equal(taxIntent.columns.length,28);
@@ -223,16 +221,4 @@ test('readCatalog starts READ ONLY and only reads catalogs',async()=>{
  assert.equal(commands[0],'SET TRANSACTION READ ONLY');
  for(const sql of commands.slice(2))assert.match(sql,/^SELECT/);
  assert.ok(commands.every(sql=>!/^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)/i.test(sql)));
-});
-
-test('la proyección Prisma vigente pasa y una divergencia nueva de G8 bloquea el control',()=>{
- const schema=readFileSync(new URL('../backend/prisma/schema.prisma',import.meta.url),'utf8');
- assert.deepEqual(blockingPrismaDifferences(auditPrisma(schema,global)),[]);
- const changed=schema.replace('estado String @default("BORRADOR") @db.VarChar(20)','estado String @default("BORRADOR") @db.VarChar(21)');
- assert.notEqual(changed,schema);
- assert.ok(blockingPrismaDifferences(auditPrisma(changed,global)).some(row=>row.table==='solicitud_firma_contrato'&&row.column==='estado'));
- const signature=global.tables.find(table=>table.name==='solicitud_firma_contrato');
- assert.equal(signature.columns.length,28);
- assert.equal(global.fks.filter(fk=>fk.table===signature.name).length,4);
- assert.ok(global.indexes.some(index=>index.name==='firma_pending_contract_key'&&index.unique&&index.definition.includes("WHERE estado = 'PENDIENTE'")));
 });

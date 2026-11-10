@@ -22,6 +22,8 @@ function loadComponent(file, mocks) {
   return exports[file];
 }
 const mocks = {
+  '../contracts/useSignatureStatus': { useSignatureStatus: () => ({ status: { policy: { manualAllowed: true, mode: 'manual' } }, refresh: async () => ({ policy: { manualAllowed: true } }) }) },
+  '../customers/ContractDocuments': { ContractDocuments: () => null },
   '../../api': { api: new Proxy({}, { get() { throw new Error('I/O not allowed'); } }) },
   '../../shared/components': {
     StatusBadge: ({ value }) => React.createElement('span', null, value),
@@ -60,6 +62,6 @@ test('prospecto valido con contrato pendiente conserva confirmacion autorizada d
     plans: [], permissions, onChanged() {},
   })); });
   assert.equal(tree.root.findAllByProps({ role: 'alert' }).length, 0);
-  assert.ok(tree.root.findAllByType('button').some(button => button.children.join('') === 'Confirmar firma'));
+  assert.ok(tree.root.findAllByType('button').some(button => button.children.join('') === 'Registrar firma manual'));
   act(() => tree.unmount());
 });

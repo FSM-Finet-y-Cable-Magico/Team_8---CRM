@@ -26,13 +26,4 @@ describe('Health y readiness global', () => {
     await expect(controller.ready()).rejects.toMatchObject({response:{application:'UP',database:'DOWN',global_schema:'DEGRADED'}});
     await expect(controller.ready()).rejects.not.toThrow('private-driver-data');
   });
-  it('la tabla de firma es opcional apagada y requerida al activar',async()=>{
-    const oldSchema=GLOBAL_COLUMNS.filter(c=>c.table!=='solicitud_firma_contrato');
-    const {controller,tx}=setup(oldSchema);
-    expect(await controller.ready()).toMatchObject({global_schema:'READY',missing_columns:0});
-    const enabled=new HealthController({$transaction:jest.fn(fn=>fn(tx))} as never,
-      {get:jest.fn(key=>key==='CONTRACT_SIGNATURE_ENABLED'?'true':undefined)} as never);
-    expect(await enabled.ready()).toMatchObject({global_schema:'DEGRADED',missing_columns:28});
-  });
-
 });

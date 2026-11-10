@@ -37,8 +37,6 @@ model Empresa {
   logsNotificacion           LogNotificacion[]
 
   @@map("empresa")
-  solicitudesFirma SolicitudFirmaContrato[]
-
 }
 
 model Usuario {
@@ -72,8 +70,6 @@ model Usuario {
   documentosTributariosRegistrados DocumentoTributarioExterno[]
 
   @@map("usuario")
-  solicitudesFirma SolicitudFirmaContrato[]
-
 }
 
 model Rol {
@@ -273,8 +269,6 @@ model Contrato {
   documentosTributarios      DocumentoTributarioExterno[]
 
   @@map("contrato")
-  solicitudesFirma SolicitudFirmaContrato[]
-
 }
 
 model Factura {
@@ -1073,8 +1067,6 @@ model ContratoDigital {
   usuarioGenerador Usuario? @relation(fields: [idUsuarioGenerador], references: [idUsuario], onDelete: NoAction, onUpdate: NoAction)
 
   @@map("contrato_digital")
-  solicitudesFirma SolicitudFirmaContrato[]
-
 }
 
 model PlantillaNotificacion {
@@ -1314,42 +1306,4 @@ model ImputacionCuota {
   @@index([idCuota])
   @@index([idOriginal])
   @@map("imputacion_cuota")
-}
-
-// G8 proposal. Partial indexes and CHECKs remain authoritative in SQL.
-model SolicitudFirmaContrato {
-  idSolicitud String @id @map("id_solicitud") @db.Uuid
-  idEmpresa Int @map("id_empresa")
-  idContrato Int @map("id_contrato")
-  idContratoDigital Int @unique(map: "firma_document_key") @map("id_contrato_digital")
-  idUsuarioCreador Int @map("id_usuario_creador")
-  tokenHash String @unique(map: "firma_token_key") @map("token_hash") @db.Char(64)
-  estado String @default("BORRADOR") @db.VarChar(20)
-  destinatario String @db.VarChar(120)
-  datosSnapshot Json @map("datos_snapshot")
-  hashOriginal String @map("hash_original") @db.Char(64)
-  pdfOriginal Bytes @map("pdf_original")
-  fechaCreacion DateTime @default(now()) @map("fecha_creacion") @db.Timestamptz(3)
-  fechaExpiracion DateTime @map("fecha_expiracion") @db.Timestamptz(3)
-  otpHash String? @map("otp_hash") @db.Char(64)
-  otpExpiracion DateTime? @map("otp_expiracion") @db.Timestamptz(3)
-  otpSolicitado DateTime? @map("otp_solicitado") @db.Timestamptz(3)
-  otpEnvios Int @default(0) @map("otp_envios")
-  otpIntentos Int @default(0) @map("otp_intentos")
-  pdfVisto DateTime? @map("pdf_visto") @db.Timestamptz(3)
-  correoEstado String @default("PENDIENTE") @map("correo_estado") @db.VarChar(30)
-  firmaFecha DateTime? @map("firma_fecha") @db.Timestamptz(3)
-  firmaIp String? @map("firma_ip") @db.VarChar(45)
-  firmaUserAgent String? @map("firma_user_agent") @db.VarChar(200)
-  consentimientoVersion String? @map("consentimiento_version") @db.VarChar(40)
-  pdfFirmado Bytes? @map("pdf_firmado")
-  hashFirmado String? @map("hash_firmado") @db.Char(64)
-  firmaCorreoEstado String @default("PENDIENTE") @map("firma_correo_estado") @db.VarChar(30)
-  motivoAnulacion String? @map("motivo_anulacion") @db.VarChar(40)
-  empresa Empresa @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Restrict, onUpdate: Cascade, map: "firma_company_fk")
-  contrato Contrato @relation(fields: [idContrato], references: [idContrato], onDelete: Restrict, onUpdate: Cascade, map: "firma_contract_fk")
-  documento ContratoDigital @relation(fields: [idContratoDigital], references: [idContratoDigital], onDelete: Restrict, onUpdate: Cascade, map: "firma_document_fk")
-  creador Usuario @relation(fields: [idUsuarioCreador], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade, map: "firma_creator_fk")
-  @@index([idEmpresa, idContrato], map: "firma_company_contract_idx")
-  @@map("solicitud_firma_contrato")
 }

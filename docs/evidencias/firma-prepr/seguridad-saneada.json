@@ -1,0 +1,17 @@
+{
+  "added_line_findings": [
+    {
+      "file": "scripts/i4-contract-signature-qa.test.mjs",
+      "line": 20,
+      "type": "DATABASE_URI",
+      "value": "[REDACTED]",
+      "status": "TEST_OR_EXAMPLE_REVIEW",
+      "review": "Credencial sintética para comprobar rechazo de host externo; no es una conexión operativa."
+    }
+  ],
+  "heuristic_total_including_baseline": 84,
+  "previous_external_snapshot_findings": 8,
+  "private_files_read": false,
+  "private_files_modified": false,
+  "scope": "Líneas añadidas por la corrección y reglas de higiene de la copia pública; no certifica todo el historial remoto."
+}

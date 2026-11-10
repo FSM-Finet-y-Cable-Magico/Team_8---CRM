@@ -1,10 +1,10 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: 8bfeba2a0b8f1233f04e597f810ddfac097b639508d5116ee8303796eb8ebe0b. Modelos G8: 64.
+Hash canónico: 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50. Modelos G8: 63.
 
 Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Tambien incorpora el estado final de tax_emission_intent, tax_payment_job y la extension Meta de log_notificacion; los indices parciales se conservan aunque Prisma no pueda declararlos. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
-Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":965,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":54,"FK_MISMATCH":65}.
+Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":929,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}.
 
 |Tabla|Objeto|Owner|Estado|Prisma|Global|
 |---|---|---|---|---|---|
@@ -937,42 +937,6 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |imputacion_cuota|INDEX:id_operacion,id_cuota|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_operacion","id_cuota"],"unique":true}|null|
 |imputacion_cuota|INDEX:id_cuota|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_cuota"],"unique":false}|null|
 |imputacion_cuota|INDEX:id_original|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_original"],"unique":false}|null|
-|solicitud_firma_contrato|id_solicitud|G8 (coordinar columnas compartidas)|MATCH|{"type":"uuid","nullable":false}|{"type":"uuid","nullable":false}|
-|solicitud_firma_contrato|id_empresa|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|id_contrato|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|id_contrato_digital|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|id_usuario_creador|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|token_hash|G8 (coordinar columnas compartidas)|MATCH|{"type":"char(64)","nullable":false}|{"type":"char(64)","nullable":false}|
-|solicitud_firma_contrato|estado|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(20)","nullable":false}|{"type":"varchar(20)","nullable":false}|
-|solicitud_firma_contrato|destinatario|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(120)","nullable":false}|{"type":"varchar(120)","nullable":false}|
-|solicitud_firma_contrato|datos_snapshot|G8 (coordinar columnas compartidas)|MATCH|{"type":"jsonb","nullable":false}|{"type":"jsonb","nullable":false}|
-|solicitud_firma_contrato|hash_original|G8 (coordinar columnas compartidas)|MATCH|{"type":"char(64)","nullable":false}|{"type":"char(64)","nullable":false}|
-|solicitud_firma_contrato|pdf_original|G8 (coordinar columnas compartidas)|MATCH|{"type":"bytea","nullable":false}|{"type":"bytea","nullable":false}|
-|solicitud_firma_contrato|fecha_creacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":false}|{"type":"timestamptz(3)","nullable":false}|
-|solicitud_firma_contrato|fecha_expiracion|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":false}|{"type":"timestamptz(3)","nullable":false}|
-|solicitud_firma_contrato|otp_hash|G8 (coordinar columnas compartidas)|MATCH|{"type":"char(64)","nullable":true}|{"type":"char(64)","nullable":true}|
-|solicitud_firma_contrato|otp_expiracion|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":true}|{"type":"timestamptz(3)","nullable":true}|
-|solicitud_firma_contrato|otp_solicitado|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":true}|{"type":"timestamptz(3)","nullable":true}|
-|solicitud_firma_contrato|otp_envios|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|otp_intentos|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
-|solicitud_firma_contrato|pdf_visto|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":true}|{"type":"timestamptz(3)","nullable":true}|
-|solicitud_firma_contrato|correo_estado|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(30)","nullable":false}|{"type":"varchar(30)","nullable":false}|
-|solicitud_firma_contrato|firma_fecha|G8 (coordinar columnas compartidas)|MATCH|{"type":"timestamptz(3)","nullable":true}|{"type":"timestamptz(3)","nullable":true}|
-|solicitud_firma_contrato|firma_ip|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(45)","nullable":true}|{"type":"varchar(45)","nullable":true}|
-|solicitud_firma_contrato|firma_user_agent|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(200)","nullable":true}|{"type":"varchar(200)","nullable":true}|
-|solicitud_firma_contrato|consentimiento_version|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(40)","nullable":true}|{"type":"varchar(40)","nullable":true}|
-|solicitud_firma_contrato|pdf_firmado|G8 (coordinar columnas compartidas)|MATCH|{"type":"bytea","nullable":true}|{"type":"bytea","nullable":true}|
-|solicitud_firma_contrato|hash_firmado|G8 (coordinar columnas compartidas)|MATCH|{"type":"char(64)","nullable":true}|{"type":"char(64)","nullable":true}|
-|solicitud_firma_contrato|firma_correo_estado|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(30)","nullable":false}|{"type":"varchar(30)","nullable":false}|
-|solicitud_firma_contrato|motivo_anulacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(40)","nullable":true}|{"type":"varchar(40)","nullable":true}|
-|solicitud_firma_contrato|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_solicitud"]|["id_solicitud"]|
-|solicitud_firma_contrato|FK:empresa|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
-|solicitud_firma_contrato|FK:contrato|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
-|solicitud_firma_contrato|FK:documento|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
-|solicitud_firma_contrato|FK:creador|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|{"onDelete":"RESTRICT","onUpdate":"CASCADE"}|
-|solicitud_firma_contrato|INDEX:id_contrato_digital|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_contrato_digital"],"unique":true}|null|
-|solicitud_firma_contrato|INDEX:token_hash|G8 (coordinar columnas compartidas)|MATCH|{"columns":["token_hash"],"unique":true}|null|
-|solicitud_firma_contrato|INDEX:id_empresa,id_contrato|G8 (coordinar columnas compartidas)|MATCH|{"columns":["id_empresa","id_contrato"],"unique":false}|null|
 |empresa|umbral_desconexion_min|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"smallint","nullable":true}|
 |usuario|bloqueado_hasta|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"timestamptz","nullable":true}|
 |usuario|debe_cambiar_password|COMPARTIDO|COLUMN_GLOBAL_ONLY|null|{"type":"boolean","nullable":true}|
@@ -1341,7 +1305,6 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |stock_consumible|INDEX:stock_consumible_id_tipo_equipo_idx|G1|INDEX_MISMATCH|null|"(id_tipo_equipo)"|
 |tipo_equipo|INDEX:tipo_equipo_id_empresa_idx|G1|INDEX_MISMATCH|null|"(id_empresa)"|
 |usuario|INDEX:usuario_id_empresa_idx|COMPARTIDO|INDEX_MISMATCH|null|"(id_empresa)"|
-|solicitud_firma_contrato|INDEX:firma_pending_contract_key|G8 (coordinar columnas compartidas)|INDEX_MISMATCH|null|"(id_contrato) WHERE estado = 'PENDIENTE'"|
 |alerta_monitoreo|FK:alerta_monitoreo_id_caja_nap_fkey|G3/Ops|OWNER_EXTERNAL|null|{"columns":["id_caja_nap"],"referencedTable":"caja_nap","referencedColumns":["id_caja_nap"],"onDelete":"SET NULL","onUpdate":"CASCADE"}|
 |alerta_monitoreo|FK:alerta_monitoreo_id_cliente_fkey|G3/Ops|OWNER_EXTERNAL|null|{"columns":["id_cliente"],"referencedTable":"cliente","referencedColumns":["id_cliente"],"onDelete":"SET NULL","onUpdate":"CASCADE"}|
 |alerta_monitoreo|FK:alerta_monitoreo_id_empresa_fkey|G3/Ops|OWNER_EXTERNAL|null|{"columns":["id_empresa"],"referencedTable":"empresa","referencedColumns":["id_empresa"],"onDelete":"RESTRICT","onUpdate":"CASCADE"}|

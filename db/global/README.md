@@ -2,8 +2,8 @@
 
 `init-global.sql` es el contrato físico canónico de PostgreSQL compartido por G1, G2, G3/Ops y G8. No contiene datos ni seeds.
 
-- SHA-256 vigente en esta rama: `8bfeba2a0b8f1233f04e597f810ddfac097b639508d5116ee8303796eb8ebe0b`.
-- 97 tablas, 1010 columnas, 97 PK, 234 FK, 71 checks y 136 índices explícitos.
+- SHA-256 vigente en esta rama: `0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50`.
+- 96 tablas, 982 columnas, 96 PK, 230 FK, 63 checks y 132 índices explícitos.
 - Incluye F3 manual (04-11-2026), autorizado únicamente para desarrollo/QA: dos tablas G8, sin modificar tablas financieras existentes. No implica que la base compartida esté migrada.
 - `db/final/init.sql` es un snapshot histórico de G8 y no representa el contrato global vigente.
 
@@ -52,7 +52,3 @@ Ver [diseño](../../docs/i4-f3-imputaciones-diseno.md) y
 [implementación y QA](../../docs/i4-f3-imputaciones-validacion.md).
 
 No usar `db push`, migraciones históricas ni el reconciliador obsoleto para cambiar la base compartida. Ver [contrato y proyección](../../docs/i3-global-database-contract.md) y [verificación final](../../docs/i3-global-verification-final.md).
-
-## Propuesta de firma por correo del 10 de noviembre de 2026
-
-Se agrega únicamente `solicitud_firma_contrato`, propiedad de G8. La tabla conserva snapshot, PDF original, PDF con constancia y límites de códigos. No modifica columnas existentes ni autoriza migraciones compartidas. Su instalación requiere revisión de los grupos y respaldo; `CONTRACT_SIGNATURE_ENABLED=false` conserva el despliegue anterior sin consultar esta tabla.

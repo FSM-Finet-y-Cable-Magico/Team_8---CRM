@@ -867,7 +867,7 @@ export function CustomersPanel({
                       <td>{prospect.empresa?.nombre ?? '-'}</td>
                       <td>{contract?.plan?.nombreComercial ?? '-'}</td>
                       <td>#{contract?.idContrato ?? '-'}</td>
-                      <td>{formatDateOnly(contract?.fechaFirmaManual)}</td>
+                      <td>{formatDateOnly(contract?.fechaFirmaEfectiva ?? contract?.fechaFirmaManual)}</td>
                       <td>{pendingActivationAddress(prospect)}</td>
                       <td>{prospect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? '-'}</td>
                       <td>{prospect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? '-'}</td>
@@ -1040,7 +1040,7 @@ export function CustomersPanel({
                 <div><dt>Plan contratado</dt><dd>{contract?.plan?.nombreComercial ?? 'No registrado'}</dd></div>
                 <div><dt>Contrato</dt><dd>#{contract?.idContrato ?? '-'}</dd></div>
                 <div><dt>Estado contrato</dt><dd>{formatWorkOrderValue(contract?.estado ?? 'Firmado')}</dd></div>
-                <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaManual)}</dd></div>
+                <div><dt>Fecha de firma</dt><dd>{formatDateOnly(contract?.fechaFirmaEfectiva ?? contract?.fechaFirmaManual)}</dd></div>
                 <div><dt>Dirección de instalación</dt><dd>{pendingActivationAddress(selectedPendingActivation)}</dd></div>
                 <div><dt>Comuna</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedPendingActivation.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
                 <div><dt>Ciudad</dt><dd>{selectedPendingActivation.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>

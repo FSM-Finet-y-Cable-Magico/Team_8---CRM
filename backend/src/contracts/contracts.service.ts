@@ -1,4 +1,7 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, Optional, StreamableFile } from '@nestjs/common';
+import { assignAutomatic, assertManualMode, assertPendingSignature, resolveSignatureMode, SignatureMode } from './signature-policy';
+import { signatureRepository, signatureStorageAvailable } from './signature.repository';
+import { signatureSettings } from './e-signature.config';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional, StreamableFile } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { createReadStream, existsSync } from 'fs';
 import { mkdir, open, unlink } from 'fs/promises';
@@ -63,7 +66,8 @@ export class ContractsService {
     }
 
     const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
-    const contract = await this.prisma.contrato.create({
+    return this.prisma.$transaction(async tx => {
+    const contract = await tx.contrato.create({
       data: {
         idCliente: customer.idCliente,
         idPlan: plan.idPlan,
@@ -77,7 +81,8 @@ export class ContractsService {
       include: CONTRACT_INCLUDE,
     });
 
-    await this.reconcileCustomerStatus(customer.idCliente);
+    await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
+    await this.reconcileCustomerStatus(customer.idCliente, tx);
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'CREAR_CONTRATACION_CLIENTE',
@@ -88,9 +93,10 @@ export class ContractsService {
         idPlan: plan.idPlan,
         estadoContrato: contract.estado,
       },
-    });
+    }, tx);
 
     return contract;
+    }, { timeout: 20000 });
   }
 
   async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
@@ -112,10 +118,15 @@ export class ContractsService {
     await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
     const contract = await this.getContractOrThrow(idContrato, origin.actor, tx);
 
+    const mode = await resolveSignatureMode(tx, contract, this.config);
+    if (origin.kind === 'manual') assertManualMode(mode);
+    else if (mode !== 'automatic') throw new ConflictException('Contrato no asignado a firma automática');
     // Replays preserve the original signature, financial state and audit.
     if (this.isSignedContract(contract.estado)) return contract;
-    if (['Anulado', 'Baja'].includes(contract.estado)) {
-      throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
+    assertPendingSignature(contract.estado);
+    const document = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' } });
+    if (!document || document.idEmpresa !== contract.idEmpresa || !['Generado','Enviado','Firmado manualmente'].includes(document.estadoFirma)) {
+      throw new ConflictException('El contrato necesita un PDF vigente y elegible para firma');
     }
 
     const installationAddress = contract.direccionInstalacion?.trim()
@@ -140,8 +151,8 @@ export class ContractsService {
       include: CONTRACT_INCLUDE,
     });
 
-    if (origin.kind === 'manual' && this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true') {
-      await tx.solicitudFirmaContrato.updateMany({ where: { idContrato, estado: 'PENDIENTE' },
+    if (origin.kind === 'manual' && await signatureStorageAvailable(tx)) {
+      await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' },
         data: { estado: 'ANULADA', motivoAnulacion: 'FIRMA_MANUAL', otpHash: null } });
     }
     if (signedContract.idProspecto && !signedContract.idCliente) {
@@ -380,9 +391,14 @@ export class ContractsService {
           where: { idContrato },
           orderBy: { version: 'desc' },
         });
+        await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
+        const mode = await resolveSignatureMode(tx, contract, this.config);
+        const settings = signatureSettings(this.config ?? new ConfigService());
+        const storage = await signatureStorageAvailable(tx);
+        const automaticAvailable = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
         const version = (latest?.version ?? 0) + 1;
         const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
-        const buffer = await this.renderDigitalContract(contract, version, tx, snapshot);
+        const buffer = await this.renderDigitalContract(contract, version, tx, snapshot, mode);
         const hash = createHash('sha256').update(buffer).digest('hex');
         // A rollback may release the version for another attempt. Never share its filename.
         const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
@@ -407,18 +423,20 @@ export class ContractsService {
             version,
           },
         });
-        if (this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true') {
+        if (mode === 'automatic' && storage) {
+          await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
+        }
+        if (automaticAvailable) {
+          if (buffer.length > 4 * 1024 * 1024) throw new BadRequestException('El PDF supera el límite de firma de 4 MiB');
           if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
-          await tx.solicitudFirmaContrato.create({ data: {
+          await signatureRepository(tx).create({ data: {
             idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
-            idContratoDigital: created.idContratoDigital, idUsuarioCreador: currentUser.idUsuario,
+            idContratoDigital: created.idContratoDigital, version, idUsuarioCreador: currentUser.idUsuario,
             tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
             estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
             datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
             pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
           } });
-          await tx.solicitudFirmaContrato.updateMany({ where: { idContrato, estado: 'PENDIENTE' },
-            data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
         }
         await this.auditService.record({
           idUsuario: currentUser.idUsuario,
@@ -489,14 +507,17 @@ export class ContractsService {
     return this.prisma.$transaction(async tx => {
       // Use the same parent lock as PDF generation and business signature.
       await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
-      await this.getContractOrThrow(idContrato, currentUser, tx);
+      const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
+      const mode = await resolveSignatureMode(tx, contract, this.config);
+      if (dto.estadoFirma === 'Firmado manualmente') assertManualMode(mode);
       await tx.$queryRaw`SELECT id_contrato_digital FROM contrato_digital WHERE id_contrato = ${idContrato} ORDER BY version DESC LIMIT 1 FOR UPDATE`;
       const latest = await tx.contratoDigital.findFirst({
         where: { idContrato },
         orderBy: { version: 'desc' },
       });
       if (!latest) throw new NotFoundException('El contrato digital aun no fue generado');
-
+      if (latest.idEmpresa !== contract.idEmpresa) throw new ConflictException('El documento no pertenece a la empresa del contrato');
+      if (latest.estadoFirma === 'Anulado' && dto.estadoFirma !== 'Anulado') throw new ConflictException('Una versión anulada no se reactiva. Genera una nueva versión');
       // Preserve every signed variant and any persisted signing timestamp.
       if (this.isSignedDigitalContract(latest)) {
         if (dto.estadoFirma !== latest.estadoFirma) {
@@ -504,6 +525,7 @@ export class ContractsService {
         }
         return latest;
       }
+      if (dto.estadoFirma === 'Firmado manualmente') assertPendingSignature(contract.estado);
 
       const updated = await tx.contratoDigital.update({
         where: { idContratoDigital: latest.idContratoDigital },
@@ -512,6 +534,9 @@ export class ContractsService {
           fechaFirma: dto.estadoFirma === 'Firmado manualmente' ? new Date() : latest.fechaFirma,
         },
       });
+      if (dto.estadoFirma === 'Anulado' && await signatureStorageAvailable(tx)) {
+        await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'DOCUMENTO_ANULADO', otpHash: null } });
+      }
       await this.auditService.record({
         idUsuario: currentUser.idUsuario,
         accion: 'ACTUALIZAR_ESTADO_CONTRATO_DIGITAL',
@@ -606,7 +631,7 @@ export class ContractsService {
     } as Prisma.InputJsonObject;
   }
 
-  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma, savedSnapshot?: ContractSnapshot) {
+  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma, savedSnapshot?: ContractSnapshot, mode: SignatureMode = 'manual') {
     const snapshot = savedSnapshot ?? await buildContractSnapshot(client, contract.idContrato, false, contract);
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -670,9 +695,10 @@ export class ContractsService {
     block('Información del documento', [
       ['Datos técnicos', 'Corresponden a la información registrada al generar esta versión.'],
       ['Equipos físicos', 'La asignación de equipos se consulta en el registro de inventario.'],
-      ['Firma', this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true'
+      ['Firma', mode === 'automatic'
         ? 'La aceptación por correo se registra en una constancia de firma electrónica simple. Este documento no incorpora firma electrónica avanzada.'
-        : 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'],
+        : mode === 'manual' ? 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'
+        : 'Documento pendiente de autorización del modo de firma. No incorpora firma electrónica avanzada.'],
     ]);
     doc.end();
 

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +39,7 @@ describe('ContractsService', () => {
     };
     const audit = { record: jest.fn() };
     const servicesService = { ensureInstallationServiceForContract: jest.fn() };
+    Object.assign(prisma, { $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)) });
     const service = new ContractsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
@@ -71,10 +73,10 @@ function signatureSetup() {
     addresses: [] as Array<{ direccionCompleta: string }>,
     otherContracts: [] as string[],
     document: {
-      idContratoDigital: 11, idContrato: 30, version: 1,
+      idContratoDigital: 11, idContrato: 30, idEmpresa: 1, version: 1,
       estadoFirma: 'Generado', fechaFirma: null as Date | null,
       hashDocumento: 'f'.repeat(64), urlDocumento: 'generated/contracts/qa-existing.pdf',
-    } as { idContratoDigital: number; idContrato: number; version: number; estadoFirma: string;
+    } as { idContratoDigital: number; idContrato: number; idEmpresa: number; version: number; estadoFirma: string;
       fechaFirma: Date | null; hashDocumento: string; urlDocumento: string } | null,
     audits: [] as Array<Record<string, unknown>>,
   };
@@ -108,6 +110,7 @@ function signatureSetup() {
       }),
     },
     logAuditoria: {
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(async ({ data }) => { state.audits.push(data); return data; }),
     },
   };
@@ -128,8 +131,9 @@ function signatureSetup() {
   const audit = new AuditService(prisma as unknown as PrismaService);
   const record = jest.spyOn(audit, 'record');
   const services = { ensureInstallationServiceForContract: jest.fn() };
-  const service = new ContractsService(prisma as unknown as PrismaService, audit, services as never);
-  return { state, tx, prisma, record, service, services, outside, present };
+  const config = new ConfigService({ CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES: '[]', CONTRACT_SIGNATURE_MANUAL_COMPANIES: '[1]', CONTRACT_SIGNATURE_MANUAL_CONTRACTS: '[30]' });
+  const service = new ContractsService(prisma as unknown as PrismaService, audit, services as never, config);
+  return { state, tx, prisma, record, service, services, outside, present, config };
 }
 
 describe('Firma manual atomica', () => {
@@ -205,7 +209,7 @@ describe('Firma manual atomica', () => {
   it.each(['Anulado', 'Baja'])('rechaza %s sin efectos', async estado => {
     const ctx = signatureSetup(); ctx.state.contract.estado = estado;
     const before = structuredClone(ctx.state);
-    await expect(ctx.service.confirmManualSignature(30, {}, comercial)).rejects.toThrow('anulado');
+    await expect(ctx.service.confirmManualSignature(30, {}, comercial)).rejects.toThrow('pendiente de firma');
     expect(ctx.state).toEqual(before);
     expect(ctx.record).not.toHaveBeenCalled();
   });
@@ -308,6 +312,36 @@ describe('Conservacion del documento digital firmado', () => {
     expect(ctx.prisma.$transaction).not.toHaveBeenCalled();
     ctx.tx.contrato.findUnique.mockResolvedValueOnce({ ...ctx.present(), idEmpresa: 2 });
     await expect(ctx.service.updateDigitalContractStatus(30, { estadoFirma: 'Enviado' }, comercial)).rejects.toThrow('empresa');
+    expect(ctx.tx.contratoDigital.update).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Política de firma sin retorno manual implícito', () => {
+  it.each(['false','true'])('automático bloquea ambas APIs manuales con servicio enabled=%s', async enabled => {
+    const ctx = signatureSetup(); ctx.config.set('CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES','[1]');
+    ctx.config.set('CONTRACT_SIGNATURE_ENABLED',enabled);
+    const before=structuredClone(ctx.state);
+    await expect(ctx.service.confirmManualSignature(30,{},comercial)).rejects.toMatchObject({status:409});
+    await expect(ctx.service.updateDigitalContractStatus(30,{estadoFirma:'Firmado manualmente'},comercial)).rejects.toMatchObject({status:409});
+    expect(ctx.state).toEqual(before); expect(ctx.record).not.toHaveBeenCalled();
+  });
+  it.each(['EXPIRADA','ANULADA','FALLIDO','EN_PROCESO'])('la asignación persistida bloquea manual con solicitud %s y sin configuración automática', async () => {
+    const ctx=signatureSetup(); ctx.tx.logAuditoria.findFirst.mockResolvedValue({idLog:1});
+    ctx.config.set('CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES','[]');ctx.config.set('CONTRACT_SIGNATURE_ENABLED','false');
+    const before=structuredClone(ctx.state);
+    await expect(ctx.service.confirmManualSignature(30,{},comercial)).rejects.toThrow('automática');
+    await expect(ctx.service.updateDigitalContractStatus(30,{estadoFirma:'Firmado manualmente'},comercial)).rejects.toThrow('automática');
+    expect(ctx.state).toEqual(before);
+  });
+  it('modo desconocido no es permiso manual', async()=>{
+    const ctx=signatureSetup();ctx.config.set('CONTRACT_SIGNATURE_MANUAL_CONTRACTS','[]');
+    await expect(ctx.service.confirmManualSignature(30,{},comercial)).rejects.toMatchObject({status:409});
+    expect(ctx.tx.contrato.update).not.toHaveBeenCalled();
+  });
+  it('un documento anulado no puede reactivarse por etiqueta',async()=>{
+    const ctx=signatureSetup();ctx.state.document!.estadoFirma='Anulado';
+    await expect(ctx.service.updateDigitalContractStatus(30,{estadoFirma:'Generado'},comercial)).rejects.toThrow('no se reactiva');
     expect(ctx.tx.contratoDigital.update).not.toHaveBeenCalled();
   });
 });

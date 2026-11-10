@@ -1,0 +1,48 @@
+ .env.example                                       |   5 +
+ .github/workflows/ci.yml                           |   3 +-
+ backend/.env.example                               |   5 +
+ .../migration.sql                                  |  58 ---
+ backend/prisma/schema.prisma                       |  46 --
+ backend/src/contracts/contracts-pdf.spec.ts        |   3 +-
+ ...ontracts-signature.postgres.integration.spec.ts | 255 ++++++++--
+ backend/src/contracts/contracts.service.spec.ts    |  44 +-
+ backend/src/contracts/contracts.service.ts         |  64 ++-
+ backend/src/contracts/e-signature.controller.ts    |   2 +
+ backend/src/contracts/e-signature.service.ts       | 156 +++++--
+ backend/src/contracts/e-signature.spec.ts          |  13 +-
+ backend/src/health/global-columns.generated.ts     | 170 +------
+ backend/src/health/health.controller.spec.ts       |   9 -
+ backend/src/health/health.controller.ts            |   1 -
+ backend/src/prospects/prospects-quote-flow.spec.ts |  32 +-
+ backend/src/prospects/prospects.service.spec.ts    |   3 +-
+ backend/src/prospects/prospects.service.ts         |  13 +-
+ db/global/README.md                                |   8 +-
+ db/global/init-global.sql                          |  60 ---
+ docs/i3-prisma-vs-global-schema.json               | 516 +--------------------
+ docs/i3-prisma-vs-global-schema.md                 |  41 +-
+ docs/i4-firma-electronica.md                       | 221 +++++----
+ docs/reglas-esquema-compartido.md                  |   7 +
+ frontend/src/api.ts                                |   6 +
+ .../contracts/ContractSignatureActions.tsx         |  45 +-
+ .../src/features/customers/ContractDocuments.tsx   |   4 +-
+ .../customers/CustomerContractWorkflow.tsx         |  15 +-
+ frontend/src/features/customers/CustomersPanel.tsx |   4 +-
+ .../features/prospects/ProspectWorkflowPanel.tsx   |   6 +-
+ frontend/tests/coverage-quote-workflow.test.mjs    |   2 +-
+ frontend/tests/prospects-lifecycle.test.mjs        |   4 +-
+ scripts/global-schema.mjs                          |   4 +-
+ scripts/global-schema.test.mjs                     |  16 +-
+ scripts/i4-contract-signature-qa.cjs               |   3 +-
+ scripts/i4-contract-signature-qa.test.mjs          |   9 +
+ 36 files changed, 703 insertions(+), 1150 deletions(-)
+
+NEW SOURCE FILES (unstaged):
+backend/src/contracts/signature-policy.ts
+backend/src/contracts/signature-schema.ts
+backend/src/contracts/signature.repository.ts
+db/g8/migrations/001_contract_signatures.sql
+db/g8/provision-access.sql
+frontend/src/features/contracts/useSignatureStatus.ts
+frontend/tests/signature-policy-workflow.test.mjs
+scripts/i4-contract-signature-off-qa.cjs
+scripts/i4-contract-signature-recovery-qa.cjs

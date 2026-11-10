@@ -7,13 +7,16 @@ const settings = () => ({ NODE_ENV: 'test', CONTRACT_SIGNATURE_ENABLED: 'true',
   CONTRACT_SIGNATURE_PUBLIC_URL: 'http://localhost/', CONTRACT_SIGNATURE_COMPANIES: '[1,2]',
   CONTRACT_SIGNATURE_OTP_SECRET: randomBytes(32).toString('hex') });
 describe('Configuración de firma y compatibilidad apagada', () => {
-  it('sin flag no consulta tablas nuevas ni SMTP y devuelve capacidad desactivada', async () => {
-    const db = { solicitudFirmaContrato: { findFirst: jest.fn() }, contrato: { findUnique: jest.fn() } };
+  it('apagada y sin tabla privada permite el legado expresamente autorizado sin SMTP', async () => {
+    const db = { contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 99, idEmpresa: 1, estado: 'Pendiente firma contrato' }) },
+      contratoDigital: { findFirst: jest.fn().mockResolvedValue({ idEmpresa: 1, estadoFirma: 'Generado' }) },
+      logAuditoria: { findFirst: jest.fn().mockResolvedValue(null) }, $queryRaw: jest.fn().mockResolvedValue([]), $transaction: jest.fn() };
+    db.$transaction.mockImplementation(async fn => fn(db));
     const mail = { isConfigured: jest.fn() };
-    const service = new ESignatureService(db as never, new ConfigService({}), mail as never, {} as never, {} as never);
+    const service = new ESignatureService(db as never, new ConfigService({ CONTRACT_SIGNATURE_MANUAL_COMPANIES: '[1]', CONTRACT_SIGNATURE_MANUAL_CONTRACTS: '[99]' }), mail as never, {} as never, {} as never);
     await service.onModuleInit();
-    expect(await service.status(99, {} as never)).toEqual({ enabled: false, solicitud: null });
-    expect(db.solicitudFirmaContrato.findFirst).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(await service.status(99, { idEmpresa: 1, roles: ['Comercial'] } as never)).toMatchObject({ enabled: false, policy: { mode: 'manual', manualAllowed: true } });
     expect(mail.isConfigured).not.toHaveBeenCalled();
     await expect(service.create(99, {} as never)).rejects.toThrow('Función no disponible');
   });

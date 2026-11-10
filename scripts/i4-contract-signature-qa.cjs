@@ -14,7 +14,8 @@ async function main() {
       || url.search !== '?schema=public&connection_limit=1' || url.hash) throw Error('ISOLATED_QA_REQUIRED');
   const { isolatedQaEnv } = await import('./i3-release-acceptance.mjs');
   const env = { ...isolatedQaEnv(), RUN_CONTRACT_SIGNATURE_PG_QA: '1',
-    QA_CONTRACT_SIGNATURE_DB_URL: raw, QA_CONTRACT_SIGNATURE_RUN_ID: runId };
+    QA_CONTRACT_SIGNATURE_DB_URL: raw, QA_CONTRACT_SIGNATURE_RUN_ID: runId,
+    QA_CONTRACT_SIGNATURE_DENIED_URLS: process.env.QA_CONTRACT_SIGNATURE_DENIED_URLS ?? '[]' };
   const result = spawnSync(process.execPath, ['--max-old-space-size=3072', '-r', resolve(root, 'scripts/qa-loopback-only.cjs'),
     require.resolve('jest/bin/jest'), '--runInBand', '--runTestsByPath',
     'src/contracts/contracts-signature.postgres.integration.spec.ts'], {

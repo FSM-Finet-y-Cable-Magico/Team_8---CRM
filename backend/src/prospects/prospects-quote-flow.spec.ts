@@ -15,7 +15,7 @@ function setup() {
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
     contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
-  const prisma = { prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
+  const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ available: false }]), prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
@@ -48,6 +48,36 @@ describe('cotizacion persistida y confirmacion segura', () => {
     const [row] = await c.service.listPendingActivation(user);
     expect(row).toHaveProperty('ubicacionInstalacion', expect.objectContaining({ comuna: null, ciudad: null }));
     expect(row.contratos.map(c => c.idContrato)).toEqual([10]);
+  });
+
+  it.each([
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-09') }], expected: 10, origin: 'ELECTRONICA' },
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-07') }], expected: 11, origin: 'MANUAL' },
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-08') }], expected: 11, origin: 'MANUAL' },
+    { electronic: [], expected: 11, origin: 'MANUAL' },
+  ])('selecciona fecha efectiva y desempate estable: $origin / $expected', async ({ electronic, expected, origin }) => {
+    const c=setup();
+    c.prisma.$queryRaw.mockResolvedValueOnce([{available:true}]).mockResolvedValueOnce(electronic as never);
+    const manualDate=new Date('2026-11-08');
+    c.prisma.prospecto.findMany.mockResolvedValue([{...c.prospect,contratos:[
+      {idContrato:12,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null},
+      {idContrato:10,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null},
+      {idContrato:11,idEmpresa:1,estado:'Moroso',fechaFirmaManual:manualDate},
+      {idContrato:99,idEmpresa:2,estado:'Firmado',fechaFirmaManual:new Date('2026-12-01')},
+    ]}]);
+    const [result]=await c.service.listPendingActivation(user);
+    expect(result.contratos).toHaveLength(1);
+    expect(result.contratos[0]).toMatchObject({idContrato:expected,origenFirma:origin});
+    expect(result.contratos[0].fechaFirmaManual).toEqual(expected===11?manualDate:null);
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+  });
+  it('históricos sin fecha eligen ID descendente sin inventar una fecha de firma',async()=>{
+    const c=setup();
+    c.prisma.prospecto.findMany.mockResolvedValue([{...c.prospect,contratos:[10,12,11].map(idContrato=>({
+      idContrato,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null,
+    }))}]);
+    const [result]=await c.service.listPendingActivation(user);
+    expect(result.contratos[0]).toMatchObject({idContrato:12,fechaFirmaEfectiva:null,origenFirma:'SIN_FECHA'});
   });
   it.each([
     { latitud: -35 }, { direccion: 'Otra direccion' }, { estadoPipeline: 'Perdido' },

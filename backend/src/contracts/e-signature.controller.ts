@@ -67,6 +67,8 @@ export class ContractSignatureController {
   status(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.service.status(id, user); }
   @Post()
   create(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.service.create(id, user); }
+  @Post('retry-delivery')
+  retryDelivery(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.service.retryDelivery(id, user); }
   @Patch('cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) { return this.service.cancel(id, user); }
   @Get('download')

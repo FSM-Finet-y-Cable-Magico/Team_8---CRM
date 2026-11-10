@@ -21,7 +21,6 @@ jobs:
       G3_INTEGRATION_ENABLED: 'false'
       FACTURACION_CL_INTEGRATION_ENABLED: 'false'
       FACTURACION_CL_PRODUCTION_ENABLED: 'false'
-      MAIL_PROVIDER: disabled
       WHATSAPP_PROVIDER: disabled
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -31,6 +30,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run prisma:generate
+      - name: SMTP suite with the exact isolated workflow environment
+        run: node -r ./scripts/qa-loopback-only.cjs ./node_modules/jest/bin/jest.js --config backend/jest.config.js --runInBand --runTestsByPath backend/src/mail/mail.service.spec.ts
       - name: Backend regression with external sockets blocked
         run: node --max-old-space-size=4096 -r ./scripts/qa-loopback-only.cjs ./node_modules/jest/bin/jest.js --config backend/jest.config.js --runInBand
       - run: node --test scripts/global-schema.test.mjs

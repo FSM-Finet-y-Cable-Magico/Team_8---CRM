@@ -1,3 +1,5 @@
+import { ContractDocuments } from '../customers/ContractDocuments';
+import { useSignatureStatus } from '../contracts/useSignatureStatus';
 import { useEffect, useRef, useState } from 'react';
 import { FileClock, HandCoins, MapPin, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
@@ -91,6 +93,7 @@ export function ProspectWorkflowPanel({
   const isQuoted = !requiresReview && QUOTED_STATUSES.includes(currentStatus);
   const isFinal = requiresReview || FINAL_PROSPECT_STATUSES.includes(currentStatus);
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
+  const signaturePolicy = useSignatureStatus(pendingContract?.idContrato);
   const isWorkflowLocked = isFinal || Boolean(currentProspect.contratos?.length) || currentProspect.idCliente != null;
   const canVerify = permissions.verifyFeasibility || permissions.createProspects;
   const canEditLocation = permissions.createProspects && !isWorkflowLocked && !isQuoted && FEASIBILITY_STAGES.includes(currentStatus);
@@ -435,7 +438,8 @@ export function ProspectWorkflowPanel({
         {pendingContract && permissions.manageContracts && !requiresReview && (
           <section className="prospect-action-card prospect-action-card-contract">
             <header className="prospect-action-header"><div><h4>Confirmar firma de contrato</h4><p>Al confirmar, la persona pasa a Pendiente de activacion. No se crea cliente ni servicio todavia.</p></div></header>
-            <button type="button" onClick={() => void runAction(() => api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}), 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Confirmar firma</button>
+            <ContractDocuments idContrato={pendingContract.idContrato} canGenerate={permissions.generateDigitalContract} onChanged={onChanged} />
+            {signaturePolicy.status?.policy.manualAllowed && <button type="button" onClick={() => void runAction(async () => { if (!(await signaturePolicy.refresh())?.policy.manualAllowed) throw new Error('Firma manual no autorizada'); return api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}); }, 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Registrar firma manual</button>}
           </section>
         )}
       {permissions.recordProspectLoss && !isFinal && (

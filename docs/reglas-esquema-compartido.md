@@ -19,3 +19,10 @@ El ownership se obtiene de ownerOf() en scripts/global-schema.mjs, no de una lis
 La firma lee datos de otros dominios y solo bloquea el contrato y cliente G8. No escribe inventario, órdenes, sesiones o credenciales de otros grupos. La instalación y activación mantienen sus rutas actuales, fuera de la transacción de firma.
 
 El workflow CRM verification comprueba pruebas, compilación y esquema. El administrador del repositorio debe configurar main y develop con PR obligatorio, al menos una revisión, conversaciones resueltas, el control CRM tests and shared schema obligatorio y sin bypass/push directo. CODEOWNERS es una propuesta comentada: faltan usuarios o equipos exactos con acceso de escritura. Estas protecciones requieren configuración real en GitHub y todavía no están activadas por este trabajo.
+
+## Corrección de firma para segunda revisión
+
+La firma propuesta usa g8_contratos.solicitud_firma, sin FKs ni triggers hacia public y sin modelo Prisma global.
+Su migración y permisos se revisan por separado en db/g8/. No añade tablas, columnas ni permisos a public.
+La asignación al modo automático usa únicamente metadatos de política en la auditoría ya existente.
+El catálogo y permisos públicos se comparan antes/después en PostgreSQL exclusivo; el despliegue compartido sigue pendiente.

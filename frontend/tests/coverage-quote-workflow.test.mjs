@@ -62,7 +62,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
   const calendar=load('features/prospects/ContractDateCalendar.tsx',{});
   const {ProspectWorkflowPanel:Workflow}=load('features/prospects/ProspectWorkflowPanel.tsx',{
-    ...mocks,'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
+    ...mocks,'../contracts/useSignatureStatus':{useSignatureStatus:()=>({status:null,refresh:async()=>null})},'../customers/ContractDocuments':{ContractDocuments:()=>null},'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
   props={prospect:persisted,plans:[{idPlan:1,idEmpresa:1,activo:true,nombreComercial:'Internet QA 1'},{idPlan:2,idEmpresa:2,activo:true,nombreComercial:'Internet QA 2'},
     {idPlan:3,idEmpresa:company,activo:false,nombreComercial:'Inactivo'},{idPlan:4,idEmpresa:company,activo:true,nombreComercial:'Sin cotizar'}],
     permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:g2&&commercial},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};

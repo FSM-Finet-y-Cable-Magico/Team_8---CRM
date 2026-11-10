@@ -1,6 +1,11 @@
+import { inspectPrivateSignatureSchema } from './signature-schema';
+import { MailDeliveryError } from '../mail/mail.service';
+import { readFile } from 'node:fs/promises';
+import { signatureRepository, signatureStorageAvailable } from './signature.repository';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
+import { inflateSync } from 'node:zlib';
 import { ESignatureService } from './e-signature.service';
 import { SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -23,6 +28,7 @@ const deferred = () => {
 isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => {
   let db: PrismaClient;
   let other: PrismaClient;
+  let outsiders: PrismaClient[] = [];
   let user: AuthUser;
   let company: number;
   let otherCompany: number;
@@ -49,6 +55,15 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     other = new PrismaClient({ log: [], datasources: { db: { url: raw } } });
     await attest(db, url.pathname.slice(1), runId);
     await attest(other, url.pathname.slice(1), runId);
+    const denied: unknown=JSON.parse(process.env.QA_CONTRACT_SIGNATURE_DENIED_URLS ?? '[]');
+    if (!Array.isArray(denied)||denied.length!==3) throw new Error('ISOLATED_QA_OTHER_ROLES_REQUIRED');
+    outsiders=denied.map((raw,index)=>{
+      const target=new URL(raw);
+      if(target.hostname!=='127.0.0.1'||target.port!=='5432'||target.pathname!==url.pathname
+        ||target.username!==['g1_app','g2_app','g3_app'][index]||target.search!==url.search) throw new Error('ISOLATED_QA_REQUIRED');
+      return new PrismaClient({log:[],datasources:{db:{url:raw}}});
+    });
+
     expect(await db.empresa.count()).toBe(0);
     expect(await db.cliente.count()).toBe(0);
     expect(await db.contrato.count()).toBe(0);
@@ -65,12 +80,14 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
   afterAll(async () => {
     await db?.$disconnect();
     await other?.$disconnect();
+    await Promise.all(outsiders.map(p=>p.$disconnect()));
   });
 
   function services(client: PrismaClient) {
     const audit = new AuditService(client as PrismaService);
     const installation = { ensureInstallationServiceForContract: jest.fn() };
-    const service = new ContractsService(client as PrismaService, audit, installation as never);
+    const service = new ContractsService(client as PrismaService, audit, installation as never, new ConfigService({
+      CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES: '[]', CONTRACT_SIGNATURE_MANUAL_COMPANIES: JSON.stringify([company, otherCompany]), CONTRACT_SIGNATURE_MANUAL_CONTRACTS: JSON.stringify(Array.from({length:1000},(_,i)=>i+1)) }));
     return { service, audit, installation };
   }
 
@@ -87,6 +104,8 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
       fechaInicio: new Date('2026-01-01'), diaVencimiento: 10, estado: 'Pendiente firma contrato',
       direccionInstalacion: 'DIRECCION FICTICIA QA',
     } });
+    await db.contratoDigital.create({ data: { idContrato: contract.idContrato, idEmpresa: company, version: 1, estadoFirma: 'Generado',
+      hashDocumento: 'f'.repeat(64), urlDocumento: 'generated/contracts/qa-unmodified.pdf', idUsuarioGenerador: user.idUsuario } });
     return { contract, customer, prospect };
   }
 
@@ -97,7 +116,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
 
   async function document(idContrato: number) {
     return db.contratoDigital.create({ data: {
-      idContrato, idEmpresa: company, version: 1, estadoFirma: 'Generado',
+      idContrato, idEmpresa: company, version: 2, estadoFirma: 'Generado',
       hashDocumento: 'f'.repeat(64), urlDocumento: 'generated/contracts/qa-unmodified.pdf',
       idUsuarioGenerador: user.idUsuario,
     } });
@@ -212,7 +231,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
   });
   function electronicServices(client = db) {
     const config = new ConfigService({ NODE_ENV: 'test', CONTRACT_SIGNATURE_ENABLED: 'true',
-      CONTRACT_SIGNATURE_PUBLIC_URL: 'http://localhost/', CONTRACT_SIGNATURE_COMPANIES: JSON.stringify([company, otherCompany]),
+      CONTRACT_SIGNATURE_PUBLIC_URL: 'http://localhost/', CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES: JSON.stringify([company, otherCompany]), CONTRACT_SIGNATURE_COMPANIES: JSON.stringify([company, otherCompany]),
       CONTRACT_SIGNATURE_OTP_SECRET: qaOtpSecret });
     const audit = new AuditService(client as PrismaService);
     const installation = { ensureInstallationServiceForContract: jest.fn() };
@@ -254,7 +273,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     const args = [f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '127.0.0.1', 'QA'] as const;
     const results = await Promise.all([f.electronic.sign(...args), second.electronic.sign(...args)]);
     expect(results).toEqual([{ estado: 'FIRMADA' }, { estado: 'FIRMADA' }]);
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     expect(row.pdfOriginal).toEqual(f.original);
     expect(createHash('sha256').update(row.pdfOriginal).digest('hex')).toBe(row.hashOriginal);
     expect(createHash('sha256').update(row.pdfFirmado!).digest('hex')).toBe(row.hashFirmado);
@@ -277,7 +296,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     if (changed === 'address') await other.contrato.update({ where: { idContrato: f.contract.idContrato }, data: { direccionInstalacion: 'Otra dirección ficticia' } });
     if (changed === 'price') await other.plan.update({ where: { idPlan: f.plan.idPlan }, data: { precioMensual: 29990 } });
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('datos cambiaron');
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('ANULADA');
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('ANULADA');
     expect((await db.contrato.findUniqueOrThrow({ where: { idContrato: f.contract.idContrato } })).estado).toBe('Pendiente firma contrato');
     expect(f.mail.sendSignedContract).not.toHaveBeenCalled();
   });
@@ -287,7 +306,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     const wrong = f.code === '000000' ? '111111' : '000000';
     for (let n = 0; n < 5; n++) await expect(f.electronic.sign(f.token, wrong, f.doc.hashDocumento!, true,
       SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('Código incorrecto');
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     expect(row).toMatchObject({ estado: 'ANULADA', otpIntentos: 5, otpHash: null });
     await expect(f.electronic.requestCode(f.token)).rejects.toThrow('no vigente');
     expect(f.mail.sendSignatureCode).toHaveBeenCalledTimes(1);
@@ -295,29 +314,34 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
 
   it('caducidad del código y del enlace impiden firmar', async () => {
     const f = await electronicFixture();
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital }, data: { otpExpiracion: new Date(Date.now() - 1000) } });
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital }, data: { otpExpiracion: new Date(Date.now() - 1000) } });
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('Código no vigente');
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { fechaCreacion: new Date(Date.now() - 10000), fechaExpiracion: new Date(Date.now() - 1000) } });
     await expect(f.electronic.view(f.token)).rejects.toThrow('expiró');
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('EXPIRADA');
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('EXPIRADA');
   });
 
   it('no acepta consentimiento falso, huella distinta ni códigos solicitados sin revisar PDF', async () => {
     const f = await electronicFixture();
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, false, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('acepta');
     await expect(f.electronic.sign(f.token, f.code, '0'.repeat(64), true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('no coincide');
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital }, data: { pdfVisto: null } });
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital }, data: { pdfVisto: null } });
     await expect(f.electronic.requestCode(f.token)).rejects.toThrow('revisa el PDF');
     expect(f.mail.sendSignatureCode).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['manual', 'version'])('invalida la solicitud pendiente al confirmar %s', async kind => {
+  it.each(['manual', 'version'])('rechaza la firma manual automática y sustituye de forma segura la versión: %s', async kind => {
     const f = await electronicFixture();
-    if (kind === 'manual') await f.contracts.confirmManualSignature(f.contract.idContrato, {}, user);
+    if (kind === 'manual') {
+      await expect(f.contracts.confirmManualSignature(f.contract.idContrato, {}, user)).rejects.toMatchObject({status:409});
+      expect((await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}})).estado).toBe('PENDIENTE');
+      await f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','');
+      return;
+    }
     else await f.contracts.generateDigitalContract(f.contract.idContrato, user);
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('no vigente');
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('ANULADA');
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('ANULADA');
   });
 
   it('un fallo de auditoría revierte PDF firmado, estado comercial y consumo del código', async () => {
@@ -329,7 +353,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
       return result;
     });
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('QA_SIGN_AUDIT_FAILED');
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     expect(row).toMatchObject({ estado: 'PENDIENTE', pdfFirmado: null, firmaFecha: null });
     expect(row.otpHash).not.toBeNull();
     expect((await db.contrato.findUniqueOrThrow({ where: { idContrato: f.contract.idContrato } })).estado).toBe('Pendiente firma contrato');
@@ -342,7 +366,7 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     expect(await f.electronic.sign(...args)).toEqual({ estado: 'FIRMADA' });
     expect(await f.electronic.sign(...args)).toEqual({ estado: 'FIRMADA' });
     expect(f.mail.sendSignedContract).toHaveBeenCalledTimes(1);
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).firmaCorreoEstado).toBe('INDETERMINADO');
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).firmaCorreoEstado).toBe('INDETERMINADO');
   });
 
   it('un operador de otra empresa no obtiene estado, envío ni PDF firmado', async () => {
@@ -355,53 +379,53 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
 
   it('el índice parcial impide una segunda solicitud pendiente del mismo contrato', async () => {
     const f = await electronicFixture();
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     const doc = await db.contratoDigital.create({ data: { idContrato: f.contract.idContrato, idEmpresa: company,
       version: 99, hashDocumento: 'f'.repeat(64), estadoFirma: 'Generado', urlDocumento: 'generated/contracts/qa.pdf', idUsuarioGenerador: user.idUsuario } });
-    await expect(db.solicitudFirmaContrato.create({ data: { ...row, datosSnapshot: row.datosSnapshot as Prisma.InputJsonObject, idSolicitud: randomUUID(), idContratoDigital: doc.idContratoDigital,
-      tokenHash: createHash('sha256').update(randomUUID()).digest('hex') } })).rejects.toMatchObject({ code: 'P2002' });
+    await expect(signatureRepository(db).create({ data: { ...row, datosSnapshot: row.datosSnapshot as Prisma.InputJsonObject, idSolicitud: randomUUID(), version: 99, idContratoDigital: doc.idContratoDigital,
+      tokenHash: createHash('sha256').update(randomUUID()).digest('hex') } })).rejects.toMatchObject({code:'P2010',meta:{code:'23505'}});
   });
 
   it('respetan espera y máximo de cinco envíos aunque cambie la instancia', async () => {
     const f = await electronicFixture();
     await expect(electronicServices(other).electronic.requestCode(f.token)).rejects.toThrow('60 segundos');
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { otpEnvios: 4, otpSolicitado: new Date(Date.now() - 61000) } });
     await f.electronic.requestCode(f.token);
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { otpSolicitado: new Date(Date.now() - 61000) } });
     await expect(f.electronic.requestCode(f.token)).rejects.toThrow('Límite');
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).otpEnvios).toBe(5);
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).otpEnvios).toBe(5);
     expect(f.mail.sendSignatureCode).toHaveBeenCalledTimes(2);
   });
 
   it('un envío de código no confirmado inutiliza el código reservado', async () => {
     const f = await electronicFixture();
     f.mail.sendSignatureCode.mockRejectedValueOnce(new Error('uncertain QA code delivery'));
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { otpSolicitado: new Date(Date.now() - 61000) } });
     await expect(f.electronic.requestCode(f.token)).rejects.toThrow('No se confirmó');
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     expect(row.otpHash).toBeNull();
     await expect(f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow('Código no vigente');
   });
 
   it('el CHECK exige huella firmada no nula además del PDF y la constancia', async () => {
     const f = await electronicFixture();
-    await expect(db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    await expect(signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { estado: 'FIRMADA', firmaFecha: new Date(), pdfFirmado: f.original, hashFirmado: null,
         consentimientoVersion: SIGNATURE_CONSENT_VERSION, otpHash: null } })).rejects.toThrow('firma_signed_check');
-    expect((await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('PENDIENTE');
+    expect((await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } })).estado).toBe('PENDIENTE');
   });
 
   it('un enlace vencido no entrega el PDF firmado y conserva la evidencia inmutable', async () => {
     const f = await electronicFixture();
     await f.electronic.sign(f.token, f.code, f.doc.hashDocumento!, true, SIGNATURE_CONSENT_VERSION, '', '');
-    const saved = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
-    await db.solicitudFirmaContrato.update({ where: { idContratoDigital: f.doc.idContratoDigital },
+    const saved = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    await signatureRepository(db).update({ where: { idContratoDigital: f.doc.idContratoDigital },
       data: { fechaCreacion: new Date(Date.now() - 10000), fechaExpiracion: new Date(Date.now() - 1000) } });
     await expect(f.electronic.pdf(f.token)).rejects.toThrow('expiró');
-    const row = await db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
+    const row = await signatureRepository(db).findUniqueOrThrow({ where: { idContratoDigital: f.doc.idContratoDigital } });
     expect(row.estado).toBe('FIRMADA'); expect(row.pdfFirmado).toEqual(saved.pdfFirmado);
     expect(await f.electronic.signedPdf(f.contract.idContrato, user)).toEqual(saved.pdfFirmado);
   });
@@ -415,6 +439,181 @@ isolated('Firma de contratos con PostgreSQL exclusivo y datos ficticios', () => 
     expect((await db.cliente.findUniqueOrThrow({ where: { idCliente: f.customer!.idCliente } })).idEmpresa).toBe(company);
     await expect(f.electronic.signedPdf(f.contract.idContrato, user)).rejects.toThrow('no encontrado');
     expect(await f.electronic.signedPdf(f.contract.idContrato, f.actor)).toBeInstanceOf(Buffer);
+  });
+
+  it('el catálogo privado y el rol de ejecución cumplen permisos mínimos sin FKs a public', async () => {
+    const report = await inspectPrivateSignatureSchema(db);
+    expect(report.ready).toBe(true);
+    expect(report.permissions[0]).toMatchObject({ runtime: 'qa_contract', owner: 'qa_owner', superuser: false,
+      usage: true, create: false, select: true, insert: true, update: true, delete: false });
+    expect(report.constraints.some(c => c.kind === 'f')).toBe(false);
+    expect(await db.$queryRaw`SELECT to_regclass('public.solicitud_firma_contrato') IS NULL AS absent`).toEqual([{absent:true}]);
+  });
+
+  it.each([0,1,2])('el rol efectivo de grupo %s no puede leer ni escribir evidencia', async index => {
+    const client = outsiders[index];
+    const rows=await client.$queryRaw<Array<{superuser:boolean;usage:boolean;lectura:boolean;escritura:boolean}>>`
+      SELECT r.rolsuper AS superuser, has_schema_privilege(current_user,n.oid,'USAGE') AS usage,
+        has_table_privilege(current_user,c.oid,'SELECT') AS lectura, has_table_privilege(current_user,c.oid,'UPDATE') AS escritura
+      FROM pg_roles r,pg_namespace n,pg_class c WHERE r.rolname=current_user AND n.nspname='g8_contratos'
+        AND c.relnamespace=n.oid AND c.relname='solicitud_firma'`;
+    expect(rows).toEqual([{superuser:false,usage:false,lectura:false,escritura:false}]);
+    for(const statement of [
+      Prisma.sql`SELECT id_solicitud FROM g8_contratos.solicitud_firma LIMIT 0`,
+      Prisma.sql`UPDATE g8_contratos.solicitud_firma SET estado=estado WHERE false RETURNING id_solicitud`,
+      Prisma.sql`INSERT INTO g8_contratos.solicitud_firma (id_solicitud) SELECT NULL::uuid WHERE false RETURNING id_solicitud`,
+    ]) await expect(client.$queryRaw(statement)).rejects.toMatchObject({code:'P2010',meta:{code:'42501'}});
+  });
+
+  it('asignación automática no admite manual tras vencimiento, error y apagado o cambio de cohortes', async () => {
+    const f=await electronicFixture();
+    await signatureRepository(db).update({where:{idContratoDigital:f.doc.idContratoDigital},data:{estado:'EXPIRADA',correoEstado:'FALLIDO',otpHash:null}});
+    f.config.set('CONTRACT_SIGNATURE_ENABLED','false');
+    f.config.set('CONTRACT_SIGNATURE_COMPANIES','[]');f.config.set('CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES','[]');
+    f.config.set('CONTRACT_SIGNATURE_MANUAL_COMPANIES',JSON.stringify([company]));
+    f.config.set('CONTRACT_SIGNATURE_MANUAL_CONTRACTS',JSON.stringify([f.contract.idContrato]));
+    const before=await db.contrato.findUniqueOrThrow({where:{idContrato:f.contract.idContrato}});
+    await expect(f.contracts.confirmManualSignature(f.contract.idContrato,{},user)).rejects.toMatchObject({status:409});
+    await expect(f.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Firmado manualmente'},user)).rejects.toMatchObject({status:409});
+    expect(await db.contrato.findUniqueOrThrow({where:{idContrato:f.contract.idContrato}})).toEqual(before);
+    expect((await f.electronic.status(f.contract.idContrato,user)).policy).toMatchObject({mode:'automatic',manualAllowed:false,available:false});
+  });
+
+  it('anular el documento limpia el OTP y no permite revivir la versión por etiqueta', async()=>{
+    const f=await electronicFixture();
+    await f.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Anulado'},user);
+    const row=await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}});
+    expect(row).toMatchObject({estado:'ANULADA',otpHash:null,motivoAnulacion:'DOCUMENTO_ANULADO'});
+    await expect(f.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Generado'},user)).rejects.toThrow('no se reactiva');
+    await expect(f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','')).rejects.toThrow('no vigente');
+  });
+
+  it('una empresa excluida no copia PDF ni snapshot al esquema privado ni recibe leyenda automática',async()=>{
+    const f=await fixture();const ctx=electronicServices();
+    ctx.config.set('CONTRACT_SIGNATURE_COMPANIES',JSON.stringify([otherCompany]));
+    ctx.config.set('CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES',JSON.stringify([otherCompany]));
+    const doc=await ctx.contracts.generateDigitalContract(f.contract.idContrato,user);
+    expect(await signatureRepository(db).findUnique({where:{idContratoDigital:doc.idContratoDigital}})).toBeNull();
+    const original=await readFile(doc.urlDocumento);
+
+    const text=[...original.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)].flatMap(match=>{
+      const stream=inflateSync(Buffer.from(match[1],'latin1')).toString('latin1');
+      return [...stream.matchAll(/\[([^\]]*)\]\s*TJ/g)].map(line=>
+        [...line[1].matchAll(/<([\da-f]+)>/gi)].map(hex=>Buffer.from(hex[1],'hex').toString('latin1')).join(''));
+    }).join('\n');
+    expect(text).toContain('Empresa: QA Firma empresa A');
+    expect(text).not.toContain('aceptación por correo');
+    expect(text).not.toContain('firma por correo');
+
+    expect((await ctx.electronic.status(f.contract.idContrato,user)).policy.mode).toBe('unknown');
+  });
+
+  it('la evidencia firmada sigue descargable con el envío apagado y desde otra instancia',async()=>{
+    const f=await electronicFixture();
+    await f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','');
+    const row=await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}});
+    const fresh=electronicServices(other);fresh.config.set('CONTRACT_SIGNATURE_ENABLED','false');
+    fresh.config.set('CONTRACT_SIGNATURE_COMPANIES','[]');
+    expect(await fresh.electronic.signedPdf(f.contract.idContrato,user)).toEqual(row.pdfFirmado);
+    expect((await fresh.electronic.status(f.contract.idContrato,user)).signedDownloadAvailable).toBe(true);
+    expect(fresh.mail.sendSignedContract).not.toHaveBeenCalled();
+  });
+
+  it('solo un rechazo SMTP confirmado admite recuperación autorizada sin duplicar la firma',async()=>{
+    const f=await electronicFixture();
+    f.mail.sendSignedContract.mockRejectedValueOnce(new MailDeliveryError('SMTP_NOT_ACCEPTED',true,false));
+    await f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','');
+    expect((await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}})).firmaCorreoEstado).toBe('FALLIDO');
+    const before=await db.logAuditoria.count({where:{accion:'FIRMAR_CONTRATO_CORREO',idEntidadAfectada:f.contract.idContrato}});
+    await f.electronic.retryDelivery(f.contract.idContrato,user);
+    await expect(f.electronic.retryDelivery(f.contract.idContrato,user)).rejects.toMatchObject({status:409});
+    expect(await db.logAuditoria.count({where:{accion:'FIRMAR_CONTRATO_CORREO',idEntidadAfectada:f.contract.idContrato}})).toBe(before);
+    expect(f.mail.sendSignedContract).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['Anulado','version'])('compite con %s usando dos conexiones y un bloqueo real',async change=>{
+    const f=await electronicFixture();
+    const second=electronicServices(other);
+    const acquired=deferred(),release=deferred();
+    const blocker=db.$transaction(async tx=>{
+      await tx.$queryRawUnsafe('SELECT id_contrato FROM contrato WHERE id_contrato=$1 FOR UPDATE',f.contract.idContrato);
+      acquired.resolve();await release.promise;
+    },{timeout:20000});
+    await acquired.promise;
+    const changed=(change==='Anulado'
+      ?second.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Anulado'},user)
+      :second.contracts.generateDigitalContract(f.contract.idContrato,user)
+    ).then(value=>({value,error:null}),error=>({value:null,error}));
+    const signed=f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','')
+      .then(value=>({value,error:null}),error=>({value:null,error}));
+    release.resolve();await blocker;
+    const [mutation,acceptance]=await Promise.all([changed,signed]);
+    const row=await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}});
+    const business=await db.contrato.findUniqueOrThrow({where:{idContrato:f.contract.idContrato}});
+    const audits=await db.logAuditoria.count({where:{accion:'FIRMAR_CONTRATO_CORREO',idEntidadAfectada:f.contract.idContrato}});
+    if(acceptance.value){
+      expect(row.estado).toBe('FIRMADA');expect(business.estado).toBe('Firmado');expect(audits).toBe(1);
+      expect(f.mail.sendSignedContract).toHaveBeenCalledTimes(1);
+      if(change==='Anulado')expect(mutation.error).toBeTruthy();
+    }else{
+      expect(mutation.error).toBeNull();expect(row.estado).toBe('ANULADA');expect(row.otpHash).toBeNull();
+      expect(business.estado).toBe('Pendiente firma contrato');expect(audits).toBe(0);
+      expect(f.mail.sendSignedContract).not.toHaveBeenCalled();
+    }
+    expect(await db.ordenTrabajo.count()).toBe(0);
+  });
+  it.each(['empresa','version'])('las referencias lógicas rechazan una solicitud con %s inconsistente',async field=>{
+    const f=await electronicFixture();
+    await signatureRepository(db).update({where:{idContratoDigital:f.doc.idContratoDigital},
+      data:field==='empresa'?{idEmpresa:otherCompany}:{version:99}});
+    await expect(f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','')).rejects.toThrow();
+    expect((await db.contrato.findUniqueOrThrow({where:{idContrato:f.contract.idContrato}})).estado).toBe('Pendiente firma contrato');
+    expect(f.mail.sendSignedContract).not.toHaveBeenCalled();
+  });
+
+  it('la recuperación de correo también respeta la empresa habilitada para enviar',async()=>{
+    const f=await electronicFixture();
+    f.mail.sendSignedContract.mockRejectedValueOnce(new MailDeliveryError('SMTP_NOT_ACCEPTED',true,false));
+    await f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','');
+    f.config.set('CONTRACT_SIGNATURE_COMPANIES',JSON.stringify([otherCompany]));
+    await expect(f.electronic.retryDelivery(f.contract.idContrato,user)).rejects.toThrow('Empresa no habilitada');
+    expect(f.mail.sendSignedContract).toHaveBeenCalledTimes(1);
+    expect((await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}})).firmaCorreoEstado).toBe('FALLIDO');
+  });
+  it('la política de envío exige un PDF vigente pendiente y deshabilita versiones anuladas',async()=>{
+    const f=await electronicFixture();
+    expect((await f.electronic.status(f.contract.idContrato,user)).sendAllowed).toBe(true);
+    await f.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Anulado'},user);
+    expect((await f.electronic.status(f.contract.idContrato,user)).sendAllowed).toBe(false);
+  });
+
+  it.each(['Anulado','version'])('una firma que obtiene primero el bloqueo conserva la evidencia frente a %s',async change=>{
+    const f=await electronicFixture();
+    const acquired=deferred(),release=deferred();
+    const record=f.audit.record.bind(f.audit);
+    jest.spyOn(f.audit,'record').mockImplementation(async(input,tx)=>{
+      if(input.accion==='FIRMAR_CONTRATO_CORREO'){acquired.resolve();await release.promise;}
+      return record(input,tx);
+    });
+    const signing=f.electronic.sign(f.token,f.code,f.doc.hashDocumento!,true,SIGNATURE_CONSENT_VERSION,'','');
+    await acquired.promise;
+    const second=electronicServices(other);
+    const mutation=(change==='Anulado'
+      ?second.contracts.updateDigitalContractStatus(f.contract.idContrato,{estadoFirma:'Anulado'},user)
+      :second.contracts.generateDigitalContract(f.contract.idContrato,user)
+    ).then(value=>({value,error:null}),error=>({value:null,error}));
+    release.resolve();
+    await expect(signing).resolves.toEqual({estado:'FIRMADA'});
+    const outcome=await mutation;
+    if(change==='Anulado')expect(outcome.error).toBeTruthy();
+    else expect(outcome.value).toMatchObject({version:f.doc.version+1});
+    const saved=await signatureRepository(db).findUniqueOrThrow({where:{idContratoDigital:f.doc.idContratoDigital}});
+    expect(saved.estado).toBe('FIRMADA');
+    expect((await db.contrato.findUniqueOrThrow({where:{idContrato:f.contract.idContrato}})).estado).toBe('Firmado');
+    expect(await f.electronic.signedPdf(f.contract.idContrato,user)).toEqual(saved.pdfFirmado);
+    expect(await db.logAuditoria.count({where:{accion:'FIRMAR_CONTRATO_CORREO',idEntidadAfectada:f.contract.idContrato}})).toBe(1);
+    expect(f.mail.sendSignedContract).toHaveBeenCalledTimes(1);
+    expect(await db.ordenTrabajo.count()).toBe(0);
   });
 
 });

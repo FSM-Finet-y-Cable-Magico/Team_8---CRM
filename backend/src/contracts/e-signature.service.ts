@@ -1,12 +1,15 @@
+import { inspectPrivateSignatureSchema } from './signature-schema';
+import { signatureRepository, signatureStorageAvailable, SignatureRow } from './signature.repository';
+import { assignAutomatic, assertPendingSignature, resolveSignatureMode } from './signature-policy';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, SolicitudFirmaContrato } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
-import { MailService } from '../mail/mail.service';
+import { MailDeliveryError, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildContractSnapshot, canonicalSnapshot } from './contract-snapshot';
 import { ContractsService } from './contracts.service';
@@ -37,10 +40,10 @@ export class ESignatureService implements OnModuleInit {
   }
 
   async signedPdf(idContrato: number, actor: AuthUser) {
-    requireSignatureSettings(this.config);
     await this.authorize(this.db, idContrato, actor);
-    const row = await this.db.solicitudFirmaContrato.findFirst({ where: { idContrato, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } });
-    if (!row?.pdfFirmado || digest(row.pdfFirmado) !== row.hashFirmado) throw new NotFoundException('Documento no disponible');
+    if (!await signatureStorageAvailable(this.db)) throw new NotFoundException('Documento no disponible');
+    const row = await signatureRepository(this.db).findFirst({ where: { idContrato, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } });
+    if (!row?.pdfFirmado || !await this.validReferences(this.db, row) || digest(row.pdfFirmado) !== row.hashFirmado) throw new NotFoundException('Documento no disponible');
     return row.pdfFirmado;
   }
 
@@ -49,23 +52,44 @@ export class ESignatureService implements OnModuleInit {
     if (!settings) return; // No table access, file access, SMTP or external calls when off.
     if (settings.companies.some(id => !this.mail.isConfigured(id))) throw new Error('CONTRACT_SIGNATURE_SMTP_REQUIRED');
     try {
-      // Explicitly validate the new schema only after activation was requested.
-      await this.db.solicitudFirmaContrato.findFirst({ select: { idSolicitud: true, datosSnapshot: true,
-        otpIntentos: true, pdfFirmado: true, firmaCorreoEstado: true } });
+      const storage = await inspectPrivateSignatureSchema(this.db);
+      if (!storage.ready) throw new Error('PRIVATE_SIGNATURE_SCHEMA_NOT_READY');
     } catch { throw new Error('CONTRACT_SIGNATURE_SCHEMA_NOT_READY'); }
   }
 
   async status(idContrato: number, actor: AuthUser) {
-    const settings = signatureSettings(this.config);
-    if (!settings) return { enabled: false, solicitud: null };
-    const contract = await this.authorize(this.db, idContrato, actor);
-    const select = { idSolicitud: true, estado: true, correoEstado: true, fechaExpiracion: true,
-      firmaFecha: true, firmaCorreoEstado: true } satisfies Prisma.SolicitudFirmaContratoSelect;
-    const signed = await this.db.solicitudFirmaContrato.findFirst({ where: { idContrato, estado: 'FIRMADA' },
-      orderBy: { firmaFecha: 'desc' }, select });
-    const row = signed ?? await this.db.solicitudFirmaContrato.findFirst({ where: { idContrato },
-      orderBy: { documento: { version: 'desc' } }, select });
-    return { enabled: settings.companies.includes(contract.idEmpresa!), solicitud: row };
+    return this.transaction(async tx => {
+      await this.lock(tx, idContrato);
+      const contract = await this.authorize(tx, idContrato, actor);
+      await assignAutomatic(tx, contract, this.config, actor.idUsuario);
+      const mode = await resolveSignatureMode(tx, contract, this.config);
+      const settings = signatureSettings(this.config);
+      const storage = await signatureStorageAvailable(tx);
+      const available = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
+      const latest = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' } });
+      const manualAllowed = mode === 'manual' && contract.estado === 'Pendiente firma contrato'
+        && !!latest && latest.idEmpresa === contract.idEmpresa && ['Generado','Enviado','Firmado manualmente'].includes(latest.estadoFirma);
+      const repo = signatureRepository(tx);
+      const row = storage ? await repo.findFirst({ where: { idContrato, idEmpresa: contract.idEmpresa!, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } })
+        ?? await repo.findFirst({ where: { idContrato, idEmpresa: contract.idEmpresa! }, orderBy: { documento: { version: 'desc' } } }) : null;
+      const sendAllowed = available && contract.estado === 'Pendiente firma contrato' && !!latest && !!row
+        && row.idContratoDigital === latest.idContratoDigital && row.idEmpresa === contract.idEmpresa
+        && ['Generado','Enviado'].includes(latest.estadoFirma) && !latest.fechaFirma
+        && (row.estado === 'BORRADOR' || row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() > Date.now());
+      return { enabled: available, sendAllowed, policy: { mode, available, manualAllowed,
+        reason: mode === 'unknown' ? 'Modo de firma pendiente de autorización' : mode === 'automatic' && !available ? 'Firma automática temporalmente no disponible; no admite firma manual' : null },
+        solicitud: row ? { idSolicitud: row.idSolicitud, estado: row.estado, correoEstado: row.correoEstado,
+          fechaExpiracion: row.fechaExpiracion, firmaFecha: row.firmaFecha, firmaCorreoEstado: row.firmaCorreoEstado } : null,
+        signedDownloadAvailable: row?.estado === 'FIRMADA' };
+    });
+  }
+
+  private async validReferences(tx: Tx, row: SignatureRow) {
+    const contract = await tx.contrato.findUnique({ where: { idContrato: row.idContrato }, select: { idEmpresa: true } });
+    const doc = await tx.contratoDigital.findUnique({ where: { idContratoDigital: row.idContratoDigital },
+      select: { idContrato: true, idEmpresa: true, version: true } });
+    return contract?.idEmpresa === row.idEmpresa && doc?.idContrato === row.idContrato
+      && doc.idEmpresa === row.idEmpresa && doc.version === row.version;
   }
 
   private async authorize(tx: Tx, idContrato: number, actor: AuthUser) {
@@ -88,12 +112,18 @@ export class ESignatureService implements OnModuleInit {
       await this.lock(tx, idContrato);
       const contract = await this.authorize(tx, idContrato, actor);
       if (!contract.idEmpresa || !settings.companies.includes(contract.idEmpresa)) throw new BadRequestException('Empresa no habilitada para firma');
-      if (['Firmado', 'Activo', 'Moroso', 'Suspendido', 'Anulado', 'Baja'].includes(contract.estado)) throw new ConflictException('El contrato no está pendiente de firma');
+      assertPendingSignature(contract.estado);
+      await assignAutomatic(tx, contract, this.config, actor.idUsuario);
+      if (await resolveSignatureMode(tx, contract, this.config) !== 'automatic') throw new ConflictException('Contrato no asignado a firma automática');
+      if (!await signatureStorageAvailable(tx)) throw new ConflictException('Almacenamiento de firma no disponible');
       const latest = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' },
-        select: { idContratoDigital: true, hashDocumento: true, estadoFirma: true, fechaFirma: true } });
-      if (!latest || latest.fechaFirma || /^firmad[oa]/iu.test(latest.estadoFirma)) throw new ConflictException('Genera un PDF vigente sin firmar');
-      const row = await tx.solicitudFirmaContrato.findUnique({ where: { idContratoDigital: latest.idContratoDigital } });
-      if (!row) throw new ConflictException('Regenera el PDF para conservar sus datos de firma');
+        select: { idContratoDigital: true, idEmpresa: true, version: true, hashDocumento: true, estadoFirma: true, fechaFirma: true } });
+      if (!latest || latest.idEmpresa !== contract.idEmpresa || !['Generado','Enviado'].includes(latest.estadoFirma) || latest.fechaFirma) throw new ConflictException('Genera un PDF vigente sin firmar');
+      const row = await signatureRepository(tx).findUnique({ where: { idContratoDigital: latest.idContratoDigital } });
+      if (!row || !await this.validReferences(tx, row)) throw new ConflictException('Regenera el PDF para conservar sus datos de firma');
+      if (row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() <= Date.now()) {
+        await this.invalidate(tx, row, 'PLAZO_CUMPLIDO', true); return failure('El enlace expiró. Genera una nueva versión');
+      }
       if (row.estado === 'PENDIENTE') return { existing: true as const, row };
       if (row.estado !== 'BORRADOR') throw new ConflictException('Genera una nueva versión para reenviar a firma');
       const snapshot = await buildContractSnapshot(tx, idContrato, true);
@@ -104,13 +134,13 @@ export class ESignatureService implements OnModuleInit {
       }
       if (!this.mail.isConfigured(row.idEmpresa)) throw new BadRequestException('Correo de empresa no configurado');
       const now = new Date();
-      const updated = await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: {
+      const updated = await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
         estado: 'PENDIENTE', tokenHash: digest(token), destinatario: snapshot.cliente.email!,
         fechaCreacion: now, fechaExpiracion: new Date(now.getTime() + 48 * 3600000), correoEstado: 'EN_PROCESO',
       } });
       await this.audit.record({ idUsuario: actor.idUsuario, accion: 'SOLICITAR_FIRMA_CONTRATO',
         entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
-        valorNuevo: { idSolicitud: row.idSolicitud, hashOriginal: row.hashOriginal } }, tx);
+        valorNuevo: { modo: 'automatic' } }, tx);
       return { existing: false as const, row: updated };
     });
     if (isFailure(result)) throw new ConflictException(result.failure);
@@ -121,7 +151,7 @@ export class ESignatureService implements OnModuleInit {
           to: result.row.destinatario, link: settings.url + '/firmar#' + token });
         estado = sent.status === 'sent' ? 'ENVIADO' : sent.status === 'simulated' && settings.test ? 'SIMULADO' : 'FALLIDO';
       } catch { /* Never log SMTP responses, links or recipient addresses. */ }
-      await this.db.solicitudFirmaContrato.updateMany({ where: { idSolicitud: result.row.idSolicitud,
+      await signatureRepository(this.db).updateMany({ where: { idSolicitud: result.row.idSolicitud,
         estado: 'PENDIENTE', tokenHash: digest(token) }, data: { correoEstado: estado } });
     }
     return this.status(idContrato, actor); // Never return bearer tokens to internal callers.
@@ -132,7 +162,7 @@ export class ESignatureService implements OnModuleInit {
     return this.transaction(async tx => {
       await this.lock(tx, idContrato);
       await this.authorize(tx, idContrato, actor);
-      const count = await tx.solicitudFirmaContrato.updateMany({ where: { idContrato, estado: 'PENDIENTE' },
+      const count = await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' },
         data: { estado: 'ANULADA', motivoAnulacion: 'OPERADOR', otpHash: null } });
       await this.audit.record({ idUsuario: actor.idUsuario, accion: 'ANULAR_SOLICITUD_FIRMA',
         entidadAfectada: 'contrato', idEntidadAfectada: idContrato, valorNuevo: { solicitudes: count.count } }, tx);
@@ -140,30 +170,34 @@ export class ESignatureService implements OnModuleInit {
     });
   }
 
-  private async invalidate(tx: Tx, row: SolicitudFirmaContrato, reason: string, expired = false) {
-    await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: {
+  private async invalidate(tx: Tx, row: SignatureRow, reason: string, expired = false) {
+    await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
       estado: expired ? 'EXPIRADA' : 'ANULADA', motivoAnulacion: reason, otpHash: null,
     } });
     await this.audit.record({ accion: 'INVALIDAR_SOLICITUD_FIRMA', entidadAfectada: 'contrato',
-      idEntidadAfectada: row.idContrato, valorNuevo: { idSolicitud: row.idSolicitud, motivo: reason } }, tx);
+      idEntidadAfectada: row.idContrato, valorNuevo: { motivo: reason } }, tx);
   }
 
-  private async withToken<T>(token: string, action: (tx: Tx, row: SolicitudFirmaContrato) => Promise<T | Failure>): Promise<T> {
+  private async withToken<T>(token: string, action: (tx: Tx, row: SignatureRow) => Promise<T | Failure>): Promise<T> {
     const settings = requireSignatureSettings(this.config);
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new NotFoundException('Enlace no disponible');
-    const found = await this.db.solicitudFirmaContrato.findUnique({ where: { tokenHash: digest(token) },
+    const found = await signatureRepository(this.db).findUnique({ where: { tokenHash: digest(token) },
       select: { idContrato: true, idSolicitud: true } });
     if (!found) throw new NotFoundException('Enlace no disponible');
     const result = await this.transaction(async tx => {
       await this.lock(tx, found.idContrato);
-      const row = await tx.solicitudFirmaContrato.findUnique({ where: { idSolicitud: found.idSolicitud } });
-      if (!row || !settings.companies.includes(row.idEmpresa) || row.tokenHash !== digest(token)) return failure('Enlace no disponible');
+      const row = await signatureRepository(tx).findUnique({ where: { idSolicitud: found.idSolicitud } });
+      if (!row || !settings.companies.includes(row.idEmpresa) || row.tokenHash !== digest(token) || !await this.validReferences(tx, row)) return failure('Enlace no disponible');
       if (row.estado !== 'FIRMADA' && row.estado !== 'PENDIENTE') return failure('Solicitud no vigente. Contacta a la empresa');
       if (row.fechaExpiracion.getTime() <= Date.now()) {
         if (row.estado === 'PENDIENTE') await this.invalidate(tx, row, 'PLAZO_CUMPLIDO', true);
         return failure('El enlace expiró. Contacta a la empresa');
       }
       if (row.estado === 'PENDIENTE') {
+        const current = await tx.contrato.findUniqueOrThrow({ where: { idContrato: row.idContrato } });
+        if (current.estado !== 'Pendiente firma contrato' || await resolveSignatureMode(tx, current, this.config) !== 'automatic') {
+          await this.invalidate(tx, row, 'CONTRATO_NO_ELEGIBLE'); return failure('Contrato no elegible para firma');
+        }
         let snapshot;
         try { snapshot = await buildContractSnapshot(tx, row.idContrato, true); }
         catch (error) {
@@ -175,7 +209,7 @@ export class ESignatureService implements OnModuleInit {
           select: { idContratoDigital: true, hashDocumento: true, fechaFirma: true, estadoFirma: true } });
         if (snapshot.idEmpresa !== row.idEmpresa || !sameSnapshot(snapshot, row.datosSnapshot)
             || latest?.idContratoDigital !== row.idContratoDigital || latest.hashDocumento !== row.hashOriginal
-            || latest.fechaFirma || /^firmad[oa]/iu.test(latest.estadoFirma)
+            || latest.fechaFirma || !['Generado','Enviado'].includes(latest.estadoFirma)
             || digest(row.pdfOriginal) !== row.hashOriginal) {
           await this.invalidate(tx, row, 'DATOS_CAMBIADOS');
           return failure('Los datos cambiaron. Solicita un nuevo documento');
@@ -200,7 +234,7 @@ export class ESignatureService implements OnModuleInit {
         if (!row.pdfFirmado || digest(row.pdfFirmado) !== row.hashFirmado) return failure('Documento no disponible');
         return row.pdfFirmado;
       }
-      await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: { pdfVisto: new Date() } });
+      await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: { pdfVisto: new Date() } });
       return row.pdfOriginal;
     });
   }
@@ -215,7 +249,7 @@ export class ESignatureService implements OnModuleInit {
         return failure('Límite de códigos alcanzado o espera de 60 segundos pendiente');
       }
       const hash = this.otpHash(row.idSolicitud, code);
-      await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: {
+      await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
         otpHash: hash, otpExpiracion: new Date(Date.now() + 10 * 60000), otpSolicitado: new Date(),
         otpEnvios: { increment: 1 }, correoEstado: 'EN_PROCESO',
       } });
@@ -227,7 +261,7 @@ export class ESignatureService implements OnModuleInit {
         to: prepared.row.destinatario, code });
       estado = sent.status === 'sent' ? 'ENVIADO' : sent.status === 'simulated' && settings.test ? 'SIMULADO' : 'FALLIDO';
     } catch { /* Unknown delivery is never automatically retried. */ }
-    await this.db.solicitudFirmaContrato.updateMany({ where: { idSolicitud: prepared.row.idSolicitud,
+    await signatureRepository(this.db).updateMany({ where: { idSolicitud: prepared.row.idSolicitud,
       otpHash: prepared.hash, estado: 'PENDIENTE' }, data: { correoEstado: estado,
         ...(!['ENVIADO', 'SIMULADO'].includes(estado) ? { otpHash: null } : {}) } });
     if (!['ENVIADO', 'SIMULADO'].includes(estado)) throw new ConflictException('No se confirmó el envío. Espera antes de solicitar otro código');
@@ -248,7 +282,7 @@ export class ESignatureService implements OnModuleInit {
           || !(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && requireSignatureSettings(this.config).test) || row.otpIntentos >= 5) return failure('Código no vigente');
       const expected = Buffer.from(row.otpHash, 'hex'), supplied = Buffer.from(this.otpHash(row.idSolicitud, code), 'hex');
       if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
-        await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: { otpIntentos: { increment: 1 } } });
+        await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: { otpIntentos: { increment: 1 } } });
         if (row.otpIntentos >= 4) await this.invalidate(tx, row, 'INTENTOS_AGOTADOS');
         return failure('Código incorrecto');
       }
@@ -260,21 +294,20 @@ export class ESignatureService implements OnModuleInit {
       await tx.contratoDigital.update({ where: { idContratoDigital: row.idContratoDigital }, data: {
         estadoFirma: 'Firmado electronicamente', fechaFirma: signedAt,
       }, select: { idContratoDigital: true } });
-      await tx.solicitudFirmaContrato.update({ where: { idSolicitud: row.idSolicitud }, data: {
+      await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
         estado: 'FIRMADA', firmaFecha: signedAt, firmaIp: /^[a-fA-F0-9:.]{1,45}$/.test(ip) ? ip : null,
         firmaUserAgent: agent.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 200),
         consentimientoVersion: SIGNATURE_CONSENT_VERSION, otpHash: null, pdfFirmado: pdf, hashFirmado: digest(pdf),
       } });
       await this.audit.record({ accion: 'FIRMAR_CONTRATO_CORREO', entidadAfectada: 'contrato',
-        idEntidadAfectada: row.idContrato, valorNuevo: { idSolicitud: row.idSolicitud,
-          hashOriginal: row.hashOriginal, hashFirmado: digest(pdf), consentimientoVersion: SIGNATURE_CONSENT_VERSION } }, tx);
+        idEntidadAfectada: row.idContrato, valorNuevo: { estado: 'Firmado', origenFirma: 'electronic' } }, tx);
       return { estado: 'FIRMADA', idSolicitud: row.idSolicitud };
     });
     try { await this.deliverSigned(result.idSolicitud); } catch { /* A delivery/status failure cannot undo a committed signature. */ }
     return { estado: result.estado };
   }
 
-  private async seal(row: SolicitudFirmaContrato, when: Date) {
+  private async seal(row: SignatureRow, when: Date) {
     const pdf = await PDFDocument.load(row.pdfOriginal, { updateMetadata: false });
     const font = await pdf.embedFont(StandardFonts.Helvetica);
     const page = pdf.addPage([595.28, 841.89]);
@@ -301,23 +334,50 @@ export class ESignatureService implements OnModuleInit {
       }
       y -= 8;
     }
-    return Buffer.from(await pdf.save({ useObjectStreams: false }));
+    const sealed = Buffer.from(await pdf.save({ useObjectStreams: false }));
+    if (sealed.length > 5 * 1024 * 1024) throw new BadRequestException('La constancia supera el límite de entrega de 5 MiB');
+    return sealed;
+  }
+
+  async retryDelivery(idContrato: number, actor: AuthUser) {
+    const settings = requireSignatureSettings(this.config);
+    const row = await this.transaction(async tx => {
+      await this.lock(tx, idContrato);
+      const contract = await this.authorize(tx, idContrato, actor);
+      if (!contract.idEmpresa || !settings.companies.includes(contract.idEmpresa) || !this.mail.isConfigured(contract.idEmpresa)) {
+        throw new ConflictException('Empresa no habilitada para entrega de firma');
+      }
+      const saved = await signatureRepository(tx).findFirst({ where: { idContrato, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } });
+      if (!saved || !await this.validReferences(tx, saved) || saved.firmaCorreoEstado !== 'FALLIDO') {
+        throw new ConflictException('Solo puede reintentarse un correo con rechazo confirmado. Revisa los resultados inciertos sin reenviar.');
+      }
+      await signatureRepository(tx).update({ where: { idSolicitud: saved.idSolicitud }, data: { firmaCorreoEstado: 'PENDIENTE' } });
+      await this.audit.record({ idUsuario: actor.idUsuario, accion: 'REINTENTAR_ENTREGA_CONTRATO', entidadAfectada: 'contrato', idEntidadAfectada: idContrato }, tx);
+      return saved;
+    });
+    await this.deliverSigned(row.idSolicitud); return this.status(idContrato, actor);
   }
 
   private async deliverSigned(idSolicitud: string) {
+    // Recheck availability and company before any claim or external send.
+    const settings = requireSignatureSettings(this.config);
+    const prepared = await signatureRepository(this.db).findUniqueOrThrow({ where: { idSolicitud } });
+    if (!settings.companies.includes(prepared.idEmpresa) || !await this.validReferences(this.db, prepared)) {
+      throw new ConflictException('Empresa o documento no habilitado para entrega');
+    }
     // Durable one-shot claim: uncertain SMTP results or process crashes are not retried by a replay.
-    const claim = await this.db.solicitudFirmaContrato.updateMany({ where: { idSolicitud, estado: 'FIRMADA',
+    const claim = await signatureRepository(this.db).updateMany({ where: { idSolicitud, estado: 'FIRMADA',
       firmaCorreoEstado: 'PENDIENTE' }, data: { firmaCorreoEstado: 'EN_PROCESO' } });
     if (!claim.count) return;
-    const row = await this.db.solicitudFirmaContrato.findUniqueOrThrow({ where: { idSolicitud } });
+    const row = await signatureRepository(this.db).findUniqueOrThrow({ where: { idSolicitud } });
     let estado = 'INDETERMINADO';
     try {
       const sent = await this.mail.sendSignedContract({ idEmpresa: row.idEmpresa, to: row.destinatario,
         pdf: row.pdfFirmado!, filename: 'contrato-firmado.pdf' });
       const settings = requireSignatureSettings(this.config);
       estado = sent.status === 'sent' ? 'ENVIADO' : sent.status === 'simulated' && settings.test ? 'SIMULADO' : 'FALLIDO';
-    } catch { /* The signature remains committed if delivery fails. */ }
-    await this.db.solicitudFirmaContrato.updateMany({ where: { idSolicitud, firmaCorreoEstado: 'EN_PROCESO' },
+    } catch (error) { estado = error instanceof MailDeliveryError && error.confirmedNotAccepted ? 'FALLIDO' : 'INDETERMINADO'; }
+    await signatureRepository(this.db).updateMany({ where: { idSolicitud, firmaCorreoEstado: 'EN_PROCESO' },
       data: { firmaCorreoEstado: estado } });
   }
 }
