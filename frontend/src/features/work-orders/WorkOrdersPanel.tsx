@@ -1,25 +1,24 @@
 import { useState } from 'react';
-import { CircleCheckBig, ClipboardList, Wrench } from 'lucide-react';
+import { ArrowDown, ArrowDownUp, ArrowUp, Search } from 'lucide-react';
 import { type WorkOrder } from '../../api';
 import {
-  formatConnectionType,
   formatDateOnly,
-  formatDateTime,
   formatWorkOrderValue,
   normalizeWorkOrderValue,
-  isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder,
 } from '../../lib';
-import { HistoryBox, Modal, StatusBadge } from '../../shared/components';
-import { WorkOrderTechnicalEvidence } from '../installations/WorkOrderTechnicalEvidence';
+import { Modal, StatusBadge } from '../../shared/components';
+import { WorkOrderDetail } from './WorkOrderDetail';
+
+const sortLabels = { code: 'Código registro', type: 'Tipo', date: 'Fecha' } as const;
+type SortField = keyof typeof sortLabels;
+const collator = new Intl.Collator('es-CL', { numeric: true, sensitivity: 'base' });
 
 export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onChanged: () => void }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<{ field: SortField; descending: boolean } | null>(null);
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
-  const selectedOrderIsInstallation = isInstallationWorkOrder(selectedOrder?.tipoOt);
-  const selectedOrderIsCompleted = isCompletedWorkOrder(selectedOrder?.estado);
-  const selectedOrderIsTerminal = isTerminalWorkOrder(selectedOrder?.estado);
-  const selectedOrderHasTicket = Boolean(selectedOrder?.idTicket) && !selectedOrderIsInstallation;
 
   function ownerLabel(order: WorkOrder) {
     if (order.prospecto?.idProspecto) {
@@ -36,17 +35,17 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
       return `Ticket ${order.ticket?.codigoSeguimiento ?? order.idTicket}`;
     }
 
-    return 'Sin asociado';
+    return '—';
   }
 
-  function formatWorkOrderTicketCode(order: WorkOrder) {
+  function formatWorkOrderTicketCode(order: WorkOrder, fallback = '-') {
     const code = order.ticket?.codigoSeguimiento?.trim();
 
     if (code) {
       return code;
     }
 
-    return '-';
+    return fallback;
   }
 
   function formatWorkOrderCode(order: WorkOrder) {
@@ -68,48 +67,98 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
     return `OT-${prefix}-${String(order.idOt).padStart(6, '0')}`;
   }
 
+  const rows = workOrders.map(order => ({
+    order,
+    code: formatWorkOrderCode(order),
+    client: order.cliente?.nombreCompleto?.trim() || order.prospecto?.nombreCompleto?.trim()
+      || (order.idCliente ? `Cliente #${order.idCliente}` : 'Sin cliente asociado'),
+    ticket: formatWorkOrderTicketCode(order),
+    technician: order.tecnico?.nombreCompleto ?? 'Sin asignar',
+    type: formatWorkOrderValue(order.tipoOt),
+    date: order.fechaProgramada ? `${order.fechaProgramada.slice(0, 10)} ${order.horaVisita ?? ''}` : '',
+    priority: formatWorkOrderValue(order.prioridad),
+    status: formatWorkOrderValue(order.estado),
+  }));
+  const searchTerm = normalizeWorkOrderValue(query);
+  const rutTerm = /^[\d.k-]+$/.test(searchTerm) ? searchTerm.replace(/[.-]/g, '') : '';
+  const visibleRows = rows.filter(row => {
+    if (!searchTerm) return true;
+    const ruts = [row.order.cliente?.rut, row.order.prospecto?.rut];
+    return [row.code, row.client, row.ticket, row.technician, ...ruts]
+      .some(value => normalizeWorkOrderValue(value).includes(searchTerm))
+      || Boolean(rutTerm && ruts.some(rut => normalizeWorkOrderValue(rut).replace(/[.-]/g, '').includes(rutTerm)));
+  });
+
+  if (sort) {
+    const { field, descending } = sort;
+    visibleRows.sort((left, right) => {
+      const a = left[field];
+      const b = right[field];
+      if (field === 'date' && Boolean(a) !== Boolean(b)) return a ? -1 : 1;
+      return descending ? collator.compare(b, a) : collator.compare(a, b);
+    });
+  }
+
+  function sortableHeading(field: SortField) {
+    const direction = sort?.field === field ? (sort.descending ? 'descending' : 'ascending') : undefined;
+    const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowDownUp;
+    return <th scope="col" aria-sort={direction}>
+      <button type="button" className="work-order-column-sort" onClick={() => setSort(current => ({
+        field,
+        descending: current?.field === field && !current.descending,
+      }))}>
+        {sortLabels[field]} <Icon size={14} aria-hidden="true" />
+      </button>
+    </th>;
+  }
+
   return (
     <section className="work-orders-panel stack">
       <div className="section-heading">
         <h2>Órdenes de trabajo</h2>
-        <p>Consulta las visitas, reparaciones e instalaciones registradas.</p>
+      </div>
+      <div className="work-orders-toolbar">
+        <label className="work-orders-search">
+          <Search size={16} aria-hidden="true" />
+          <input type="search" aria-label="Buscar órdenes de trabajo" placeholder="Buscar por código, cliente, RUT, ticket o técnico" value={query} onChange={event => setQuery(event.target.value)} />
+        </label>
+        {searchTerm && <button type="button" className="secondary compact crm-table-action" onClick={() => setQuery('')}>Limpiar búsqueda</button>}
+        <span className="work-orders-result-count" role="status">{searchTerm ? `${visibleRows.length} de ${rows.length}` : rows.length} {rows.length === 1 ? 'orden' : 'órdenes'}</span>
       </div>
       <div className="table-wrap work-orders-table-wrap">
         <table className="work-orders-table operational-table">
           <thead>
             <tr>
-              <th>Código OT</th>
-              <th>Registro</th>
-              <th>Tipo</th>
-              <th>Asociado</th>
+              {sortableHeading('code')}
+              {sortableHeading('type')}
+              <th>Cliente</th>
               <th>Ticket</th>
-              <th>Fecha</th>
+              {sortableHeading('date')}
               <th>Técnico</th>
               <th className="operational-badge-column">Prioridad</th>
               <th className="operational-badge-column">Estado</th>
-              <th></th>
+              <th><span className="sr-only">Acción</span></th>
             </tr>
           </thead>
           <tbody>
-            {workOrders.map((order) => (
-              <tr key={order.idOt}>
-                <td className="work-order-id">{formatWorkOrderCode(order)}</td>
-                <td><span className="source-badge">Histórico</span></td>
-                <td><span className="work-order-type">{formatWorkOrderValue(order.tipoOt)}</span></td>
-                <td>{ownerLabel(order)}</td>
-                <td>{formatWorkOrderTicketCode(order)}</td>
+            {visibleRows.map(row => (
+              <tr key={row.order.idOt}>
+                <td className="work-order-id">{row.code}</td>
+                <td><span className="work-order-type">{row.type}</span></td>
+                <td>{row.client}</td>
+                <td>{row.ticket}</td>
                 <td>
-                  {order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : '-'}
-                  {order.horaVisita ? ` ${order.horaVisita}` : ''}
+                  {row.order.fechaProgramada ? formatDateOnly(row.order.fechaProgramada) : '-'}
+                  {row.order.horaVisita ? ` ${row.order.horaVisita}` : ''}
                 </td>
-                <td>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</td>
-                <td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.prioridad)} /></td>
-                <td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.estado)} /></td>
+                <td>{row.technician}</td>
+                <td className="operational-badge-column"><StatusBadge value={row.priority} /></td>
+                <td className="operational-badge-column"><StatusBadge value={row.status} /></td>
                 <td>
                   <button
-                    className="secondary compact operational-manage-button"
+                    className="secondary compact crm-table-action"
                     onClick={() => {
-                      setSelectedId(order.idOt);
+                      setSelectedId(row.order.idOt);
                       setModalOpen(true);
                     }}
                   >
@@ -121,131 +170,18 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
           </tbody>
         </table>
       </div>
-      {!workOrders.length && <p className="empty-state">No hay órdenes de trabajo disponibles.</p>}
+      {!visibleRows.length && <p className="empty-state">{rows.length ? 'No hay órdenes de trabajo que coincidan con la búsqueda.' : 'No hay órdenes de trabajo disponibles.'}</p>}
 
-      <Modal title="Gestionar orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title="Detalle de orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)} focusClose>
         {selectedOrder ? (
-          <div className="workflow-panel modal-workflow work-order-workflow">
-            <section className="work-order-overview">
-              <header className="work-order-overview-header">
-                <span className="work-order-overview-icon" aria-hidden="true">
-                  <ClipboardList size={23} strokeWidth={1.8} />
-                </span>
-                <div>
-                  <p>Orden de trabajo</p>
-                  <h3>{formatWorkOrderCode(selectedOrder)}</h3>
-                </div>
-                <StatusBadge value={formatWorkOrderValue(selectedOrder.estado)} />
-              </header>
-
-              <dl className="work-order-overview-data">
-                <div>
-                  <dt>Código OT</dt>
-                  <dd>{formatWorkOrderCode(selectedOrder)}</dd>
-                </div>
-                <div>
-                  <dt>Tipo</dt>
-                  <dd>{formatWorkOrderValue(selectedOrder.tipoOt)}</dd>
-                </div>
-                <div>
-                  <dt>Asociado</dt>
-                  <dd>{ownerLabel(selectedOrder)}</dd>
-                </div>
-                <div>
-                  <dt>Ticket</dt>
-                  <dd>{formatWorkOrderTicketCode(selectedOrder)}</dd>
-                </div>
-                <div>
-                  <dt>Técnico</dt>
-                  <dd>{selectedOrder.tecnico?.nombreCompleto ?? 'Sin asignar'}</dd>
-                </div>
-                <div>
-                  <dt>Prioridad</dt>
-                  <dd><StatusBadge value={formatWorkOrderValue(selectedOrder.prioridad)} /></dd>
-                </div>
-                <div>
-                  <dt>Visita</dt>
-                  <dd>
-                    {selectedOrder.fechaProgramada ? formatDateOnly(selectedOrder.fechaProgramada) : 'Sin fecha'}{' '}
-                    {selectedOrder.horaVisita ?? 'Sin hora'}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Conexión</dt>
-                  <dd>{selectedOrder.tipoConexion ? formatConnectionType(selectedOrder.tipoConexion) : 'No registrada'}</dd>
-                </div>
-                {selectedOrder.observacionesAgenda && (
-                  <div className="work-order-overview-note">
-                    <dt>Observaciones de agenda</dt>
-                    <dd>{selectedOrder.observacionesAgenda}</dd>
-                  </div>
-                )}
-              </dl>
-            </section>
-
-            <WorkOrderTechnicalEvidence evidence={selectedOrder.antecedenteTecnico} />
-            {selectedOrderIsInstallation ? (
-              <section className="work-order-completion">
-                <div className="work-order-section-heading">
-                  <span aria-hidden="true">
-                    {selectedOrderIsCompleted
-                      ? <CircleCheckBig size={21} strokeWidth={1.8} />
-                      : <Wrench size={21} strokeWidth={1.8} />}
-                  </span>
-                  <div>
-                    <h3>{selectedOrderIsCompleted ? 'Instalación completada' : selectedOrderIsTerminal ? 'Instalación no completada' : 'Instalación pendiente de cierre'}</h3>
-                    <p>
-                      {selectedOrderIsCompleted
-                        ? 'Consulta los antecedentes registrados de esta instalación.'
-                        : selectedOrderIsTerminal ? 'Una OT cerrada o cancelada no acredita por sí sola una instalación completada.' : 'El cierre de esta instalación aún no está registrado.'}
-                    </p>
-                  </div>
-                </div>
-                <div className="history-grid">
-                  <HistoryBox title="Fecha de creación del prospecto" value={formatDateTime(selectedOrder.prospecto?.fechaCreacion)} />
-                  <HistoryBox title="Fecha de conversión" value={formatDateOnly(selectedOrder.prospecto?.fechaConversion)} />
-                  <HistoryBox
-                    title="Tiempo de conversión"
-                    value={
-                      selectedOrder.prospecto?.tiempoConversionDias === null || selectedOrder.prospecto?.tiempoConversionDias === undefined
-                        ? 'Pendiente'
-                        : `${selectedOrder.prospecto.tiempoConversionDias} día(s)`
-                    }
-                  />
-                </div>
-                <p className="inline-status">Esta orden está disponible para consulta de solo lectura.</p>
-              </section>
-            ) : selectedOrderHasTicket ? (
-              <section className="work-order-completion">
-                <div className="work-order-section-heading">
-                  <span aria-hidden="true">
-                    {selectedOrderIsCompleted
-                      ? <CircleCheckBig size={21} strokeWidth={1.8} />
-                      : <Wrench size={21} strokeWidth={1.8} />}
-                  </span>
-                  <div>
-                    <h3>{selectedOrderIsCompleted ? 'Trabajo técnico completado' : 'Trabajo técnico pendiente de cierre'}</h3>
-                    <p>
-                      {selectedOrderIsCompleted
-                        ? 'Esta orden consta completada; sus datos históricos se conservan sin modificaciones.'
-                        : 'El cierre técnico está pendiente. Puedes registrar observaciones y dar seguimiento desde Tickets.'}
-                    </p>
-                  </div>
-                </div>
-                <p className="inline-status">{selectedOrderIsCompleted ? 'Consulta de solo lectura de los antecedentes del trabajo técnico.' : 'Consulta de solo lectura. El cierre técnico está pendiente de confirmación.'}</p>
-              </section>
-            ) : (
-              <div className="work-order-information">
-                <span aria-hidden="true">
-                  <CircleCheckBig size={21} strokeWidth={1.8} />
-                </span>
-                <div>
-                  <strong>Orden registrada</strong>
-                  <p>Esta orden no requiere cierre de instalación desde este panel.</p>
-                </div>
-              </div>
-            )}
-          </div>
+          <WorkOrderDetail
+            key={selectedOrder.idOt}
+            order={selectedOrder}
+            code={formatWorkOrderCode(selectedOrder)}
+            owner={ownerLabel(selectedOrder)}
+            ticket={formatWorkOrderTicketCode(selectedOrder, '—')}
+            onClose={() => setModalOpen(false)}
+          />
         ) : (
           <p className="inline-status">Selecciona una orden de trabajo para gestionarla.</p>
         )}

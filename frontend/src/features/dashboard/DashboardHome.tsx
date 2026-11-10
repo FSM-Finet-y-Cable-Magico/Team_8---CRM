@@ -88,6 +88,7 @@ export function DashboardHome({
   billingOverview,
   permissions,
   onNavigate,
+  onOpenPendingInstallations,
 }: {
   summary: Summary | null;
   prospects: Prospect[];
@@ -97,6 +98,7 @@ export function DashboardHome({
   billingOverview: BillingOverview | null;
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
+  onOpenPendingInstallations?: (view: 'activation' | 'agenda') => void;
 }) {
   const [expiryFilter, setExpiryFilter] = useState<'overdue' | 'upcoming'>('upcoming');
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
@@ -116,12 +118,13 @@ export function DashboardHome({
       tab: 'prospects' as Tab,
     },
     {
-      label: 'Pendientes de activacion',
+      label: 'Pendientes de activación',
       value: summary?.metricas.pendientesActivacion ?? 0,
       description: 'Contratos firmados sin servicio activo',
       icon: CalendarPlus,
       tone: 'blue' as const,
       tab: 'customers' as Tab,
+      pendingView: 'activation' as const,
     },
     {
       label: 'Clientes activos',
@@ -134,10 +137,11 @@ export function DashboardHome({
     {
       label: 'Instalaciones pendientes',
       value: summary?.metricas.instalacionesPendientes ?? pendingInstallations,
-      description: 'Por coordinar o finalizar',
+      description: 'Órdenes técnicas abiertas',
       icon: Wrench,
       tone: 'blue' as const,
       tab: 'installations' as Tab,
+      pendingView: 'agenda' as const,
     },
     {
       label: 'Tickets abiertos',
@@ -173,7 +177,7 @@ export function DashboardHome({
     },
     {
       label: 'Churn mensual',
-      value: 'Dato no validado',
+      value: '-',
       description: 'Historial insuficiente para calcular bajas y población inicial',
       icon: TrendingDown,
       tone: 'amber' as const,
@@ -253,7 +257,7 @@ export function DashboardHome({
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
     { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Por fecha técnica efectiva (Santiago)', tone: 'green', tab: 'installations' as Tab },
-    { label: 'Churn mensual', value: 'Dato no validado', description: 'Historial insuficiente para calcular bajas y población inicial', tone: 'amber', tab: 'commercial' as Tab },
+    { label: 'Churn mensual', value: '-', description: 'Historial insuficiente para calcular bajas y población inicial', tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
     { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
   ];
@@ -281,7 +285,10 @@ export function DashboardHome({
 
       <section className="stat-grid">
         {stats.slice(0, 6).map((stat) => (
-          <DashboardStatCard key={stat.label} {...stat} onClick={() => onNavigate(stat.tab)} />
+          <DashboardStatCard key={stat.label} {...stat} onClick={() => {
+            if (stat.pendingView && onOpenPendingInstallations) onOpenPendingInstallations(stat.pendingView);
+            else onNavigate(stat.tab);
+          }} />
         ))}
       </section>
 
@@ -308,13 +315,6 @@ export function DashboardHome({
 
         <article className="dashboard-installation-panel">
           <div className="dashboard-panel-heading"><h2>Instalaciones</h2></div>
-          {(summary?.metricas.instalacionesSinFechaTecnica ?? 0) > 0 && <p role="status">
-            Pendiente de fecha técnica: {summary?.metricas.instalacionesSinFechaTecnica} instalación(es) completada(s).
-            No se incluyen en el total mensual ni representan trabajo pendiente de ejecución.
-          </p>}
-          {(summary?.metricas.instalacionesRequierenRevision ?? 0) > 0 && <p role="status">
-            {summary?.metricas.instalacionesRequierenRevision} registro(s) de instalación requieren revisión de fecha o relaciones; no incluidos en el indicador.
-          </p>}
           <div className="installation-chart-layout">
             <div className="installation-donut-wrap">
               <svg className="installation-donut" viewBox="0 0 120 120" aria-label={`${installationSegments[0].value} instalaciones pendientes`} role="img">

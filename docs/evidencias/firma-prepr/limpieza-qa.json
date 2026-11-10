@@ -1,0 +1,11 @@
+{
+  "temporary_qa_containers_removed": [
+    "finet-prepr-qa-97ca99d3-postgres",
+    "finet-prepr-qa-97ca99d3"
+  ],
+  "other_running_containers_preserved": true,
+  "other_running_count": 9,
+  "shared_db_touched": false,
+  "railway_touched": false,
+  "vps_touched": false
+}

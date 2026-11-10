@@ -1,0 +1,182 @@
+{
+  ".env.example": {
+    "exists": true,
+    "sha256": "8723311fc88a4e8da30b873ae80d14f2816e47ce0cf7be28439bc772f8b02bdc"
+  },
+  ".github/workflows/ci.yml": {
+    "exists": true,
+    "sha256": "c4d38e49da4413f4205a360d0ab66b43565020f62d2244a264dd658412304b6c"
+  },
+  "backend/.env.example": {
+    "exists": true,
+    "sha256": "427e506111ce2155bf026fd5c05b5540e2485650a5fa738da7163bad2273487f"
+  },
+  "backend/prisma/migrations/20261110010000_i4_contract_signature/migration.sql": {
+    "exists": false,
+    "sha256": null
+  },
+  "backend/prisma/schema.prisma": {
+    "exists": true,
+    "sha256": "4253501b665097d9b46ce86e734ce8d0e530b10d6e085e48d871a2e917f59203"
+  },
+  "backend/src/contracts/contracts-pdf.spec.ts": {
+    "exists": true,
+    "sha256": "198a1376b18000a2bb799c2c1deb1e6ff61acefa282561edeb8cb1c95b00fd62"
+  },
+  "backend/src/contracts/contracts-signature.postgres.integration.spec.ts": {
+    "exists": true,
+    "sha256": "7ca81bb6fc96bb9c25f05d4725a75e79e7ea15eccda33912cb7a7bb0347065f0"
+  },
+  "backend/src/contracts/contracts.service.spec.ts": {
+    "exists": true,
+    "sha256": "23ac95c58296a472950ab29a5728f99fe8ca7de32aa16b82d1bd9f1dfd8db3ad"
+  },
+  "backend/src/contracts/contracts.service.ts": {
+    "exists": true,
+    "sha256": "4d3886495e6d48c13ed7babf310d4cfd0a066edc0fa33631b11974a780338ab2"
+  },
+  "backend/src/contracts/e-signature.controller.ts": {
+    "exists": true,
+    "sha256": "a6ea511d5d5fa813d4f9c35a6cac15172741002c967bd81542cb08490b4306f4"
+  },
+  "backend/src/contracts/e-signature.service.ts": {
+    "exists": true,
+    "sha256": "df0040605b44264114a0b32bc322479a2dfa2f2ee06306ea52937038c3340282"
+  },
+  "backend/src/contracts/e-signature.spec.ts": {
+    "exists": true,
+    "sha256": "1e8e3367fca5ae08ea7b93476d83ade33fa29c50dbe9a0999511b435c7b9eefb"
+  },
+  "backend/src/contracts/signature-policy.ts": {
+    "exists": true,
+    "sha256": "1c6c43090f7afd2ed5c338fdcce9a636de1d97d1033776b013a1e25640e57ed5"
+  },
+  "backend/src/contracts/signature-schema.ts": {
+    "exists": true,
+    "sha256": "20cb85447a9ea24511ed92e5f83651686ec15cc6ac76e99f8bf8a1f60488ab90"
+  },
+  "backend/src/contracts/signature.repository.ts": {
+    "exists": true,
+    "sha256": "ae742726b9d71c265b89519a2ac3e8c44b09e83c9122b620992cf52b13cdc545"
+  },
+  "backend/src/health/global-columns.generated.ts": {
+    "exists": true,
+    "sha256": "d03a2aa135d62fad201816bf9deebc836ce34a4378f270d232c2ffc6f3b61f72"
+  },
+  "backend/src/health/health.controller.spec.ts": {
+    "exists": true,
+    "sha256": "90164136bff9be8a353049f608b7e3f8d7ce4c93f79c5b5f5b02c8c3b5551d50"
+  },
+  "backend/src/health/health.controller.ts": {
+    "exists": true,
+    "sha256": "5ed0c396247ff25a09bfe31d6f244dbb393d5d1c58ca8a2361541780aee3a0b5"
+  },
+  "backend/src/prospects/prospects-quote-flow.spec.ts": {
+    "exists": true,
+    "sha256": "b5c7f6654792f10c0b4ffa1995705907740f197d842c48ff5c40913e3671de2c"
+  },
+  "backend/src/prospects/prospects.service.spec.ts": {
+    "exists": true,
+    "sha256": "1803f018581d11d2afb80d846adedf90dd4f1fd6cd611f22204c9f2018984c4e"
+  },
+  "backend/src/prospects/prospects.service.ts": {
+    "exists": true,
+    "sha256": "2eb586facd6962badaaa01c4f4553d3cbc86ac19dab7e5d7ee0af822ff2e021d"
+  },
+  "db/g8/migrations/001_contract_signatures.sql": {
+    "exists": true,
+    "sha256": "972a3a8b1a11984c1771d357eaee970d5a325d9608dc83d624b78db83f54cffd"
+  },
+  "db/g8/provision-access.sql": {
+    "exists": true,
+    "sha256": "d38c40160b1438d7ac2f27ae4a728a99aee3e5acbe26c2e58409c9041564105a"
+  },
+  "db/global/README.md": {
+    "exists": true,
+    "sha256": "270ba897deb1de2b12e870fb95a0ffd865055f1411ca8febf4e46ea53e518ed1"
+  },
+  "db/global/init-global.sql": {
+    "exists": true,
+    "sha256": "0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50"
+  },
+  "docs/i3-prisma-vs-global-schema.json": {
+    "exists": true,
+    "sha256": "a39810c9efcf0de9d8543ef46f4023c4ba510120255838dc779b8307cab7957c"
+  },
+  "docs/i3-prisma-vs-global-schema.md": {
+    "exists": true,
+    "sha256": "7d242344be270ddb81d2ae442115104f1b90dbd473f3dfafcde5262ae51ee54d"
+  },
+  "docs/i4-firma-electronica.md": {
+    "exists": true,
+    "sha256": "0d5217b961e180d78fe022fbf16fd5ce01d0164c54bed5d559886c6def3ef7e4"
+  },
+  "docs/reglas-esquema-compartido.md": {
+    "exists": true,
+    "sha256": "372ea1d6fda41e6dadfd04259d8b9178289070af6747c7065e412d918fe79803"
+  },
+  "frontend/src/api.ts": {
+    "exists": true,
+    "sha256": "0b3a6ca2e9d40a37d4c1978071455ed91ad5c93e825d44092c85bfe5ccefa8ab"
+  },
+  "frontend/src/features/contracts/ContractSignatureActions.tsx": {
+    "exists": true,
+    "sha256": "7aeff0486d11218f10fa620557dde1d702364466b5dfe56e894a594a23fabc4b"
+  },
+  "frontend/src/features/contracts/useSignatureStatus.ts": {
+    "exists": true,
+    "sha256": "f7857e69cdeaa8815d37732635edbd1b514605ec18fcf88de9db442bb0d6ce01"
+  },
+  "frontend/src/features/customers/ContractDocuments.tsx": {
+    "exists": true,
+    "sha256": "250a39e2a781c70f258e652c4085020f4f47ce69e22f081020eeb38110a65784"
+  },
+  "frontend/src/features/customers/CustomerContractWorkflow.tsx": {
+    "exists": true,
+    "sha256": "8cf59772ef1978d93b21bbd281cfc148e7c6658de969a49a2f30d5a58f6d6b51"
+  },
+  "frontend/src/features/customers/CustomersPanel.tsx": {
+    "exists": true,
+    "sha256": "d2033fb4bb147d6321a78d84a5c87f10acc2a852d8959e5f09d98369a1e872f2"
+  },
+  "frontend/src/features/prospects/ProspectWorkflowPanel.tsx": {
+    "exists": true,
+    "sha256": "a2ca6063a3c58ecd8def0d876d8bc6179e6372e6cbd14130265c7fd85f679686"
+  },
+  "frontend/tests/coverage-quote-workflow.test.mjs": {
+    "exists": true,
+    "sha256": "43ad954493fe2e0d9580dd934695a3fe61090a82799b427b24482951e2a0331a"
+  },
+  "frontend/tests/prospects-lifecycle.test.mjs": {
+    "exists": true,
+    "sha256": "8d8455b01822c68f3b8a72b721380c6405e8a9aa5777812e8425148a1de56773"
+  },
+  "frontend/tests/signature-policy-workflow.test.mjs": {
+    "exists": true,
+    "sha256": "9b16ad1273b465c660ef75258c27cd48ef827ee99e5c0d22b22ae5481bb0c629"
+  },
+  "scripts/global-schema.mjs": {
+    "exists": true,
+    "sha256": "f0f37c084452009bbed017a9f134e0765e4a48b4027b36d7794834070e28f44e"
+  },
+  "scripts/global-schema.test.mjs": {
+    "exists": true,
+    "sha256": "743de4eeb5db86deb7744b4c2837539966866f2f70f234432ecb12a76c981e82"
+  },
+  "scripts/i4-contract-signature-off-qa.cjs": {
+    "exists": true,
+    "sha256": "ddce8f69ba72a353f2d0af251342c757d540115bc980bf755005b3bf4dd5e92a"
+  },
+  "scripts/i4-contract-signature-qa.cjs": {
+    "exists": true,
+    "sha256": "d2e6687994fde1c64884c31a3c710060365fdf2682688b90f8755b2db8c4e78d"
+  },
+  "scripts/i4-contract-signature-qa.test.mjs": {
+    "exists": true,
+    "sha256": "debc010712b8b752b1a773f5fcb7e00aa5e4941ae0e7e546a12510a0f65b8f91"
+  },
+  "scripts/i4-contract-signature-recovery-qa.cjs": {
+    "exists": true,
+    "sha256": "02b6f8c30f5b9f71c68966f5274b2a80546308bfe8714d47ed161860e59058e4"
+  }
+}

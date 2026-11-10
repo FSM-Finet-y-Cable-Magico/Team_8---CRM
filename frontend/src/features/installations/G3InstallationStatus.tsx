@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Clock3 } from 'lucide-react';
+import { CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
 import { api, apiErrorMessage, type G3InstallationTracking } from '../../api';
 import { formatDateTime, userFacingMessage } from '../../lib';
-import { StatusBadge } from '../../shared/components';
+import { StatusBadge, ToastNotice } from '../../shared/components';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 
 const STATE_LABELS: Record<string, string> = {
   PENDIENTE: 'Pendiente', ASIGNADA: 'Asignada', EN_CURSO: 'En curso', COMPLETADA: 'Completada',
@@ -18,8 +19,8 @@ function textValue(value: unknown) {
   return '-';
 }
 
-export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged }: {
-  prospectId?: number; contractId?: number; canRequest: boolean; onChanged?: () => void;
+export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false }: {
+  prospectId?: number; contractId?: number; canRequest: boolean; onChanged?: () => void; compact?: boolean;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,19 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   const [comuna, setComuna] = useState('');
   const [sameAddress, setSameAddress] = useState(false);
   const [notice, setNotice] = useState('');
+  const { message, showMessage, clearMessage } = useTransientMessage(5000);
+  const trackingError = tracking?.ultimoErrorSanitizado
+    ? userFacingMessage(tracking.ultimoErrorSanitizado, 'No se pudo actualizar la instalación. Inténtalo nuevamente más tarde.')
+    : '';
+  const feedback = error || notice || trackingError;
+  useEffect(() => {
+    if (!compact) return;
+    if (!tracking || !feedback || loading || busy) {
+      clearMessage();
+      return;
+    }
+    showMessage(feedback);
+  }, [compact, tracking, feedback, loading, busy, showMessage, clearMessage]);
   const loadRevision = useRef(0);
   const loadController = useRef<AbortController | null>(null);
   useEffect(() => { setComuna(''); setSameAddress(false); setNotice(''); }, [contractId, prospectId]);
@@ -114,8 +128,20 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
+  const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';
+  const consultClosure = delivered && !completed && (
+    <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>
+  );
   return <div className="g3-installation-card">
-    <header><div className="installation-delivery-heading">{delivered ? <CheckCircle2 size={20} aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<strong>{delivered ? 'Orden de instalación enviada a terreno' : 'Orden de instalación pendiente de envío'}</strong></div><StatusBadge value={state} /></header>
+    <header>
+      <div className="installation-delivery-heading">{delivered ? <CheckCircle2 size={20} aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<strong>{delivered ? 'Orden de instalación enviada a terreno' : 'Orden de instalación pendiente de envío'}</strong></div>
+      {compact ? <div className="installation-status-actions">
+        <StatusBadge value={state} />
+        {delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
+          <RefreshCw size={17} aria-hidden="true" />
+        </button>}
+      </div> : <StatusBadge value={state} />}
+    </header>
     <dl className="customer-readonly-details">
       <div><dt>Orden de trabajo</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de asignación'}</dd></div>
       <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
@@ -137,13 +163,19 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     {(tracking.estadoOriginalRemotoG3 || tracking.estadoOriginalG3) && <p className="inline-status">La última actualización técnica está pendiente de revisión. {completed ? 'Se conserva el cierre confirmado de la instalación.' : 'La instalación continúa en seguimiento.'}</p>}
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
     {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">No fue posible realizar la visita por ausencia del cliente. Está pendiente coordinar una nueva fecha.</p>}
-    {tracking.ultimoErrorSanitizado && <p className="alert">{userFacingMessage(tracking.ultimoErrorSanitizado, 'No se pudo actualizar la instalación. Inténtalo nuevamente más tarde.')}</p>}
-    <div className="button-row">
-      {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Ver detalle</button>}
-      {!completed && (tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>}
-      {tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE' && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
-    </div>
-    {error && <p className="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
+    {!compact && trackingError && <p className="alert">{trackingError}</p>}
+    {compact && consultClosure && <details className="installation-closure-options">
+      <summary>Opciones de instalación</summary>
+      {consultClosure}
+    </details>}
+    {(!compact || retryable) && <div className="button-row">
+      {!compact && delivered && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Detalle</button>}
+      {!compact && consultClosure}
+      {retryable && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
+    </div>}
+    {compact ? <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} /> : <>
+      {error && <p className="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+    </>}
   </div>;
 }

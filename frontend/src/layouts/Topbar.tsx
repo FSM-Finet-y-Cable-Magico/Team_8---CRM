@@ -1,4 +1,4 @@
-import { Building2, ChevronDown, LogOut, Settings } from 'lucide-react';
+import { Building2, ChevronDown, LogOut, UserRound } from 'lucide-react';
 import type { AuthUser, Company } from '../api';
 
 export function Topbar({
@@ -62,8 +62,8 @@ export function Topbar({
                 onOpenSettings();
               }}
             >
-              <Settings size={18} strokeWidth={1.8} aria-hidden="true" />
-              Configuración
+              <UserRound size={18} strokeWidth={1.8} aria-hidden="true" />
+              Mi perfil
             </button>
             <button type="button" className="profile-menu-item danger" onClick={onLogout}>
               <LogOut size={18} strokeWidth={1.8} aria-hidden="true" />

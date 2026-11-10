@@ -12,10 +12,11 @@ function setup() {
     estadoPipeline: 'Cotizacion Enviada', latitud: -33.475, longitud: -70.675, contratos: [], clasificacionComercial: 'PROSPECTO' };
   const tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn(),
     plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
-    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) },
+    cotizacion: {findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }), updateMany: jest.fn().mockResolvedValue({ count: 1 }),},
     contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
-  const prisma = { prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
+  const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ available: false }]), prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
+    zonaPago: { findUnique: jest.fn().mockResolvedValue({ idZonaPago: 21, idEmpresa: 1, activo: true }) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
@@ -23,6 +24,38 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it.each([
+    { microzona: null, expectedZoneId: 21 },
+    { microzona: { idZonaPago: 22 }, expectedZoneId: 22 },
+  ])('resuelve zona contractual validada cuando la UI no envia idZonaPago: $expectedZoneId', async ({ microzona, expectedZoneId }) => {
+    const c = setup();
+    c.coverage.plansForLocation.mockResolvedValue({ coberturaComercial: true,
+      zona: { idZonaPago: 21 }, microzona, planes: [{ idPlan: 1 }] });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.prisma.zonaPago.findUnique).toHaveBeenCalledWith({ where: { idZonaPago: expectedZoneId } });
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: expectedZoneId }),
+    }));
+  });
+  it.each([
+    { origenPrecio: 'ZONA_PADRE', expectedZoneId: 21 },
+    { origenPrecio: 'MICROZONA', expectedZoneId: 22 },
+  ])('usa la zona de la regla de precio aplicada: $origenPrecio', async ({ origenPrecio, expectedZoneId }) => {
+    const c = setup();
+    c.coverage.plansForLocation.mockResolvedValue({ coberturaComercial: true,
+      zona: { idZonaPago: 21 }, microzona: { idZonaPago: 22 }, planes: [{ idPlan: 1, origenPrecio }] });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: expectedZoneId }),
+    }));
+  });
+  it('conserva idZonaPago explicito de los consumidores existentes', async () => {
+    const c = setup();
+    await c.service.contractPlan(1, { planId: 1, idZonaPago: 21 }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: 21 }),
+    }));
+  });
   it('conserva comuna registrada al confirmar sin repetirla y ciudad explicita', async () => {
     const c = setup(); Object.assign(c.prospect, { comuna: ' Valparaiso ', region: 'Region QA' });
     await c.service.contractPlan(1, { planId: 1, ciudad: ' Ciudad QA ' }, user);
@@ -49,9 +82,39 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(row).toHaveProperty('ubicacionInstalacion', expect.objectContaining({ comuna: null, ciudad: null }));
     expect(row.contratos.map(c => c.idContrato)).toEqual([10]);
   });
+
+  it.each([
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-09') }], expected: 10, origin: 'ELECTRONICA' },
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-07') }], expected: 11, origin: 'MANUAL' },
+    { electronic: [{ idContrato: 10, fecha: new Date('2026-11-08') }], expected: 11, origin: 'MANUAL' },
+    { electronic: [], expected: 11, origin: 'MANUAL' },
+  ])('selecciona fecha efectiva y desempate estable: $origin / $expected', async ({ electronic, expected, origin }) => {
+    const c=setup();
+    c.prisma.$queryRaw.mockResolvedValueOnce([{available:true}]).mockResolvedValueOnce(electronic as never);
+    const manualDate=new Date('2026-11-08');
+    c.prisma.prospecto.findMany.mockResolvedValue([{...c.prospect,contratos:[
+      {idContrato:12,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null},
+      {idContrato:10,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null},
+      {idContrato:11,idEmpresa:1,estado:'Moroso',fechaFirmaManual:manualDate},
+      {idContrato:99,idEmpresa:2,estado:'Firmado',fechaFirmaManual:new Date('2026-12-01')},
+    ]}]);
+    const [result]=await c.service.listPendingActivation(user);
+    expect(result.contratos).toHaveLength(1);
+    expect(result.contratos[0]).toMatchObject({idContrato:expected,origenFirma:origin});
+    expect(result.contratos[0].fechaFirmaManual).toEqual(expected===11?manualDate:null);
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+  });
+  it('históricos sin fecha eligen ID descendente sin inventar una fecha de firma',async()=>{
+    const c=setup();
+    c.prisma.prospecto.findMany.mockResolvedValue([{...c.prospect,contratos:[10,12,11].map(idContrato=>({
+      idContrato,idEmpresa:1,estado:'Firmado',fechaFirmaManual:null,
+    }))}]);
+    const [result]=await c.service.listPendingActivation(user);
+    expect(result.contratos[0]).toMatchObject({idContrato:12,fechaFirmaEfectiva:null,origenFirma:'SIN_FECHA'});
+  });
   it.each([
     { latitud: -35 }, { direccion: 'Otra direccion' }, { estadoPipeline: 'Perdido' },
-    { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 },
+    { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 }, { idZonaPago: 2 },
   ])('rechaza datos que cambiaron antes del lock: %j', async change => {
     const c = setup();
     c.tx.prospecto.findUniqueOrThrow.mockResolvedValue({ ...c.prospect, ...change } as typeof c.prospect);
@@ -78,12 +141,56 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(c.tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(c.tx.contrato.findFirst.mock.invocationCallOrder[0]);
     expect(c.tx.prospecto.update).not.toHaveBeenCalled(); expect(c.audit.record).not.toHaveBeenCalled();
   });
-  it('conserva actualizacion previa al contrato con auditoria en la misma transaccion', async () => {
+  it('invalida cotizaciones al editar la ubicacion de un prospecto cotizado', async () => {
     const c = setup();
-    await c.service.updateLocation(1, { ubicacion: { latitud: -33, longitud: -70 } }, user);
-    expect(c.tx.prospecto.update).toHaveBeenCalled();
-    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_UBICACION_PROSPECTO' }), c.tx);
-    expect(c.tx.prospecto.update.mock.calls[0][0].data).not.toHaveProperty('estadoPipeline');
+
+    c.coverage.check.mockResolvedValue({
+      estado: 'FACTIBLE',
+      coberturaComercial: true,
+    });
+
+    c.tx.prospecto.update.mockResolvedValue({
+      ...c.prospect,
+      latitud: -33,
+      longitud: -70,
+      estadoPipeline: 'Factible',
+    });
+
+    await c.service.updateLocation(
+      1,
+      { ubicacion: { latitud: -33, longitud: -70 } },
+      user,
+    );
+
+    expect(c.tx.cotizacion.updateMany).toHaveBeenCalledWith({
+      where: { idProspecto: 1 },
+      data: { factibilidadVerificada: false },
+    });
+
+    expect(c.tx.prospecto.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          estadoPipeline: 'Factible',
+        }),
+      }),
+    );
+
+    expect(c.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+        valorNuevo: expect.objectContaining({
+          cotizacionesAnterioresInvalidas: true,
+          estadoPipeline: 'Factible',
+        }),
+      }),
+      c.tx,
+    );
+
+    expect(
+      c.tx.cotizacion.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      c.tx.prospecto.update.mock.invocationCallOrder[0],
+    );
   });
   it('publica solo referencias de cotizaciones factibles de planes propios activos', async () => {
     const c = setup();

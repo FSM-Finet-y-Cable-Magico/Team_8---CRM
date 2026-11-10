@@ -15,7 +15,7 @@ new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/form
 const mocks = {
   '../../lib': { ...formatting, expiryAlertKey: () => '', expiryUrgency: () => '', formatDateOnly: v => v },
   '../../shared/components': {
-    DashboardStatCard: ({ label, value, description }) => React.createElement('article', { 'data-label': label, 'data-value': value }, description),
+    DashboardStatCard: ({ label, value, description, onClick }) => React.createElement('article', { 'data-label': label, 'data-value': value, onClick }, description),
     ExpiryBadge: () => null, ExpiryCustomerCard: () => null, Modal: () => null, QuickActionCard: () => null,
   },
 };
@@ -24,13 +24,13 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
 } }).outputText;
 new Function('require', 'exports', compiled)(name => name in mocks ? mocks[name] : require(name), exports);
 
-async function render(metricas, check, workOrders = []) {
+async function render(metricas, check, workOrders = [], navigation = {}) {
   let tree;
   await act(async () => { tree = create(React.createElement(exports.DashboardHome, {
     summary: { metricas: { clientes: 0, prospectos: 0, instalacionesPendientes: 0, ...metricas } },
-    prospects: [], customers: [], tickets: [], workOrders, billingOverview: null, permissions: {}, onNavigate: () => {},
+    prospects: [], customers: [], tickets: [], workOrders, billingOverview: null, permissions: {}, onNavigate: () => {}, ...navigation,
   })); });
-  try { check(tree); } finally { await act(async () => tree.unmount()); }
+  try { await check(tree); } finally { await act(async () => tree.unmount()); }
 }
 
 test('CU47 presents effective-date total without adding undated completions to pending execution', async () => {
@@ -40,8 +40,7 @@ test('CU47 presents effective-date total without adding undated completions to p
     assert.equal(monthly.findByType('strong').props.children, 2);
     assert.equal(cards.find(c => c.props['data-label'] === 'Instalaciones pendientes').props['data-value'], 0);
     const rendered = JSON.stringify(tree.toJSON());
-    assert.match(rendered, /Pendiente de fecha técnica/);
-    assert.match(rendered, /ni representan trabajo pendiente de ejecución/);
+    assert.doesNotMatch(rendered, /Pendiente de fecha técnica/);
     assert.match(rendered, /Por fecha técnica efectiva \(Santiago\)/);
   });
 });
@@ -57,12 +56,12 @@ test('gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar rep
   ]);
 });
 
-test('inconsistent installation evidence is visible and older summary responses remain compatible', async () => {
+test('older summary responses remain compatible with monthly indicator', async () => {
   await render({ instalacionesMensuales: 0, instalacionesRequierenRevision: 1 }, tree => {
-    assert.match(JSON.stringify(tree.toJSON()), /requieren revisión de fecha o relaciones/);
+    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
+    assert.equal(monthly.findByType('strong').props.children, 0);
   });
   await render({ instalacionesMensuales: 4 }, tree => {
-    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Pendiente de fecha técnica|requieren revisión de fecha o relaciones/);
     const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
     assert.equal(monthly.findByType('strong').props.children, 4);
   });
@@ -71,10 +70,34 @@ test('inconsistent installation evidence is visible and older summary responses 
 test('churn sin historia suficiente no presenta porcentaje ni bajas inventadas, incluso ante respuesta antigua', async () => {
   for (const values of [{}, { churnRateMensual: null, churnBajasMensuales: null, churnEstado: 'HISTORIAL_INSUFICIENTE' }, { churnRateMensual: 50, churnBajasMensuales: 1 }]) {
     await render(values, tree => {
+      const churn = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Churn mensual'));
+      assert.equal(churn.findByType('strong').props.children, '-');
       const rendered = JSON.stringify(tree.toJSON());
-      assert.match(rendered, /Dato no validado/);
       assert.match(rendered, /Historial insuficiente/);
       assert.doesNotMatch(rendered, /50%|0%|baja\(s\) durante el mes/);
     });
   }
+});
+
+test('dashboard solicita por separado agenda técnica y contratos por activar', async () => {
+  const opened = [], navigated = [];
+  await render({ pendientesActivacion: 3, instalacionesPendientes: 5 }, async tree => {
+    const card = label => tree.root.findByProps({ 'data-label': label });
+    assert.equal(card('Pendientes de activación').props['data-value'], 3);
+    assert.equal(card('Instalaciones pendientes').props['data-value'], 5);
+    await act(async () => card('Instalaciones pendientes').props.onClick());
+    await act(async () => card('Pendientes de activación').props.onClick());
+    await act(async () => card('Clientes activos').props.onClick());
+    assert.deepEqual(opened, ['agenda', 'activation']);
+    assert.deepEqual(navigated, ['customers']);
+  }, [], { onOpenPendingInstallations: view => opened.push(view), onNavigate: tab => navigated.push(tab) });
+});
+
+test('dashboard deriva la agenda a Instalaciones y la activación a Clientes si no recibe apertura directa', async () => {
+  const navigated = [];
+  await render({ pendientesActivacion: 3, instalacionesPendientes: 5 }, async tree => {
+    await act(async () => tree.root.findByProps({ 'data-label': 'Instalaciones pendientes' }).props.onClick());
+    await act(async () => tree.root.findByProps({ 'data-label': 'Pendientes de activación' }).props.onClick());
+    assert.deepEqual(navigated, ['installations', 'customers']);
+  }, [], { onNavigate: tab => navigated.push(tab) });
 });

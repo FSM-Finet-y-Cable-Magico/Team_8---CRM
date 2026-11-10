@@ -375,7 +375,11 @@ export class InstallationIntegrationService {
       const failure = this.normalizeError(error);
       const updated = await this.updateNonTerminalTracking(tracking.idIntegracion, {
         estadoIntegracion: failure.retryable ? 'FALLIDA_REINTENTABLE' : 'FALLIDA_DEFINITIVA',
-        ultimoErrorSanitizado: failure.message,
+        // Keep provider identifiers out of the user-facing message. A disabled
+        // integration has not sent an external order and must not look like a timeout.
+        ultimoErrorSanitizado: failure.code === 'INTEGRACION_G3_NO_CONFIGURADA'
+          ? 'La integración técnica no está habilitada en este entorno. Solicita su configuración antes de reintentar; no se emitió ninguna orden externa.'
+          : failure.message,
       });
       this.logger.warn(JSON.stringify({
         result: failure.code, requestId: tracking.requestId, traceId: tracking.traceId,

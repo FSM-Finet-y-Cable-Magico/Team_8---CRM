@@ -1,0 +1,462 @@
+
+## full
+
+ok 1 - write gate aborts before fetch, even with credentials
+ok 2 - 401 stops reads and never leaks key or response
+ok 3 - read smoke validates envelope and only GET
+ok 4 - reject ambiguous origins
+ok 5 - activation payload rejects textual OT before POST
+ok 6 - canonical hash and all objects parsed, SQL expressions stay intact
+ok 7 - normaliza solo diferencias seguras de CHECK y preserva precedencia booleana
+ok 8 - las 14 representaciones CHECK reales de PostgreSQL 18 hacen MATCH
+ok 9 - los tres índices parciales PostgreSQL 18 separan clave y predicado seguro
+ok 10 - las columnas de PK compuesta son no nulas aunque el SQL no repita NOT NULL
+ok 11 - exact synthetic catalog passes; this is not Railway evidence
+ok 12 - _prisma_migrations es el unico extra tecnico permitido
+ok 13 - exactamente los cinco extras legacy preservados son permitidos y un sexto extra bloquea PASS
+ok 14 - missing critical table fails, unrelated schemas cannot satisfy FK
+ok 15 - wrong nullable, FK action and invalid index all fail
+ok 16 - readCatalog starts READ ONLY and only reads catalogs
+ok 17 - harness de firma no usa DATABASE_URL como alternativa
+ok 18 - harness de firma rechaza producción antes de cargar Prisma
+ok 19 - harness de firma rechaza host externo y no publica la URL
+ok 20 - harness off rechaza URL ajena antes de cargar la aplicación y no publica claves
+ok 21 - harness recovery rechaza URL ajena antes de cargar la aplicación y no publica claves
+ok 22 - no private environment files or database data backups are tracked
+ok 23 - QA descarta conexiones y credenciales heredadas incluso si estaban habilitadas
+ok 24 - QA elimina SMTP ambiental y permite que los tests configuren sus servidores loopback
+ok 25 - el informe saneado no publica valores de hallazgos
+ok 26 - el repositorio no guarda claves privadas PEM completas
+ok 27 - las URLs HTTP de manifests y locks no contienen credenciales ni tokens en query
+ok 28 - las plantillas no incluyen tokens de proveedores reales
+ok 29 - aborta antes de conectar si falta el flag explícito
+ok 30 - aborta antes de conectar si falta DATABASE_URL o si NODE_ENV es production
+ok 31 - solo acepta éxito con rollback confirmado y no imprime conexión
+ok 32 - variables G1 opcionales no bloquean módulos independientes ni inventan credenciales
+ok 33 - Facturacion.cl queda bloqueado mientras falta contrato y valida separacion por empresa
+ok 34 - G1 habilitado requiere URL y key sin inventar segunda credencial
+ok 35 - valida hashes S2S, scope y rotación sin claves en claro
+ok 36 - salida nunca imprime valores sensibles
+ok 37 - preparación productiva exige activación explícita, perfil y secreto propios sin conectar
+ok 38 - preparación productiva rechaza DEMO y RUT de otro emisor y nunca imprime credenciales
+# tests 38
+# pass 38
+# fail 0
+# skipped 0
+ok 1 - la imagen productiva copia solo dist a un runtime estatico sin devDependencies
+ok 2 - nginx escucha PORT, expone health y conserva fallback SPA sin fallback de assets
+ok 3 - el contexto Docker excluye entornos, dependencias y artefactos locales
+# tests 3
+# pass 3
+# fail 0
+# skipped 0
+ok 1 - enlace inválido no hace llamadas públicas
+ok 2 - token solo en memoria y cuerpo; PDF verificado antes de código y aceptación
+ok 3 - PDF alterado no habilita código ni firma
+ok 4 - cuotas de fin de mes conservan el día original y respetan febrero
+ok 5 - cuotas conservan centavos, suma exacta y fechas en cambio de año
+ok 6 - formularios incompletos no generan cuotas inválidas ni montos cero
+ok 7 - exportación expande las celdas agrupadas sin perder identidad ni duplicar columnas
+ok 8 - gestiones respetan deuda, atraso y servicio requerido
+ok 9 - cliente sin documentos conserva contacto y cargos, pero exige relaciones para las demás acciones
+ok 10 - solicitudes sin factura omiten identificadores ausentes y describen su contexto real
+ok 11 - una sola vista conserva las siete gestiones y exporta las columnas esenciales
+ok 12 - registro ubica domicilio completo al seleccionar comuna y muestra solo estado, sin mapa ni botón manual
+ok 13 - editar la calle espera a terminar, invalida ubicación y no busca por cada tecla
+ok 14 - región limita comunas; cambiarla borra la comuna anterior y no consulta un domicilio incompleto
+ok 15 - sin cobertura permite registrar; el registro conserva las coordenadas
+ok 16 - sin resultados no inventa coordenadas o factibilidad y permite corregir la dirección o registrar para revisión
+ok 17 - respuestas de una dirección o empresa anterior no cambian ubicación ni estado actuales
+ok 18 - coverage/check decide factibilidad y no el geocoder
+ok 19 - mapa resumido conserva punto, es de solo lectura y actualiza sin geocodificar de nuevo
+ok 20 - editor completo conserva corrección manual, coordenadas y atribución en los otros módulos
+ok 21 - actualizar en segundo plano mantiene el estado visible hasta recibir el resultado y descarta cobertura antigua si falla
+ok 22 - G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo → cotización → contratación
+ok 23 - revisión sin evidencia/permisos o histórico no se desbloquea: {"g2":true,"reviewAvailable":false}
+ok 24 - revisión sin evidencia/permisos o histórico no se desbloquea: {"g2":true,"commercial":false}
+ok 25 - revisión sin evidencia/permisos o histórico no se desbloquea: {"requiresReview":true,"state":"Servicio Activo","reviewAvailable":false}
+ok 26 - rechazo de revisión y coordenadas ausentes no anuncian éxito ni envían escrituras
+ok 27 - ubicación ausente tras revisión exige coordenadas y no infiere comuna o región
+ok 28 - prospecto G2 ya recuperado abre editor: clic persiste ubicación antes de factibilidad y conserva al recargar
+ok 29 - contrato o permisos insuficientes conservan resumen y el mapa no escribe: {"existingContract":true}
+ok 30 - contrato o permisos insuficientes conservan resumen y el mapa no escribe: {"commercial":false}
+ok 31 - cobertura negativa, falta de planes o conflicto no habilitan contratación: {"outside":true}
+ok 32 - cobertura negativa, falta de planes o conflicto no habilitan contratación: {"noPlans":true}
+ok 33 - cobertura negativa, falta de planes o conflicto no habilitan contratación: {"locationFailure":true}
+ok 34 - error de geocodificación conserva selección manual y no inventa factibilidad ni geografía
+ok 35 - React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nueva sesión recupera cotización persistida
+ok 36 - React: cotizado sin cotización persistida, perdido y NO_FACTIBLE no fabrican autorización
+ok 37 - React: contratación conserva comuna, omite ciudad y envía la fecha elegida en el calendario
+ok 38 - React bloquea Perdido
+ok 39 - React bloquea No Factible
+ok 40 - React: actualizar polígonos recalcula factibilidad, persiste el cambio y mantiene el punto guardado
+ok 41 - React: una cotización previa no habilita contratar si la cobertura dejó de ser factible
+ok 42 - React: aviso de cotización refleja el envío real: sent
+ok 43 - React: aviso de cotización refleja el envío real: failed
+ok 44 - React: aviso de cotización refleja el envío real: disabled
+ok 45 - solicitud general exige tipo y descripcion; no envia fecha ni un servicio inventado
+ok 46 - solicitud vinculada conserva el servicio elegido y distingue registrar de aplicar un cambio
+ok 47 - retiro requiere servicio y fecha y usa exclusivamente el endpoint existente de retiros
+ok 48 - fallar al guardar conserva el borrador y presenta un mensaje formal
+ok 49 - un envio en curso bloquea un segundo registro
+ok 50 - sin servicios puede registrar una consulta general pero no un retiro
+ok 51 - una carga de servicios en curso no se presenta como ausencia de servicios
+ok 52 - registro confirmado y fallo de recarga no reabre el formulario ni invita a duplicar
+ok 53 - la primera apertura espera la carga y luego abre consistentemente el servicio activo
+ok 54 - una carga lenta o fallida no se interpreta como contrato sin servicio
+ok 55 - un contrato firmado sin servicio gestionable conserva el workflow de contratacion
+ok 56 - si un contrato tiene varios servicios prioriza el servicio gestionable
+ok 57 - el cambio rapido de cliente aborta y descarta la respuesta anterior fuera de orden
+ok 58 - cancelar al desmontar impide aplicar una respuesta tardia
+ok 59 - consulta por acción explícita y presenta antecedentes con textos de producción
+ok 60 - campos ausentes no se sustituyen por datos inventados ni por la fecha de consulta
+ok 61 - error de red mantiene el mensaje de instalación confirmada sin mostrar errores remotos
+ok 62 - una respuesta no validada no expone datos y permite consultar de nuevo
+ok 63 - cambiar de servicio aborta la consulta anterior y descarta su respuesta tardía
+ok 64 - cerrar el panel aborta la consulta pendiente
+ok 65 - missing comuna blocks installation and requires explicit same-address confirmation
+ok 66 - failed preflight does not enable installation
+ok 67 - support must ask an authorized commercial role to complete missing data
+ok 68 - validated installation still needs an explicit request
+ok 69 - pending closure is visible without losing the tracking
+ok 70 - seguimiento presenta estados y fallas remotas con mensajes de producción
+ok 71 - tarjeta unica de clientes y prospectos conserva el endpoint y muestra filas rechazadas
+ok 72 - un lote fallido no se presenta como importado ni refresca los datos
+ok 73 - errores conservan el archivo para reintentar y los formatos invalidos no se envian
+ok 74 - envio en curso bloquea duplicados y descarta respuestas de otra empresa
+ok 75 - historial React muestra cierre sin OT local, fecha original y completada sin fecha, con filtro
+ok 76 - respuesta tardía de otra empresa no contamina la vista actual; error no afirma que falten cierres
+ok 77 - preserva detalle de OT local sin mezclar una OT de igual numero de otra empresa
+ok 78 - OT histórica completada sin servicio conserva fecha y equipos solo como declaración de la orden
+ok 79 - CU47 presents effective-date total without adding undated completions to pending execution
+ok 80 - gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar reparación ni cancelación como completadas
+ok 81 - inconsistent installation evidence is visible and older summary responses remain compatible
+ok 82 - churn sin historia suficiente no presenta porcentaje ni bajas inventadas, incluso ante respuesta antigua
+ok 83 - consulta distingue imputar de cobrar y no preselecciona ni envía automáticamente
+ok 84 - distribución explícita exige revisión y confirmación, con importes decimales exactos
+ok 85 - resultado incierto reintenta exactamente la misma clave y payload sin cambiar distribución
+ok 86 - rechaza sobreimputación, precisión inválida y falta de motivo antes de confirmar
+ok 87 - usuarios de consulta e históricos sin trazabilidad no ofrecen imputación
+ok 88 - reversa requiere importe, motivo y confirmación; conserva el pago original
+ok 89 - respuesta tardía de otro convenio/empresa no contamina el contexto actual
+ok 90 - errores internos se presentan según el contexto de inventario, instalaciones, retiro o atención
+ok 91 - conserva validaciones útiles, permisos y el bloqueo de cierre por orden pendiente
+ok 92 - no expone errores técnicos ni presenta una falla como ausencia de datos
+ok 93 - las etiquetas visibles del frontend no contienen referencias a grupos ni códigos de desarrollo
+ok 94 - conserva el RUT escrito sin guion al ir a Cobertura y regresar a Prospectos
+ok 95 - el campo RUT impide agregar más de nueve caracteres y permite corregirlos
+ok 96 - celular agrega +569 al escribir, reconoce números pegados y conserva el valor al navegar
+ok 97 - conserva todos los campos, origen y ubicación al cambiar de apartado del CRM
+ok 98 - al recargar la aplicación se descarta el borrador sin afectar la sesión autenticada
+ok 99 - mantiene un borrador independiente por empresa y vuelve a recuperar el anterior
+ok 100 - un registro exitoso limpia el borrador y conserva el envío correcto a la API
+ok 101 - errores de validación o guardado conservan los datos al salir y regresar
+ok 102 - cambiar la dirección invalida la ubicación conservada
+ok 103 - navegar durante un registro mantiene el bloqueo y evita un segundo envío
+ok 104 - la respuesta de otra empresa limpia solamente el borrador del registro enviado
+ok 105 - cerrar sesión o expirar el acceso elimina los borradores de la sesión anterior
+ok 106 - crear un prospecto muestra un aviso global breve y desaparece a los tres segundos
+ok 107 - historico ambiguo muestra revision y no habilita firma, cotizacion o perdida
+ok 108 - prospecto valido con contrato pendiente conserva confirmacion autorizada de firma
+ok 109 - agrega el guion a RUT de siete u ocho dígitos y conserva los ceros
+ok 110 - admite pegar puntos, espacios y guion y normaliza el verificador K
+ok 111 - permite vaciar y escribir parcialmente sin truncar los valores inválidos
+ok 112 - mantiene la normalización utilizada para enviar el RUT al backend
+ok 113 - acciones en orden y sin iconos; datos completos disponibles en tres secciones
+ok 114 - cero equipos oficiales no oculta la instalación ni promueve una serie declarada a inventario
+ok 115 - sin tracking ni OT correlacionada no concluye que nunca existió instalación
+ok 116 - modificar plan conserva seleccion por empresa, fecha, observacion y endpoint
+ok 117 - baja permanece separada y requiere confirmar con el mismo payload
+ok 118 - conserva alta y desactivacion de garantias
+ok 119 - permisos y estado de baja conservan sus restricciones
+ok 120 - errores formales conservan el borrador y los datos ausentes no se presentan como monto cero
+ok 121 - documentos empresa 1: cliente compartido seleccionable sin contratos ajenos
+ok 122 - documentos empresa 2: cliente compartido seleccionable sin contratos ajenos
+ok 123 - documentos desde Libro Control conservan cliente fijo compartido y contrato autorizado
+ok 124 - Prospectos: política real automatic antes de existir cliente o servicio
+ok 125 - Prospectos: política real unknown antes de existir cliente o servicio
+ok 126 - Prospectos: política real manual antes de existir cliente o servicio
+ok 127 - Clientes: cierra y limpia el formulario manual al cambiar a automático
+ok 128 - firma confirmada refresca una vez y conserva descarga con el envío apagado
+ok 129 - un fallo tardío de otra ficha no elimina la política del contrato actual
+ok 130 - no ofrece enviar sin documento elegible ni repetir un documento anulado
+ok 131 - alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del catálogo
+ok 132 - catálogo incompleto no inventa categorías y selección técnica manipulada no envía POST
+ok 133 - tipo clasificado bloquea selección comercial técnica o interna aunque llegue una etiqueta inconsistente
+ok 134 - catálogo de backend anterior sin clasificación no ofrece IDs supuestos y conserva histórico
+ok 135 - gestión excluye internas de opciones manuales y conserva la categoría actual sin cambiarla
+ok 136 - Tickets separa gestion, seguimiento y resolucion con mensajes de produccion
+ok 137 - ticket compartido G3 conserva estado y consulta sin ofrecer escrituras ni otro POST
+ok 138 - backend anterior no convierte EN_PROGRESO ni estado desconocido en opcion CRM editable
+ok 139 - diagnostico conserva payload compatible y anuncia la resolucion
+ok 140 - OT pendiente bloquea resolucion directa pero conserva notas y escalamiento comercial
+ok 141 - OT reparacion Pendiente: conserva consulta historica y elimina cierre local
+ok 142 - OT reparacion Completada: conserva consulta historica y elimina cierre local
+ok 143 - panel sin permisos permite consultar antecedentes sin ofrecer edicion
+ok 144 - OT INSTALACION COMPLETADA: antecedente técnico de solo lectura sin asignación oficial ni cierre automático
+ok 145 - OT INSTALACION EN_CURSO: antecedente técnico de solo lectura sin asignación oficial ni cierre automático
+ok 146 - OT INSTALACION CANCELADA: antecedente técnico de solo lectura sin asignación oficial ni cierre automático
+ok 147 - guardar cambios envia solo campos editados y mantiene los contratos existentes
+ok 148 - fallo parcial conserva pendientes y reintenta solo lo que falta
+ok 149 - un error conserva la observacion escrita y presenta un mensaje formal
+ok 150 - cambiar o reabrir un ticket limpia los borradores anteriores
+ok 151 - OT COMPLETADA no bloquea el diagnostico comercial ni cambia el estado tecnico por lectura
+ok 152 - OT COMPLETADA secundaria no oculta EN_CURSO ni habilita cierre
+ok 153 - la equivalencia visual no ignora un bloqueo conservador informado por backend
+ok 154 - una orden pendiente secundaria tambien impide resolver
+ok 155 - seguimiento separa el reporte y conserva notas, comentarios y diagnosticos sin duplicarlos
+ok 156 - lecturas de UI reconocen vocabulario global e histórico sin convertir reparación ni cancelación
+ok 157 - Inventario consulta catálogo por empresa sin presentar sus tipos como asignaciones a servicios
+ok 158 - Instalaciones integra historial real una vez sin convertir reparaciones ni generar solicitudes
+# tests 158
+# pass 158
+# fail 0
+# skipped 0
+PASS src/common/company-response.http.spec.ts
+PASS src/users/users.service.spec.ts
+PASS src/mail/mail.service.spec.ts
+PASS src/contracts/qa-disabled-startup.spec.ts
+PASS src/g3-integration/g3-closure.http.spec.ts
+PASS src/g2-integration/g2-shared-finance.http.spec.ts
+PASS src/tickets/tickets-authority.http.spec.ts
+PASS src/g2-integration/g2-integration.http.spec.ts
+PASS src/contracts/e-signature.spec.ts
+PASS src/g2-integration/g2-contract.spec.ts
+PASS src/prospects/prospects-quote-flow.spec.ts
+PASS src/commercial/commercial-control-book.service.spec.ts
+PASS src/contracts/e-signature.http.spec.ts
+PASS src/prospects/prospects-g2-review.spec.ts
+PASS src/contracts/contracts-pdf.spec.ts
+PASS src/g3-integration/installation-integration.service.spec.ts
+PASS src/g3-integration/post-closure-recovery.spec.ts
+PASS src/commercial/installment-allocation.spec.ts
+PASS src/coverage/coverage-domain.service.spec.ts
+PASS src/prospects/prospects.service.spec.ts
+PASS src/contracts/contracts.service.spec.ts
+PASS src/g3-integration/g3-closure.processor.spec.ts
+PASS src/tax-document-issuance/facturacion-cl.issuer.spec.ts
+PASS src/imports/control-book-import-preview.service.spec.ts
+PASS src/coverage/geocoding.service.spec.ts
+PASS src/billing/billing.service.spec.ts
+PASS src/g3-integration/installation-history.http.spec.ts
+PASS src/g3-integration/g3-historical-closure.spec.ts
+PASS src/g3-integration/legacy-installation-routing.spec.ts
+PASS src/contracts/plan-change.processor.spec.ts
+PASS src/messaging/meta-webhook.http.spec.ts
+PASS src/g2-integration/g2-integration.service.spec.ts
+PASS src/prospects/prospects-coverage.spec.ts
+PASS src/contracts/plan-changes.spec.ts
+PASS src/g1-integration/g1-activation.service.spec.ts
+PASS src/g3-integration/installation-activation.service.spec.ts
+PASS src/external-tax-documents/external-tax-documents.service.spec.ts
+PASS src/services/services.service.spec.ts
+PASS src/tickets/tickets-compatibility.spec.ts
+PASS src/domain-ownership/inventory-write-blocking.spec.ts
+PASS src/g3-integration/g3-integration.controller.spec.ts
+PASS src/coverage/coverage.service.spec.ts
+PASS src/g3-integration/http-g3-integration.client.spec.ts
+PASS src/messaging/messaging.spec.ts
+PASS src/g1-integration/http-g1-inventory.client.spec.ts
+PASS src/g3-integration/installation-history.service.spec.ts
+PASS src/tax-document-issuance/prisma-tax-intent.store.spec.ts
+PASS src/imports/imports.service.spec.ts
+PASS src/tax-document-issuance/tax-recovery.spec.ts
+PASS src/reports/reports.service.spec.ts
+PASS src/customers/customers.service.spec.ts
+PASS src/g1-integration/g1-inventory.service.spec.ts
+PASS src/integration-auth/integration-api-key.guard.spec.ts
+PASS src/companies/companies.service.spec.ts
+PASS src/tax-document-issuance/facturacion-cl-payment.config.spec.ts
+PASS src/common/work-order-read.spec.ts
+PASS src/plans/plans.service.spec.ts
+PASS src/common/company-response.spec.ts
+PASS src/contracts/contract-snapshot.spec.ts
+PASS src/inventory/inventory.service.spec.ts
+PASS src/tax-document-issuance/facturacion-cl-sandbox-dispatcher.spec.ts
+PASS src/common/guards/jwt-auth.guard.spec.ts
+PASS src/work-orders/work-orders.service.spec.ts
+PASS src/commercial/commercial.dto.spec.ts
+PASS src/tax-document-issuance/facturacion-cl-read-client.spec.ts
+PASS src/g3-integration/g3-integration.utils.spec.ts
+PASS src/external-tax-documents/external-tax-documents.dto.spec.ts
+PASS src/health/health.controller.spec.ts
+PASS src/coverage/coverage.dto.spec.ts
+PASS src/tax-document-issuance/facturacion-cl-document-builder.spec.ts
+PASS src/g3-integration/service-withdrawal.service.spec.ts
+PASS src/companies/installation-metrics.spec.ts
+PASS src/g1-integration/commercial-warranties.service.spec.ts
+PASS src/billing/billing-read.service.spec.ts
+PASS src/g3-integration/g3-integration.dto.spec.ts
+PASS src/requests/requests.service.spec.ts
+PASS src/observations/observations.service.spec.ts
+PASS src/coverage/technical-coverage.providers.spec.ts
+PASS src/coverage/commercial-coverage.provider.spec.ts
+PASS src/tax-document-issuance/tax-emission-intent.service.spec.ts
+PASS src/tax-document-issuance/pending-facturacion-cl.issuer.spec.ts
+PASS src/common/roles.spec.ts
+PASS src/commercial/commercial-status.service.spec.ts
+PASS src/tax-document-issuance/facturacion-cl-artifacts.client.spec.ts
+PASS src/external-tax-documents/external-tax-documents.boundaries.spec.ts
+PASS src/common/customer-lifecycle.spec.ts
+PASS src/app.controller.spec.ts
+PASS src/rut/rut.util.spec.ts
+PASS src/common/service-type.spec.ts
+PASS src/coverage/coverage-geometry.spec.ts
+PASS src/billing/invoice-balance.spec.ts
+PASS src/domain-ownership/external-dependencies.spec.ts
+PASS src/common/install-order-metadata.spec.ts
+Test Suites: 6 skipped, 93 passed, 93 of 99 total
+Tests:       52 skipped, 1764 passed, 1816 total
+Time:        27.707 s, estimated 34 s
+
+## postgres
+
+PASS src/contracts/contracts-signature.postgres.integration.spec.ts (14.324 s)
+    ✓ dos confirmaciones concurrentes y su repeticion conservan una sola firma y auditoria (93 ms)
+    ✓ fallo de auditoria revierte contrato y relacion asociada (prospecto=false) (52 ms)
+    ✓ fallo de auditoria revierte contrato y relacion asociada (prospecto=true) (34 ms)
+    ✓ dos firmas del documento conservan fecha, hash, ruta y una sola auditoria (64 ms)
+    ✓ una carrera entre enviar y firmar nunca degrada un documento firmado (37 ms)
+    ✓ revalida la empresa despues de esperar una transaccion concurrente (31 ms)
+    ✓ conserva el estado financiero Moroso al firmar (35 ms)
+    ✓ conserva el estado financiero Suspendido al firmar (33 ms)
+    ✓ firma por correo el mismo PDF y su repetición concurrente no duplica firma, auditoría ni correo (334 ms)
+    ✓ cambio relevante de email anula sin firmar ni enviar documento (143 ms)
+    ✓ cambio relevante de price anula sin firmar ni enviar documento (160 ms)
+    ✓ cambio relevante de address anula sin firmar ni enviar documento (167 ms)
+    ✓ cinco códigos incorrectos bloquean la solicitud de forma persistente y no reinician el presupuesto (231 ms)
+    ✓ caducidad del código y del enlace impiden firmar (187 ms)
+    ✓ no acepta consentimiento falso, huella distinta ni códigos solicitados sin revisar PDF (203 ms)
+    ✓ rechaza la firma manual automática y sustituye de forma segura la versión: manual (256 ms)
+    ✓ rechaza la firma manual automática y sustituye de forma segura la versión: version (178 ms)
+    ✓ un fallo de auditoría revierte PDF firmado, estado comercial y consumo del código (216 ms)
+    ✓ un SMTP incierto después de firmar conserva la firma y no reenvía al repetir (255 ms)
+    ✓ un operador de otra empresa no obtiene estado, envío ni PDF firmado (128 ms)
+    ✓ el índice parcial impide una segunda solicitud pendiente del mismo contrato (140 ms)
+    ✓ respetan espera y máximo de cinco envíos aunque cambie la instancia (203 ms)
+    ✓ un envío de código no confirmado inutiliza el código reservado (177 ms)
+    ✓ el CHECK exige huella firmada no nula además del PDF y la constancia (140 ms)
+    ✓ un enlace vencido no entrega el PDF firmado y conserva la evidencia inmutable (236 ms)
+    ✓ la segunda empresa firma una identidad compartida usando exclusivamente su remitente y permisos (234 ms)
+    ✓ el catálogo privado y el rol de ejecución cumplen permisos mínimos sin FKs a public (6 ms)
+    ✓ el rol efectivo de grupo 0 no puede leer ni escribir evidencia (29 ms)
+    ✓ el rol efectivo de grupo 1 no puede leer ni escribir evidencia (21 ms)
+    ✓ el rol efectivo de grupo 2 no puede leer ni escribir evidencia (23 ms)
+    ✓ asignación automática no admite manual tras vencimiento, error y apagado o cambio de cohortes (494 ms)
+    ✓ anular el documento limpia el OTP y no permite revivir la versión por etiqueta (360 ms)
+    ✓ una empresa excluida no copia PDF ni snapshot al esquema privado ni recibe leyenda automática (68 ms)
+    ✓ la evidencia firmada sigue descargable con el envío apagado y desde otra instancia (245 ms)
+    ✓ solo un rechazo SMTP confirmado admite recuperación autorizada sin duplicar la firma (257 ms)
+    ✓ compite con Anulado usando dos conexiones y un bloqueo real (259 ms)
+    ✓ compite con version usando dos conexiones y un bloqueo real (396 ms)
+    ✓ las referencias lógicas rechazan una solicitud con empresa inconsistente (227 ms)
+    ✓ las referencias lógicas rechazan una solicitud con version inconsistente (342 ms)
+    ✓ la recuperación de correo también respeta la empresa habilitada para enviar (295 ms)
+    ✓ la política de envío exige un PDF vigente pendiente y deshabilita versiones anuladas (198 ms)
+    ✓ una firma que obtiene primero el bloqueo conserva la evidencia frente a Anulado (229 ms)
+    ✓ una firma que obtiene primero el bloqueo conserva la evidencia frente a version (253 ms)
+Test Suites: 1 passed, 1 total
+Tests:       43 passed, 43 total
+Time:        14.598 s
+
+## smtp
+
+PASS backend/src/mail/mail.service.spec.ts
+    ✓ disabled SMTP makes no connection (1 ms)
+    ✓ verify authenticates without sending a message (27 ms)
+    ✓ sends an attached boleta with starttls and authenticates only after encryption (73 ms)
+    ✓ sends an attached boleta with tls and authenticates only after encryption (59 ms)
+    ✓ preserves quote attachments and generates a stable tax Message-ID (152 ms)
+    ✓ refuses an untrusted TLS certificate before sending credentials or DATA (7 ms)
+    ✓ refuses a certificate with the wrong hostname (7 ms)
+    ✓ requires STARTTLS and never falls back to plaintext AUTH (2 ms)
+    ✓ stops on rejected authentication without sending DATA (7 ms)
+    ✓ classifies recipient rejection 450 without exposing server responses (6 ms)
+    ✓ classifies recipient rejection 550 without exposing server responses (6 ms)
+    ✓ classifies an explicit DATA rejection as not accepted (46 ms)
+    ✓ a connection lost before the DATA acknowledgement is uncertain even when its error says CONN (48 ms)
+    ✓ does not turn SMTP acceptance into failure if QUIT loses its connection (48 ms)
+    ✓ bounds preflight waiting and confirms no DATA was sent (103 ms)
+    ✓ a timeout waiting for DATA acceptance remains uncertain (106 ms)
+    ✓ rejects envelope injection or multiple recipients before connecting (1 ms)
+    ✓ rejects envelope injection or multiple recipients before connecting (1 ms)
+    ✓ rejects unsafe/incomplete configuration {"SMTP_REJECT_UNAUTHORIZED":"false"} (4 ms)
+    ✓ rejects unsafe/incomplete configuration {"SMTP_STARTTLS":"false"} (1 ms)
+    ✓ rejects unsafe/incomplete configuration {"SMTP_PORT":"not-a-port"} (1 ms)
+    ✓ rejects unsafe/incomplete configuration {"SMTP_USER":"qa"}
+    ✓ rejects unsafe/incomplete configuration {"SMTP_SECURE":"maybe"} (1 ms)
+    ✓ rejects unsafe/incomplete configuration {"SMTP_FROM":"qa@example.invalid\r\nBCC: other@example.invalid"}
+    ✓ permits plaintext only explicitly for unauthenticated local QA, never production (2 ms)
+    ✓ delivers each PDF from its own SMTP account, with no FiNet signature in Cable Magico (113 ms)
+    ✓ verifies the selected company without sending DATA (24 ms)
+    ✓ never uses global credentials for an absent or unknown company undefined (1 ms)
+    ✓ never uses global credentials for an absent or unknown company 1 (1 ms)
+    ✓ never uses global credentials for an absent or unknown company 3 (1 ms)
+    ✓ never routes automatic company 1 through legacy global SMTP without a mapping (1 ms)
+    ✓ never routes automatic company 2 through legacy global SMTP without a mapping (1 ms)
+    ✓ does not borrow a global host, password or TLS relaxation for a selected company (1 ms)
+    ✓ rejects ambiguous or malformed company maps { (1 ms)
+    ✓ rejects ambiguous or malformed company maps {} (1 ms)
+    ✓ rejects ambiguous or malformed company maps [{"idEmpresa":"2","alias":"CABLE_MAGICO"}]
+    ✓ rejects ambiguous or malformed company maps [{"idEmpresa":2,"alias":"bad-alias"}] (1 ms)
+    ✓ rejects ambiguous or malformed company maps [{"idEmpresa":2,"alias":"CABLE_MAGICO","password":"FAKE"}]
+    ✓ rejects ambiguous or malformed company maps [{"idEmpresa":2,"alias":"A"},{"idEmpresa":2,"alias":"B"}] (1 ms)
+    ✓ rejects ambiguous or malformed company maps [{"idEmpresa":1,"alias":"A"},{"idEmpresa":2,"alias":"A"}] (1 ms)
+    ✓ routes quotations using the same explicit company identity (54 ms)
+Test Suites: 1 passed, 1 total
+Tests:       43 passed, 43 total
+Time:        5.206 s
+
+## ui
+
+ok 1 - Prospectos: política real automatic antes de existir cliente o servicio
+ok 2 - Prospectos: política real unknown antes de existir cliente o servicio
+ok 3 - Prospectos: política real manual antes de existir cliente o servicio
+ok 4 - Clientes: cierra y limpia el formulario manual al cambiar a automático
+ok 5 - firma confirmada refresca una vez y conserva descarga con el envío apagado
+ok 6 - un fallo tardío de otra ficha no elimina la política del contrato actual
+ok 7 - no ofrece enviar sin documento elegible ni repetir un documento anulado
+# tests 7
+# pass 7
+# fail 0
+# skipped 0
+
+## build
+
+Exit status 0; output not relevant or empty.
+
+## prisma
+
+Exit status 0; output not relevant or empty.
+
+## global-audit
+
+{"modeledTables":63,"summary":{"MATCH":929,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}}
+
+## generated
+
+Exit status 0; output not relevant or empty.
+
+## off
+
+{"result":"PASS","flag":false,"private_schema_absent":true,"app_boot":true,"ready_http":200,"global_schema":"READY","explicit_legacy_manual":true,"manual_audits":1,"implicit_orders":0,"implicit_services":0}
+
+## recovery
+
+{"result":"PASS","new_app_process":true,"flag":false,"persisted_signed_documents":12,"original_and_signed_hashes_verified":true,"external_sends":0}
+
+## dbverify
+
+{"status":"PASS","counts":{"tables":96,"columns":982,"pk":96,"fk":230,"checks":63,"indexes":132},"summary":{"MATCH":1692},"classifications":{},"allowedExtras":0,"missing":0,"different":0}
+
+## harness
+
+ok 1 - harness de firma no usa DATABASE_URL como alternativa
+ok 2 - harness de firma rechaza producción antes de cargar Prisma
+ok 3 - harness de firma rechaza host externo y no publica la URL
+ok 4 - harness off rechaza URL ajena antes de cargar la aplicación y no publica claves
+ok 5 - harness recovery rechaza URL ajena antes de cargar la aplicación y no publica claves
+# tests 5
+# pass 5
+# fail 0
+# skipped 0

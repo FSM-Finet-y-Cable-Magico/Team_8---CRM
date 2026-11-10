@@ -40,6 +40,55 @@ describe('Factibilidad geografica en prospectos', () => {
     return { service, prisma, coverage, audit };
   }
 
+  it('edita datos de contacto sin exigir ubicación ni alterar factibilidad', async () => {
+    const { service, prisma, coverage, audit } = setup();
+    const result = await service.update(7, { nombreCompleto: 'Contacto QA', telefono: '+56900000003', email: null }, user);
+    expect(result).toMatchObject({ nombreCompleto: 'Contacto QA', telefono: '+56900000003', email: null, estadoPipeline: 'Prospecto Nuevo' });
+    expect(coverage.check).not.toHaveBeenCalled();
+    expect(prisma.prospecto.update.mock.calls[0][0].data).not.toHaveProperty('latitud');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DATOS_PROSPECTO' }), prisma);
+  });
+
+  it('editar un prospecto cotizado invalida la cotización anterior y reinicia en Factible', async () => {
+    const { service, prisma, coverage, audit } = setup(true, 'Cotizacion Enviada');
+    const original = { ...await prisma.prospecto.findUnique(), latitud: location.latitud, longitud: location.longitud,
+      nombreCompleto: 'Prospecto cotizado', telefono: '+56912345678', email: 'qa@example.invalid', comuna: null, region: null };
+    prisma.prospecto.findUnique.mockResolvedValue(original);
+    prisma.prospecto.findUniqueOrThrow.mockResolvedValue(original);
+    const result = await service.update(7, { nombreCompleto: 'Prospecto actualizado', ubicacion: location }, user);
+
+    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
+    expect(prisma.cotizacion.updateMany).toHaveBeenCalledWith({ where: { idProspecto: 7 }, data: { factibilidadVerificada: false } });
+    expect(prisma.prospecto.update.mock.calls[0][0].data.estadoPipeline).toBe('Factible');
+    expect(result.estadoPipeline).toBe('Factible');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      valorNuevo: expect.objectContaining({ cotizacionesAnterioresInvalidas: true, estadoPipeline: 'Factible' }),
+    }), prisma);
+  });
+
+  it('no permite editar una cotización sin volver a validar la ubicación', async () => {
+    const { service, prisma, coverage } = setup(true, 'Cotizacion Enviada');
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 400 });
+    expect(coverage.check).not.toHaveBeenCalled();
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(prisma.cotizacion.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rechaza una edición de contacto si se crea un contrato concurrentemente', async () => {
+    const { service, prisma } = setup();
+    prisma.contrato.findFirst.mockResolvedValue({ idContrato: 30 });
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 400 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
+  it('detecta cambios concurrentes del contacto y conserva los datos', async () => {
+    const { service, prisma } = setup();
+    const original = await prisma.prospecto.findUnique();
+    prisma.prospecto.findUniqueOrThrow.mockResolvedValue({ ...original, telefono: '+56900000009' });
+    await expect(service.update(7, { telefono: '+56900000003' }, user)).rejects.toMatchObject({ status: 409 });
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+  });
+
   it('crea como Factible dentro de cobertura general y genera evidencia interna', async () => {
     const { service, prisma, coverage, audit } = setup();
     const result = await service.create(input, user);

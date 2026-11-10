@@ -67,7 +67,7 @@ export function CustomerRequestsPanel({ customer, services, servicesStatus = ser
       <button className="secondary compact" onClick={() => { setCreating(true); setMessage(''); }}><Plus size={15} /> Nueva solicitud</button></header>
     {message && <p role="status" className="inline-status">{message}</p>}
     {loading ? <p>Cargando solicitudes…</p> : <div className="table-wrap"><table><thead><tr><th>Solicitud</th><th>Servicio</th><th>Estado</th><th>Fecha</th><th>Acción</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.idSolicitud}><td>{row.tipoSolicitud}</td><td>{row.servicio?.contrato?.plan?.nombreComercial ?? 'General'}</td><td><StatusBadge value={row.estado} /></td><td>{formatDateTime(row.fechaCreacion)}</td><td><button className="secondary compact" onClick={() => manage(row)}>Ver detalle</button></td></tr>)}</tbody></table>
+      <tbody>{rows.map(row => <tr key={row.idSolicitud}><td>{row.tipoSolicitud}</td><td>{row.servicio?.contrato?.plan?.nombreComercial ?? 'General'}</td><td><StatusBadge value={row.estado} /></td><td>{formatDateTime(row.fechaCreacion)}</td><td><button className="secondary compact" onClick={() => manage(row)}>Detalle</button></td></tr>)}</tbody></table>
       {!rows.length && <p className="empty-state">Sin solicitudes registradas.</p>}</div>}
     {creating && <NewCustomerRequestModal key={customer.idCliente} customer={customer} services={services} servicesStatus={servicesStatus} onClose={() => setCreating(false)} onCreated={created} />}
     <Modal title="Detalle de solicitud" open={Boolean(selected)} onClose={() => { if (!busy) setSelected(null); }}>

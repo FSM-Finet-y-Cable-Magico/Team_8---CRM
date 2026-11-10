@@ -82,6 +82,7 @@ function fixture(companies = [1, 2]) {
     update: jest.fn(async ({ where, data }: any) => ({ ...rows.find(r => matches(r, where)), ...data })),
   });
   const db = {
+    $queryRaw: jest.fn().mockResolvedValue([{ idCategoria: 1, nombre: 'Consulta general', slaHoras: null, tipo: 'ATENCION', tipoDisponible: true }]),
     cliente: model([customer]), contrato: model(contracts), servicioContratado: model(services),
     solicitudCliente: model(requests), ticket: model(tickets), unidadEquipo: model(units),
     monitoreoOnt: model(measurements), historialConexionOnt: model(history), ordenTrabajo: model(orders),
