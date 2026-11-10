@@ -4233,3 +4233,8 @@ button.profile-menu-item.danger:hover {
   .tax-document-filters { grid-template-columns: 1fr; }
   .tax-document-wide { grid-column: auto; }
 }
+
+.public-signature { max-width: 850px; margin: 3rem auto; padding: 1rem; }
+.public-signature form { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.public-signature label { display: block; }
+.signature-hash { overflow-wrap: anywhere; font-family: monospace; }

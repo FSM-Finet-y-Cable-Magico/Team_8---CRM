@@ -41,6 +41,7 @@ export class HealthController {
       const columns = new Map(rows.map(c => [c.table + '.' + c.name, c]));
       let missing = 0, different = 0;
       for (const c of GLOBAL_COLUMNS) {
+        if (c.table === 'solicitud_firma_contrato' && this.config.get<string>('CONTRACT_SIGNATURE_ENABLED') !== 'true') continue;
         const actual = columns.get(c.table + '.' + c.name);
         if (!actual) missing++;
         else if (normalize(actual.type) !== c.type || actual.nullable !== c.nullable) different++;

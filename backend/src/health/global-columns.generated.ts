@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50; no seeds or credentials.
+// Generated from init-global.sql SHA256 8bfeba2a0b8f1233f04e597f810ddfac097b639508d5116ee8303796eb8ebe0b; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -5890,6 +5890,174 @@ export const GLOBAL_COLUMNS = [
     "table": "imputacion_cuota",
     "name": "id_original",
     "type": "integer",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "id_solicitud",
+    "type": "uuid",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "id_empresa",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "id_contrato",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "id_contrato_digital",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "id_usuario_creador",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "token_hash",
+    "type": "char(64)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "estado",
+    "type": "varchar(20)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "destinatario",
+    "type": "varchar(120)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "datos_snapshot",
+    "type": "jsonb",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "hash_original",
+    "type": "char(64)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "pdf_original",
+    "type": "bytea",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "fecha_creacion",
+    "type": "timestamptz(3)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "fecha_expiracion",
+    "type": "timestamptz(3)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "otp_hash",
+    "type": "char(64)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "otp_expiracion",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "otp_solicitado",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "otp_envios",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "otp_intentos",
+    "type": "integer",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "pdf_visto",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "correo_estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "firma_fecha",
+    "type": "timestamptz(3)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "firma_ip",
+    "type": "varchar(45)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "firma_user_agent",
+    "type": "varchar(200)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "consentimiento_version",
+    "type": "varchar(40)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "pdf_firmado",
+    "type": "bytea",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "hash_firmado",
+    "type": "char(64)",
+    "nullable": true
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "firma_correo_estado",
+    "type": "varchar(30)",
+    "nullable": false
+  },
+  {
+    "table": "solicitud_firma_contrato",
+    "name": "motivo_anulacion",
+    "type": "varchar(40)",
     "nullable": true
   }
 ];

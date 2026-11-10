@@ -1,3 +1,4 @@
+import { ContractSignatureActions } from '../contracts/ContractSignatureActions';
 import { useCallback, useEffect, useState } from 'react';
 import { api, apiErrorMessage, DigitalContract } from '../../api';
 import { formatDateTime } from '../../lib';
@@ -39,6 +40,7 @@ export function ContractDocuments({ idContrato, canGenerate }: { idContrato: num
   return <section className="workflow-panel"><header className="section-heading compact-heading"><h3>Documentos del contrato</h3>
     {canGenerate && <button className="secondary compact" disabled={busy || loading} onClick={() => void generate()}>{busy ? 'Procesando…' : documents.length ? 'Generar nueva versión' : 'Generar PDF'}</button>}</header>
     <p>La confirmación de firma se registra por separado en la contratación.</p>
+    <ContractSignatureActions idContrato={idContrato} canSend={canGenerate} revision={documents[0]?.version ?? 0} />
     {message && <p role="status" className="inline-status">{message}</p>}
     {loading ? <p>Cargando documentos…</p> : documents.length ? <div className="table-wrap"><table><thead><tr><th>Versión</th><th>Generado</th><th>Estado documental</th><th></th></tr></thead>
       <tbody>{documents.map(row => <tr key={row.idContratoDigital}><td>{row.version}</td><td>{formatDateTime(row.fechaGeneracion)}</td><td><StatusBadge value={row.estadoFirma} /></td><td><button className="secondary compact" disabled={busy} onClick={() => void download(row)}>Descargar PDF</button></td></tr>)}</tbody></table></div> : <p className="empty-state">Todavía no se ha generado un documento.</p>}

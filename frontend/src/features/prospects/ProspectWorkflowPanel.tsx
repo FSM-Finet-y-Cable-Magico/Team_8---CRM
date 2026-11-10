@@ -318,9 +318,9 @@ export function ProspectWorkflowPanel({
       {requiresReview && <section className="prospect-action-card" aria-label="Revisión comercial">
         <p>Este registro requiere revisión comercial y no se habilita automáticamente por su estado histórico.</p>
         {permissions.createProspects && currentProspect.revisionOrigenG2Disponible && <div className="stack">
-          <p>Existen auditorías originales de solicitud y privacidad de G2. Comprueba la empresa antes de aprobar. Esta acción no acredita factibilidad ni crea contratos o clientes.</p>
-          <label><input type="checkbox" checked={originConfirmed} onChange={event => setOriginConfirmed(event.target.checked)} disabled={reviewing} />Confirmo que verifiqué el origen G2 y la empresa de esta solicitud</label>
-          <button type="button" disabled={reviewing || !originConfirmed} onClick={() => void approveG2Review()}>Aprobar revisión G2</button>
+          <p>Existen auditorías originales de solicitud y privacidad del portal de clientes. Comprueba la empresa antes de aprobar. Esta acción no acredita factibilidad ni crea contratos o clientes.</p>
+          <label><input type="checkbox" checked={originConfirmed} onChange={event => setOriginConfirmed(event.target.checked)} disabled={reviewing} />Confirmo que verifiqué el origen en el portal de clientes y la empresa de esta solicitud</label>
+          <button type="button" disabled={reviewing || !originConfirmed} onClick={() => void approveG2Review()}>Aprobar revisión del portal</button>
         </div>}
       </section>}
 

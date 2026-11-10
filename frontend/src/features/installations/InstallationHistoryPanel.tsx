@@ -37,7 +37,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], on
       <div className="table-wrap"><table><thead><tr><th>Empresa / OT</th><th>Fuente y referencias</th><th>Contrato / Servicio</th><th>Fecha técnica original</th><th>Solicitud y cierre técnico</th></tr></thead>
         <tbody>{items.slice((page - 1) * pageSize, page * pageSize).map(row => <tr key={row.key}>
           <td>Empresa {row.idEmpresa} / OT {row.idOt ?? 'Sin referencia'}<br />Completada</td>
-          <td>{row.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin tracking G8–G3 confirmado' : 'Cierre de solicitud G8–G3 confirmado'}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
+          <td>{row.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin solicitud de instalación confirmada' : 'Cierre de solicitud de instalación confirmado'}{row.ordenesLocales.length ? <details><summary>OT local: {row.ordenesLocales.join(', ')}</summary>
             {localOrders.filter(order => order.idEmpresa === row.idEmpresa && row.ordenesLocales.includes(order.idOt)).map(order => <div key={order.idOt}>
               <p>{order.codigoSeguimiento ?? `OT ${order.idOt}`} · {order.prioridad} · {order.estado}</p>
               <p>{order.prospecto?.nombreCompleto ?? order.cliente?.nombreCompleto ?? `Cliente ${order.idCliente ?? '-'}`}</p>

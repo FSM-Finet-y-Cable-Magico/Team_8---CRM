@@ -78,6 +78,9 @@ export function auditPrisma(text,global){
   const summary=rows.reduce((r,x)=>{r[x.status]=(r[x.status]??0)+1;return r;},{});
   return {contractHash:global.hash,modeledTables:models.length,summary,rows};
 }
+export function blockingPrismaDifferences(report) {
+  return report.rows.filter(row => !['MATCH','COLUMN_GLOBAL_ONLY','OWNER_EXTERNAL'].includes(row.status) && row.prisma != null);
+}
 export function alignPrisma(text,global){
   const models=parsePrisma(text);
   for(const model of models){let block=model.block;const table=global.tables.find(t=>t.name===model.table);if(!table)continue;
@@ -105,4 +108,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   const cell=x=>JSON.stringify(x??null).replaceAll('|','\\|');
   writeFileSync('docs/i3-prisma-vs-global-schema.md',`# Proyección Prisma G8 frente al contrato global\n\nHash canónico: ${global.hash}. Modelos G8: ${report.modeledTables}.\n\nPrisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Tambien incorpora el estado final de tax_emission_intent, tax_payment_job y la extension Meta de log_notificacion; los indices parciales se conservan aunque Prisma no pueda declararlos. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.\n\nAntes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: ${cell(report.summary)}.\n\n|Tabla|Objeto|Owner|Estado|Prisma|Global|\n|---|---|---|---|---|---|\n`+report.rows.map(r=>`|${r.table}|${r.column}|${r.owner}|${r.status}|${cell(r.prisma)}|${cell(r.global)}|`).join('\n')+'\n');
   console.log(JSON.stringify({modeledTables:report.modeledTables,summary:report.summary}));
+  if (process.argv.includes('--check') && blockingPrismaDifferences(report).length) {
+    console.error('PRISMA_GLOBAL_PROJECTION_MISMATCH'); process.exitCode = 1;
+  }
 }

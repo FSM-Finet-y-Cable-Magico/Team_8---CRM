@@ -87,11 +87,11 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
 
 test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo → cotización → contratación', async t => {
   const h=await harness(t,{g2:true});
-  assert.equal(h.button('Aprobar revisión G2').props.disabled,true);
+  assert.equal(h.button('Aprobar revisión del portal').props.disabled,true);
   assert.equal(h.button('Editar ubicación'),undefined);
   assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
   await h.confirmOrigin();
-  await act(async()=>{h.button('Aprobar revisión G2').props.onClick();h.button('Aprobar revisión G2').props.onClick();});
+  await act(async()=>{h.button('Aprobar revisión del portal').props.onClick();h.button('Aprobar revisión del portal').props.onClick();});
   assert.equal(h.calls.filter(c=>c.path.endsWith('/g2-review')).length,1);
   assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
   assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().origenContacto,null);
@@ -114,20 +114,20 @@ test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo
 
 for(const options of [{g2:true,reviewAvailable:false},{g2:true,commercial:false},
   {requiresReview:true,state:'Servicio Activo',reviewAvailable:false}])test('revisión sin evidencia/permisos o histórico no se desbloquea: '+JSON.stringify(options),async t=>{
-  const h=await harness(t,options);assert.equal(h.button('Aprobar revisión G2'),undefined);
+  const h=await harness(t,options);assert.equal(h.button('Aprobar revisión del portal'),undefined);
   assert.equal(h.button('Editar ubicación'),undefined);assert.equal(h.button('Generar cotización'),undefined);
   assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')||c.path.endsWith('/g2-review')).length,0);
 });
 
 test('rechazo de revisión y coordenadas ausentes no anuncian éxito ni envían escrituras',async t=>{
   const h=await harness(t,{g2:true,reviewFailure:true});await h.confirmOrigin();
-  await act(async()=>h.button('Aprobar revisión G2').props.onClick());
+  await act(async()=>h.button('Aprobar revisión del portal').props.onClick());
   assert.equal(h.persisted().estadoPipeline,'NUEVO');assert.equal(h.button('Editar ubicación'),undefined);
   assert.ok(h.text().includes('QA error'));
 });
 
 test('ubicación ausente tras revisión exige coordenadas y no infiere comuna o región',async t=>{
-  const h=await harness(t,{g2:true});await h.confirmOrigin();await act(async()=>h.button('Aprobar revisión G2').props.onClick());
+  const h=await harness(t,{g2:true});await h.confirmOrigin();await act(async()=>h.button('Aprobar revisión del portal').props.onClick());
   await act(async()=>h.button('Editar ubicación').props.onClick());await act(async()=>h.button('Guardar ubicación').props.onClick());
   assert.equal(h.calls.filter(c=>c.path.endsWith('/location')).length,0);
   assert.equal(h.persisted().comuna,null);assert.equal(h.persisted().region,null);
@@ -136,7 +136,7 @@ test('ubicación ausente tras revisión exige coordenadas y no infiere comuna o 
 
 test('prospecto G2 ya recuperado abre editor: clic persiste ubicación antes de factibilidad y conserva al recargar',async t=>{
   const h=await harness(t,{g2:true,requiresReview:false});
-  assert.equal(h.button('Aprobar revisión G2'),undefined);
+  assert.equal(h.button('Aprobar revisión del portal'),undefined);
   assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,1);
   await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
   const location=h.calls.findIndex(c=>c.path.endsWith('/location'));

@@ -1,0 +1,10 @@
+# Required review paths. Pending the team's exact GitHub users/team slugs.
+# "Nosotros" does not identify an account; no names or approvals have been invented.
+# Activate these rules with maintainers who have repository write permission.
+# /db/global/ @organization/shared-schema-team
+# /backend/prisma/ @organization/shared-schema-team
+# /backend/src/g1-integration/ @organization/g1-reviewers
+# /backend/src/g2-integration/ @organization/g2-reviewers
+# /backend/src/g3-integration/ @organization/g3-reviewers
+# /.github/ @organization/repository-maintainers
+# This commented proposal does not enforce owner review until the real names are configured.

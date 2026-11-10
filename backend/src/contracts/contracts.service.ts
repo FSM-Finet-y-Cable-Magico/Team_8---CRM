@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional, StreamableFile } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { createReadStream, existsSync } from 'fs';
 import { mkdir, open, unlink } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import PDFDocument from 'pdfkit';
-import { isISO8601 } from 'class-validator';
+import { ConfigService } from '@nestjs/config';
+import { buildContractSnapshot, ContractSnapshot, CONTRACT_INCLUDE } from './contract-snapshot';
 import { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -20,22 +21,6 @@ import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dt
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
-const CONTRACT_INCLUDE = {
-  cliente: { include: { empresa: true, direcciones: true } },
-  prospecto: { include: { empresa: true } },
-  plan: true,
-  zonaPago: true,
-  servicios: {
-    include: {
-      direccion: true,
-      equipos: true,
-      tickets: { take: 10, orderBy: { fechaCreacion: 'desc' } },
-      ordenes: { take: 10, orderBy: { fechaCreacion: 'desc' } },
-    },
-    orderBy: { fechaCreacion: 'desc' },
-  },
-} satisfies Prisma.ContratoInclude;
-
 @Injectable()
 export class ContractsService {
   private readonly contractsDir = resolve(process.cwd(), 'generated', 'contracts');
@@ -45,6 +30,7 @@ export class ContractsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly servicesService: ServicesService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async createCustomerContract(dto: CreateCustomerContractDto, currentUser: AuthUser) {
@@ -108,65 +94,81 @@ export class ContractsService {
   }
 
   async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
-    const contract = await this.getContractOrThrow(idContrato, currentUser);
+    // Check access before waiting, then revalidate the current row under its lock.
+    await this.getContractOrThrow(idContrato, currentUser);
+    return this.prisma.$transaction(
+      tx => this.markContractSigned(tx, idContrato, {
+        kind: 'manual', actor: currentUser, observation: dto.observacion,
+      }),
+      { timeout: 20000 },
+    );
+  }
 
-    if (this.isSignedContract(contract.estado)) {
-      return contract;
-    }
+  async markContractSigned(
+    tx: Prisma.TransactionClient,
+    idContrato: number,
+    origin: { kind: 'manual' | 'electronic'; actor: AuthUser; observation?: string },
+  ) {
+    await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+    const contract = await this.getContractOrThrow(idContrato, origin.actor, tx);
 
+    // Replays preserve the original signature, financial state and audit.
+    if (this.isSignedContract(contract.estado)) return contract;
     if (['Anulado', 'Baja'].includes(contract.estado)) {
       throw new BadRequestException('No se puede confirmar la firma de un contrato anulado');
     }
 
     const installationAddress = contract.direccionInstalacion?.trim()
       || contract.prospecto?.direccion?.trim()
-      || contract.cliente?.direcciones.find((address) => address.direccionCompleta?.trim())?.direccionCompleta;
-
+      || contract.cliente?.direcciones.find(address => address.direccionCompleta?.trim())?.direccionCompleta;
     if (!installationAddress) {
       throw new BadRequestException('El contrato necesita una direccion de instalacion registrada antes de confirmar la firma');
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const signedContract = await tx.contrato.update({
-        where: { idContrato },
-        data: {
-          estado: 'Firmado',
-          fechaFirmaManual: new Date(),
-          idUsuarioFirmaManual: currentUser.idUsuario,
-          observacionFirmaManual: dto.observacion?.trim() || null,
-        },
-        include: CONTRACT_INCLUDE,
-      });
-
-      if (signedContract.idProspecto && !signedContract.idCliente) {
-        await tx.prospecto.update({
-          where: { idProspecto: signedContract.idProspecto },
-          data: { estadoPipeline: 'Pendiente activacion' },
-        });
-      }
-
-      return signedContract;
+    // Different contracts may share a customer. Serialize their lifecycle rollups.
+    if (contract.idCliente) {
+      await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${contract.idCliente} FOR UPDATE`;
+    }
+    const signedContract = await tx.contrato.update({
+      where: { idContrato },
+      data: {
+        estado: 'Firmado',
+        ...(origin.kind === 'manual' ? { fechaFirmaManual: new Date(),
+          idUsuarioFirmaManual: origin.actor.idUsuario,
+          observacionFirmaManual: origin.observation?.trim() || null } : {}),
+      },
+      include: CONTRACT_INCLUDE,
     });
 
-    if (updated.idCliente) {
-      await this.reconcileCustomerStatus(updated.idCliente);
+    if (origin.kind === 'manual' && this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true') {
+      await tx.solicitudFirmaContrato.updateMany({ where: { idContrato, estado: 'PENDIENTE' },
+        data: { estado: 'ANULADA', motivoAnulacion: 'FIRMA_MANUAL', otpHash: null } });
     }
-
+    if (signedContract.idProspecto && !signedContract.idCliente) {
+      await tx.prospecto.update({
+        where: { idProspecto: signedContract.idProspecto },
+        data: { estadoPipeline: 'Pendiente activacion' },
+      });
+    }
+    if (signedContract.idCliente) {
+      await this.reconcileCustomerStatus(signedContract.idCliente, tx);
+    }
     await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'CONFIRMAR_FIRMA_CONTRATO_MANUAL',
+      idUsuario: origin.kind === 'manual' ? origin.actor.idUsuario : null,
+      accion: origin.kind === 'manual' ? 'CONFIRMAR_FIRMA_CONTRATO_MANUAL' : 'CONFIRMAR_FIRMA_CONTRATO_ELECTRONICA',
       entidadAfectada: 'contrato',
       idEntidadAfectada: idContrato,
       valorAnterior: { estado: contract.estado },
       valorNuevo: {
-        estado: updated.estado,
-        fechaFirmaManual: updated.fechaFirmaManual?.toISOString() ?? null,
-        idProspecto: updated.idProspecto,
-        estadoActivacion: updated.idCliente ? null : 'Pendiente Instalacion',
+        estado: signedContract.estado,
+        origenFirma: origin.kind,
+        fechaFirmaManual: signedContract.fechaFirmaManual?.toISOString() ?? null,
+        idProspecto: signedContract.idProspecto,
+        estadoActivacion: signedContract.idCliente ? null : 'Pendiente Instalacion',
       },
-    });
+    }, tx);
 
-    return this.getContractOrThrow(idContrato, currentUser);
+    return this.getContractOrThrow(idContrato, origin.actor, tx);
   }
   async prepareInstallation(idContrato: number, currentUser: AuthUser) {
     const contract = await this.getContractOrThrow(idContrato, currentUser);
@@ -379,7 +381,8 @@ export class ContractsService {
           orderBy: { version: 'desc' },
         });
         const version = (latest?.version ?? 0) + 1;
-        const buffer = await this.renderDigitalContract(contract, version, tx);
+        const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
+        const buffer = await this.renderDigitalContract(contract, version, tx, snapshot);
         const hash = createHash('sha256').update(buffer).digest('hex');
         // A rollback may release the version for another attempt. Never share its filename.
         const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
@@ -404,6 +407,19 @@ export class ContractsService {
             version,
           },
         });
+        if (this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true') {
+          if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
+          await tx.solicitudFirmaContrato.create({ data: {
+            idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
+            idContratoDigital: created.idContratoDigital, idUsuarioCreador: currentUser.idUsuario,
+            tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
+            estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
+            datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
+            pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
+          } });
+          await tx.solicitudFirmaContrato.updateMany({ where: { idContrato, estado: 'PENDIENTE' },
+            data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
+        }
         await this.auditService.record({
           idUsuario: currentUser.idUsuario,
           accion: 'GENERAR_CONTRATO_DIGITAL',
@@ -470,40 +486,46 @@ export class ContractsService {
 
   async updateDigitalContractStatus(idContrato: number, dto: UpdateDigitalContractStatusDto, currentUser: AuthUser) {
     await this.getContractOrThrow(idContrato, currentUser);
-    const latest = await this.prisma.contratoDigital.findFirst({
-      where: { idContrato },
-      orderBy: { version: 'desc' },
-    });
+    return this.prisma.$transaction(async tx => {
+      // Use the same parent lock as PDF generation and business signature.
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      await this.getContractOrThrow(idContrato, currentUser, tx);
+      await tx.$queryRaw`SELECT id_contrato_digital FROM contrato_digital WHERE id_contrato = ${idContrato} ORDER BY version DESC LIMIT 1 FOR UPDATE`;
+      const latest = await tx.contratoDigital.findFirst({
+        where: { idContrato },
+        orderBy: { version: 'desc' },
+      });
+      if (!latest) throw new NotFoundException('El contrato digital aun no fue generado');
 
-    if (!latest) {
-      throw new NotFoundException('El contrato digital aun no fue generado');
-    }
+      // Preserve every signed variant and any persisted signing timestamp.
+      if (this.isSignedDigitalContract(latest)) {
+        if (dto.estadoFirma !== latest.estadoFirma) {
+          throw new BadRequestException('Un contrato firmado no se modifica destructivamente; genera una nueva version si necesitas corregir');
+        }
+        return latest;
+      }
 
-    if (latest.estadoFirma === 'Firmado manualmente' && dto.estadoFirma !== 'Firmado manualmente') {
-      throw new BadRequestException('Un contrato firmado no se modifica destructivamente; genera una nueva version si necesitas corregir');
-    }
+      const updated = await tx.contratoDigital.update({
+        where: { idContratoDigital: latest.idContratoDigital },
+        data: {
+          estadoFirma: dto.estadoFirma,
+          fechaFirma: dto.estadoFirma === 'Firmado manualmente' ? new Date() : latest.fechaFirma,
+        },
+      });
+      await this.auditService.record({
+        idUsuario: currentUser.idUsuario,
+        accion: 'ACTUALIZAR_ESTADO_CONTRATO_DIGITAL',
+        entidadAfectada: 'contrato_digital',
+        idEntidadAfectada: updated.idContratoDigital,
+        valorAnterior: { estadoFirma: latest.estadoFirma },
+        valorNuevo: { estadoFirma: updated.estadoFirma, observaciones: dto.observaciones },
+      }, tx);
+      return updated;
+    }, { timeout: 20000 });
+  }
 
-    const updated = await this.prisma.contratoDigital.update({
-      where: { idContratoDigital: latest.idContratoDigital },
-      data: {
-        estadoFirma: dto.estadoFirma,
-        fechaFirma: dto.estadoFirma === 'Firmado manualmente' ? new Date() : latest.fechaFirma,
-      },
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_ESTADO_CONTRATO_DIGITAL',
-      entidadAfectada: 'contrato_digital',
-      idEntidadAfectada: updated.idContratoDigital,
-      valorAnterior: { estadoFirma: latest.estadoFirma },
-      valorNuevo: {
-        estadoFirma: updated.estadoFirma,
-        observaciones: dto.observaciones,
-      },
-    });
-
-    return updated;
+  private isSignedDigitalContract(document: { estadoFirma: string; fechaFirma?: Date | null }) {
+    return document.fechaFirma != null || /^firmad[oa](?:\s|$)/iu.test(document.estadoFirma.trim());
   }
 
   private async getContractOrThrow(idContrato: number, currentUser: AuthUser, client: Prisma.TransactionClient = this.prisma) {
@@ -525,8 +547,8 @@ export class ContractsService {
     return ['Firmado', 'Activo', 'Suspendido', 'Moroso'].includes(status ?? '');
   }
 
-  private async reconcileCustomerStatus(idCliente: number) {
-    const customer = await this.prisma.cliente.findUnique({
+  private async reconcileCustomerStatus(idCliente: number, client: Prisma.TransactionClient = this.prisma) {
+    const customer = await client.cliente.findUnique({
       where: { idCliente },
       include: {
         contratos: { select: { estado: true } },
@@ -545,7 +567,7 @@ export class ContractsService {
     });
 
     if (nextStatus !== customer.estado) {
-      await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
+      await client.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
     }
   }
 
@@ -584,10 +606,8 @@ export class ContractsService {
     } as Prisma.InputJsonObject;
   }
 
-  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma) {
-    const company = contract.idEmpresa ? await client.empresa.findUnique({
-      where: { idEmpresa: contract.idEmpresa }, select: { nombre: true },
-    }) : null;
+  private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma, savedSnapshot?: ContractSnapshot) {
+    const snapshot = savedSnapshot ?? await buildContractSnapshot(client, contract.idContrato, false, contract);
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -596,17 +616,6 @@ export class ContractsService {
       doc.on('error', reject);
     });
 
-    const price = await this.resolvePlanPrice(contract.idPlan ?? 0, contract.idZonaPago, client);
-
-    const text = (value: unknown, max = 300): string | null => typeof value === 'string'
-      && value.trim().length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value)
-      ? value.trim() : null;
-    const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-    const date = (value: unknown): string | null => {
-      if (typeof value !== 'string' || !isISO8601(value, { strict: true, strictSeparator: true })
-        || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
-      return new Date(value).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
-    };
     const width = doc.page.width - 100;
     const ensureSpace = (height: number) => {
       if (doc.y + height > doc.page.height - doc.page.margins.bottom) doc.addPage();
@@ -635,59 +644,35 @@ export class ContractsService {
       section(title);
       rows.forEach(([label, value]) => row(label, value));
     };
-    const person = contract.cliente ?? contract.prospecto;
     doc.font('Helvetica-Bold').fontSize(18).text('Contrato digital de servicios', { align: 'center' });
     doc.moveDown();
     row('Versión', version);
     row('Fecha de generación (Chile)', new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }));
     section('Cliente');
-    row('Nombre', text(person?.nombreCompleto));
-    row('RUT', text(person?.rut, 12));
-    row('Correo electrónico', text(person?.email));
-    row('Teléfono', text(person?.telefono, 30));
+    row('Nombre', snapshot.cliente.nombre);
+    row('RUT', snapshot.cliente.rut);
+    row('Correo electrónico', snapshot.cliente.email);
+    row('Teléfono', snapshot.cliente.telefono);
     section('Condiciones comerciales');
-    row('Empresa', text(company?.nombre));
-    row('Plan', text(contract.plan?.nombreComercial));
-    row('Velocidad del plan', finite(contract.plan?.velocidadMbps) && contract.plan.velocidadMbps > 0
-      ? `${contract.plan.velocidadMbps} Mbps` : null);
-    const amount = price == null ? null : Number(price);
-    row('Precio mensual', finite(amount) && amount >= 0 ? `$${amount.toLocaleString('es-CL')}` : null);
-    row('Día de vencimiento', Number.isInteger(contract.diaVencimiento) && contract.diaVencimiento >= 1
-      && contract.diaVencimiento <= 31 ? contract.diaVencimiento : null);
-    row('Estado del contrato', text(contract.estado, 60));
-    row('Zona de pago', text(contract.zonaPago?.nombreZona));
-    if (!contract.servicios.length) {
+    row('Empresa', snapshot.comercial.empresa);
+    row('Plan', snapshot.comercial.plan);
+    row('Velocidad del plan', snapshot.comercial.velocidad ? snapshot.comercial.velocidad + ' Mbps' : null);
+    row('Precio mensual', snapshot.comercial.precio !== null ? '$' + snapshot.comercial.precio.toLocaleString('es-CL') : null);
+    row('Día de vencimiento', snapshot.comercial.vencimiento);
+    row('Estado del contrato', snapshot.comercial.estado);
+    row('Zona de pago', snapshot.comercial.zona);
+    if (!snapshot.servicios.length) {
       section('Servicio contratado');
-      row('Dirección de instalación', text(contract.direccionInstalacion));
+      row('Dirección de instalación', snapshot.direccion);
       row('Datos de instalación', 'Todavía no registrados');
     }
-    contract.servicios.forEach((service, index) => {
-      const rows: Array<[string, string | number | null]> = [
-        ['Tipo de servicio', text(service.tipoServicio, 60)],
-        ['Estado del servicio', text(service.estadoOperativo, 60)],
-        ['Dirección de instalación', text(service.direccion?.direccionCompleta)],
-      ];
-      const technical = service.datosTecnicos && typeof service.datosTecnicos === 'object'
-        && !Array.isArray(service.datosTecnicos) ? service.datosTecnicos : {};
-      // Whitelist persisted presentation fields only. No payloads, identifiers or live integration calls.
-      const completed = date(technical.fechaCompletadaG3);
-      if (completed) rows.push(['Finalización de instalación (Chile)', completed]);
-      if (finite(technical.potenciaOpticaDbm)) rows.push(['Potencia óptica registrada', `${technical.potenciaOpticaDbm} dBm`]);
-      const mac = text(technical.macAddress, 17);
-      const validMac = mac && /^(?:[\da-f]{2}:){5}[\da-f]{2}$/i.test(mac) ? mac : null;
-      if (validMac) rows.push(['MAC registrada', validMac]);
-      const olt = text(technical.puertoOlt, 80);
-      const validOlt = olt && /^[\w .:/-]+$/.test(olt) ? olt : null;
-      if (validOlt) rows.push(['Puerto OLT registrado', validOlt]);
-      if (!completed && !finite(technical.potenciaOpticaDbm) && !validMac && !validOlt) {
-        rows.push(['Datos técnicos', 'Sin información técnica validada']);
-      }
-      block(`Servicio contratado ${index + 1}`, rows);
-    });
+    snapshot.servicios.forEach((rows, index) => block('Servicio contratado ' + (index + 1), rows));
     block('Información del documento', [
       ['Datos técnicos', 'Corresponden a la información registrada al generar esta versión.'],
       ['Equipos físicos', 'La asignación de equipos se consulta en el registro de inventario.'],
-      ['Firma', 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'],
+      ['Firma', this.config?.get<string>('CONTRACT_SIGNATURE_ENABLED') === 'true'
+        ? 'La aceptación por correo se registra en una constancia de firma electrónica simple. Este documento no incorpora firma electrónica avanzada.'
+        : 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'],
     ]);
     doc.end();
 
