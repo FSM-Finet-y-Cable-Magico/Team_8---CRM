@@ -126,18 +126,11 @@
 .installation-detail-view dt { color: var(--install-muted); font-size: .74rem; line-height: 1.5; }
 .installation-detail-view dd { margin: 5px 0 0; color: var(--install-ink); font-size: .84rem; line-height: 1.5; overflow-wrap: anywhere; }
 .installation-detail-grid dd > small { display: block; margin-top: 3px; color: var(--install-muted); font-size: .73rem; }
-.installation-detail-section,
-.installation-detail-view .installation-technical-evidence { display: grid; gap: 16px; padding-top: 18px; border-top: 1px solid var(--install-line); }
-.installation-detail-section > h3,
-.installation-detail-view .installation-technical-evidence > h4 { margin: 0; font-size: .96rem; font-weight: 650; }
+.installation-detail-section { display: grid; gap: 16px; padding-top: 18px; border-top: 1px solid var(--install-line); }
+.installation-detail-section > h3 { margin: 0; font-size: .96rem; font-weight: 650; }
 .installation-detail-section > h3 { display: flex; align-items: center; gap: 8px; }
 .installation-detail-view .installation-detail-summary > svg,
 .installation-detail-section > h3 > svg { flex-shrink: 0; color: var(--install-green); }
-.installation-detail-view .installation-technical-evidence > dl { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 16px 20px; margin: 0; }
-.installation-detail-view .installation-technical-evidence > dl > div { grid-column: span 2; min-width: 0; }
-.installation-detail-view .installation-technical-evidence dd { font-weight: 600; }
-.installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: span 5; padding-top: 12px; border-top: 1px solid var(--install-line); }
-.installation-detail-view .installation-evidence-equipment dt { color: var(--install-ink); font-weight: 650; }
 .installation-integration-details { padding-top: 20px; border-top: 1px solid var(--install-line); }
 .installation-integration-details summary { cursor: pointer; color: var(--install-green); font-size: .8rem; font-weight: 550; }
 .installation-integration-details > div { display: grid; gap: 16px; margin-top: 18px; }
@@ -156,8 +149,6 @@
   .installations-redesign .installation-section-heading { flex-wrap: wrap; gap: 10px; }
   .installations-redesign .installation-toolbar > .installation-search { max-width: none; }
   .installation-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .installation-detail-view .installation-technical-evidence > dl { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: span 3; }
 }
 @media (max-width: 520px) {
   .installations-redesign .installation-toolbar > label { flex-wrap: wrap; }
@@ -175,7 +166,4 @@
   .installation-completed-badge { margin-left: 0; }
   .installation-people-place { grid-template-columns: 1fr; gap: 20px; }
   .installation-detail-grid { grid-template-columns: 1fr; gap: 16px; }
-  .installation-detail-view .installation-technical-evidence > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .installation-detail-view .installation-technical-evidence > dl > div { grid-column: auto; }
-  .installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: 1 / -1; }
 }
