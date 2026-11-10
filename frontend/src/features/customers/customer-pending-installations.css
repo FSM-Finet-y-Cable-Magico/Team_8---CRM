@@ -7,15 +7,11 @@
   --pending-soft: #edf5f0;
   color: var(--pending-ink);
 }
-.customer-pending-launcher { display: flex; align-items: center; gap: 15px; padding: 4px 0 24px; border-bottom: 1px solid var(--pending-line); }
-.customer-pending-launcher > div { min-width: 0; }
-.customer-pending-launcher h2 { margin: 0; font-size: 1.02rem; font-weight: 650; letter-spacing: -.015em; }
-.customer-pending-launcher p { margin: 7px 0 0; color: var(--pending-muted); font-size: .78rem; line-height: 1.6; }
-.customer-pending-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; color: var(--pending-green); background: var(--pending-soft); }
 .customer-pending-installations .customer-pending-trigger,
 .customer-pending-installations .customer-pending-manage { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 9px; width: auto; min-height: 40px; padding: 10px 16px; color: var(--pending-green); background: var(--pending-soft); border: 0; border-radius: 9px; box-shadow: none; font-size: .8rem; font-weight: 600; }
-.customer-pending-installations .customer-pending-trigger { margin-left: auto; }
-.customer-pending-installations .customer-pending-trigger:hover,
+.customer-pending-installations .customer-pending-trigger { color: #fff; background: #247c68; white-space: nowrap; }
+.customer-pending-count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 999px; color: #fff; background: rgba(0, 0, 0, .18); font-size: .72rem; }
+.customer-pending-installations .customer-pending-trigger:hover { color: #fff; background: #1d6958; box-shadow: none; transform: none; }
 .customer-pending-installations .customer-pending-manage:hover { background: var(--pending-soft); color: var(--pending-green); box-shadow: none; transform: none; filter: brightness(.97); }
 .modal-card:has(.customer-pending-modal) { width: min(1140px, 100%); }
 .modal-card:has(.customer-pending-modal-detail) { width: min(760px, 100%); }
@@ -45,26 +41,28 @@
 .customer-pending-installations .customer-pending-detail:hover { background: var(--pending-soft); box-shadow: none; transform: none; }
 .customer-pending-installations .customer-pending-back { justify-self: start; padding-left: 0; }
 .customer-pending-installations .customer-pending-back:hover { background: transparent; box-shadow: none; transform: none; text-decoration: underline; }
-.customer-pending-person { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px; border-radius: 12px; background: var(--pending-soft); }
-.customer-pending-person > div { min-width: 0; }
+.customer-pending-person { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--pending-line); }
+.customer-pending-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px; color: var(--pending-green); background: var(--pending-soft); }
+.customer-pending-person > div { flex: 1; min-width: 0; }
 .customer-pending-person h3 { margin: 0; color: var(--pending-ink); font-size: 1.04rem; line-height: 1.5; overflow-wrap: anywhere; }
 .customer-pending-person p { margin: 5px 0 0; color: var(--pending-muted); font-size: .76rem; line-height: 1.5; }
-.customer-pending-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; margin: 0; }
+.customer-pending-data { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; margin: 0; }
 .customer-pending-data > div { min-width: 0; }
 .customer-pending-data dt { color: var(--pending-muted); font-size: .74rem; line-height: 1.5; }
 .customer-pending-data dd { margin: 6px 0 0; color: var(--pending-ink); font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
 .customer-pending-note { margin: 0; color: var(--pending-muted); font-size: .78rem; line-height: 1.6; }
-.customer-pending-manage { justify-self: end; }
+.customer-pending-activation-note { margin: 0; padding: 13px 16px; border-radius: 8px; color: #76520d; background: #fff3d6; font-size: .82rem; line-height: 1.5; }
+.customer-pending-installations .customer-pending-manage { width: 100%; color: #fff; background: #247c68; }
+.customer-pending-installations .customer-pending-manage:hover { color: #fff; background: #1d6958; }
 .customer-pending-installations button:focus-visible { outline: 2px solid var(--pending-green); outline-offset: 3px; }
 .theme-dark .customer-pending-installations { --pending-ink: #e0ede8; --pending-muted: #a7bdb4; --pending-green: #a5dfca; --pending-line: #29483e; --pending-surface: #102732; --pending-soft: #162f29; }
+.theme-dark .customer-pending-activation-note { color: #f6df9d; background: #4b3b1c; }
 @media (max-width: 600px) {
-  .customer-pending-launcher { flex-wrap: wrap; gap: 12px; }
-  .customer-pending-launcher > div { flex: 1; }
-  .customer-pending-installations .customer-pending-trigger { margin-left: 54px; }
   .modal-card:has(.customer-pending-modal) > .modal-header { padding: 16px; }
   .modal-card:has(.customer-pending-modal) > .modal-content { padding: 0 16px 22px; }
   .customer-pending-toolbar > select,
   .customer-pending-search { flex: 1 1 100%; max-width: none; }
-  .customer-pending-person { align-items: flex-start; flex-direction: column; }
-  .customer-pending-data { grid-template-columns: 1fr; gap: 18px; }
+  .customer-pending-person { flex-wrap: wrap; }
+  .customer-pending-data { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 }
+@media (max-width: 400px) { .customer-pending-data { grid-template-columns: 1fr; } }

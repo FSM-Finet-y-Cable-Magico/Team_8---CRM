@@ -819,30 +819,31 @@ export function CustomersPanel({
 
   return (
     <section className="customers-module">
-      <CustomerPendingInstallations
-        key={scope}
-        prospects={pendingActivations}
-        loading={pendingActivationsLoading}
-        error={pendingActivationsError}
-        requestedView={pendingInstallationsView}
-        onViewConsumed={onPendingInstallationsViewConsumed}
-        canManage={permissions.createInstallOrders}
-        onManageInstallation={onManageInstallation}
-      />
-
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
           <h2>Clientes activos</h2>
         </div>
-        <div className="customer-search">
-          <label>
-            Buscar cliente
-            <input
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Buscar por RUT, nombre, teléfono o contrato"
-            />
-          </label>
+        <div className="customer-search-row">
+          <div className="customer-search">
+            <label>
+              <input
+                aria-label="Buscar cliente"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Buscar por RUT, nombre, teléfono o contrato"
+              />
+            </label>
+          </div>
+          <CustomerPendingInstallations
+            key={scope}
+            prospects={pendingActivations}
+            loading={pendingActivationsLoading}
+            error={pendingActivationsError}
+            requestedView={pendingInstallationsView}
+            onViewConsumed={onPendingInstallationsViewConsumed}
+            canManage={permissions.createInstallOrders}
+            onManageInstallation={onManageInstallation}
+          />
         </div>
         <div className="customer-list-filters">
           <span>Clientes activos: {visibleCustomers.length}</span>

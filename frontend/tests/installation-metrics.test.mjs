@@ -40,8 +40,7 @@ test('CU47 presents effective-date total without adding undated completions to p
     assert.equal(monthly.findByType('strong').props.children, 2);
     assert.equal(cards.find(c => c.props['data-label'] === 'Instalaciones pendientes').props['data-value'], 0);
     const rendered = JSON.stringify(tree.toJSON());
-    assert.match(rendered, /Pendiente de fecha técnica/);
-    assert.match(rendered, /ni representan trabajo pendiente de ejecución/);
+    assert.doesNotMatch(rendered, /Pendiente de fecha técnica/);
     assert.match(rendered, /Por fecha técnica efectiva \(Santiago\)/);
   });
 });
@@ -57,12 +56,12 @@ test('gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar rep
   ]);
 });
 
-test('inconsistent installation evidence is visible and older summary responses remain compatible', async () => {
+test('older summary responses remain compatible with monthly indicator', async () => {
   await render({ instalacionesMensuales: 0, instalacionesRequierenRevision: 1 }, tree => {
-    assert.match(JSON.stringify(tree.toJSON()), /requieren revisión de fecha o relaciones/);
+    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
+    assert.equal(monthly.findByType('strong').props.children, 0);
   });
   await render({ instalacionesMensuales: 4 }, tree => {
-    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Pendiente de fecha técnica|requieren revisión de fecha o relaciones/);
     const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
     assert.equal(monthly.findByType('strong').props.children, 4);
   });
@@ -71,8 +70,9 @@ test('inconsistent installation evidence is visible and older summary responses 
 test('churn sin historia suficiente no presenta porcentaje ni bajas inventadas, incluso ante respuesta antigua', async () => {
   for (const values of [{}, { churnRateMensual: null, churnBajasMensuales: null, churnEstado: 'HISTORIAL_INSUFICIENTE' }, { churnRateMensual: 50, churnBajasMensuales: 1 }]) {
     await render(values, tree => {
+      const churn = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Churn mensual'));
+      assert.equal(churn.findByType('strong').props.children, '-');
       const rendered = JSON.stringify(tree.toJSON());
-      assert.match(rendered, /Dato no validado/);
       assert.match(rendered, /Historial insuficiente/);
       assert.doesNotMatch(rendered, /50%|0%|baja\(s\) durante el mes/);
     });

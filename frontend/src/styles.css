@@ -4151,7 +4151,8 @@ button.profile-menu-item.danger:hover {
 }
 
 /* Listados operativos: filtros visibles y valores consistentes. */
-.customers-list-panel .customer-search { grid-template-columns: minmax(260px, 1fr); max-width: 720px; margin-bottom: 10px; }
+.customer-search-row { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; width: 100%; margin: 12px 0 10px; }
+.customers-list-panel .customer-search { grid-template-columns: minmax(0, 1fr); flex: 1 1 260px; max-width: 720px; min-width: 0; margin-bottom: 0; }
 .customers-list-heading { display: flex; align-items: center; gap: 9px; }
 .customers-list-heading > span,
 .installation-history-count { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; min-height: 24px; border-radius: 999px; padding: 0 8px; color: #1f735e; background: #e3f3ec; font-size: .72rem; font-weight: 750; }

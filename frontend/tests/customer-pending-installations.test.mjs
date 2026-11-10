@@ -33,9 +33,9 @@ async function setup(t, props = {}) {
 test('Clientes muestra sus pendientes de activación solo en modal, separados de la agenda técnica', async t => {
   const tree = await setup(t);
   assert.equal(tree.root.findAllByType('table').length, 0);
-  assert.match(JSON.stringify(tree.toJSON()), /3 por activar/);
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Ver pendientes de activación: 3' }).props['aria-haspopup'], 'dialog');
   assert.doesNotMatch(JSON.stringify(tree.toJSON()), /en agenda/);
-  await act(async () => button(tree, 'Ver pendientes').props.onClick());
+  await act(async () => button(tree, 'Ver pendientes de activación').props.onClick());
   assert.equal(tree.root.findByType('tbody').findAllByType('tr').length, 3);
 });
 

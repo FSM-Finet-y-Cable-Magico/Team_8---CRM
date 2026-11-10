@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, CalendarClock, Search } from 'lucide-react';
+import { ArrowLeft, Search, UserRound } from 'lucide-react';
 import type { Prospect } from '../../api';
 import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
 import { Modal, StatusBadge, TablePagination } from '../../shared/components';
@@ -36,18 +36,19 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
   function close() { setOpen(false); setSelectedProspect(null); }
 
   return <section className="customer-pending-installations">
-    <header className="customer-pending-launcher">
-      <span className="customer-pending-icon"><CalendarClock size={22} aria-hidden="true" /></span>
-      <div><h2>Pendientes de activación</h2><p>{loading ? 'Consultando contrataciones…' : error ? 'No se pudieron cargar las contrataciones por activar.' : `${prospects.length} por activar`}</p></div>
-      <button type="button" className="customer-pending-trigger" aria-haspopup="dialog" onClick={() => { setSelectedProspect(null); setOpen(true); }}>Ver pendientes</button>
-    </header>
+    <button type="button" className="customer-pending-trigger" aria-haspopup="dialog"
+      aria-label={`Ver pendientes de activación: ${loading ? 'cargando' : error ? 'cantidad no disponible' : prospects.length}`}
+      onClick={() => { setSelectedProspect(null); setOpen(true); }}>
+      Ver pendientes de activación <span className="customer-pending-count" aria-hidden="true">{loading ? '…' : error ? '—' : prospects.length}</span>
+    </button>
     <Modal key={selectedProspect ? `prospect-${selectedProspect.idProspecto}` : 'pending-list'}
       title={selectedProspect ? 'Pendiente de activación' : 'Pendientes de activación'} open={open} onClose={close}>
       <div className={`customer-pending-modal${selectedProspect ? ' customer-pending-modal-detail' : ''}`}>
         {selectedProspect ? <>
           <button autoFocus type="button" className="customer-pending-back" onClick={() => setSelectedProspect(null)}><ArrowLeft size={16} aria-hidden="true" />Volver a pendientes</button>
-          <header className="customer-pending-person"><div><h3>{selectedProspect.nombreCompleto ?? 'Sin nombre registrado'}</h3><p>{selectedProspect.rut ?? 'RUT no registrado'} · {selectedProspect.empresa?.nombre ?? 'Empresa no registrada'}</p></div><StatusBadge value="Pendiente de activación" /></header>
+          <header className="customer-pending-person"><span className="customer-pending-avatar"><UserRound size={22} aria-hidden="true" /></span><div><h3>{selectedProspect.nombreCompleto ?? 'Sin nombre registrado'}</h3><p>{selectedProspect.rut ?? 'RUT no registrado'}</p></div><StatusBadge value="Pendiente de activación" /></header>
           <dl className="customer-pending-data">
+            <div><dt>Empresa</dt><dd>{selectedProspect.empresa?.nombre ?? 'Empresa no registrada'}</dd></div>
             <div><dt>Contacto</dt><dd>{selectedProspect.telefono ?? selectedProspect.email ?? 'No registrado'}</dd></div>
             <div><dt>Plan contratado</dt><dd>{contract?.plan?.nombreComercial ?? 'No registrado'}</dd></div>
             <div><dt>Contrato</dt><dd>#{contract?.idContrato ?? '-'}</dd></div>
@@ -56,8 +57,9 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
             <div><dt>Dirección de instalación</dt><dd>{addressFor(selectedProspect)}</dd></div>
             <div><dt>Comuna</dt><dd>{selectedProspect.ubicacionInstalacion?.comuna ?? contract?.comunaInstalacion ?? 'No registrada'}{selectedProspect.ubicacionInstalacion?.fuenteComuna === 'PROSPECTO' && ' (registrada en prospecto; contrato sin modificación)'}</dd></div>
             <div><dt>Ciudad</dt><dd>{selectedProspect.ubicacionInstalacion?.ciudad ?? contract?.ciudadInstalacion ?? 'No registrada'}</dd></div>
+            <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
           </dl>
-          <p className="customer-pending-note">La activación del cliente se realizará cuando se complete la instalación.</p>
+          <p className="customer-pending-activation-note">La activación del cliente se realizará cuando se complete la instalación.</p>
           {canManage && <button type="button" className="customer-pending-manage" onClick={() => { close(); onManageInstallation(selectedProspect.idProspecto); }}>Gestionar instalación</button>}
         </> : <>
           <div className="customer-pending-toolbar">

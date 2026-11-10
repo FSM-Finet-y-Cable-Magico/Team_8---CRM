@@ -16,7 +16,7 @@ const mocks = {
     StatusBadge: ({ value }) => React.createElement('span', null, value), TablePagination: () => null,
   },
   './InstallationHistoryPanel': { InstallationHistoryPanel: ({ scope, onLoaded }) => {
-    React.useEffect(() => { onLoaded(scope, ['1:99']); }, [scope, onLoaded]);
+    React.useEffect(() => { onLoaded?.(scope, ['1:99']); }, [scope, onLoaded]);
     return null;
   } },
   './InstallOrderForm': { InstallOrderForm: ({ prospect, onChanged }) => React.createElement('button', { onClick: onChanged }, `Actualizar estado de ${prospect.idProspecto}`) },
@@ -39,7 +39,7 @@ const workOrders = [
   { idOt: 14, idEmpresa: 1, tipoOt: 'REPARACION', estado: 'ASIGNADA', cliente: { nombreCompleto: 'NO MOSTRAR REPARACION' } },
   { idOt: 99, idEmpresa: 1, tipoOt: 'INSTALACION', estado: 'ASIGNADA', cliente: { nombreCompleto: 'NO MOSTRAR CIERRE CONFIRMADO' } },
 ];
-const defaults = { scope: '1', prospects, pendingActivationProspects: [prospects[0]], workOrders, inventory: [], canComplete: false, focusedProspectId: null, onFocusConsumed() {}, onChanged() {} };
+const defaults = { scope: '1', prospects, pendingActivationProspects: prospects.slice(0, 3), workOrders, inventory: [], canComplete: false, focusedProspectId: null, onFocusConsumed() {}, onChanged() {} };
 const button = (tree, text) => tree.root.findAllByType('button').find(node => node.children.some(child => typeof child === 'string' && child.trim() === text));
 async function setup(t, props = {}) {
   let tree;
@@ -48,59 +48,44 @@ async function setup(t, props = {}) {
   return tree;
 }
 
-test('las dos tablas permanecen visibles en la página sin agruparse en contadores o modales', async t => {
+
+test('solo muestra la tabla de contrataciones pendientes; no vuelve a incluir OT terminales ni duplicar la agenda', async t => {
   const tree = await setup(t);
-  assert.equal(tree.root.findAllByType('table').length, 2);
+  assert.equal(tree.root.findAllByType('table').length, 1);
+  assert.equal(tree.root.findByType('tbody').findAllByType('tr').length, 3);
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
-  assert.equal(tree.root.findByProps({ 'aria-label': 'Solicitudes por coordinar' }).findByType('tbody').findAllByType('tr').length, 2);
-  assert.equal(tree.root.findByProps({ 'aria-label': 'Órdenes en agenda' }).findByType('tbody').findAllByType('tr').length, 2);
-  assert.equal(tree.root.findAllByProps({ className: 'installation-summary-strip' }).length, 0);
+  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Órdenes en agenda|NO MOSTRAR|Sin contrato firmado|solicitudes por coordinar/);
 });
 
-test('coordinar abre únicamente la gestión en modal y conserva el listado al volver', async t => {
+test('buscar, gestionar y volver conserva el listado y no crea solicitudes', async t => {
   let refreshed = 0;
   const tree = await setup(t, { onChanged: () => refreshed++ });
-  const rows = () => tree.root.findByProps({ 'aria-label': 'Solicitudes por coordinar' }).findByType('tbody').findAllByType('tr');
-  assert.equal(rows().length, 2);
-  await act(async () => tree.root.findByProps({ 'aria-label': 'Buscar solicitudes por coordinar' }).props.onChange({ target: { value: 'carlos' } }));
-  assert.equal(rows().length, 1);
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Buscar instalaciones en proceso' }).props.onChange({ target: { value: 'carlos' } }));
+  assert.equal(tree.root.findByType('tbody').findAllByType('tr').length, 1);
   await act(async () => button(tree, 'Gestionar').props.onClick());
-  assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 1);
   assert.match(JSON.stringify(tree.toJSON()), /Carlos Prueba/);
   await act(async () => button(tree, 'Actualizar estado de 2').props.onClick());
   assert.equal(refreshed, 1);
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 1);
-  await act(async () => button(tree, 'Volver al listado').props.onClick());
-  assert.equal(tree.root.findByProps({ 'aria-label': 'Buscar solicitudes por coordinar' }).props.value, 'carlos');
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Cerrar modal' }).props.onClick());
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Buscar instalaciones en proceso' }).props.value, 'carlos');
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
 });
 
-test('agenda conserva filtros y detalle; cancelaciones quedan consultables fuera de la agenda activa', async t => {
-  const tree = await setup(t, { requestedView: 'agenda' });
-  const rows = () => tree.root.findByProps({ 'aria-label': 'Órdenes en agenda' }).findByType('tbody').findAllByType('tr');
-  assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
-  assert.equal(rows().length, 2);
-  assert.doesNotMatch(JSON.stringify(tree.toJSON()), /NO MOSTRAR|Visita cancelada/);
-  await act(async () => tree.root.findByProps({ 'aria-label': 'Filtrar órdenes por estado' }).props.onChange({ target: { value: 'all' } }));
-  assert.equal(rows().length, 3);
-  assert.match(JSON.stringify(tree.toJSON()), /Visita cancelada/);
-  await act(async () => tree.root.findByProps({ 'aria-label': 'Filtrar órdenes por prioridad' }).props.onChange({ target: { value: 'alta' } }));
-  assert.equal(rows().length, 2);
-  await act(async () => tree.root.findByProps({ 'aria-label': 'Buscar órdenes de instalación' }).props.onChange({ target: { value: 'en curso' } }));
-  assert.equal(rows().length, 1);
-  await act(async () => button(tree, 'Detalle').props.onClick());
-  assert.match(JSON.stringify(tree.toJSON()), /Detalle de orden 11/);
-  assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 1);
-  await act(async () => button(tree, 'Volver al listado').props.onClick());
-  assert.equal(tree.root.findByProps({ 'aria-label': 'Buscar órdenes de instalación' }).props.value, 'en curso');
-  assert.equal(tree.root.findByProps({ 'aria-label': 'Filtrar órdenes por prioridad' }).props.value, 'alta');
-});
-
-test('acceso enfocado abre la coordinación y un cambio de empresa no arrastra el modal anterior', async t => {
-  let consumed = 0;
-  const tree = await setup(t, { focusedProspectId: 1, onFocusConsumed: () => consumed++ });
-  assert.equal(consumed, 1);
-  assert.match(JSON.stringify(tree.toJSON()), /Actualizar estado de 1/);
+test('gestiona una contratación que ya tiene orden local sin agregar otra tabla', async t => {
+  const tree = await setup(t, { focusedProspectId: 3 });
+  assert.match(JSON.stringify(tree.toJSON()), /Actualizar estado de 3/);
+  assert.equal(tree.root.findAllByProps({ role: 'dialog', 'aria-label': 'Instalación técnica' }).length, 1);
+  assert.equal(tree.root.findAllByType('table').length, 1);
   await act(async () => tree.update(React.createElement(component.InstallationsPanel, { ...defaults, scope: '2', focusedProspectId: null })));
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
+});
+
+test('el foco no se consume antes de que llegue la contratación pendiente', async t => {
+  let consumed = 0;
+  const tree = await setup(t, { pendingActivationProspects: [], focusedProspectId: 3, onFocusConsumed: () => consumed++ });
+  assert.equal(consumed, 0);
+  await act(async () => tree.update(React.createElement(component.InstallationsPanel, { ...defaults, focusedProspectId: 3, onFocusConsumed: () => consumed++ })));
+  assert.equal(consumed, 1);
+  assert.match(JSON.stringify(tree.toJSON()), /Actualizar estado de 3/);
 });
