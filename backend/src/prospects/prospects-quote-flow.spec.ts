@@ -37,6 +37,18 @@ describe('cotizacion persistida y confirmacion segura', () => {
       data: expect.objectContaining({ idZonaPago: expectedZoneId }),
     }));
   });
+  it.each([
+    { origenPrecio: 'ZONA_PADRE', expectedZoneId: 21 },
+    { origenPrecio: 'MICROZONA', expectedZoneId: 22 },
+  ])('usa la zona de la regla de precio aplicada: $origenPrecio', async ({ origenPrecio, expectedZoneId }) => {
+    const c = setup();
+    c.coverage.plansForLocation.mockResolvedValue({ coberturaComercial: true,
+      zona: { idZonaPago: 21 }, microzona: { idZonaPago: 22 }, planes: [{ idPlan: 1, origenPrecio }] });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: expectedZoneId }),
+    }));
+  });
   it('conserva idZonaPago explicito de los consumidores existentes', async () => {
     const c = setup();
     await c.service.contractPlan(1, { planId: 1, idZonaPago: 21 }, user);

@@ -715,13 +715,17 @@ export class ProspectsService {
     }
     const commercial = await this.coverageService.plansForLocation(prospect.idEmpresa ?? 0,
       { latitud: prospect.latitud, longitud: prospect.longitud }, currentUser);
-    if (!commercial.coberturaComercial || !commercial.planes.some(plan => plan.idPlan === dto.planId)) {
+    const availablePlan = commercial.planes.find(plan => plan.idPlan === dto.planId);
+    if (!commercial.coberturaComercial || !availablePlan) {
       throw new BadRequestException('El plan no esta disponible para la ubicacion del prospecto');
     }
 
-    // If the UI does not supply a zone, use the active commercial coverage
-    // already validated for this prospect and plan. Preserve explicit callers.
-    const contractZoneId = dto.idZonaPago ?? commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago;
+    // Select the zone that provides this plan's actual applicable price.
+    // A parent-zone price must not be replaced by a microzone without a plan rule.
+    // Explicit authorized consumers retain their existing zone contract.
+    const contractZoneId = dto.idZonaPago ?? (availablePlan.origenPrecio === 'ZONA_PADRE'
+      ? commercial.zona?.idZonaPago
+      : commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago);
     if (contractZoneId) {
       const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: contractZoneId } });
 
