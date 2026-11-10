@@ -1,7 +1,7 @@
 import { inspectPrivateSignatureSchema } from './signature-schema';
 import { MailDeliveryError } from '../mail/mail.service';
 import { readFile } from 'node:fs/promises';
-import { signatureRepository, signatureStorageAvailable } from './signature.repository';
+import { signatureRepository } from './signature.repository';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
