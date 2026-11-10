@@ -719,8 +719,11 @@ export class ProspectsService {
       throw new BadRequestException('El plan no esta disponible para la ubicacion del prospecto');
     }
 
-    if (dto.idZonaPago) {
-      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
+    // If the UI does not supply a zone, use the active commercial coverage
+    // already validated for this prospect and plan. Preserve explicit callers.
+    const contractZoneId = dto.idZonaPago ?? commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago;
+    if (contractZoneId) {
+      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: contractZoneId } });
 
       if (!zone || zone.activo === false) {
         throw new BadRequestException('Zona de pago inexistente o inactiva');
@@ -745,6 +748,7 @@ export class ProspectsService {
       if (current.idEmpresa !== prospect.idEmpresa || current.idCliente != null
         || [NOT_FEASIBLE_PIPELINE_STATUS, LOST_PIPELINE_STATUS].includes(current.estadoPipeline ?? '')
         || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud
+        || current.idZonaPago !== prospect.idZonaPago
         || current.direccion !== prospect.direccion || current.rut !== prospect.rut
         || current.nombreCompleto !== prospect.nombreCompleto || current.telefono !== prospect.telefono
         || current.comuna !== prospect.comuna) {
@@ -762,7 +766,7 @@ export class ProspectsService {
         idProspecto,
         idPlan: dto.planId,
         idEmpresa: prospect.idEmpresa,
-        idZonaPago: dto.idZonaPago,
+        idZonaPago: contractZoneId,
         fechaInicio,
         diaVencimiento: dto.diaVencimiento ?? PENDING_SIGNATURE_DUE_DAY,
         estado: PENDING_SIGNATURE_STATUS,
@@ -835,6 +839,7 @@ export class ProspectsService {
       valorNuevo: {
         idProspecto,
         idPlan: dto.planId,
+        idZonaPago: contractZoneId ?? null,
         estadoContrato: PENDING_SIGNATURE_STATUS,
         estadoProspecto: PENDING_SIGNATURE_PIPELINE_STATUS,
         fechaConfirmacion: fechaInicio,

@@ -449,6 +449,7 @@ describe('Etapa 3 - solicitud y reconciliacion G3', () => {
   it('16. G3 no configurado no crea OT local', async () => {
     const { service, client, prisma } = setup(); client.createInstallation.mockRejectedValue(new G3IntegrationError('INTEGRACION_G3_NO_CONFIGURADA', null, true, 'No configurada'));
     const result: any = await service.requestInstallation({ idProspecto: 10 }, user); expect(result.estadoIntegracion).toBe('FALLIDA_REINTENTABLE'); expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(result.ultimoErrorSanitizado).toBe('La integración técnica no está habilitada en este entorno. Solicita su configuración antes de reintentar; no se emitió ninguna orden externa.');
   });
   it('17. referencias de empresa cruzada son rechazadas', async () => {
     const { service, contract } = setup(); contract.plan.idEmpresa = 2;
