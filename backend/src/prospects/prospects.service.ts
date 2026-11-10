@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { assignAutomatic } from '../contracts/signature-policy';
+import { effectiveSignatureDates } from '../contracts/signature.repository';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
@@ -24,6 +27,7 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { UpdateProspectDto } from './dto/update-prospect.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidate, readG2OriginAudits } from './g2-prospect-review';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
@@ -62,6 +66,7 @@ export class ProspectsService {
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
     private readonly coverageService: CoverageDomainService,
+    @Optional() private readonly signatureConfig?: ConfigService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -130,13 +135,17 @@ export class ProspectsService {
             servicios: { none: { estadoOperativo: { notIn: ['Pendiente Instalacion', 'Instalacion Programada'] } } },
           },
           include: { plan: true },
-          orderBy: { fechaFirmaManual: 'desc' },
+          orderBy: { idContrato: 'desc' },
         },
       },
     });
+    const effectiveDates = await effectiveSignatureDates(this.prisma, prospects.flatMap(p => p.contratos.map(c => c.idContrato)));
     return prospects.map((prospect) => {
       const contracts = prospect.contratos
         .filter((contract) => contract.idEmpresa === prospect.idEmpresa)
+        .map(contract => ({ ...contract, fechaFirmaEfectiva: effectiveDates.get(contract.idContrato) ?? contract.fechaFirmaManual,
+          origenFirma: effectiveDates.has(contract.idContrato) ? 'ELECTRONICA' : contract.fechaFirmaManual ? 'MANUAL' : 'SIN_FECHA' }))
+        .sort((a,b) => (b.fechaFirmaEfectiva?.getTime() ?? -1) - (a.fechaFirmaEfectiva?.getTime() ?? -1) || b.idContrato-a.idContrato)
         .slice(0, 1)
         .map((contract) => ({
           ...contract,
@@ -369,11 +378,33 @@ export class ProspectsService {
   }
 
   async updateLocation(idProspecto: number, dto: UpdateProspectLocationDto, currentUser: AuthUser) {
+    return this.update(idProspecto, dto, currentUser);
+  }
+
+  async update(idProspecto: number, dto: UpdateProspectDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
+    const wasQuoted = prospect.estadoPipeline === QUOTE_SENT_PIPELINE_STATUS;
     if (prospect.estadoPipeline === 'NUEVO') {
       throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
     }
-    const cobertura = await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser);
+    if (!wasQuoted) this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (wasQuoted && !dto.ubicacion) {
+      throw new BadRequestException('Vuelve a comprobar la ubicación y cobertura antes de emitir otra cotización');
+    }
+    const addressChanged = (dto.direccion !== undefined && dto.direccion.trim() !== prospect.direccion)
+      || (dto.comuna !== undefined && (dto.comuna.trim() || null) !== prospect.comuna)
+      || (dto.region !== undefined && (dto.region.trim() || null) !== prospect.region);
+    const quoteRelevantDataChanged = (dto.nombreCompleto !== undefined && dto.nombreCompleto.trim() !== prospect.nombreCompleto)
+      || (dto.telefono !== undefined && dto.telefono.trim() !== prospect.telefono)
+      || (dto.email !== undefined && (dto.email?.trim().toLowerCase() || null) !== prospect.email)
+      || (dto.origenContacto !== undefined && (dto.origenContacto.trim() || null) !== prospect.origenContacto)
+      || addressChanged
+      || (dto.ubicacion !== undefined && (dto.ubicacion.latitud !== prospect.latitud || dto.ubicacion.longitud !== prospect.longitud));
+    const restartQuoteFlow = wasQuoted && quoteRelevantDataChanged;
+    if (addressChanged && !dto.ubicacion) throw new BadRequestException('Selecciona la ubicación de la dirección antes de guardar');
+    const cobertura = dto.ubicacion
+      ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
+      : null;
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
@@ -384,35 +415,52 @@ export class ProspectsService {
       if (previous.idEmpresa !== prospect.idEmpresa || previous.idCliente !== prospect.idCliente
         || previous.estadoPipeline !== prospect.estadoPipeline || previous.direccion !== prospect.direccion
         || previous.comuna !== prospect.comuna || previous.region !== prospect.region
-        || previous.latitud !== prospect.latitud || previous.longitud !== prospect.longitud) {
+        || previous.latitud !== prospect.latitud || previous.longitud !== prospect.longitud
+        || previous.nombreCompleto !== prospect.nombreCompleto || previous.telefono !== prospect.telefono
+        || previous.email !== prospect.email || previous.origenContacto !== prospect.origenContacto) {
         throw new ConflictException('El prospecto cambió durante la edición de ubicación; vuelve a consultarlo');
       }
       if (previous.idCliente != null) throw new BadRequestException('La ubicación de clientes convertidos requiere su flujo autorizado');
+      if (restartQuoteFlow && dto.ubicacion) {
+        // Keep the old quote as history, but prevent it from being used to confirm
+        // a contract after any prospect data has changed.
+        await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      }
       const updated = await tx.prospecto.update({
         where: { idProspecto },
         data: {
-          latitud: dto.ubicacion.latitud,
-          longitud: dto.ubicacion.longitud,
-          idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+          ...(dto.ubicacion && cobertura ? {
+            latitud: dto.ubicacion.latitud, longitud: dto.ubicacion.longitud,
+            idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
+          } : {}),
+          ...(dto.nombreCompleto !== undefined ? { nombreCompleto: dto.nombreCompleto.trim() } : {}),
+          ...(dto.telefono !== undefined ? { telefono: dto.telefono.trim() } : {}),
+          ...(dto.email !== undefined ? { email: dto.email?.trim().toLowerCase() || null } : {}),
+          ...(dto.origenContacto !== undefined ? { origenContacto: dto.origenContacto.trim() || null } : {}),
           ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
           ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
           ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
+          ...(restartQuoteFlow ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
         },
         include: { empresa: true, zonaPago: true },
       });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario,
-        accion: 'ACTUALIZAR_UBICACION_PROSPECTO',
+        accion: dto.ubicacion ? 'ACTUALIZAR_UBICACION_PROSPECTO' : 'ACTUALIZAR_DATOS_PROSPECTO',
         entidadAfectada: 'prospecto',
         idEntidadAfectada: idProspecto,
         valorAnterior: { latitud: previous.latitud, longitud: previous.longitud, idZonaPago: previous.idZonaPago,
-          comuna: previous.comuna ?? null, region: previous.region ?? null },
+          comuna: previous.comuna ?? null, region: previous.region ?? null, direccion: previous.direccion,
+          nombreCompleto: previous.nombreCompleto, telefono: previous.telefono, email: previous.email, origenContacto: previous.origenContacto },
         valorNuevo: {
           latitud: updated.latitud,
           longitud: updated.longitud,
           idZonaPago: updated.idZonaPago,
-          estadoCobertura: cobertura.estado,
+          estadoCobertura: cobertura?.estado,
           comuna: updated.comuna ?? null, region: updated.region ?? null,
+          direccion: updated.direccion, nombreCompleto: updated.nombreCompleto,
+          telefono: updated.telefono, email: updated.email, origenContacto: updated.origenContacto,
+          ...(restartQuoteFlow ? { cotizacionesAnterioresInvalidas: true, estadoPipeline: updated.estadoPipeline } : {}),
         },
       }, tx);
       return { ...updated, cobertura };
@@ -766,6 +814,7 @@ export class ProspectsService {
           }).catch((error: unknown) => this.rethrowConcurrentChange(error))
         : await tx.contrato.create({ data: contractData });
 
+      await assignAutomatic(tx, contrato, this.signatureConfig, currentUser.idUsuario);
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {

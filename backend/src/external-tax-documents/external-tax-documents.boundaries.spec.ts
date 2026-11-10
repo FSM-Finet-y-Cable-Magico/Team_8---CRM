@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 function source(relativePath: string) {
-  return readFileSync(join(process.cwd(), relativePath), 'utf8');
+  return readFileSync(join(__dirname, '..', '..', relativePath), 'utf8');
 }
 
 describe('Etapa 5 - fronteras de CU-86', () => {

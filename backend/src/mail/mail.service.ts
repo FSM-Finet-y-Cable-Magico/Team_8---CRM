@@ -60,6 +60,22 @@ export class MailService implements OnModuleInit {
       text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.` });
   }
 
+  sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string }) {
+    return this.sendMessage({ ...message, subject: 'Revisa y firma tu contrato',
+      text: 'Tu contrato está disponible para revisar y firmar mediante un código enviado a tu correo. Abre este enlace personal; no lo compartas:\n' + message.link });
+  }
+
+  sendSignatureCode(message: { idEmpresa: number; to: string; code: string }) {
+    if (!/^\d{6}$/.test(message.code)) throw new MailDeliveryError('SIGNATURE_CODE_INVALID', true, false);
+    return this.sendMessage({ ...message, subject: 'Código para firmar tu contrato',
+      text: 'Tu código de firma es: ' + message.code + '. Vence en 10 minutos. No lo compartas. Si no solicitaste la firma, contacta a la empresa.' });
+  }
+
+  sendSignedContract(message: { idEmpresa: number; to: string; pdf: Buffer; filename: string }) {
+    return this.sendMessage({ ...message, subject: 'Tu contrato y constancia de firma',
+      text: 'Adjuntamos el contrato que aceptaste y su constancia de firma electrónica simple. Conserva una copia.' });
+  }
+
   sendTest(to: string, idEmpresa?: number) {
     return this.sendMessage({ to, idEmpresa, subject: 'Prueba SMTP del CRM',
       text: 'Mensaje de prueba de la conexion SMTP del CRM. No es un cobro, cotizacion ni documento tributario.' });

@@ -1,3 +1,4 @@
+import { useSignatureStatus } from '../contracts/useSignatureStatus';
 import { FormEvent, useEffect, useState } from 'react';
 import { ChevronRight, CircleCheckBig, Plus } from 'lucide-react';
 import { api, apiErrorMessage, Customer, CustomerService, PaymentZone, Plan } from '../../api';
@@ -94,6 +95,10 @@ export function CustomerContractWorkflow({
   }, [addPlanOpen, showMessage]);
 
   const selectedContract = contracts.find((contract) => contract.idContrato === selectedContractId) ?? null;
+  const signaturePolicy = useSignatureStatus(selectedContract?.idContrato);
+  useEffect(() => {
+    setSignatureOpen(false); setSignatureObservation('');
+  }, [selectedContract?.idContrato, selectedContract?.idEmpresa, signaturePolicy.status?.policy.mode, signaturePolicy.status?.policy.manualAllowed]);
   const contractServices = selectedContract ? services.filter((service) => service.idContrato === selectedContract.idContrato) : [];
   const selectedService = contractServices.find((service) => service.idServicio === selectedServiceId) ?? contractServices[0] ?? null;
   const activeService = services.find((service) => service.idServicio === activeServiceId) ?? null;
@@ -184,7 +189,7 @@ export function CustomerContractWorkflow({
 
   async function confirmSignature(event: FormEvent) {
     event.preventDefault();
-    if (!selectedContract) return;
+    if (!selectedContract || !(await signaturePolicy.refresh())?.policy.manualAllowed) { setSignatureOpen(false); setSignatureObservation(''); return; }
     try {
       const { data } = await api.patch<CustomerContract>(
         '/contracts/' + selectedContract.idContrato + '/confirm-signature',
@@ -268,11 +273,11 @@ export function CustomerContractWorkflow({
               <div><dt>Fecha contratación</dt><dd>{selectedContract.fechaInicio ? formatDateOnly(selectedContract.fechaInicio) : '-'}</dd></div>
               <div><dt>Dirección</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
             </dl>
-            {!contractSigned && permissions.manageContracts && (signatureOpen ? <form className="workflow-grid customer-inline-form" onSubmit={confirmSignature}>
+            {!contractSigned && permissions.manageContracts && signaturePolicy.status?.policy.manualAllowed && (signatureOpen ? <form className="workflow-grid customer-inline-form" onSubmit={confirmSignature}>
               <label className="customer-inline-form-wide">Observaciones<textarea value={signatureObservation} onChange={(event) => setSignatureObservation(event.target.value)} /></label>
-              <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit">Confirmar firma de contrato</button></div>
-            </form> : <button type="button" onClick={() => setSignatureOpen(true)}>Confirmar firma de contrato</button>)}
-            {permissions.manageContracts && <ContractDocuments idContrato={selectedContract.idContrato} canGenerate={permissions.generateDigitalContract} />}
+              <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit">Registrar firma manual</button></div>
+            </form> : <button type="button" onClick={() => setSignatureOpen(true)}>Registrar firma manual</button>)}
+            {permissions.manageContracts && <ContractDocuments idContrato={selectedContract.idContrato} canGenerate={permissions.generateDigitalContract} onChanged={() => void onRefresh()} />}
           </section>}
 
           {stage === 2 && <section className="workflow-panel customer-contract-stage">

@@ -88,6 +88,8 @@ export type Prospect = {
     idContrato: number;
     estado: string | null;
     fechaFirmaManual?: string | null;
+    fechaFirmaEfectiva?: string | null;
+    origenFirma?: 'ELECTRONICA' | 'MANUAL' | 'SIN_FECHA';
     idPlan?: number | null;
     plan?: Plan | null;
     direccionInstalacion?: string | null;
@@ -239,6 +241,8 @@ export type Customer = {
     estado?: string | null;
     fechaInicio?: string | null;
     fechaFirmaManual?: string | null;
+    fechaFirmaEfectiva?: string | null;
+    origenFirma?: 'ELECTRONICA' | 'MANUAL' | 'SIN_FECHA';
     idUsuarioFirmaManual?: number | null;
     observacionFirmaManual?: string | null;
     proveedorContrato?: string | null;
@@ -304,6 +308,8 @@ export type CustomerService = {
     idContrato: number;
     estado: string | null;
     fechaFirmaManual?: string | null;
+    fechaFirmaEfectiva?: string | null;
+    origenFirma?: 'ELECTRONICA' | 'MANUAL' | 'SIN_FECHA';
     idUsuarioFirmaManual?: number | null;
     observacionFirmaManual?: string | null;
     proveedorContrato?: string | null;

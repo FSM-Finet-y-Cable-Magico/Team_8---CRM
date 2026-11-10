@@ -16,7 +16,7 @@ describe('Arranque AppModule QA sin workers ni proveedores externos', () => {
     const config = new ConfigService({
       NODE_ENV: 'test', JWT_SECRET: 'synthetic-qa-startup-not-a-deployment-secret',
       PLAN_CHANGE_PROCESSOR_ENABLED: 'false',
-      DATABASE_URL: 'postgresql://qa:synthetic@127.0.0.1:1/qa_unavailable',
+      DATABASE_URL: 'postgresql://127.0.0.1:1/qa_unavailable',
       G3_INTEGRATION_ENABLED: 'true', G3_API_URL: 'http://127.0.0.1:1', G3_API_KEY: 'synthetic-local-only',
       G1_INTEGRATION_ENABLED: 'false', G8_INTEGRATION_API_KEYS: '[]',
       WHATSAPP_PROVIDER: 'disabled', WHATSAPP_COMPANIES: '[]',

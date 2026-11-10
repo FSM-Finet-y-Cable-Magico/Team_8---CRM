@@ -1,0 +1,144 @@
+{
+  "captured_at": "2026-11-10T03:38:08.425759+00:00",
+  "branch": "fix/firma-prepr-privado-g8",
+  "head": "bfeb69a93f5eb661e9deb93d64d57b2d65b5c376",
+  "base_develop": "57789765550173b65a5777fd3d1d2ab4a2457b51",
+  "published_feature": "bfeb69a93f5eb661e9deb93d64d57b2d65b5c376",
+  "candidate_committed": false,
+  "pushed": false,
+  "pr_created": false,
+  "remote_deployed": false,
+  "runtime": {
+    "node": "22.23.3",
+    "postgres": "15",
+    "external_network_blocked": true,
+    "private_env_loaded": false
+  },
+  "checks": [
+    {
+      "command": "npm ci --ignore-scripts --no-audit --no-fund",
+      "status": "PASS",
+      "detail": "904 packages; realizado al preparar el contenedor. Salida original no conservada."
+    },
+    {
+      "command": "npm run prisma:generate",
+      "status": "PASS"
+    },
+    {
+      "command": "npm run build",
+      "status": "PASS",
+      "note": "Aviso de tamaño de bundle Vite; no error de compilación."
+    },
+    {
+      "command": "npm test",
+      "status": "PASS",
+      "backend": {
+        "suites_passed": 93,
+        "tests_passed": 1764,
+        "skipped": 52
+      },
+      "global_tools_passed": 38,
+      "frontend_runtime_passed": 3,
+      "frontend_passed": 158,
+      "skipped_note": "Suites optativas de integración no se dan por aprobadas. La suite PostgreSQL de firma se ejecutó aparte."
+    },
+    {
+      "command": "SMTP exact workflow command",
+      "status": "PASS",
+      "tests_passed": 43
+    },
+    {
+      "command": "npm run test:signature:postgres",
+      "status": "PASS",
+      "tests_passed": 43
+    },
+    {
+      "command": "node --test frontend/tests/signature-policy-workflow.test.mjs",
+      "status": "PASS",
+      "tests_passed": 7
+    },
+    {
+      "command": "npm run db:audit:prisma-global",
+      "status": "PASS",
+      "new_shared_schema_diff": false,
+      "baseline_classifications": {
+        "MATCH": 929,
+        "COLUMN_GLOBAL_ONLY": 35,
+        "OWNER_EXTERNAL": 325,
+        "INDEX_MISMATCH": 53,
+        "FK_MISMATCH": 65
+      }
+    },
+    {
+      "command": "node scripts/generate-health-contract.mjs",
+      "status": "PASS",
+      "generated_matches_develop": true
+    },
+    {
+      "command": "git diff --check",
+      "status": "PASS"
+    },
+    {
+      "command": "node scripts/verify-global-db.mjs (QA URL only)",
+      "status": "PASS",
+      "missing": 0,
+      "different": 0,
+      "matched": 1692
+    },
+    {
+      "command": "node scripts/i4-contract-signature-off-qa.cjs",
+      "status": "PASS",
+      "app_boot": true,
+      "private_schema_absent": true,
+      "ready_http": 200,
+      "legacy_manual": true
+    },
+    {
+      "command": "node scripts/i4-contract-signature-recovery-qa.cjs",
+      "status": "PASS",
+      "new_app_process": true,
+      "persisted_signed_documents": 12,
+      "external_sends": 0
+    }
+  ],
+  "public_schema": {
+    "tables": 96,
+    "columns": 982,
+    "pk": 96,
+    "fk": 230,
+    "checks": 63,
+    "indexes": 132,
+    "canonical_sha256": "0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50",
+    "catalog_and_permissions_equal_before_after": true
+  },
+  "private_permissions": {
+    "owner": "qa_owner",
+    "runtime": "qa_contract",
+    "runtime_superuser": false,
+    "usage": true,
+    "select": true,
+    "insert": true,
+    "update": true,
+    "create": false,
+    "delete": false,
+    "g1_g2_g3_actual_login_roles_in_qa_rejected_read_write": true,
+    "shared_foreign_keys": 0
+  },
+  "screenshots": {
+    "kind": "Real CRM components; local browser; synthetic data and simulated Axios adapter. Not evidence of real portal/API execution.",
+    "files": [
+      "01-automatico-apagado.jpg",
+      "02-legado-manual.jpg",
+      "03-automatico-disponible.jpg",
+      "04-descarga-envio-apagado.jpg"
+    ]
+  },
+  "pending": [
+    "Segunda revisión G8 del diff y evidencias, antes de commit/publicación/PR.",
+    "Caso único enlazado G2 -> G8 firma -> solicitud habitual -> G3 cierre -> una activación/asignación G1: suites por componentes pasan, recorrido combinado aún pendiente.",
+    "Repetición y capturas en portales reales del ambiente aprobado, con responsables y cuentas de prueba.",
+    "Aprovisionamiento privado y permisos efectivos del despliegue, respaldo/restauración y retención.",
+    "Aprobación del mecanismo de identidad/consentimiento y controles de uso comercial.",
+    "Protecciones reales de GitHub: CODEOWNERS sigue como propuesta comentada; no se configuraron reglas remotas."
+  ]
+}

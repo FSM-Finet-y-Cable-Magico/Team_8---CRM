@@ -5,11 +5,13 @@ export function Modal({
   title,
   open,
   onClose,
+  focusClose = false,
   children,
 }: {
   title: string;
   open: boolean;
   onClose: () => void;
+  focusClose?: boolean;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -43,7 +45,7 @@ export function Modal({
       >
         <header className="modal-header">
           <h2>{title}</h2>
-          <button type="button" className="modal-close-button" aria-label="Cerrar modal" onClick={onClose}>
+          <button type="button" className="modal-close-button" aria-label="Cerrar modal" onClick={onClose} autoFocus={focusClose}>
             <X size={20} strokeWidth={1.8} aria-hidden="true" />
           </button>
         </header>

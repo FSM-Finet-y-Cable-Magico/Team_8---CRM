@@ -1,0 +1,46 @@
+name: CRM verification
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: crm-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  crm-tests:
+    name: CRM tests and shared schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://disabled:disabled@127.0.0.1:1/disabled
+      CONTRACT_SIGNATURE_ENABLED: 'false'
+      G1_INTEGRATION_ENABLED: 'false'
+      G3_INTEGRATION_ENABLED: 'false'
+      FACTURACION_CL_INTEGRATION_ENABLED: 'false'
+      FACTURACION_CL_PRODUCTION_ENABLED: 'false'
+      WHATSAPP_PROVIDER: disabled
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run prisma:generate
+      - name: SMTP suite with the exact isolated workflow environment
+        run: node -r ./scripts/qa-loopback-only.cjs ./node_modules/jest/bin/jest.js --config backend/jest.config.js --runInBand --runTestsByPath backend/src/mail/mail.service.spec.ts
+      - name: Backend regression with external sockets blocked
+        run: node --max-old-space-size=4096 -r ./scripts/qa-loopback-only.cjs ./node_modules/jest/bin/jest.js --config backend/jest.config.js --runInBand
+      - run: node --test scripts/global-schema.test.mjs
+      - run: npm run db:audit:prisma-global
+      - name: Generated schema artifacts must be current
+        run: |
+          node scripts/generate-health-contract.mjs
+          git diff --exit-code -- backend/src/health/global-columns.generated.ts docs/i3-prisma-vs-global-schema.json docs/i3-prisma-vs-global-schema.md
+      - run: npm run build
+      - run: npm run test:global-tools
+      - run: npm run test:frontend-runtime
+      - run: npm test -w frontend
