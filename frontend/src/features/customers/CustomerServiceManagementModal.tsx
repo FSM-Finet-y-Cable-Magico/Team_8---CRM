@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FileText, Router, ShieldCheck } from 'lucide-react';
 import {
   api,
   apiErrorMessage,
@@ -257,7 +258,7 @@ export function CustomerServiceManagementModal({
 
         <div className="service-details-list">
           <details className="service-details-section">
-            <summary><span>Contrato y plan<small>Datos del contrato, documentos y cambios de plan</small></span></summary>
+            <summary><FileText size={18} aria-hidden="true" /><span>Contrato y plan<small>Datos del contrato, documentos y cambios de plan</small></span></summary>
             <div className="service-details-content">
               <dl className="customer-readonly-details">
                 <div><dt>Contrato</dt><dd>#{contract.idContrato}</dd></div>
@@ -271,7 +272,7 @@ export function CustomerServiceManagementModal({
           </details>
 
           <details className="service-details-section">
-            <summary><span>Instalación y equipos<small>Visita técnica, conexión y equipos instalados</small></span></summary>
+            <summary><Router size={18} aria-hidden="true" /><span>Instalación y equipos<small>Visita técnica, conexión y equipos instalados</small></span></summary>
             <div className="service-details-content">
               <section className="service-subsection">
                 <h3>Datos de instalación</h3>
@@ -311,7 +312,7 @@ export function CustomerServiceManagementModal({
           </details>
 
           <details className="service-details-section">
-            <summary><span>Garantías del servicio<small>Cobertura y vigencia de las garantías comerciales</small></span></summary>
+            <summary><ShieldCheck size={18} aria-hidden="true" /><span>Garantías del servicio<small>Cobertura y vigencia de las garantías comerciales</small></span></summary>
             <div className="service-details-content">
               {warrantyStatus && <p role="status" className="service-muted">{warrantyStatus}</p>}
               {warranties.map(warranty => <div className="service-record" key={warranty.idGarantia}>

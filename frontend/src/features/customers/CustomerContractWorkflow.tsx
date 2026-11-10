@@ -1,6 +1,6 @@
 import { useSignatureStatus } from '../contracts/useSignatureStatus';
 import { FormEvent, useEffect, useState } from 'react';
-import { ChevronRight, CircleCheckBig, Plus } from 'lucide-react';
+import { FileText, Plus, Router, ShieldCheck } from 'lucide-react';
 import { api, apiErrorMessage, Customer, CustomerService, PaymentZone, Plan } from '../../api';
 import { formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
@@ -44,6 +44,7 @@ function companyName(contract: CustomerContract, customer: Customer) {
 }
 
 function formatCurrency(value?: string | number | null) {
+  if (value == null || value === '') return 'No registrado';
   const amount = Number(value);
   return Number.isFinite(amount) ? '$' + amount.toLocaleString('es-CL') : '-';
 }
@@ -81,7 +82,7 @@ export function CustomerContractWorkflow({
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [activeServiceId, setActiveServiceId] = useState<number | null>(null);
-  const [stage, setStage] = useState<Stage>(1);
+  const [stage, setStage] = useState<Stage | null>(null);
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [signatureObservation, setSignatureObservation] = useState('');
   const { message, showMessage, clearMessage } = useTransientMessage();
@@ -144,17 +145,16 @@ export function CustomerContractWorkflow({
     setActiveServiceId(null);
     setSelectedContractId(contract.idContrato);
     setSelectedServiceId(target.serviceId);
-    setStage(1);
+    setStage(null);
     setSignatureOpen(false);
     setSignatureObservation('');
     clearMessage();
   }
 
-  async function selectStage(nextStage: Stage) {
+  function selectStage(nextStage: Stage) {
     if (nextStage === 2 && !contractSigned) return;
-    setStage(nextStage);
+    setStage(current => current === nextStage ? null : nextStage);
     setSignatureOpen(false);
-
   }
 
   async function addPlan(event: FormEvent) {
@@ -233,7 +233,7 @@ export function CustomerContractWorkflow({
                         ? service.tipoServicio + ' - ' + formatWorkOrderValue(service.estadoOperativo)
                         : signed(contract) ? 'Sin servicio activo' : 'Pendiente de firma'}</td>
                   <td>{serviceAddress(service, customer)}</td>
-                  <td><button type="button" className="secondary compact" disabled={servicesLoad.status === 'idle' || servicesLoad.status === 'loading'} onClick={() => openContract(contract)}>Gestionar <ChevronRight size={14} /></button></td>
+                  <td><button type="button" className="secondary compact crm-table-action" disabled={servicesLoad.status === 'idle' || servicesLoad.status === 'loading'} onClick={() => openContract(contract)}>Gestionar</button></td>
                 </tr>;
               })}
             </tbody>
@@ -254,45 +254,55 @@ export function CustomerContractWorkflow({
       </Modal>
 
       <Modal title="Gestionar contratación" open={Boolean(selectedContract)} onClose={closeContractManagement}>
-        {selectedContract && <div className="customer-contract-workflow">
-          <div className="customer-workflow-steps">
-            {([1, 2] as Stage[]).map((item) => {
-              const locked = item === 2 && !contractSigned;
-              const label = item === 1 ? 'Contrato y plan' : 'Instalación';
-              return <button type="button" key={item} disabled={locked} className={'customer-workflow-step ' + (stage === item ? 'active' : '') + (locked ? ' blocked' : '')} onClick={() => void selectStage(item)}><span>{item === 1 && contractSigned ? <CircleCheckBig size={16} /> : item}</span>{label}</button>;
-            })}
-          </div>
-
-          {stage === 1 && <section className="workflow-panel customer-contract-stage">
-            <header className="section-heading compact-heading"><h3>Contrato y plan</h3><StatusBadge value={selectedContract.estado ?? 'Pendiente firma contrato'} /></header>
-            <dl className="customer-readonly-details">
-              <div><dt>Plan</dt><dd>{selectedContract.plan?.nombreComercial ?? '-'}</dd></div>
-              <div><dt>Empresa</dt><dd>{companyName(selectedContract, customer)}</dd></div>
-              <div><dt>Velocidad</dt><dd>{selectedContract.plan?.velocidadMbps ? selectedContract.plan.velocidadMbps + ' Mbps' : '-'}</dd></div>
+        {selectedContract && <div className="customer-service-management service-management-view">
+          <section className="service-summary" aria-label="Resumen de la contratación">
+            <header>
+              <div><p>Contrato #{selectedContract.idContrato}</p><h3>{selectedContract.plan?.nombreComercial ?? 'Plan no registrado'}</h3><span>{customer.nombreCompleto} · {companyName(selectedContract, customer)}</span></div>
+              <StatusBadge value={selectedService ? formatWorkOrderValue(selectedService.estadoOperativo) : selectedContract.estado ?? 'Pendiente firma contrato'} />
+            </header>
+            <dl>
               <div><dt>Precio mensual</dt><dd>{formatCurrency(selectedContract.plan?.precioMensual)}</dd></div>
-              <div><dt>Fecha contratación</dt><dd>{selectedContract.fechaInicio ? formatDateOnly(selectedContract.fechaInicio) : '-'}</dd></div>
-              <div><dt>Dirección</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
+              <div><dt>Dirección de instalación</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
             </dl>
-            {!contractSigned && permissions.manageContracts && signaturePolicy.status?.policy.manualAllowed && (signatureOpen ? <form className="workflow-grid customer-inline-form" onSubmit={confirmSignature}>
-              <label className="customer-inline-form-wide">Observaciones<textarea value={signatureObservation} onChange={(event) => setSignatureObservation(event.target.value)} /></label>
-              <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit">Registrar firma manual</button></div>
-            </form> : <button type="button" onClick={() => setSignatureOpen(true)}>Registrar firma manual</button>)}
-            {permissions.manageContracts && <ContractDocuments idContrato={selectedContract.idContrato} canGenerate={permissions.generateDigitalContract} onChanged={() => void onRefresh()} />}
-          </section>}
-
-          {stage === 2 && <section className="workflow-panel customer-contract-stage">
-            <header className="section-heading compact-heading"><h3>Instalación técnica</h3></header>
-            <dl className="customer-readonly-details">
-              <div><dt>Plan</dt><dd>{selectedContract.plan?.nombreComercial ?? '-'}</dd></div>
-              <div><dt>Dirección solicitada</dt><dd>{serviceAddress(selectedService, customer)}</dd></div>
-              <div><dt>Atención</dt><dd>Equipo técnico</dd></div>
-            </dl>
-            <G3InstallationStatus
-              contractId={selectedContract.idContrato}
-              canRequest={contractSigned && permissions.createInstallOrders}
-              onChanged={() => void onRefresh(selectedService?.idServicio)}
-            />
-          </section>}
+          </section>
+          <p className="service-muted service-availability-note">La gestión del servicio estará disponible cuando se active.</p>
+          {message && <p role="status" className="inline-status customer-transient-status">{message}</p>}
+          <div className="service-details-list">
+            <section className="service-details-section">
+              <button type="button" className="service-section-trigger" aria-expanded={stage === 1} onClick={() => selectStage(1)}>
+                <FileText size={18} aria-hidden="true" /><span>Contrato y plan<small>Datos del contrato, firma y documentos</small></span>
+              </button>
+              {stage === 1 && <div className="service-details-content">
+                <dl className="customer-readonly-details">
+                  <div><dt>Estado del contrato</dt><dd><StatusBadge value={selectedContract.estado ?? 'Pendiente firma contrato'} /></dd></div>
+                  <div><dt>Velocidad</dt><dd>{selectedContract.plan?.velocidadMbps ? selectedContract.plan.velocidadMbps + ' Mbps' : '-'}</dd></div>
+                  <div><dt>Fecha de contratación</dt><dd>{selectedContract.fechaInicio ? formatDateOnly(selectedContract.fechaInicio) : '-'}</dd></div>
+                </dl>
+                {!contractSigned && permissions.manageContracts && signaturePolicy.status?.policy.manualAllowed && (signatureOpen ? <form className="workflow-grid customer-inline-form" onSubmit={confirmSignature}>
+                  <label className="customer-inline-form-wide">Observaciones<textarea value={signatureObservation} onChange={(event) => setSignatureObservation(event.target.value)} /></label>
+                  <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit">Registrar firma manual</button></div>
+                </form> : <button type="button" className="secondary compact crm-table-action" onClick={() => setSignatureOpen(true)}>Registrar firma manual</button>)}
+                {permissions.manageContracts && <ContractDocuments idContrato={selectedContract.idContrato} canGenerate={permissions.generateDigitalContract} onChanged={() => void onRefresh()} />}
+              </div>}
+            </section>
+            <section className="service-details-section">
+              <button type="button" className="service-section-trigger" aria-expanded={stage === 2} disabled={!contractSigned} onClick={() => selectStage(2)}>
+                <Router size={18} aria-hidden="true" /><span>Instalación y equipos<small>{contractSigned ? 'Solicitud y seguimiento de la visita técnica' : 'Disponible después de firmar el contrato'}</small></span>
+              </button>
+              {stage === 2 && contractSigned && <div className="service-details-content">
+                <G3InstallationStatus
+                  contractId={selectedContract.idContrato}
+                  canRequest={contractSigned && permissions.createInstallOrders}
+                  onChanged={() => void onRefresh(selectedService?.idServicio)}
+                />
+              </div>}
+            </section>
+            <details className="service-details-section">
+              <summary><ShieldCheck size={18} aria-hidden="true" /><span>Garantías del servicio<small>Cobertura y vigencia de las garantías comerciales</small></span></summary>
+              <div className="service-details-content"><p className="service-muted">Podrás consultar las garantías desde la ficha del servicio una vez habilitado.</p></div>
+            </details>
+          </div>
+          <footer className="service-modal-footer"><button type="button" className="secondary" onClick={closeContractManagement}>Cerrar</button></footer>
         </div>}
       </Modal>
 
