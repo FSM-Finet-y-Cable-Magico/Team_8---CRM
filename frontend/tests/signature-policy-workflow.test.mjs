@@ -73,6 +73,12 @@ test('Clientes: cierra y limpia el formulario manual al cambiar a automático',a
       services:[],servicesLoad:{status:'empty',customerId:1,error:''},plans:[],permissions,onRefresh:async()=>{},onOpenObservations(){}};
     await act(async()=>{tree=create(React.createElement(CustomerContractWorkflow,props));});
     await act(async()=>button(tree,'Gestionar').props.onClick());
+    const [contractSection, installationSection] = tree.root.findAllByProps({className:'service-section-trigger'});
+    assert.equal(contractSection.props['aria-expanded'], false);
+    assert.equal(installationSection.props['aria-expanded'], false);
+    assert.equal(installationSection.props.disabled, true);
+    assert.equal(button(tree,'Registrar firma manual'),undefined);
+    await act(async()=>contractSection.props.onClick());
     await act(async()=>button(tree,'Registrar firma manual').props.onClick());
     const textareas=tree.root.findAllByType('textarea');
     assert.ok(textareas.length>0);
@@ -85,6 +91,45 @@ test('Clientes: cierra y limpia el formulario manual al cambiar a automático',a
     await act(async()=>button(tree,'Registrar firma manual').props.onClick());
     assert.equal(tree.root.findAllByType('textarea').at(-1).props.value,'');
   }finally{if(tree)act(()=>tree.unmount());h.restore();}
+});
+test('Clientes: contratación pendiente y servicio activo conservan sus acciones propias', async () => {
+  const h = harness(state('automatic'));
+  let tree;
+  const InstallationStatus = () => React.createElement('p', null, 'Seguimiento de instalación');
+  const ServiceModal = () => React.createElement('button', null, 'Dar de baja');
+  try {
+    const { CustomerContractWorkflow } = load('features/customers/CustomerContractWorkflow.tsx', {
+      ...h.common,
+      '../../lib': { formatDateOnly: () => 'Fecha QA', formatWorkOrderValue: String },
+      '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage() {}, clearMessage() {} }) },
+      '../installations/G3InstallationStatus': { G3InstallationStatus: InstallationStatus },
+      './CustomerServiceManagementModal': { CustomerServiceManagementModal: ServiceModal },
+      './ContractDocuments': h.common['../customers/ContractDocuments'],
+      './customer-services-state': load('features/customers/customer-services-state.ts'),
+    });
+    await act(async () => { tree = create(React.createElement(CustomerContractWorkflow, {
+      customer: { idCliente: 1, nombreCompleto: 'Cliente ficticio', contratos: [{ idContrato: 10, estado: 'Firmado' }, { idContrato: 11, estado: 'Activo' }] },
+      services: [{ idContrato: 10, idServicio: 20, estadoOperativo: 'Pendiente Instalacion' }, { idContrato: 11, idServicio: 21, estadoOperativo: 'Activo' }],
+      servicesLoad: { status: 'success', customerId: 1, error: '' }, plans: [], permissions: { ...permissions, createInstallOrders: true },
+      onRefresh: async () => {}, onOpenObservations() {},
+    })); });
+    const manage = index => tree.root.findAllByType('button').filter(node => node.props.children === 'Gestionar')[index];
+    await act(async () => manage(0).props.onClick());
+    assert.match(JSON.stringify(tree.toJSON()), /La gestión del servicio estará disponible cuando se active/);
+    assert.equal(button(tree, 'Dar de baja'), undefined);
+    assert.equal(tree.root.findAllByType(InstallationStatus).length, 0);
+    await act(async () => tree.root.findAllByProps({ className: 'service-section-trigger' })[1].props.onClick());
+    assert.equal(tree.root.findByType(InstallationStatus).props.contractId, 10);
+    assert.equal(tree.root.findByType(InstallationStatus).props.canRequest, true);
+    await act(async () => button(tree, 'Cerrar').props.onClick());
+    await act(async () => manage(1).props.onClick());
+    assert.equal(tree.root.findByType(ServiceModal).props.service.idServicio, 21);
+    assert.ok(button(tree, 'Dar de baja'));
+    assert.deepEqual(h.mutations, []);
+  } finally {
+    if (tree) act(() => tree.unmount());
+    h.restore();
+  }
 });
 test('firma confirmada refresca una vez y conserva descarga con el envío apagado',async()=>{
   const signed=state('automatic',false,{signedDownloadAvailable:true,

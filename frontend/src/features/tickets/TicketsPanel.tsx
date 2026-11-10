@@ -214,7 +214,7 @@ export function TicketsPanel({
                   </td>
                   <td>
                     <button
-                      className="secondary compact operational-manage-button"
+                      className="secondary compact crm-table-action"
                       onClick={() => {
                         setSelectedId(ticket.idTicket);
                         setManagementOpen(true);

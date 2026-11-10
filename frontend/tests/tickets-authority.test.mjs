@@ -241,13 +241,98 @@ for (const estado of ['Pendiente', 'Completada']) {
       ticket: { codigoSeguimiento: 'TK-QA' }, cliente: { nombreCompleto: 'QA' } }] });
     assert.match(ctx.text(), /OT-REP-000080/);
     assert.match(ctx.text(), /TK-QA/);
-    assert.match(ctx.text(), /solo lectura/);
-    assert.match(ctx.text(), estado === 'Completada' ? /antecedentes del trabajo técnico/ : /pendiente de confirmación/);
+    assert.doesNotMatch(ctx.text(), /Consulta de solo lectura/);
     assert.doesNotMatch(ctx.text(), /G3|ratificado|LEGACY_LOCAL/);
     assert.equal(ctx.button('Completar orden y resolver ticket'), undefined);
+    const detail = ctx.tree.root.findByProps({ className: 'work-order-detail' });
+    assert.equal(detail.findByProps({ 'aria-label': `Estado: ${estado}` }).children.length, 1);
+    assert.doesNotMatch(textOf(detail), /Prioridad|Trabajo completado|Pendiente de cierre/);
+    assert.equal(textOf(detail).split('OT-REP-000080').length, 2);
+    assert.equal(detail.findAllByType('form').length, 0);
+    await ctx.click('Cerrar');
+    assert.equal(ctx.tree.root.findAllByProps({ className: 'work-order-detail' }).length, 0);
     assert.equal(ctx.calls.length, 0);
   });
 }
+
+test('OT: el resumen conserva potencia cero, resolución negativa e identificadores separados', async t => {
+  const ctx = await harness(t, 'WorkOrdersPanel', { workOrders: [{ idOt: 80,
+    tipoOt: 'INSTALACION', estado: 'COMPLETADA', prioridad: 'Media', antecedenteTecnico: {
+      idOt: 80, fechaCompletada: '2026-11-10T12:00:00Z', potenciaOpticaDbm: 0,
+      resueltoRemotamente: false, idTecnicoRegistrado: 0, idTecnicoExterno: 54,
+      equiposDeclarados: { instalados: ['ONT-QA'], retirados: ['ONT-ANTERIOR'] },
+    } }] });
+  const result = ctx.tree.root.findByProps({ 'aria-label': 'Resumen técnico' });
+  const value = label => result.findAllByType('dt').find(node => textOf(node) === label).parent.findByType('dd');
+  assert.equal(textOf(value('Potencia óptica')), '0dBm');
+  assert.equal(textOf(value('Resolución remota')), 'No');
+  assert.equal(result.findByType('time').props.dateTime, '2026-11-10T12:00:00Z');
+  assert.match(textOf(result), /ONT-QA/);
+  assert.match(textOf(result), /ONT-ANTERIOR/);
+  const additional = ctx.tree.root.findByProps({ 'aria-label': 'Información adicional' });
+  assert.equal(ctx.tree.root.findAllByType('details').length, 0);
+  const references = additional.findAllByType('dt');
+  assert.equal(textOf(references.find(node => textOf(node) === 'ID del técnico en OT').parent.findByType('dd')), '0');
+  assert.equal(textOf(references.find(node => textOf(node) === 'ID del técnico externo').parent.findByType('dd')), '54');
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('OT: conserva la estructura visible y usa guiones para los datos ausentes', async t => {
+  const ctx = await harness(t, 'WorkOrdersPanel', { workOrders: [{ idOt: 81,
+    tipoOt: 'INSTALACION', estado: 'Asignada', prioridad: 'Media',
+    observacionesAgenda: 'Consultar acceso al edificio', antecedenteTecnico: {
+      idOt: 81, fechaCompletada: null, potenciaOpticaDbm: null, resueltoRemotamente: null,
+      equiposDeclarados: { instalados: [], retirados: [] },
+    } }] });
+  const result = ctx.tree.root.findByProps({ 'aria-label': 'Resumen técnico' });
+  assert.deepEqual(result.findAllByType('dd').map(textOf), ['—', '—', '—', '—', '—', '—']);
+  assert.match(textOf(result), /Equipos declarados · Instalados/);
+  assert.match(textOf(result), /Equipos declarados · Retirados/);
+  assert.doesNotMatch(textOf(result), /Sin resultados|Instalación completada|dBm|No registrad/);
+  const additional = ctx.tree.root.findByProps({ 'aria-label': 'Información adicional' });
+  assert.match(textOf(additional), /Consultar acceso al edificio/);
+  assert.deepEqual(additional.findAllByType('dd').map(textOf), ['#81', '—', '—', '—', '—', '—', '—', '—']);
+  assert.equal(ctx.tree.root.findAllByType('details').length, 0);
+  assert.equal(ctx.calls.length, 0);
+});
+
+test('OT: ordena con clic directo en la cabecera y conserva la búsqueda de solo lectura', async t => {
+  const ctx = await harness(t, 'WorkOrdersPanel', { workOrders: [
+    { idOt: 10, tipoOt: 'Reparacion', codigoSeguimiento: 'OT-QA-10', idTicket: 12, estado: 'Pendiente', prioridad: 'Alta',
+      fechaProgramada: '2026-11-07', horaVisita: '10:00', ticket: { codigoSeguimiento: 'TK-ESPECIAL' } },
+    { idOt: 2, tipoOt: 'Instalacion', codigoSeguimiento: 'OT-QA-2', idCliente: 100, estado: 'Completada', prioridad: 'Media',
+      fechaProgramada: '2026-11-07T00:00:00.000Z', horaVisita: '09:00', cliente: { nombreCompleto: 'Cliente QA', rut: '12.345.678-5' } },
+    { idOt: 90, tipoOt: 'Instalacion', codigoSeguimiento: 'OT-QA-90', estado: 'Asignada', prioridad: 'Baja' },
+  ] });
+  const table = ctx.tree.root.findByType('table');
+  const rowCodes = () => table.findByType('tbody').findAllByType('tr').map(row => textOf(row.findAllByType('td')[0]));
+  const sortBy = label => act(async () => table.findAllByType('button').find(node => textOf(node).trim() === label).props.onClick());
+  const search = () => ctx.tree.root.findByProps({ 'aria-label': 'Buscar órdenes de trabajo' });
+
+  assert.equal(textOf(table.findAllByType('th')[0]).trim(), 'Código registro');
+  assert.equal(textOf(table.findAllByType('th')[2]), 'Cliente');
+  assert.doesNotMatch(textOf(table.findByType('tbody')), /Histórico/);
+  assert.equal(table.findAllByType('select').length, 0);
+  assert.deepEqual(rowCodes(), ['OT-QA-10', 'OT-QA-2', 'OT-QA-90']);
+  await sortBy('Código registro');
+  assert.deepEqual(rowCodes(), ['OT-QA-2', 'OT-QA-10', 'OT-QA-90']);
+  await sortBy('Código registro');
+  assert.deepEqual(rowCodes(), ['OT-QA-90', 'OT-QA-10', 'OT-QA-2']);
+  await sortBy('Tipo');
+  assert.deepEqual(rowCodes(), ['OT-QA-2', 'OT-QA-90', 'OT-QA-10']);
+  await sortBy('Fecha');
+  assert.deepEqual(rowCodes(), ['OT-QA-2', 'OT-QA-10', 'OT-QA-90']);
+  await sortBy('Fecha');
+  assert.equal(table.findAllByType('th')[4].props['aria-sort'], 'descending');
+  assert.deepEqual(rowCodes(), ['OT-QA-10', 'OT-QA-2', 'OT-QA-90']);
+  await ctx.change(search(), '123456785');
+  assert.deepEqual(rowCodes(), ['OT-QA-2']);
+  await ctx.change(search(), 'tk-especial');
+  assert.deepEqual(rowCodes(), ['OT-QA-10']);
+  await ctx.click('Limpiar búsqueda');
+  assert.deepEqual(rowCodes(), ['OT-QA-10', 'OT-QA-2', 'OT-QA-90']);
+  assert.equal(ctx.calls.length, 0);
+});
 
 test('panel sin permisos permite consultar antecedentes sin ofrecer edicion', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [], permissions: {} });
@@ -268,10 +353,11 @@ for (const estado of ['COMPLETADA', 'EN_CURSO', 'CANCELADA']) {
         equiposDeclarados: { instalados: ['ONT-DECLARADA-OT-2'], retirados: [] },
       } }] });
     assert.match(ctx.text(), /ONT-DECLARADA-OT-2/);
-    assert.match(ctx.text(), /no acreditan asignación oficial/);
-    if (estado === 'COMPLETADA') assert.match(ctx.text(), /Instalación completada/);
-    else assert.doesNotMatch(ctx.text(), /Instalación completada/);
-    if (estado === 'CANCELADA') assert.match(ctx.text(), /Instalación no completada/);
+    assert.match(ctx.text(), /Equipos declarados/);
+    assert.doesNotMatch(ctx.text(), /no acreditan asignación oficial/);
+    const detail = ctx.tree.root.findByProps({ className: 'work-order-detail' });
+    assert.match(textOf(detail.findByProps({ className: 'work-order-detail-status' })), new RegExp(estado));
+    assert.doesNotMatch(textOf(detail), /Instalación completada|Instalación no completada|Prioridad/);
     assert.equal(ctx.calls.length, 0);
   });
 }

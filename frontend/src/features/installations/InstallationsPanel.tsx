@@ -44,9 +44,8 @@ export function InstallationsPanel({
   }, [requestedView, onViewConsumed, scope]);
 
   return <section className="installations-workspace installations-redesign">
-    <header className="installation-page-heading"><h1>Instalaciones</h1></header>
+    <header className="installation-page-heading"><h1 id="installation-process-title">Instalaciones en proceso</h1></header>
     <section ref={sectionRef} className="installation-coordination" aria-labelledby="installation-process-title">
-      <header className="installation-section-heading"><h2 id="installation-process-title">Instalaciones en proceso</h2></header>
       <div className="installation-toolbar installation-process-toolbar">
         <label className="installation-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label="Buscar instalaciones en proceso" placeholder="Buscar cliente, RUT, contrato o dirección" value={query} onChange={event => setQuery(event.target.value)} /></label>
         <InstallationHistoryPanel key={scope} scope={scope} revision={workOrders} localOrders={workOrders.filter(order => isInstallationWorkOrder(order.tipoOt))} companies={companies} customers={customers} />

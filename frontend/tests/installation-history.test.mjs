@@ -31,7 +31,9 @@ const row = (company, date) => ({ key: `${company}:901`, idEmpresa: company, idO
   solicitudesG3: [{ idIntegracion: company, requestId: `request-${company}`, traceId: `trace-${company}`, fechaCierreProcesado: '2026-11-03T12:00:00Z' }] });
 async function openDetail(tree, index = 0) {
   if (!tree.root.findAllByType('dialog').length) await openHistory(tree);
-  await act(async () => tree.root.findAllByProps({ className: 'installation-detail-button' })[index].props.onClick());
+  const button = tree.root.findAllByType('button').filter(node => node.props.children === 'Detalle')[index];
+  assert.match(button.props.className, /\bcrm-table-action\b/);
+  await act(async () => button.props.onClick());
 }
 async function openHistory(tree) {
   await act(async () => tree.root.findByProps({ className: 'installation-history-trigger' }).props.onClick());
@@ -52,6 +54,7 @@ test('historial React muestra cierre sin OT local, fecha original y completada s
   await openDetail(tree);
   const text = JSON.stringify(tree.toJSON());
   assert.match(text, /Sin OT local/); assert.match(text, /2026-10-01T12:00:00Z/);
+  assert.equal(tree.root.findByProps({ 'aria-label': 'Referencias y fechas originales' }).type, 'summary');
   assert.equal(tree.root.findAllByType('dialog').length, 1);
   await backToHistory(tree);
   await act(async () => tree.root.findByProps({ 'aria-label': 'Fecha técnica' }).props.onChange({ target: { value: 'PENDIENTE_FECHA_TECNICA' } }));
@@ -79,13 +82,14 @@ test('respuesta tardía de otra empresa no contamina la vista actual; error no a
 test('preserva detalle de OT local sin mezclar una OT de igual numero de otra empresa', async () => {
   const Component = harness(async () => ({ data: { items: [{ ...row(1, null), ordenesLocales: [901] }] } }));
   const localOrders = [
-    { idOt: 901, idEmpresa: 1, codigoSeguimiento: 'LOCAL-QA', prioridad: 'Alta', estado: 'Completada', fechaProgramada: '2026-10-01', tecnico: { nombreCompleto: 'Tecnico QA' } },
+    { idOt: 901, idEmpresa: 1, idTecnico: 8, codigoSeguimiento: 'LOCAL-QA', prioridad: 'Alta', estado: 'Completada', fechaProgramada: '2026-10-01', tecnico: { nombreCompleto: 'Tecnico QA' } },
     { idOt: 901, idEmpresa: 2, codigoSeguimiento: 'NO-MEZCLAR', tecnico: { nombreCompleto: 'AJENO' } },
   ];
   let tree; await act(async () => { tree = create(React.createElement(Component, { scope: '1', localOrders })); });
   await openDetail(tree);
   const text = JSON.stringify(tree.toJSON());
   assert.match(text, /LOCAL-QA/); assert.match(text, /Tecnico QA/); assert.match(text, /Visita programada/);
+  assert.deepEqual(tree.root.findByType('small').children, ['ID en CRM #', '8']);
   assert.doesNotMatch(text, /NO-MEZCLAR|AJENO/);
   await act(async () => tree.unmount());
 });
@@ -94,7 +98,7 @@ test('OT histórica completada sin servicio conserva fecha y equipos solo como d
   const historical = { ...row(1, '2026-10-02T12:00:00.000Z'), key: '1:2', idOt: '2', fuente: 'LEGACY_LOCAL',
     idContrato: null, idServicio: null, ordenesLocales: [2], solicitudesG3: [], antecedentesTecnicos: [{
       idEmpresa: 1, idOt: 2, fechaCompletada: '2026-10-02T12:00:00.000Z', idTecnicoRegistrado: 8,
-      idTecnicoExterno: null, potenciaOpticaDbm: -19.5, resueltoRemotamente: false,
+      idTecnicoExterno: 0, potenciaOpticaDbm: 0, resueltoRemotamente: false,
       equiposDeclarados: { instalados: ['ONT-DECLARADA-QA'], retirados: [] }, asignacionInventarioConfirmada: false,
     }] };
   const Component = harness(async () => ({ data: { items: [historical] } }));
@@ -105,6 +109,15 @@ test('OT histórica completada sin servicio conserva fecha y equipos solo como d
   const rendered = JSON.stringify(tree.toJSON());
   for (const value of ['Histórica / local', 'Sin contrato correlacionado', 'Sin servicio correlacionado', 'ONT-DECLARADA-QA', '2026-10-02T12:00:00.000Z', 'no acreditan asignación oficial']) assert.ok(rendered.includes(value), value);
   assert.doesNotMatch(rendered, /Tracking #|Cierre de solicitud G8/);
+  const evidence = tree.root.findByProps({ 'aria-label': 'Antecedente técnico OT 2' });
+  assert.equal(evidence.findAllByType('p').length, 0);
+  const references = tree.root.findByType('details');
+  assert.ok(references.findAllByType('p').some(paragraph => paragraph.children.join('').includes('no acreditan asignación oficial')));
+  const fields = new Map(evidence.findAllByType('dt').map(label => [label.children.join(''), label.parent.findByType('dd').children]));
+  assert.deepEqual(fields.get('Identificador técnico externo'), ['0']);
+  assert.deepEqual(fields.get('Potencia óptica (dBm)'), ['0']);
+  assert.deepEqual(fields.get('Resuelto remotamente'), ['No']);
+  assert.deepEqual(evidence.findByType('time').children, [dateExports.formatDateTime('2026-10-02T12:00:00.000Z')]);
   await act(async () => tree.unmount());
 });
 

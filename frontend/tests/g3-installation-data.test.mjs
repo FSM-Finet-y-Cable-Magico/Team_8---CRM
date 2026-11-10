@@ -7,14 +7,19 @@ import { act, create } from 'react-test-renderer';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/features/installations/G3InstallationStatus.tsx', import.meta.url), 'utf8');
+const transientMessage = {};
+const hookSource = readFileSync(new URL('../src/shared/hooks/useTransientMessage.ts', import.meta.url), 'utf8');
+const hookCode = ts.transpileModule(hookSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+new Function('require', 'exports', 'window', hookCode)(require, transientMessage, { setTimeout, clearTimeout });
+const ToastNotice = ({ message }) => message ? React.createElement('p', { role: 'status' }, message) : null;
 function component(api) {
   const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const exports = {};
-  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: () => '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null } };
+  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: () => '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null, ToastNotice }, '../../shared/hooks/useTransientMessage': transientMessage };
   new Function('require', 'exports', out)(name => name in mocks ? mocks[name] : require(name), exports);
   return exports.G3InstallationStatus;
 }
-async function mount({ missing = true, error = false, tracking = null, mayComplete = true } = {}) {
+async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false } = {}) {
   const calls = [];
   const api = {
     get: async path => { calls.push(['GET', path]); return { data: tracking }; },
@@ -28,7 +33,7 @@ async function mount({ missing = true, error = false, tracking = null, mayComple
     },
     patch: async (path, body) => { calls.push(['PATCH', path, body]); return { data: { idContrato: 4, comunaFaltante: false } }; },
   };
-  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true })); });
+  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true, compact })); });
   const button = label => tree.root.findAllByType('button').find(b => b.props.children === label);
   return { tree, calls, button, close: async () => act(async () => tree.unmount()) };
 }
@@ -90,5 +95,31 @@ test('seguimiento presenta estados y fallas remotas con mensajes de producción'
     assert.doesNotMatch(visible, /G3|INTEGRACION|CODIGO_DESCONOCIDO/);
     assert.ok(!visible.includes('Orden de instalación enviada a terreno'));
     assert.ok(h.button('Reintentar envío'));
+  } finally { await h.close(); }
+});
+
+test('el refresco compacto consulta el estado y el cierre sigue siendo una acción explícita', async () => {
+  const h = await mount({ compact: true, tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'ASIGNADA',
+    estadoIntegracion: 'ENVIADA', ultimoErrorSanitizado: 'INTEGRACION_G3_NO_CONFIGURADA' } });
+  try {
+    const toast = () => h.tree.root.findByType(ToastNotice);
+    assert.match(toast().props.message, /No se pudo actualizar la instalación/);
+    assert.equal(toast().props.tone, 'error');
+    await act(async () => toast().props.onDismiss());
+    assert.equal(toast().props.message, '');
+
+    const refresh = h.tree.root.findByProps({ 'aria-label': 'Actualizar estado de instalación' });
+    await act(async () => refresh.props.onClick());
+    assert.deepEqual(h.calls.slice(1), [['GET', '/integrations/g3/installations/2']]);
+    assert.equal(h.button('Detalle'), undefined);
+
+    const options = h.tree.root.findByType('details');
+    assert.equal(options.props.open, undefined);
+    const closure = options.findByType('button');
+    assert.equal(closure.props.children, 'Consultar cierre');
+    await act(async () => closure.props.onClick());
+    assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path === '/integrations/g3/installations/2/reconcile').length, 1);
+    assert.match(toast().props.message, /cierre técnico aún no está confirmado/);
+    assert.equal(toast().props.tone, 'info');
   } finally { await h.close(); }
 });

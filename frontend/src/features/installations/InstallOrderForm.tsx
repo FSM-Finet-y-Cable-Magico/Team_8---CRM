@@ -7,6 +7,6 @@ export function InstallOrderForm({ prospect, canRequest, onChanged }: { prospect
   );
   return <div className="install-order-form">
     <h3>Instalación técnica</h3>
-    <G3InstallationStatus prospectId={prospect.idProspecto} canRequest={canRequest && hasSignedContract} onChanged={onChanged} />
+    <G3InstallationStatus compact prospectId={prospect.idProspecto} canRequest={canRequest && hasSignedContract} onChanged={onChanged} />
   </div>;
 }

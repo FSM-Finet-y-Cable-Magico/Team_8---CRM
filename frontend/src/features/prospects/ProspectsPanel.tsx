@@ -288,7 +288,7 @@ export function ProspectsPanel({
                   <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
                   <td>
-                    <button type="button" className="secondary compact" onClick={() => setSelectedId(prospect.idProspecto)}>
+                    <button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
                     </button>
                   </td>

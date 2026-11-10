@@ -16,6 +16,7 @@ function setup() {
     contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
   const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ available: false }]), prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
+    zonaPago: { findUnique: jest.fn().mockResolvedValue({ idZonaPago: 21, idEmpresa: 1, activo: true }) },
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
@@ -23,6 +24,38 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it.each([
+    { microzona: null, expectedZoneId: 21 },
+    { microzona: { idZonaPago: 22 }, expectedZoneId: 22 },
+  ])('resuelve zona contractual validada cuando la UI no envia idZonaPago: $expectedZoneId', async ({ microzona, expectedZoneId }) => {
+    const c = setup();
+    c.coverage.plansForLocation.mockResolvedValue({ coberturaComercial: true,
+      zona: { idZonaPago: 21 }, microzona, planes: [{ idPlan: 1 }] });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.prisma.zonaPago.findUnique).toHaveBeenCalledWith({ where: { idZonaPago: expectedZoneId } });
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: expectedZoneId }),
+    }));
+  });
+  it.each([
+    { origenPrecio: 'ZONA_PADRE', expectedZoneId: 21 },
+    { origenPrecio: 'MICROZONA', expectedZoneId: 22 },
+  ])('usa la zona de la regla de precio aplicada: $origenPrecio', async ({ origenPrecio, expectedZoneId }) => {
+    const c = setup();
+    c.coverage.plansForLocation.mockResolvedValue({ coberturaComercial: true,
+      zona: { idZonaPago: 21 }, microzona: { idZonaPago: 22 }, planes: [{ idPlan: 1, origenPrecio }] });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: expectedZoneId }),
+    }));
+  });
+  it('conserva idZonaPago explicito de los consumidores existentes', async () => {
+    const c = setup();
+    await c.service.contractPlan(1, { planId: 1, idZonaPago: 21 }, user);
+    expect(c.tx.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idZonaPago: 21 }),
+    }));
+  });
   it('conserva comuna registrada al confirmar sin repetirla y ciudad explicita', async () => {
     const c = setup(); Object.assign(c.prospect, { comuna: ' Valparaiso ', region: 'Region QA' });
     await c.service.contractPlan(1, { planId: 1, ciudad: ' Ciudad QA ' }, user);
@@ -81,7 +114,7 @@ describe('cotizacion persistida y confirmacion segura', () => {
   });
   it.each([
     { latitud: -35 }, { direccion: 'Otra direccion' }, { estadoPipeline: 'Perdido' },
-    { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 },
+    { estadoPipeline: 'No Factible' }, { idCliente: 77 }, { idEmpresa: 2 }, { idZonaPago: 2 },
   ])('rechaza datos que cambiaron antes del lock: %j', async change => {
     const c = setup();
     c.tx.prospecto.findUniqueOrThrow.mockResolvedValue({ ...c.prospect, ...change } as typeof c.prospect);

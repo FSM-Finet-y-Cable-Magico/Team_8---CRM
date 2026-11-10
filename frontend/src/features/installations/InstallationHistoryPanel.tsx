@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CheckCheck, History, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeft, CircleAlert, ClipboardList, RefreshCw, Search, UserRound } from 'lucide-react';
 import { api, type Company, type Customer, type InstallationHistory, type WorkOrder } from '../../api';
 import { formatDateOnly, formatDateTime, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
 import { Modal, TablePagination } from '../../shared/components';
-import { WorkOrderTechnicalEvidence } from './WorkOrderTechnicalEvidence';
+import { WORK_ORDER_EVIDENCE_NOTICE, WorkOrderTechnicalEvidence } from './WorkOrderTechnicalEvidence';
 
 type HistoryRow = InstallationHistory['items'][number];
+
+function formatTechnicalDate(date: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? formatDateOnly(date) : formatDateTime(date);
+}
 
 export function InstallationHistoryPanel({ scope, revision, localOrders = [], companies = [], customers = [], onLoaded }: {
   scope: string; revision: unknown; localOrders?: WorkOrder[]; companies?: Company[]; customers?: Customer[];
@@ -60,13 +64,10 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
   function dateLabel(row: HistoryRow) {
     if (row.clasificacionFecha === 'REQUIERE_REVISION') return 'Requiere revisión';
     if (row.clasificacionFecha === 'PENDIENTE_FECHA_TECNICA') return 'Pendiente de fecha técnica';
-    return row.fechasTecnicasOriginales.map(date => /^\d{4}-\d{2}-\d{2}$/.test(date) ? formatDateOnly(date) : formatDateTime(date)).join(' · ');
+    return row.fechasTecnicasOriginales.map(formatTechnicalDate).join(' · ');
   }
-  return <section className="installation-history installation-completed">
-    <header className="installation-section-heading">
-      <div><h2><History size={19} aria-hidden="true" />Instalaciones completadas</h2><p>{current?.data ? `${current.data.items.length} ${current.data.items.length === 1 ? 'registro disponible' : 'registros disponibles'} en el historial.` : current?.error ? 'Consulta el historial para volver a intentar la carga.' : 'Consultando registros completados…'}</p></div>
-      <button type="button" className="installation-history-trigger" onClick={() => setHistoryOpen(true)}>Ver historial <ArrowRight size={16} aria-hidden="true" /></button>
-    </header>
+  return <>
+    <button type="button" className="installation-history-trigger" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>Ver historial de instalaciones</button>
     <Modal key={selected?.key ?? 'installation-history-list'} title={selected ? 'Instalación completada' : 'Historial de instalaciones'} open={historyOpen} onClose={() => { setHistoryOpen(false); setSelectedKey(null); }}>
     <div className={`installation-history-modal${selected ? ' installation-history-modal-detail' : ''}`}>
     {!selected && <>
@@ -92,18 +93,35 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
           <td><strong>OT {row.idOt ?? 'Sin referencia'}</strong><span className={row.fuente === 'G3' ? 'installation-origin confirmed' : 'installation-origin'}>{sourceLabel(row)}</span></td>
           <td><strong>{row.idContrato ? `Contrato #${row.idContrato}` : 'Sin contrato correlacionado'}</strong><span>{row.idServicio ? `Servicio #${row.idServicio}` : 'Sin servicio correlacionado'}</span></td>
           <td><span className={row.clasificacionFecha !== 'FECHA_TECNICA_CONFIRMADA' ? 'installation-date-warning' : ''}>{dateLabel(row)}</span></td>
-          <td><button type="button" className="installation-detail-button" onClick={() => setSelectedKey(row.key)}>Detalle <ArrowRight size={14} aria-hidden="true" /></button></td>
+          <td><button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedKey(row.key)}>Detalle</button></td>
         </tr>)}</tbody></table></div>
       {!items.length && <p className="installation-empty">No hay instalaciones completadas que coincidan con el filtro.</p>}
       <TablePagination currentPage={page} totalItems={items.length} pageSize={pageSize} onPageChange={setPage} />
     </>}
     </>}
       {selected && <div className="installation-detail-view">
-        <button autoFocus type="button" className="installation-history-back" onClick={() => setSelectedKey(null)}><ArrowLeft size={16} aria-hidden="true" />Volver al historial</button>
+        <div className="installation-detail-navigation">
+          <button autoFocus type="button" className="installation-history-back" onClick={() => setSelectedKey(null)}><ArrowLeft size={16} aria-hidden="true" />Volver al historial</button>
+          <div className="installation-detail-status">
+            <span className="installation-completed-badge">Completada</span>
+            <details className="installation-integration-details">
+              <summary aria-label="Referencias y fechas originales" title="Referencias y fechas originales"><CircleAlert size={18} aria-hidden="true" /></summary>
+              <div>
+                <p>{selected.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin solicitud de instalación confirmada' : 'Cierre de solicitud de instalación confirmado'}</p>
+                <p>{selected.ordenesLocales.length ? `OT local: ${selected.ordenesLocales.join(', ')}` : 'Sin OT local'}</p>
+                {selected.fechasTecnicasOriginales.map(date => <p key={date}>Fecha técnica original: <time dateTime={date}>{date}</time></p>)}
+                {selected.solicitudesG3.length ? selected.solicitudesG3.map(request => <dl className="installation-request-reference" key={request.idIntegracion}>
+                  <div><dt>Tracking #{request.idIntegracion}</dt><dd>request_id: {request.requestId}</dd><dd>trace_id: {request.traceId}</dd></div>
+                  <div><dt>Procesado en CRM (no es fecha técnica)</dt><dd>{formatDateTime(request.fechaCierreProcesado)}</dd><dd>{request.fechaCierreProcesado}</dd></div>
+                </dl>) : <p>Sin solicitud técnica</p>}
+                {Boolean(selected.antecedentesTecnicos?.length) && <p>{WORK_ORDER_EVIDENCE_NOTICE}</p>}
+              </div>
+            </details>
+          </div>
+        </div>
         <header className="installation-detail-summary">
-          <span className="installation-completed-icon"><CheckCheck size={24} aria-hidden="true" /></span>
+          <UserRound size={20} aria-hidden="true" />
           <div><h3>{customerName(selected)}</h3><p>{companyName(selected)} · OT {selected.idOt ?? 'Sin referencia'}</p></div>
-          <span className="installation-completed-badge">Completada</span>
         </header>
         <dl className="installation-detail-grid">
           <div><dt>Origen del registro</dt><dd>{sourceLabel(selected)}</dd></div>
@@ -112,29 +130,21 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
           <div><dt>Servicio</dt><dd>{selected.idServicio ? `#${selected.idServicio}` : 'Sin servicio correlacionado'}</dd></div>
         </dl>
         {ordersFor(selected).length > 0 && <section className="installation-detail-section">
-          <h3>Orden registrada en el CRM</h3>
+          <h3><ClipboardList size={17} aria-hidden="true" />Orden registrada en el CRM</h3>
           {ordersFor(selected).map(order => <dl className="installation-detail-grid" key={order.idOt}>
             <div><dt>Orden local</dt><dd>{order.codigoSeguimiento ?? `OT ${order.idOt}`}</dd></div>
-            <div><dt>Técnico local</dt><dd>{order.tecnico?.nombreCompleto ?? 'Sin asignar'}</dd></div>
+            <div><dt>Técnico local</dt><dd>{order.tecnico?.nombreCompleto ?? (order.idTecnico == null ? 'Sin asignar' : 'Nombre no disponible')}
+              {order.idTecnico != null && <small>ID en CRM #{order.idTecnico}</small>}
+            </dd></div>
             <div><dt>Visita programada</dt><dd>{order.fechaProgramada ? formatDateOnly(order.fechaProgramada) : 'Sin fecha'} {order.horaVisita ?? ''}</dd></div>
             <div><dt>Estado / prioridad local</dt><dd>{formatWorkOrderValue(order.estado)} · {formatWorkOrderValue(order.prioridad)}</dd></div>
           </dl>)}
         </section>}
-        {selected.antecedentesTecnicos?.map(evidence => <WorkOrderTechnicalEvidence key={`${evidence.idEmpresa}:${evidence.idOt}`} evidence={evidence} />)}
-        <details className="installation-integration-details">
-          <summary>Referencias y fechas originales</summary>
-          <div>
-            <p>{selected.fuente === 'LEGACY_LOCAL' ? 'Histórica / local, sin solicitud de instalación confirmada' : 'Cierre de solicitud de instalación confirmado'}</p>
-            <p>{selected.ordenesLocales.length ? `OT local: ${selected.ordenesLocales.join(', ')}` : 'Sin OT local'}</p>
-            {selected.fechasTecnicasOriginales.map(date => <p key={date}>Fecha técnica original: <time dateTime={date}>{date}</time></p>)}
-            {selected.solicitudesG3.length ? selected.solicitudesG3.map(request => <dl className="installation-request-reference" key={request.idIntegracion}>
-              <div><dt>Tracking #{request.idIntegracion}</dt><dd>request_id: {request.requestId}</dd><dd>trace_id: {request.traceId}</dd></div>
-              <div><dt>Procesado en CRM (no es fecha técnica)</dt><dd>{formatDateTime(request.fechaCierreProcesado)}</dd><dd>{request.fechaCierreProcesado}</dd></div>
-            </dl>) : <p>Sin solicitud técnica</p>}
-          </div>
-        </details>
+        {selected.antecedentesTecnicos?.length
+          ? selected.antecedentesTecnicos.map(evidence => <WorkOrderTechnicalEvidence key={`${evidence.idEmpresa}:${evidence.idOt}`} evidence={evidence} formatTechnicalDate={formatTechnicalDate} showNotice={false} />)
+          : <p className="installation-evidence-unavailable">Este registro no tiene antecedentes técnicos de una OT local.</p>}
       </div>}
     </div>
     </Modal>
-  </section>;
+  </>;
 }
