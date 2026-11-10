@@ -12,25 +12,24 @@
 }
 .installations-redesign .installation-page-heading h1 { margin: 0; color: var(--install-ink); font-size: 1.55rem; letter-spacing: -.035em; }
 .installations-redesign .installation-coordination,
-.installations-redesign .installation-orders-section,
-.installations-redesign .installation-completed { display: grid; gap: 18px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.installations-redesign .installation-orders-section { display: grid; gap: 18px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .installations-redesign .installation-coordination,
 .installations-redesign .installation-orders-section { scroll-margin-top: 90px; }
-.installations-redesign .installation-orders-section,
-.installations-redesign .installation-completed { padding-top: 24px; border-top: 1px solid var(--install-line); }
+.installations-redesign .installation-orders-section { padding-top: 24px; border-top: 1px solid var(--install-line); }
 .modal-card:has(.installation-workflow-modal) { width: min(780px, 100%); }
 .modal-card:has(.installation-workflow-modal) > .modal-header { flex-direction: row; align-items: center; margin: 0; padding: 22px 28px 18px; }
 .modal-card:has(.installation-workflow-modal) > .modal-content { padding: 0 28px 26px; }
 .installation-workflow-modal { display: grid; gap: 22px; min-width: 0; }
 .installation-workflow-modal > .install-order-form { display: grid; padding: 0; border: 0; background: transparent; }
 .installation-workflow-modal > .install-order-form > h3 { display: none; }
-.installation-workflow-modal .g3-installation-card { gap: 18px; padding: 0; border: 0; border-radius: 0; color: var(--install-ink); background: transparent; }
-.installation-workflow-modal .g3-installation-card > header { flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--install-line); }
+.installation-workflow-modal .g3-installation-card { gap: 16px; padding: 0; border: 0; border-radius: 0; color: var(--install-ink); background: transparent; }
+.installation-workflow-modal .g3-installation-card > header { flex-wrap: wrap; gap: 8px 16px; padding-bottom: 12px; border-bottom: 1px solid var(--install-line); }
 .installation-workflow-modal .g3-installation-card > p { margin: 0; line-height: 1.55; }
+.installation-workflow-modal .g3-installation-card > .inline-status { padding: 8px 12px; border-inline-start: 2px solid var(--install-line); border-radius: 0; color: var(--install-muted); background: transparent; font-size: .8rem; }
 .installation-workflow-modal .g3-installation-card .customer-readonly-details { margin: 0; }
 .installation-workflow-modal .g3-installation-card .customer-readonly-details > div { border-color: var(--install-line); }
 .installation-workflow-modal .g3-installation-card .customer-readonly-details dt { color: var(--install-muted); }
-.installation-workflow-modal .g3-installation-card .customer-readonly-details dd { color: var(--install-ink); }
+.installation-workflow-modal .g3-installation-card .customer-readonly-details dd { color: var(--install-ink); overflow-wrap: anywhere; }
 .installation-workflow-modal .g3-installation-card .installation-delivery-heading { color: var(--install-green); }
 .installation-workflow-modal .work-order-workflow { padding: 0; border: 0; background: transparent; }
 .installation-workflow-modal .work-order-section-heading h3 { display: none; }
@@ -41,16 +40,16 @@
 .installations-redesign .installation-section-heading p { margin: 7px 0 0; color: var(--install-muted); font-size: .78rem; line-height: 1.6; }
 .installations-redesign .installation-section-count { display: inline-flex; align-items: center; justify-content: center; min-width: 23px; padding: 3px 7px; border-radius: 6px; background: var(--install-soft); color: var(--install-green); font-size: .7rem; font-weight: 600; }
 .installations-redesign .installation-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
-.installations-redesign .installation-process-toolbar { justify-content: space-between; }
 .installations-redesign .installation-process-toolbar > .installation-search { max-width: 520px; }
-.installations-redesign .installation-process-toolbar .installation-completed { display: block; padding: 0; border: 0; }
-.installations-redesign .installation-process-toolbar .installation-history-trigger { color: #fff; background: #247c68; white-space: nowrap; }
-.installations-redesign .installation-process-toolbar .installation-history-trigger:hover { color: #fff; background: #1d6958; filter: none; }
 .installation-history-total { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 999px; background: rgba(0, 0, 0, .18); }
 .installation-workflow-modal .installation-detail-summary { padding: 0 0 18px; border-bottom: 1px solid var(--install-line); border-radius: 0; background: transparent; }
-.installation-workflow-modal .installation-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.installation-workflow-modal button.installation-refresh-state { display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 36px; padding: 0; border-radius: 8px; color: var(--install-green); background: transparent; box-shadow: none; }
-.installation-workflow-modal button.installation-refresh-state:hover { color: var(--install-green); background: var(--install-soft); box-shadow: none; transform: none; }
+.installation-workflow-modal .installation-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-inline-start: auto; }
+.installation-workflow-modal button.installation-refresh-state { display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 36px; padding: 0; border-radius: 8px; color: var(--install-green); background: var(--install-soft); box-shadow: none; }
+.installation-workflow-modal button.installation-refresh-state:hover:not(:disabled) { background: var(--install-line); box-shadow: none; transform: none; }
+.installation-workflow-modal .installation-closure-options { justify-self: start; color: var(--install-muted); font-size: .78rem; }
+.installation-workflow-modal .installation-closure-options summary { cursor: pointer; }
+.installation-workflow-modal .installation-closure-options summary:hover { color: var(--install-green); }
+.installation-workflow-modal .installation-closure-options > button { margin-top: 8px; }
 .installations-redesign .installation-toolbar > label { display: flex; align-items: center; gap: 10px; color: var(--install-muted); font-size: .75rem; }
 .installations-redesign .installation-toolbar > span { color: var(--install-muted); font-size: .72rem; line-height: 1.5; }
 .installations-redesign .installation-toolbar select { width: auto; min-width: 130px; min-height: 34px; border: 1px solid var(--install-line); border-radius: 8px; padding: 0 32px 0 11px; color: var(--install-ink); background-color: var(--install-surface); font-size: .75rem; }
@@ -67,6 +66,8 @@
 .installations-redesign .installation-table td:first-child { padding-left: 0; }
 .installations-redesign .installation-table th:last-child,
 .installations-redesign .installation-table td:last-child { padding-right: 0; }
+.installations-redesign .installation-coordination-table th:last-child,
+.installations-redesign .installation-coordination-table td:last-child { text-align: end; }
 .installations-redesign .installation-table tr:last-child td { border-bottom: 0; }
 .installations-redesign .installation-table td > strong { display: block; font-size: .8rem; font-weight: 550; }
 .installations-redesign .installation-table td > span:not(.status-badge) { display: block; color: var(--install-muted); font-size: .72rem; }
@@ -77,10 +78,10 @@
 .installations-redesign button.installation-refresh-button:hover { background: var(--install-soft); box-shadow: none; transform: none; }
 .installations-redesign .installation-empty { margin: 0; padding: 18px 0; color: var(--install-muted); font-size: .79rem; }
 .installations-redesign .installation-feedback { margin: 0; padding: 14px 16px; border-radius: 9px; background: #fff5e8; color: #8e672f; font-size: .8rem; line-height: 1.6; }
-.installations-redesign .installation-history-trigger { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 9px; width: auto; min-height: 40px; padding: 10px 16px; color: var(--install-green); background: var(--install-soft); border: 0; border-radius: 9px; box-shadow: none; font-size: .8rem; font-weight: 600; }
-.installations-redesign .installation-history-trigger:hover { color: var(--install-green); background: var(--install-soft); filter: brightness(.97); box-shadow: none; transform: none; }
+.installations-redesign .installation-history-trigger { margin-inline-start: auto; min-height: 40px; padding: 10px 16px; color: #fff; background: #247c68; border-radius: 9px; box-shadow: none; font-size: .8rem; font-weight: 600; }
+.installations-redesign .installation-history-trigger:hover { background: #1d6958; box-shadow: none; }
 .modal-card:has(.installation-history-modal) { width: min(1140px, 100%); }
-.modal-card:has(.installation-history-modal-detail) { width: min(760px, 100%); }
+.modal-card:has(.installation-history-modal-detail) { width: min(960px, 100%); }
 .modal-card:has(.installation-history-modal) > .modal-header { align-items: center; flex-direction: row; margin-bottom: 0; padding: 22px 28px 16px; }
 .modal-card:has(.installation-history-modal) > .modal-content { padding: 0 28px 26px; }
 .installation-history-modal { display: grid; gap: 18px; min-width: 0; }
@@ -91,7 +92,6 @@
 .installation-history-note { margin: -5px 0 0; color: var(--install-muted); font-size: .72rem; line-height: 1.5; }
 .installations-redesign button.installation-history-back { display: inline-flex; align-items: center; gap: 7px; justify-self: start; width: auto; min-height: 30px; padding: 3px 0; color: var(--install-green); background: transparent; box-shadow: none; font-size: .76rem; font-weight: 550; }
 .installations-redesign button.installation-history-back:hover { background: transparent; box-shadow: none; transform: none; text-decoration: underline; }
-.modal-card:has(.installation-detail-view) { width: min(720px, 100%); }
 .modal-card:has(.installation-detail-view) > .modal-header { align-items: center; flex-direction: row; margin-bottom: 0; padding: 20px 24px 18px; }
 .modal-card:has(.installation-detail-view) > .modal-content { padding: 0 24px 24px; }
 .installation-detail-view { display: grid; gap: 20px; color: var(--install-ink); }
@@ -99,6 +99,7 @@
 .installation-detail-summary > div { min-width: 0; }
 .installation-detail-summary h3 { margin: 0; color: var(--install-ink); font-size: 1.05rem; line-height: 1.5; overflow-wrap: anywhere; }
 .installation-detail-summary p { margin: 5px 0 0; color: var(--install-muted); font-size: .77rem; }
+.installation-detail-view .installation-detail-summary { padding: 0; background: transparent; }
 .installation-completion-summary { align-items: flex-start; justify-content: space-between; padding: 0; border-radius: 0; background: transparent; }
 .installation-completion-summary h3 { font-size: 1.3rem; letter-spacing: -.025em; }
 .installation-completion-summary p { margin-top: 7px; font-size: .81rem; line-height: 1.6; }
@@ -108,6 +109,7 @@
 .modal-card:has(.installation-completed-overview) { width: min(1000px, 100%); }
 .installation-completed-overview { gap: 27px; }
 .installation-detail-navigation { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.installation-detail-status { display: flex; align-items: center; gap: 5px; }
 .installations-redesign button.installation-support-trigger { display: inline-flex; align-items: center; justify-content: center; width: 34px; min-height: 34px; padding: 7px; color: var(--install-muted); background: transparent; box-shadow: none; }
 .installations-redesign button.installation-support-trigger:hover { color: var(--install-green); background: var(--install-soft); box-shadow: none; transform: none; }
 .installation-people-place { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 36px; }
@@ -119,16 +121,31 @@
 .installation-people-place small { color: var(--install-muted); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .installation-support-view .installation-integration-details { padding-top: 0; border-top: 0; }
 .installation-support-view .installation-integration-details > div { margin-top: 0; }
-.installation-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; margin: 0; }
+.installation-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 24px; margin: 0; }
 .installation-detail-grid > div { min-width: 0; }
 .installation-detail-view dt { color: var(--install-muted); font-size: .74rem; line-height: 1.5; }
-.installation-detail-view dd { margin: 6px 0 0; color: var(--install-ink); font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
-.installation-detail-section { display: grid; gap: 18px; padding-top: 22px; border-top: 1px solid var(--install-line); }
-.installation-detail-section > h3 { margin: 0; font-size: .88rem; font-weight: 650; }
+.installation-detail-view dd { margin: 5px 0 0; color: var(--install-ink); font-size: .84rem; line-height: 1.5; overflow-wrap: anywhere; }
+.installation-detail-grid dd > small { display: block; margin-top: 3px; color: var(--install-muted); font-size: .73rem; }
+.installation-detail-section,
+.installation-detail-view .installation-technical-evidence { display: grid; gap: 16px; padding-top: 18px; border-top: 1px solid var(--install-line); }
+.installation-detail-section > h3,
+.installation-detail-view .installation-technical-evidence > h4 { margin: 0; font-size: .96rem; font-weight: 650; }
+.installation-detail-section > h3 { display: flex; align-items: center; gap: 8px; }
+.installation-detail-view .installation-detail-summary > svg,
+.installation-detail-section > h3 > svg { flex-shrink: 0; color: var(--install-green); }
+.installation-detail-view .installation-technical-evidence > dl { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 16px 20px; margin: 0; }
+.installation-detail-view .installation-technical-evidence > dl > div { grid-column: span 2; min-width: 0; }
+.installation-detail-view .installation-technical-evidence dd { font-weight: 600; }
+.installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: span 5; padding-top: 12px; border-top: 1px solid var(--install-line); }
+.installation-detail-view .installation-evidence-equipment dt { color: var(--install-ink); font-weight: 650; }
 .installation-integration-details { padding-top: 20px; border-top: 1px solid var(--install-line); }
 .installation-integration-details summary { cursor: pointer; color: var(--install-green); font-size: .8rem; font-weight: 550; }
 .installation-integration-details > div { display: grid; gap: 16px; margin-top: 18px; }
 .installation-integration-details p { margin: 0; color: var(--install-muted); font-size: .74rem; line-height: 1.6; overflow-wrap: anywhere; }
+.installation-detail-navigation .installation-integration-details { position: relative; padding: 0; border: 0; }
+.installation-detail-navigation summary { display: grid; place-items: center; width: 36px; min-height: 36px; list-style: none; }
+.installation-detail-navigation summary::-webkit-details-marker { display: none; }
+.installation-detail-navigation .installation-integration-details > div { position: absolute; z-index: 2; inset-inline-end: 0; top: calc(100% + 8px); width: min(420px, calc(100vw - 88px)); max-height: min(340px, 45dvh); overflow-y: auto; margin: 0; padding: 16px; border: 1px solid var(--install-line); border-radius: 10px; background: var(--install-surface); box-shadow: 0 8px 28px #10271d22; }
 .installation-request-reference { display: grid; gap: 12px; margin: 0; }
 .installation-integration-details .installation-request-reference dd { font-family: ui-monospace, monospace; font-size: .72rem; }
 .installations-redesign button:focus-visible,
@@ -138,11 +155,12 @@
   .installations-workspace.installations-redesign { gap: 22px; }
   .installations-redesign .installation-section-heading { flex-wrap: wrap; gap: 10px; }
   .installations-redesign .installation-toolbar > .installation-search { max-width: none; }
+  .installation-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .installation-detail-view .installation-technical-evidence > dl { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: span 3; }
 }
 @media (max-width: 520px) {
   .installations-redesign .installation-toolbar > label { flex-wrap: wrap; }
-  .installations-redesign .installation-completed .installation-section-heading { align-items: flex-start; }
-  .installations-redesign .installation-completed .installation-history-trigger { width: 100%; }
   .modal-card:has(.installation-history-modal) > .modal-header { padding: 16px; }
   .modal-card:has(.installation-history-modal) > .modal-content { padding: 0 16px 20px; }
   .modal-card:has(.installation-workflow-modal) > .modal-header { padding: 16px; }
@@ -157,4 +175,7 @@
   .installation-completed-badge { margin-left: 0; }
   .installation-people-place { grid-template-columns: 1fr; gap: 20px; }
   .installation-detail-grid { grid-template-columns: 1fr; gap: 16px; }
+  .installation-detail-view .installation-technical-evidence > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .installation-detail-view .installation-technical-evidence > dl > div { grid-column: auto; }
+  .installation-detail-view .installation-technical-evidence > dl > .installation-evidence-equipment { grid-column: 1 / -1; }
 }

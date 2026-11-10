@@ -107,7 +107,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
                 <td className="operational-badge-column"><StatusBadge value={formatWorkOrderValue(order.estado)} /></td>
                 <td>
                   <button
-                    className="secondary compact operational-manage-button"
+                    className="secondary compact crm-table-action"
                     onClick={() => {
                       setSelectedId(order.idOt);
                       setModalOpen(true);

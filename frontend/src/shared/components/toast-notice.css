@@ -21,6 +21,9 @@
 .toast-notice > span { flex: 1; }
 .toast-notice > button { display: grid; place-items: center; min-width: 28px; min-height: 28px; padding: 4px; border: 0; border-radius: 7px; color: #537d6e; background: transparent; box-shadow: none; }
 .toast-notice > button:hover { color: #195c48; background: #dcefe5; transform: none; box-shadow: none; }
+.toast-notice-error { border-color: #ebc6be; color: #8b3a30; background: #fff3ef; }
+.toast-notice-error > button { color: inherit; }
+.toast-notice-error > button:hover { color: inherit; background: #f7dfd8; }
 @keyframes toast-appear { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 560px) { .toast-notice { top: 84px; right: 16px; left: 16px; max-width: none; } }
 @media (prefers-reduced-motion: reduce) { .toast-notice { animation: none; } }

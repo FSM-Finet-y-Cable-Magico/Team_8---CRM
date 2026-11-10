@@ -65,9 +65,11 @@ test('Instalaciones integra historial real una vez sin convertir reparaciones ni
     scope: '1', prospects: [], pendingActivationProspects: [], workOrders: orders, inventory: [], canComplete: false,
     focusedProspectId: null, onFocusConsumed() {}, onChanged() {},
   })); });
-  const history = tree.root.findAllByType('section').find(node => node.props.className?.includes('installation-completed'));
-  assert.equal(history.findAllByType('tbody').length, 0);
-  await act(async () => history.findByProps({ className: 'installation-history-trigger' }).props.onClick());
+  const trigger = tree.root.findByProps({ className: 'installation-history-trigger' });
+  assert.deepEqual(trigger.children, ['Ver historial de instalaciones']);
+  assert.equal(tree.root.findAllByType('dialog').length, 0);
+  await act(async () => trigger.props.onClick());
+  const history = tree.root.findByType('dialog');
   assert.equal(history.findByType('tbody').findAllByType('tr').length, 1);
   assert.match(JSON.stringify(history.toJSON?.() ?? tree.toJSON()), /Sin servicio correlacionado/);
   assert.equal(calls.length, 1);
