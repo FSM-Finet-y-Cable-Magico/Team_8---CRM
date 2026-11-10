@@ -16,6 +16,7 @@ import { RecordLossDto } from './dto/record-loss.dto';
 import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
+import { UpdateProspectDto } from './dto/update-prospect.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { ProspectsService } from './prospects.service';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
@@ -157,6 +158,12 @@ export class ProspectsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.prospectsService.updateLocation(id, dto, user);
+  }
+
+  @Patch(':id')
+  @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateProspectDto, @CurrentUser() user: AuthUser) {
+    return this.prospectsService.update(id, dto, user);
   }
 
   @Get(':id/install-day-availability')

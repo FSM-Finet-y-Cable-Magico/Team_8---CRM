@@ -3,12 +3,14 @@ import {
   ArrowRight,
   BarChart3,
   Boxes,
+  Building2,
   ChevronDown,
   CircleCheckBig,
   ClipboardList,
   FileClock,
   FileUp,
   House,
+  Mail,
   Map as MapIcon,
   Router,
   Table2,
@@ -185,6 +187,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [commercialNavigation, setCommercialNavigation] = useState(0);
   const [focusedCustomerId, setFocusedCustomerId] = useState<number | null>(null);
+  const [customerPendingView, setCustomerPendingView] = useState<'activation' | null>(null);
+  const [installationView, setInstallationView] = useState<'coordination' | 'agenda' | null>(null);
   const [scope, setScope] = useState('consolidado');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
@@ -374,28 +378,23 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           onOpenSettings={() => setSettingsOpen(true)}
           onLogout={logout}
         />
-        <Modal title="Configuración" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+        <Modal title="Mi perfil" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
           <section className="user-settings-card">
             <header className="user-settings-heading">
-              <span className="profile-avatar profile-avatar-settings" aria-hidden="true">{userInitials || 'U'}</span>
-              <div>
-                <span className="eyebrow">Perfil activo</span>
+              <span className="user-settings-avatar" aria-hidden="true">{userInitials || 'U'}</span>
+              <div className="user-settings-identity">
                 <h3>{user.nombreCompleto}</h3>
-                <p>Información de la sesión actual.</p>
+                <p className="user-settings-role">{user.roles.join(', ') || 'Sin rol asignado'}</p>
               </div>
             </header>
             <dl className="user-settings-details">
               <div>
-                <dt>Correo</dt>
+                <dt><Mail size={17} strokeWidth={1.7} aria-hidden="true" />Correo electrónico</dt>
                 <dd>{user.email ?? 'Sin correo registrado'}</dd>
               </div>
               <div>
-                <dt>Empresa</dt>
+                <dt><Building2 size={17} strokeWidth={1.7} aria-hidden="true" />Empresa</dt>
                 <dd>{currentCompanyName}</dd>
-              </div>
-              <div>
-                <dt>Rol</dt>
-                <dd>{user.roles.join(', ') || 'Sin rol asignado'}</dd>
               </div>
             </dl>
           </section>
@@ -414,6 +413,17 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               billingOverview={billingOverview}
               permissions={permissions}
               onNavigate={setActiveTab}
+              onOpenPendingInstallations={(view) => {
+                if (view === 'agenda') {
+                  if (!canViewInstallations) return;
+                  setInstallationView('agenda');
+                  setActiveTab('installations');
+                } else {
+                  if (!canManageCustomers) return;
+                  setCustomerPendingView('activation');
+                  setActiveTab('customers');
+                }
+              }}
             />
           )}
           {activeTab === 'prospects' && permissions.viewProspects && (
@@ -437,6 +447,10 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel
               scope={scope}
+              requestedView={installationView}
+              onViewConsumed={() => setInstallationView(null)}
+              companies={companies}
+              customers={customers}
               prospects={prospects}
               pendingActivationProspects={pendingActivationProspects}
               workOrders={workOrders}
@@ -449,6 +463,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           )}
           {activeTab === 'customers' && canManageCustomers && (
             <CustomersPanel
+              pendingInstallationsView={customerPendingView}
+              onPendingInstallationsViewConsumed={() => setCustomerPendingView(null)}
               focusedCustomerId={focusedCustomerId}
               onFocusConsumed={() => setFocusedCustomerId(null)}
               customers={customers}

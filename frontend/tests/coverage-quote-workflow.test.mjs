@@ -13,7 +13,7 @@ function load(file,mocks) {
     if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.startsWith('.'))throw Error(name);return require(name);
   },exports);return exports;
 }
-async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
+async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,canEdit=false,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
   t.mock.timers.enable({apis:['setTimeout']});
   const saved={window:globalThis.window,document:globalThis.document,ResizeObserver:globalThis.ResizeObserver};
   const events=new EventTarget();
@@ -55,8 +55,11 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
       if(path.endsWith('/contracts'))return {data:{contrato:{idContrato:20,estado:'Pendiente firma contrato'}}};throw Error(path);
     },patch:async(path,body)=>{calls.push({path,body});
       if(locationFailure)throw Error('QA location conflict');
-      if(!path.endsWith('/location'))throw Error(path);
-      persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion'))};return {data:persisted};
+      if(!path.endsWith('/location') && !/^\/prospects\/\d+$/.test(path))throw Error(path);
+      const wasQuoted=persisted.estadoPipeline==='Cotizacion Enviada';
+      persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion')),
+        ...(wasQuoted?{estadoPipeline:coverageOutside?'No Factible':'Factible',cotizaciones:[]}: {})};
+      return {data:{...persisted,...(wasQuoted?{cobertura:{coberturaComercial:!coverageOutside,planes:coverageOutside?[]:[{idPlan:company,precioAplicable:19990}]}}:{})}};
     }};
   const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
@@ -65,14 +68,15 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     ...mocks,'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
   props={prospect:persisted,plans:[{idPlan:1,idEmpresa:1,activo:true,nombreComercial:'Internet QA 1'},{idPlan:2,idEmpresa:2,activo:true,nombreComercial:'Internet QA 2'},
     {idPlan:3,idEmpresa:company,activo:false,nombreComercial:'Inactivo'},{idPlan:4,idEmpresa:company,activo:true,nombreComercial:'Sin cotizar'}],
-    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:g2&&commercial},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
+    permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:canEdit||(g2&&commercial)},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
   const mount=()=>create(React.createElement(Workflow,props),{createNodeMock:()=>({})});
   await act(async()=>{tree=mount();});
   const tick=async()=>{await act(async()=>{t.mock.timers.tick(350);});await act(async()=>{t.mock.timers.tick(0);});};await tick();
   t.after(async()=>{await act(async()=>tree.unmount());Object.assign(globalThis,saved);});
   return {calls,maps,tiles,notices,tick,get tree(){return tree;},pdfOpened:()=>pdfOpened,
     select:async(index,value)=>{await act(async()=>{tree.root.findAllByType('select')[index].props.onChange({target:{value:String(value)}});});},
-    button:label=>tree.root.findAllByType('button').find(b=>b.children.join('')===label),
+    button:label=>tree.root.findAllByType('button').find(b=>b.props['aria-label']===label || b.children.join('')===label),
+    save:async()=>{await act(async()=>tree.root.findByProps({className:'prospect-edit-form'}).props.onSubmit({preventDefault(){}}));},
     remount:async()=>{await act(async()=>tree.unmount());props={...props,prospect:JSON.parse(JSON.stringify(persisted))};await act(async()=>{tree=mount();});await tick();},
     company:async n=>{props={...props,prospect:{...persisted,idProspecto:11,empresa:{idEmpresa:n},latitud:-33.475,longitud:-70.475}};await act(async()=>tree.update(React.createElement(Workflow,props)));await tick();},
     outside:value=>{coverageOutside=value;},
@@ -85,21 +89,48 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     confirmOrigin:async()=>{await act(async()=>tree.root.findByProps({type:'checkbox'}).props.onChange({target:{checked:true}}));}};
 }
 
+test('el lápiz edita los datos del prospecto y los conserva al reabrir', async t => {
+  const h = await harness(t, { g2: true, requiresReview: false });
+  await act(async () => h.button('Editar prospecto').props.onClick());
+  await h.changeField('Nombre completo', 'Prospecto editado QA');
+  await h.changeField('Teléfono', '+56900000003');
+  await h.changeField('Correo', 'editado@example.invalid');
+  await h.save();
+  assert.ok(h.calls.some(call => call.path === '/prospects/10' && call.body.telefono === '+56900000003'));
+  await h.remount();
+  assert.ok(h.text().includes('Prospecto editado QA'));
+  assert.ok(h.text().includes('+56900000003'));
+  assert.ok(h.text().includes('editado@example.invalid'));
+  assert.ok(!h.text().includes('Pin azul:'));
+});
+
+test('cancelar descarta los datos y el punto editados sin guardar', async t => {
+  const h = await harness(t, { g2: true, requiresReview: false });
+  await act(async () => h.button('Editar prospecto').props.onClick());
+  await h.changeField('Nombre completo', 'Borrador sin guardar');
+  await act(async () => h.maps.at(-1).handlers.click({ latlng: { lat: -33.475, lng: -70.675 } }));
+  await act(async () => h.button('Cancelar').props.onClick());
+  await h.tick();
+  assert.equal(h.calls.filter(call => call.path === '/prospects/10' || call.path.endsWith('/location')).length, 0);
+  assert.equal(h.persisted().latitud, null);
+  assert.ok(!h.text().includes('Borrador sin guardar'));
+});
+
 test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo → cotización → contratación', async t => {
   const h=await harness(t,{g2:true});
   assert.equal(h.button('Aprobar revisión G2').props.disabled,true);
-  assert.equal(h.button('Editar ubicación'),undefined);
+  assert.equal(h.button('Editar prospecto'),undefined);
   assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
   await h.confirmOrigin();
   await act(async()=>{h.button('Aprobar revisión G2').props.onClick();h.button('Aprobar revisión G2').props.onClick();});
   assert.equal(h.calls.filter(c=>c.path.endsWith('/g2-review')).length,1);
   assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
   assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().origenContacto,null);
-  await act(async()=>h.button('Editar ubicación').props.onClick());
+  await act(async()=>h.button('Editar prospecto').props.onClick());
   await h.changeField('Comuna','Comuna QA');await h.changeField('Región','Región QA');
   await h.changeField('Latitud','-33.475');await h.changeField('Longitud','-70.675');
   await act(async()=>h.button('Ubicar punto').props.onClick());
-  await act(async()=>h.button('Guardar ubicación').props.onClick());await h.tick();await h.tick();
+  await h.save();await h.tick();await h.tick();
   assert.equal(h.persisted().comuna,'Comuna QA');assert.equal(h.persisted().region,'Región QA');
   assert.equal(h.persisted().estadoPipeline,'Factible');
   assert.ok(h.calls.some(c=>c.path==='/coverage/check'));
@@ -115,20 +146,21 @@ test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo
 for(const options of [{g2:true,reviewAvailable:false},{g2:true,commercial:false},
   {requiresReview:true,state:'Servicio Activo',reviewAvailable:false}])test('revisión sin evidencia/permisos o histórico no se desbloquea: '+JSON.stringify(options),async t=>{
   const h=await harness(t,options);assert.equal(h.button('Aprobar revisión G2'),undefined);
-  assert.equal(h.button('Editar ubicación'),undefined);assert.equal(h.button('Generar cotización'),undefined);
+  assert.equal(h.button('Editar prospecto'),undefined);assert.equal(h.button('Generar cotización'),undefined);
   assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')||c.path.endsWith('/g2-review')).length,0);
 });
 
 test('rechazo de revisión y coordenadas ausentes no anuncian éxito ni envían escrituras',async t=>{
   const h=await harness(t,{g2:true,reviewFailure:true});await h.confirmOrigin();
   await act(async()=>h.button('Aprobar revisión G2').props.onClick());
-  assert.equal(h.persisted().estadoPipeline,'NUEVO');assert.equal(h.button('Editar ubicación'),undefined);
+  assert.equal(h.persisted().estadoPipeline,'NUEVO');assert.equal(h.button('Editar prospecto'),undefined);
   assert.ok(h.text().includes('QA error'));
 });
 
 test('ubicación ausente tras revisión exige coordenadas y no infiere comuna o región',async t=>{
   const h=await harness(t,{g2:true});await h.confirmOrigin();await act(async()=>h.button('Aprobar revisión G2').props.onClick());
-  await act(async()=>h.button('Editar ubicación').props.onClick());await act(async()=>h.button('Guardar ubicación').props.onClick());
+  await act(async()=>h.button('Editar prospecto').props.onClick());
+  await h.changeField('Dirección','Otra dirección QA');await h.save();
   assert.equal(h.calls.filter(c=>c.path.endsWith('/location')).length,0);
   assert.equal(h.persisted().comuna,null);assert.equal(h.persisted().region,null);
   assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
@@ -183,6 +215,16 @@ test('React: cotizado sin cotización persistida, perdido y NO_FACTIBLE no fabri
   const h=await harness(t,{state:'Cotizacion Enviada'});assert.deepEqual(h.optionIds(1),[]);
   assert.equal(h.button('Confirmar contratación'),undefined);
 });
+test('React: editar después de cotizar invalida esa cotización y permite emitir otra',async t=>{
+  const h=await harness(t,{state:'Cotizacion Enviada',quoted:true,canEdit:true});
+  await act(async()=>h.button('Editar prospecto').props.onClick());
+  await h.changeField('Teléfono','+56900000007');await h.save();
+  assert.equal(h.persisted().estadoPipeline,'Factible');assert.deepEqual(h.persisted().cotizaciones,[]);
+  assert.ok(h.text().includes('La cotización anterior quedó invalidada'));
+  assert.deepEqual(h.optionIds(0),[1]);assert.equal(h.button('Confirmar contratación'),undefined);
+  await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());
+  assert.equal(h.persisted().estadoPipeline,'Cotizacion Enviada');assert.equal(h.persisted().cotizaciones.length,1);
+});
 test('React: contratación conserva comuna, omite ciudad y envía la fecha elegida en el calendario', async t => {
   const h = await harness(t, { state: 'Cotizacion Enviada', quoted: true });
   const inputs = h.tree.root.findAllByType('input').filter(input => input.props.maxLength === 80);
@@ -202,7 +244,7 @@ for(const state of ['Perdido','No Factible'])test('React bloquea '+state,async t
   assert.equal(h.button('Generar cotización'),undefined);
 });
 test('React: actualizar polígonos recalcula factibilidad, persiste el cambio y mantiene el punto guardado',async t=>{
-  const h=await harness(t,{state:'No Factible',outside:true});assert.ok(h.text().includes('Sin cobertura comercial'));
+  const h=await harness(t,{state:'No Factible',outside:true});assert.deepEqual(h.optionIds(0),[]);
   assert.equal(h.maps[0].zones.length,1);assert.equal(h.maps[0].zones[0][0][1],1);
   await act(async()=>h.tiles[0].handlers.tileerror());assert.ok(h.text().includes('No se pudo cargar el mapa base'));
   const before=h.maps[0].pins.slice();h.outside(false);await h.refresh();

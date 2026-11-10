@@ -139,7 +139,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">No fue posible realizar la visita por ausencia del cliente. Está pendiente coordinar una nueva fecha.</p>}
     {tracking.ultimoErrorSanitizado && <p className="alert">{userFacingMessage(tracking.ultimoErrorSanitizado, 'No se pudo actualizar la instalación. Inténtalo nuevamente más tarde.')}</p>}
     <div className="button-row">
-      {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Ver detalle</button>}
+      {(tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Detalle</button>}
       {!completed && (tracking.idOtG3 || tracking.codigoOtG3) && <button type="button" className="secondary" disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>}
       {tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE' && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
     </div>

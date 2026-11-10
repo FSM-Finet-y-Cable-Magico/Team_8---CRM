@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileClock, HandCoins, MapPin, UserRoundPlus, Wifi } from 'lucide-react';
+import { FileClock, HandCoins, MapPin, Pencil, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
@@ -49,9 +49,9 @@ export function ProspectWorkflowPanel({
   const [originConfirmed, setOriginConfirmed] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const reviewPending = useRef(false);
-  const [editingLocation, setEditingLocation] = useState(false);
-  const [savingLocation, setSavingLocation] = useState(false);
-  const [geography, setGeography] = useState({ direccion: '', comuna: '', region: '' });
+  const [editingProspect, setEditingProspect] = useState(false);
+  const [savingProspect, setSavingProspect] = useState(false);
+  const [prospectForm, setProspectForm] = useState({ nombreCompleto: '', telefono: '', email: '', origenContacto: '', direccion: '', comuna: '', region: '' });
   const changedListener = useRef(onChanged);
   changedListener.current = onChanged;
   const currentProspect = synchronized?.source === prospect ? synchronized.updated : prospect;
@@ -67,7 +67,7 @@ export function ProspectWorkflowPanel({
     setSynchronized(null);
     setCoverageSyncError(false);
     setOriginConfirmed(false);
-    setEditingLocation(false);
+    setEditingProspect(false);
     setContractConfirmationDate(localDateValue());
     setContractObservation('');
     setContractComuna(prospect.comuna ?? '');
@@ -93,9 +93,10 @@ export function ProspectWorkflowPanel({
   const pendingContract = prospect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const isWorkflowLocked = isFinal || Boolean(currentProspect.contratos?.length) || currentProspect.idCliente != null;
   const canVerify = permissions.verifyFeasibility || permissions.createProspects;
-  const canEditLocation = permissions.createProspects && !isWorkflowLocked && !isQuoted && FEASIBILITY_STAGES.includes(currentStatus);
+  const canEditProspect = permissions.createProspects && !isWorkflowLocked
+    && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada');
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
-  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked && !editingLocation && !savingLocation);
+  const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage && !coverageSyncError && !isWorkflowLocked && !editingProspect && !savingProspect);
   const planOptions = plans.filter((plan) =>
     plan.activo !== false && plan.idEmpresa === prospect.empresa?.idEmpresa && availablePlanIds?.includes(plan.idPlan),
   );
@@ -119,8 +120,8 @@ export function ProspectWorkflowPanel({
 
   useEffect(() => {
     setCoverageSyncError(false);
-    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted || editingLocation) { setCheckingCoverage(false); return; }
-    if (!hasSavedLocation && !canEditLocation) { setCheckingCoverage(false); setCoverageSyncError(true); return; }
+    if (!canVerify || !coverage || !location || isWorkflowLocked || isQuoted || editingProspect) { setCheckingCoverage(false); return; }
+    if (!hasSavedLocation && !canEditProspect) { setCheckingCoverage(false); setCoverageSyncError(true); return; }
     const nextStatus = coverage.coberturaComercial ? 'Factible' : 'No Factible';
     const zoneId = coverage.microzona?.idZonaPago ?? coverage.zona?.idZonaPago ?? null;
     if (hasSavedLocation && currentStatus === nextStatus && (currentProspect.idZonaPago ?? null) === zoneId) {
@@ -147,7 +148,7 @@ export function ProspectWorkflowPanel({
         .finally(() => { if (!controller.signal.aborted) setCheckingCoverage(false); });
     }, 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, canEditLocation, isWorkflowLocked, isQuoted, editingLocation, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
+  }, [prospect, coverage, location?.latitud, location?.longitud, canVerify, canEditProspect, isWorkflowLocked, isQuoted, editingProspect, hasSavedLocation, currentStatus, currentProspect.idZonaPago]);
 
   async function approveG2Review() {
     if (reviewPending.current || !permissions.createProspects || !currentProspect.revisionOrigenG2Disponible || !originConfirmed) return;
@@ -165,30 +166,54 @@ export function ProspectWorkflowPanel({
     finally { reviewPending.current = false; setReviewing(false); }
   }
 
-  function openLocationEditor() {
-    setGeography({ direccion: currentProspect.direccion ?? '', comuna: currentProspect.comuna ?? '', region: currentProspect.region ?? '' });
-    setEditingLocation(true);
+  function openProspectEditor() {
+    setProspectForm({ nombreCompleto: currentProspect.nombreCompleto ?? '', telefono: currentProspect.telefono ?? '',
+      email: currentProspect.email ?? '', origenContacto: currentProspect.origenContacto ?? '',
+      direccion: currentProspect.direccion ?? '', comuna: currentProspect.comuna ?? '', region: currentProspect.region ?? '' });
+    setEditingProspect(true);
+    setStatus('');
   }
 
-  async function saveLocation() {
-    if (!canEditLocation || savingLocation) return;
-    if (!geography.direccion.trim() || !location || !Number.isFinite(location.latitud) || !Number.isFinite(location.longitud)
-      || Math.abs(location.latitud) > 90 || Math.abs(location.longitud) > 180) {
-      setStatus('Indica una dirección y coordenadas válidas. Comuna y región deben registrarse explícitamente.');
+  function cancelEditing() {
+    setLocation(currentProspect.latitud != null && currentProspect.longitud != null
+      ? { latitud: currentProspect.latitud, longitud: currentProspect.longitud } : null);
+    setCoverage(null);
+    setEditingProspect(false);
+    setStatus('');
+  }
+
+  async function saveProspect() {
+    if (!canEditProspect || savingProspect) return;
+    const addressChanged = prospectForm.direccion.trim() !== (currentProspect.direccion ?? '')
+      || prospectForm.comuna.trim() !== (currentProspect.comuna ?? '') || prospectForm.region.trim() !== (currentProspect.region ?? '');
+    if ((addressChanged && !location) || (location && (!Number.isFinite(location.latitud) || !Number.isFinite(location.longitud)
+      || Math.abs(location.latitud) > 90 || Math.abs(location.longitud) > 180))) {
+      setStatus('Selecciona en el mapa la ubicación de la dirección.');
       setStatusIsError(true); return;
     }
-    setSavingLocation(true); setStatusIsError(false);
-    const { latitud, longitud } = location;
+    setSavingProspect(true); setStatusIsError(false);
     try {
-      const { data } = await api.patch<Prospect & { cobertura?: CoverageResult }>(`/prospects/${prospect.idProspecto}/location`, {
-        ubicacion: { latitud, longitud }, direccion: geography.direccion.trim(), comuna: geography.comuna.trim(), region: geography.region.trim(),
+      const { data } = await api.patch<Prospect & { cobertura?: CoverageResult }>(`/prospects/${prospect.idProspecto}`, {
+        nombreCompleto: prospectForm.nombreCompleto.trim(), telefono: prospectForm.telefono.trim(), email: prospectForm.email.trim(),
+        origenContacto: prospectForm.origenContacto.trim(),
+        ...(location || addressChanged ? { direccion: prospectForm.direccion.trim(), comuna: prospectForm.comuna.trim(), region: prospectForm.region.trim() } : {}),
+        ...(location ? { ubicacion: location } : {}),
       });
-      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data } });
-      setLocation({ latitud, longitud }); setCoverage(data.cobertura ?? null); setCoverageSyncError(false);
-      setEditingLocation(false); setStatus('Ubicación registrada. La factibilidad se determina mediante cobertura comercial.');
+      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data,
+        ...(currentStatus === 'Cotizacion Enviada' && data.estadoPipeline !== 'Cotizacion Enviada' ? { cotizaciones: [] } : {}) } });
+      setCoverage(data.cobertura ?? null); setCoverageSyncError(false);
+      setQuotePlanId(''); setContractPlanId('');
+      setEditingProspect(false);
+      setStatus(currentStatus === 'Cotizacion Enviada'
+        ? data.estadoPipeline === 'Cotizacion Enviada'
+          ? 'No hubo cambios; la cotización sigue vigente.'
+          : data.estadoPipeline === 'Factible'
+          ? 'Datos guardados. La cotización anterior quedó invalidada; puedes generar una nueva.'
+          : 'Datos guardados. La nueva ubicación no tiene cobertura comercial factible.'
+        : 'Datos del prospecto guardados.');
       changedListener.current();
     } catch (error) { setStatus(apiErrorMessage(error)); setStatusIsError(true); }
-    finally { setSavingLocation(false); }
+    finally { setSavingProspect(false); }
   }
 
   async function runAction(action: () => Promise<unknown>, success: string, closeAfterSuccess = false) {
@@ -282,8 +307,10 @@ export function ProspectWorkflowPanel({
           <span className="prospect-avatar" aria-hidden="true">
             <UserRoundPlus size={22} strokeWidth={1.8} />
           </span>
-          <div>
-            <h3>{prospect.nombreCompleto}</h3>
+          <div className="prospect-identity">
+            <div className="prospect-name-row"><h3>{currentProspect.nombreCompleto}</h3>
+              {canEditProspect && !editingProspect && <button type="button" className="prospect-edit-button" aria-label="Editar prospecto" title="Editar prospecto" onClick={openProspectEditor}><Pencil size={16} aria-hidden="true" /></button>}
+            </div>
             <p>{prospect.rut ?? 'RUT no registrado'}</p>
           </div>
           <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
@@ -291,18 +318,18 @@ export function ProspectWorkflowPanel({
         {requiresReview && (
           <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
         )}
-        <dl className="prospect-overview-data">
+        {!editingProspect && <dl className="prospect-overview-data">
           <div>
             <dt>Teléfono</dt>
-            <dd>{prospect.telefono ?? 'No registrado'}</dd>
+            <dd>{currentProspect.telefono ?? 'No registrado'}</dd>
           </div>
           <div>
             <dt>Correo</dt>
-            <dd>{prospect.email ?? 'No registrado'}</dd>
+            <dd>{currentProspect.email ?? 'No registrado'}</dd>
           </div>
           <div>
             <dt>Origen</dt>
-            <dd>{prospect.origenContacto ?? 'No registrado'}</dd>
+            <dd>{currentProspect.origenContacto ?? 'No registrado'}</dd>
           </div>
           <div>
             <dt>Empresa</dt>
@@ -310,9 +337,21 @@ export function ProspectWorkflowPanel({
           </div>
           <div>
             <dt>Dirección</dt>
-            <dd>{[prospect.direccion, prospect.comuna, prospect.region].filter(Boolean).join(', ') || 'Sin dirección registrada'}</dd>
+            <dd>{[currentProspect.direccion, currentProspect.comuna, currentProspect.region].filter(Boolean).join(', ') || 'Sin dirección registrada'}</dd>
           </div>
-        </dl>
+        </dl>}
+        {editingProspect && <form className="prospect-edit-form" onSubmit={event => { event.preventDefault(); void saveProspect(); }}>
+          <fieldset disabled={savingProspect}>
+            <label className="prospect-field-wide">Nombre completo<input required minLength={5} maxLength={120} value={prospectForm.nombreCompleto} onChange={event => setProspectForm({ ...prospectForm, nombreCompleto: event.target.value })} /></label>
+            <label>Teléfono<input required type="tel" pattern="\+569[0-9]{8}" placeholder="+56912345678" value={prospectForm.telefono} onChange={event => setProspectForm({ ...prospectForm, telefono: event.target.value })} /></label>
+            <label>Correo<input type="email" maxLength={120} value={prospectForm.email} onChange={event => setProspectForm({ ...prospectForm, email: event.target.value })} /></label>
+            <label>Origen de contacto<input maxLength={40} value={prospectForm.origenContacto} onChange={event => setProspectForm({ ...prospectForm, origenContacto: event.target.value })} /></label>
+            <label className="prospect-field-wide">Dirección<input required minLength={8} maxLength={200} value={prospectForm.direccion} onChange={event => setProspectForm({ ...prospectForm, direccion: event.target.value })} /></label>
+            <label>Comuna<input maxLength={80} value={prospectForm.comuna} onChange={event => setProspectForm({ ...prospectForm, comuna: event.target.value })} /></label>
+            <label>Región<input maxLength={80} value={prospectForm.region} onChange={event => setProspectForm({ ...prospectForm, region: event.target.value })} /></label>
+          </fieldset>
+          <div className="prospect-edit-actions"><button type="button" className="secondary" disabled={savingProspect} onClick={cancelEditing}>Cancelar</button><button type="submit" disabled={savingProspect}>{savingProspect ? 'Guardando…' : 'Guardar cambios'}</button></div>
+        </form>}
       </section>
 
       {requiresReview && <section className="prospect-action-card" aria-label="Revisión comercial">
@@ -324,31 +363,20 @@ export function ProspectWorkflowPanel({
         </div>}
       </section>}
 
-      {canEditLocation && <section className="prospect-action-card" aria-label="Datos de ubicación">
-        {!editingLocation ? <button type="button" onClick={openLocationEditor}>Editar ubicación</button> : <div className="stack">
-          <label>Dirección<input maxLength={200} value={geography.direccion} onChange={event => setGeography({ ...geography, direccion: event.target.value })} /></label>
-          <label>Comuna<input maxLength={80} value={geography.comuna} onChange={event => setGeography({ ...geography, comuna: event.target.value })} /></label>
-          <label>Región<input maxLength={80} value={geography.region} onChange={event => setGeography({ ...geography, region: event.target.value })} /></label>
-          <p>Selecciona el domicilio en el mapa o utiliza Ingresar coordenadas antes de guardar.</p>
-          <p>No se deducen comuna ni región de las coordenadas. No se modifican contratos firmados desde este formulario.</p>
-          <button type="button" disabled={savingLocation} onClick={() => void saveLocation()}>Guardar ubicación</button>
-          <button type="button" disabled={savingLocation} onClick={() => setEditingLocation(false)}>Cancelar edición de ubicación</button>
-        </div>}
-      </section>}
-
       <div className="workflow-grid prospect-action-grid">
         {(canVerify || permissions.generateQuotes || permissions.contractPlans) && prospect.empresa && (
-          <section className="prospect-action-card prospect-coverage-card">
+          <section className="prospect-coverage-card">
             <CoveragePicker
               key={prospect.idProspecto}
-              presentation={canEditLocation ? 'editor' : 'summary'}
+              presentation={canEditProspect ? 'editor' : 'summary'}
+              minimal
               idEmpresa={prospect.empresa.idEmpresa}
-              direccion={[editingLocation ? geography.direccion : currentProspect.direccion, editingLocation ? geography.comuna : currentProspect.comuna, editingLocation ? geography.region : currentProspect.region, 'Chile'].filter(Boolean).join(', ')}
+              direccion={[editingProspect ? prospectForm.direccion : currentProspect.direccion, editingProspect ? prospectForm.comuna : currentProspect.comuna, editingProspect ? prospectForm.region : currentProspect.region, 'Chile'].filter(Boolean).join(', ')}
               value={location}
               onChange={setLocation}
               onResult={setCoverage}
-              autoGeocode={Boolean(canEditLocation && !editingLocation && currentProspect.direccion && currentProspect.comuna && currentProspect.region)}
-              disabled={!canEditLocation}
+              autoGeocode={Boolean(canEditProspect && !editingProspect && currentProspect.direccion && currentProspect.comuna && currentProspect.region)}
+              disabled={!canEditProspect || savingProspect}
             />
             {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>

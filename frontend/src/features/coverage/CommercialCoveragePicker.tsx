@@ -33,7 +33,7 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor' }: {
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
@@ -44,6 +44,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   // Only enabled after the parent confirms a complete, finished address edit.
   autoGeocode?: boolean;
   presentation?: 'editor' | 'status' | 'summary';
+  minimal?: boolean;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
   const [coverage, setResult] = useState<(CoverageResult & { queryKey: string }) | null>(null);
@@ -285,6 +286,23 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     }, presentation === 'editor' ? 0 : 700);
     return () => window.clearTimeout(timer);
   }, [autoGeocode, disabled, value, version, geocodeAddress, presentation]);
+
+  if (minimal) return <section className="coverage-minimal" aria-label="Consulta de cobertura comercial" aria-busy={checking}>
+    <div className="coverage-heading"><strong>Cobertura comercial</strong>
+      {!disabled && <button type="button" className="secondary compact" disabled={geocoding} onClick={() => void geocodeAddress()}>{geocoding ? 'Ubicando…' : 'Ubicar dirección'}</button>}
+    </div>
+    <div ref={container} className="coverage-map" aria-label="Mapa de ubicación del prospecto" />
+    {mapWarning && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base.</p>}
+    {(error || zonesError) && <p role="alert">{error || zonesError}</p>}
+    {geocodeMessage && <p role="status">{geocodeMessage}</p>}
+    {!disabled && <details className="coverage-manual-coordinates"><summary>Ingresar coordenadas</summary>
+      <div className="coverage-coordinates">
+        <label>Latitud<input type="text" inputMode="decimal" value={coordinates.latitud} placeholder="-33.57" onChange={event => setCoordinates({ ...coordinates, latitud: event.target.value })} /></label>
+        <label>Longitud<input type="text" inputMode="decimal" value={coordinates.longitud} placeholder="-70.61" onChange={event => setCoordinates({ ...coordinates, longitud: event.target.value })} /></label>
+      </div>
+      <button type="button" className="secondary compact" onClick={applyCoordinates}>Ubicar punto</button>
+    </details>}
+  </section>;
 
   if (presentation !== 'editor') {
     const showStatus = Boolean(value || autoGeocode);
