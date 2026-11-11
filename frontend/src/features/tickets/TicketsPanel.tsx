@@ -5,16 +5,19 @@ import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { StatusBadge } from '../../shared/components';
 import { TicketManagementModal } from './TicketManagementModal';
+import { ticketAttentionAvailability } from './ticket-presentation';
 
 export function TicketsPanel({
   tickets,
   categories,
   permissions,
+  showCatalogDetails = false,
   onChanged,
 }: {
   tickets: Ticket[];
   categories: TicketCategory[];
   permissions: DashboardPermissions;
+  showCatalogDetails?: boolean;
   users?: UserRow[];
   onChanged: () => void;
 }) {
@@ -27,8 +30,8 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
-  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion)
-    && (category.tipo === 'ATENCION' || (category.tipo == null && category.tipoDisponible !== true)));
+  const catalog = ticketAttentionAvailability(categories);
+  const attentionCategories = catalog.options;
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -160,7 +163,13 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
-        {attentionCategories.length < 7 && <p className="inline-status" role="status">Hay categorías oficiales no disponibles en el catálogo. Solicita su revisión al administrador; no se sustituirán por categorías técnicas.</p>}
+        {!catalog.complete && <section className="inline-status" role="status" aria-label="Estado del catálogo de atención">
+          <p>Hay categorías oficiales no disponibles en el catálogo. Solicita su revisión al administrador; no se sustituirán por categorías técnicas.</p>
+          <p>Disponibles: {attentionCategories.length} de 7. Pendientes: {catalog.issues.map(issue => issue.name).join(', ')}.</p>
+          {showCatalogDetails && <details><summary>Revisar catálogo de atención</summary><ul>{catalog.issues.map(issue => <li key={issue.name}>
+            <strong>{issue.name}</strong>: {issue.reason}{issue.rows.length ? ` (${issue.rows.map(row => `${row.nombre}; ID ${row.idCategoria}; ${row.tipoDisponible === false ? 'sin clasificación de tipo' : row.tipo ?? 'tipo no informado'}`).join(' / ')})` : ''}
+          </li>)}</ul><p>La revisión del catálogo no modifica tickets, identificadores ni tiempos de atención.</p></details>}
+        </section>}
         <label>
           Prioridad
           <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>

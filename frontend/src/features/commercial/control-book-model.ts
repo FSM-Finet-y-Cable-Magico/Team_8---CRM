@@ -45,7 +45,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 export const readable = (value: string | null | undefined) => value ? STATUS_LABELS[value] ?? value.replace(/_/g, ' ').toLocaleLowerCase('es-CL') : '—';
 export const ACTION_LABELS: Record<ActionName, string> = {
-  event: 'Registrar contacto', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
+  event: 'Registrar gestión de cobranza', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
 };
 export function actionDisabledReason(action: ActionName, row: ControlRow) {

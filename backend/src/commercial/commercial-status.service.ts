@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CLOSED_INVOICE_STATES } from '../billing/invoice-balance';
 
 export const COMMERCIAL_STATUSES = [
   'SIN_DATOS_FINANCIEROS',
@@ -13,6 +14,7 @@ export const COMMERCIAL_STATUSES = [
 
 export type CommercialStatusInput = {
   monto: number | null;
+  estadoDocumento?: string;
   totalPagado: number;
   fechaVencimiento: Date;
   nuevaFechaProrroga?: Date | null;
@@ -31,6 +33,13 @@ export class CommercialStatusService {
     const fechaEfectiva = input.nuevaFechaProrroga && input.nuevaFechaProrroga > input.fechaVencimiento
       ? this.dateOnly(input.nuevaFechaProrroga)
       : fechaOriginal;
+
+    if (input.estadoDocumento && CLOSED_INVOICE_STATES.includes(input.estadoDocumento)) {
+      return { montoDocumento: input.monto, totalPagado: this.money(input.totalPagado),
+        saldoPendiente: 0, saldoFavor: input.monto === null ? null : this.money(Math.max(0, input.totalPagado - input.monto)),
+        fechaVencimientoEfectiva: fechaEfectiva, diasAtraso: 0, estadoComercial: 'AL_DIA' as const,
+        accionSugerida: 'Documento cerrado; sin deuda exigible' };
+    }
 
     if (input.monto === null || !Number.isFinite(input.monto)) {
       return {

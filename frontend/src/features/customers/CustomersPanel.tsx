@@ -31,10 +31,11 @@ import {
   userFacingMessage,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
-import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
+import { HistoryBox, Modal, MonitoringStatusView, TablePagination } from '../../shared/components';
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
 import { CustomerPendingInstallations } from './CustomerPendingInstallations';
 import { CustomerProfileForm, type CustomerProfileFields } from './CustomerProfileForm';
+import { CustomerStatusBadge, customerStatusPresentation } from './CustomerStatusBadge';
 import {
   CustomerServicesRequestGate,
   type CustomerServicesLoadState,
@@ -841,7 +842,7 @@ export function CustomersPanel({
           <span>Clientes activos: {visibleCustomers.length}</span>
           <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
-            {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
+            {customerStatusOptions.map((state) => <option key={state} value={state}>{customerStatusPresentation(formatWorkOrderValue(state)).label}</option>)}
           </select>
         </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
@@ -865,7 +866,7 @@ export function CustomersPanel({
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
                   <td>{customerCompanyLabel(customer)}</td>
-                  <td><span className="customer-current-status">{formatWorkOrderValue(customer.estado)}</span></td>
+                  <td><span className="customer-current-status"><CustomerStatusBadge value={formatWorkOrderValue(customer.estado)} compact/></span></td>
                   <td>{customer.origenContacto ?? '-'}</td>
                   <td>{customerMainPlan(customer)}</td>
                   <td>{customer.telefono ?? customer.email ?? '-'}</td>
@@ -904,7 +905,7 @@ export function CustomersPanel({
                   </h3>
                   <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
                 </div>
-                <StatusBadge value={selectedCustomer.estado} />
+                <CustomerStatusBadge value={selectedCustomer.estado} />
               </header>
               <dl className="customer-profile-data">
                 <div>

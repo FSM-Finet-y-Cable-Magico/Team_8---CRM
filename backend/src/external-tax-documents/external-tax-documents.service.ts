@@ -19,6 +19,8 @@ const DOCUMENT_INCLUDE = {
 type RelationIds = Pick<CreateExternalTaxDocumentDto, 'idCliente' | 'idContrato' | 'idFactura' | 'idCargoAdicional'>;
 type MoneyFields = Pick<CreateExternalTaxDocumentDto, 'montoNeto' | 'montoExento' | 'iva' | 'montoTotal'>;
 
+class DuplicateDocumentConflict extends ConflictException {}
+
 @Injectable()
 export class ExternalTaxDocumentsService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
@@ -26,47 +28,49 @@ export class ExternalTaxDocumentsService {
   async create(dto: CreateExternalTaxDocumentDto, user: AuthUser) {
     this.assertAdministrator(user);
     const idEmpresa = this.resolveWriteCompany(dto.idEmpresa, user);
-    await this.assertCompanyExists(idEmpresa);
     const identity = this.identity(dto.tipoDocumento, dto.emisorProveedor, dto.folioONumero);
     const fechaEmision = this.dateOnly(dto.fechaEmision, 'fechaEmision');
     const urlDocumento = this.safeUrl(dto.urlDocumento);
     this.validateMoney(dto);
-    await this.validateRelations(idEmpresa, dto);
-    await this.assertNotDuplicate(idEmpresa, identity, undefined, user);
 
     try {
-      const document = await this.prisma.documentoTributarioExterno.create({
-        data: {
-          idEmpresa,
-          ...identity,
-          fechaEmision,
-          montoNeto: this.decimal(dto.montoNeto),
-          montoExento: this.decimal(dto.montoExento),
-          iva: this.decimal(dto.iva),
-          montoTotal: this.decimal(dto.montoTotal)!,
-          urlDocumento,
-          referenciaExterna: this.optionalText(dto.referenciaExterna),
-          estado: dto.estado ?? 'REGISTRADO',
-          fuente: 'EXTERNO_MANUAL',
-          idCliente: dto.idCliente,
-          idContrato: dto.idContrato,
-          idFactura: dto.idFactura,
-          idCargoAdicional: dto.idCargoAdicional,
-          idUsuarioRegistro: user.idUsuario,
-        },
-        include: DOCUMENT_INCLUDE,
+      return await this.prisma.$transaction(async (tx) => {
+        await this.assertCompanyExists(idEmpresa, tx);
+        await this.validateRelations(idEmpresa, dto, tx);
+        await this.assertNotDuplicate(idEmpresa, identity, undefined, tx);
+        const document = await tx.documentoTributarioExterno.create({
+          data: {
+            idEmpresa,
+            ...identity,
+            fechaEmision,
+            montoNeto: this.decimal(dto.montoNeto),
+            montoExento: this.decimal(dto.montoExento),
+            iva: this.decimal(dto.iva),
+            montoTotal: this.decimal(dto.montoTotal)!,
+            urlDocumento,
+            referenciaExterna: this.optionalText(dto.referenciaExterna),
+            estado: dto.estado ?? 'REGISTRADO',
+            fuente: 'EXTERNO_MANUAL',
+            idCliente: dto.idCliente,
+            idContrato: dto.idContrato,
+            idFactura: dto.idFactura,
+            idCargoAdicional: dto.idCargoAdicional,
+            idUsuarioRegistro: user.idUsuario,
+          },
+          include: DOCUMENT_INCLUDE,
+        });
+        await this.audit.record({
+          idUsuario: user.idUsuario,
+          accion: 'CREAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
+          entidadAfectada: 'documento_tributario_externo',
+          idEntidadAfectada: document.idDocumento,
+          valorNuevo: this.auditValue(document),
+        }, tx);
+        if (dto.idFactura) await this.auditLink(document.idDocumento, idEmpresa, dto.idFactura, user, tx);
+        return document;
       });
-      await this.audit.record({
-        idUsuario: user.idUsuario,
-        accion: 'CREAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
-        entidadAfectada: 'documento_tributario_externo',
-        idEntidadAfectada: document.idDocumento,
-        valorNuevo: this.auditValue(document),
-      });
-      if (dto.idFactura) await this.auditLink(document.idDocumento, idEmpresa, dto.idFactura, user);
-      return document;
     } catch (error) {
-      if (this.isUniqueConflict(error)) {
+      if (this.isUniqueConflict(error) || error instanceof DuplicateDocumentConflict) {
         await this.auditDuplicate(idEmpresa, identity, user);
         throw new ConflictException('Ya existe un documento con el mismo tipo, emisor y folio en esta empresa');
       }
@@ -109,66 +113,68 @@ export class ExternalTaxDocumentsService {
 
   async update(idDocumento: number, dto: UpdateExternalTaxDocumentDto, user: AuthUser) {
     this.assertAdministrator(user);
-    const current = await this.prisma.documentoTributarioExterno.findUnique({ where: { idDocumento }, include: DOCUMENT_INCLUDE });
-    if (!current) throw new NotFoundException('Documento tributario externo no encontrado');
-    this.assertCompanyAccess(current.idEmpresa, user);
-
-    const values = {
-      tipoDocumento: dto.tipoDocumento ?? current.tipoDocumento,
-      folioONumero: dto.folioONumero ?? current.folioONumero,
-      emisorProveedor: dto.emisorProveedor ?? current.emisorProveedor,
-      fechaEmision: dto.fechaEmision ?? this.dateString(current.fechaEmision),
-      montoNeto: dto.montoNeto === undefined ? this.numberOrUndefined(current.montoNeto) : dto.montoNeto ?? undefined,
-      montoExento: dto.montoExento === undefined ? this.numberOrUndefined(current.montoExento) : dto.montoExento ?? undefined,
-      iva: dto.iva === undefined ? this.numberOrUndefined(current.iva) : dto.iva ?? undefined,
-      montoTotal: dto.montoTotal ?? Number(current.montoTotal),
-    };
-    const identity = this.identity(values.tipoDocumento, values.emisorProveedor, values.folioONumero);
-    this.validateMoney(values);
-    await this.assertNotDuplicate(current.idEmpresa, identity, idDocumento, user);
-
-    const relations: RelationIds = {
-      idCliente: dto.idCliente === undefined ? current.idCliente ?? undefined : dto.idCliente ?? undefined,
-      idContrato: dto.idContrato === undefined ? current.idContrato ?? undefined : dto.idContrato ?? undefined,
-      idFactura: dto.idFactura === undefined ? current.idFactura ?? undefined : dto.idFactura ?? undefined,
-      idCargoAdicional: dto.idCargoAdicional === undefined ? current.idCargoAdicional ?? undefined : dto.idCargoAdicional ?? undefined,
-    };
-    await this.validateRelations(current.idEmpresa, relations);
-    const urlDocumento = dto.urlDocumento === undefined ? current.urlDocumento : this.safeUrl(dto.urlDocumento ?? undefined);
-
+    let duplicate: { idEmpresa: number; identity: ReturnType<ExternalTaxDocumentsService['identity']> } | undefined;
     try {
-      const updated = await this.prisma.documentoTributarioExterno.update({
-        where: { idDocumento },
-        data: {
-          ...identity,
-          fechaEmision: this.dateOnly(values.fechaEmision, 'fechaEmision'),
-          montoNeto: this.decimal(values.montoNeto),
-          montoExento: this.decimal(values.montoExento),
-          iva: this.decimal(values.iva),
-          montoTotal: this.decimal(values.montoTotal)!,
-          urlDocumento,
-          referenciaExterna: dto.referenciaExterna === undefined ? current.referenciaExterna : this.optionalText(dto.referenciaExterna ?? undefined),
-          estado: dto.estado ?? current.estado,
-          idCliente: dto.idCliente === undefined ? current.idCliente : dto.idCliente,
-          idContrato: dto.idContrato === undefined ? current.idContrato : dto.idContrato,
-          idFactura: dto.idFactura === undefined ? current.idFactura : dto.idFactura,
-          idCargoAdicional: dto.idCargoAdicional === undefined ? current.idCargoAdicional : dto.idCargoAdicional,
-        },
-        include: DOCUMENT_INCLUDE,
+      return await this.prisma.$transaction(async (tx) => {
+        const current = await this.lockDocument(idDocumento, user, tx);
+
+        const values = {
+          tipoDocumento: dto.tipoDocumento ?? current.tipoDocumento,
+          folioONumero: dto.folioONumero ?? current.folioONumero,
+          emisorProveedor: dto.emisorProveedor ?? current.emisorProveedor,
+          fechaEmision: dto.fechaEmision ?? this.dateString(current.fechaEmision),
+          montoNeto: dto.montoNeto === undefined ? this.numberOrUndefined(current.montoNeto) : dto.montoNeto ?? undefined,
+          montoExento: dto.montoExento === undefined ? this.numberOrUndefined(current.montoExento) : dto.montoExento ?? undefined,
+          iva: dto.iva === undefined ? this.numberOrUndefined(current.iva) : dto.iva ?? undefined,
+          montoTotal: dto.montoTotal ?? Number(current.montoTotal),
+        };
+        const identity = this.identity(values.tipoDocumento, values.emisorProveedor, values.folioONumero);
+        this.validateMoney(values);
+        duplicate = { idEmpresa: current.idEmpresa, identity };
+        await this.assertNotDuplicate(current.idEmpresa, identity, idDocumento, tx);
+
+        const relations: RelationIds = {
+          idCliente: dto.idCliente === undefined ? current.idCliente ?? undefined : dto.idCliente ?? undefined,
+          idContrato: dto.idContrato === undefined ? current.idContrato ?? undefined : dto.idContrato ?? undefined,
+          idFactura: dto.idFactura === undefined ? current.idFactura ?? undefined : dto.idFactura ?? undefined,
+          idCargoAdicional: dto.idCargoAdicional === undefined ? current.idCargoAdicional ?? undefined : dto.idCargoAdicional ?? undefined,
+        };
+        await this.validateRelations(current.idEmpresa, relations, tx);
+        const urlDocumento = dto.urlDocumento === undefined ? current.urlDocumento : this.safeUrl(dto.urlDocumento ?? undefined);
+
+        const updated = await tx.documentoTributarioExterno.update({
+          where: { idDocumento },
+          data: {
+            ...identity,
+            fechaEmision: this.dateOnly(values.fechaEmision, 'fechaEmision'),
+            montoNeto: this.decimal(values.montoNeto),
+            montoExento: this.decimal(values.montoExento),
+            iva: this.decimal(values.iva),
+            montoTotal: this.decimal(values.montoTotal)!,
+            urlDocumento,
+            referenciaExterna: dto.referenciaExterna === undefined ? current.referenciaExterna : this.optionalText(dto.referenciaExterna ?? undefined),
+            estado: dto.estado ?? current.estado,
+            idCliente: dto.idCliente === undefined ? current.idCliente : dto.idCliente,
+            idContrato: dto.idContrato === undefined ? current.idContrato : dto.idContrato,
+            idFactura: dto.idFactura === undefined ? current.idFactura : dto.idFactura,
+            idCargoAdicional: dto.idCargoAdicional === undefined ? current.idCargoAdicional : dto.idCargoAdicional,
+          },
+          include: DOCUMENT_INCLUDE,
+        });
+        await this.audit.record({
+          idUsuario: user.idUsuario,
+          accion: 'ACTUALIZAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
+          entidadAfectada: 'documento_tributario_externo',
+          idEntidadAfectada: idDocumento,
+          valorAnterior: this.auditValue(current),
+          valorNuevo: this.auditValue(updated),
+        }, tx);
+        if (updated.idFactura && updated.idFactura !== current.idFactura) await this.auditLink(idDocumento, current.idEmpresa, updated.idFactura, user, tx);
+        return updated;
       });
-      await this.audit.record({
-        idUsuario: user.idUsuario,
-        accion: 'ACTUALIZAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
-        entidadAfectada: 'documento_tributario_externo',
-        idEntidadAfectada: idDocumento,
-        valorAnterior: this.auditValue(current),
-        valorNuevo: this.auditValue(updated),
-      });
-      if (updated.idFactura && updated.idFactura !== current.idFactura) await this.auditLink(idDocumento, current.idEmpresa, updated.idFactura, user);
-      return updated;
     } catch (error) {
-      if (this.isUniqueConflict(error)) {
-        await this.auditDuplicate(current.idEmpresa, identity, user);
+      if (duplicate && (this.isUniqueConflict(error) || error instanceof DuplicateDocumentConflict)) {
+        await this.auditDuplicate(duplicate.idEmpresa, duplicate.identity, user);
         throw new ConflictException('Ya existe un documento con el mismo tipo, emisor y folio en esta empresa');
       }
       throw error;
@@ -177,20 +183,31 @@ export class ExternalTaxDocumentsService {
 
   async deactivate(idDocumento: number, user: AuthUser) {
     this.assertAdministrator(user);
-    const current = await this.prisma.documentoTributarioExterno.findUnique({ where: { idDocumento }, include: DOCUMENT_INCLUDE });
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.lockDocument(idDocumento, user, tx);
+      if (current.estado === 'ANULADO') return current;
+      const updated = await tx.documentoTributarioExterno.update({ where: { idDocumento }, data: { estado: 'ANULADO' }, include: DOCUMENT_INCLUDE });
+      await this.audit.record({
+        idUsuario: user.idUsuario,
+        accion: 'DESACTIVAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
+        entidadAfectada: 'documento_tributario_externo',
+        idEntidadAfectada: idDocumento,
+        valorAnterior: { estado: current.estado },
+        valorNuevo: { estado: updated.estado },
+      }, tx);
+      return updated;
+    });
+  }
+
+  private async lockDocument(idDocumento: number, user: AuthUser, tx: Prisma.TransactionClient) {
+    const authorized = await tx.documentoTributarioExterno.findUnique({ where: { idDocumento }, include: DOCUMENT_INCLUDE });
+    if (!authorized) throw new NotFoundException('Documento tributario externo no encontrado');
+    this.assertCompanyAccess(authorized.idEmpresa, user);
+    await tx.$queryRaw`SELECT id_documento FROM documento_tributario_externo WHERE id_documento = ${idDocumento} AND id_empresa = ${authorized.idEmpresa} FOR UPDATE`;
+    const current = await tx.documentoTributarioExterno.findUnique({ where: { idDocumento }, include: DOCUMENT_INCLUDE });
     if (!current) throw new NotFoundException('Documento tributario externo no encontrado');
     this.assertCompanyAccess(current.idEmpresa, user);
-    if (current.estado === 'ANULADO') return current;
-    const updated = await this.prisma.documentoTributarioExterno.update({ where: { idDocumento }, data: { estado: 'ANULADO' }, include: DOCUMENT_INCLUDE });
-    await this.audit.record({
-      idUsuario: user.idUsuario,
-      accion: 'DESACTIVAR_DOCUMENTO_TRIBUTARIO_EXTERNO',
-      entidadAfectada: 'documento_tributario_externo',
-      idEntidadAfectada: idDocumento,
-      valorAnterior: { estado: current.estado },
-      valorNuevo: { estado: updated.estado },
-    });
-    return updated;
+    return current;
   }
 
   private listWhere(query: ExternalTaxDocumentQueryDto, user: AuthUser): Prisma.DocumentoTributarioExternoWhereInput {
@@ -221,23 +238,29 @@ export class ExternalTaxDocumentsService {
     };
   }
 
-  private async validateRelations(idEmpresa: number, ids: RelationIds) {
+  private async validateRelations(idEmpresa: number, ids: RelationIds, tx: Prisma.TransactionClient) {
+    for (const field of ['idCliente', 'idContrato', 'idFactura', 'idCargoAdicional'] as const) {
+      const id = ids[field];
+      if (id != null && (!Number.isSafeInteger(id) || id < 1 || id > 2147483647)) {
+        throw new BadRequestException(`${field} debe ser un ID entero positivo del CRM; no un folio ni una referencia bancaria`);
+      }
+    }
     const [customer, contract, invoice, charge] = await Promise.all([
-      ids.idCliente ? this.prisma.cliente.findUnique({ where: { idCliente: ids.idCliente }, select: { idCliente: true, idEmpresa: true } }) : null,
-      ids.idContrato ? this.prisma.contrato.findUnique({ where: { idContrato: ids.idContrato }, select: { idContrato: true, idEmpresa: true, idCliente: true } }) : null,
-      ids.idFactura ? this.prisma.factura.findUnique({ where: { idFactura: ids.idFactura }, select: { idFactura: true, idContrato: true, contrato: { select: { idEmpresa: true, idCliente: true } } } }) : null,
-      ids.idCargoAdicional ? this.prisma.cargoAdicional.findUnique({ where: { idCargo: ids.idCargoAdicional }, select: { idCargo: true, idEmpresa: true, idCliente: true, idContrato: true } }) : null,
+      ids.idCliente ? tx.cliente.findUnique({ where: { idCliente: ids.idCliente }, select: { idCliente: true, idEmpresa: true } }) : null,
+      ids.idContrato ? tx.contrato.findUnique({ where: { idContrato: ids.idContrato }, select: { idContrato: true, idEmpresa: true, idCliente: true } }) : null,
+      ids.idFactura ? tx.factura.findUnique({ where: { idFactura: ids.idFactura }, select: { idFactura: true, idContrato: true, contrato: { select: { idEmpresa: true, idCliente: true } } } }) : null,
+      ids.idCargoAdicional ? tx.cargoAdicional.findUnique({ where: { idCargo: ids.idCargoAdicional }, select: { idCargo: true, idEmpresa: true, idCliente: true, idContrato: true } }) : null,
     ]);
     if (ids.idCliente && !customer) throw new NotFoundException('Cliente no encontrado');
     if (ids.idContrato && !contract) throw new NotFoundException('Contrato no encontrado');
     if (contract && contract.idEmpresa !== idEmpresa) throw new BadRequestException('El contrato pertenece a otra empresa');
     if (contract && ids.idCliente && contract.idCliente !== ids.idCliente) throw new BadRequestException('El contrato no corresponde al cliente');
-    if (ids.idFactura && !invoice) throw new NotFoundException('Factura no encontrada');
+    if (ids.idFactura && !invoice) throw new NotFoundException('Factura CRM no encontrada; selecciona una factura existente, no una referencia bancaria');
     if (invoice && invoice.contrato?.idEmpresa !== idEmpresa) throw new BadRequestException('La factura pertenece a otra empresa o no tiene contrato válido');
     if (invoice && ids.idContrato && invoice.idContrato !== ids.idContrato) throw new BadRequestException('La factura no corresponde al contrato');
     if (invoice && ids.idCliente && invoice.contrato?.idCliente !== ids.idCliente) throw new BadRequestException('La factura no corresponde al cliente');
     if (customer && customer.idEmpresa !== idEmpresa && !contract && !invoice) {
-      const relationship = await this.prisma.contrato.findFirst({ where: { idCliente: customer.idCliente, idEmpresa }, select: { idContrato: true } });
+      const relationship = await tx.contrato.findFirst({ where: { idCliente: customer.idCliente, idEmpresa }, select: { idContrato: true } });
       if (!relationship) throw new BadRequestException('El cliente no tiene contrato en esta empresa');
     }
     if (ids.idCargoAdicional && !charge) throw new NotFoundException('Cargo adicional no encontrado');
@@ -248,7 +271,13 @@ export class ExternalTaxDocumentsService {
   }
 
   private validateMoney(values: MoneyFields) {
-    const provided = [values.montoNeto, values.montoExento, values.iva].filter((value): value is number => value !== undefined);
+    for (const [field, value] of Object.entries(values)) {
+      if (!['montoNeto', 'montoExento', 'iva', 'montoTotal'].includes(field) || value == null) continue;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 999999999999.99 || Math.abs(value * 100 - Math.round(value * 100)) > 0.01) {
+        throw new BadRequestException(`${field} debe ser un monto no negativo, finito y con hasta dos decimales`);
+      }
+    }
+    const provided = [values.montoNeto, values.montoExento, values.iva].filter((value): value is number => value != null);
     const totalCents = this.cents(values.montoTotal);
     if (totalCents < 0) throw new BadRequestException('El monto total no puede ser negativo');
     const componentCents = provided.reduce((sum, value) => sum + this.cents(value), 0);
@@ -279,8 +308,8 @@ export class ExternalTaxDocumentsService {
     };
   }
 
-  private async assertNotDuplicate(idEmpresa: number, identity: ReturnType<ExternalTaxDocumentsService['identity']>, excludedId: number | undefined, user: AuthUser) {
-    const duplicate = await this.prisma.documentoTributarioExterno.findFirst({ where: {
+  private async assertNotDuplicate(idEmpresa: number, identity: ReturnType<ExternalTaxDocumentsService['identity']>, excludedId: number | undefined, tx: Prisma.TransactionClient) {
+    const duplicate = await tx.documentoTributarioExterno.findFirst({ where: {
       idEmpresa,
       tipoDocumento: identity.tipoDocumento,
       emisorNormalizado: identity.emisorNormalizado,
@@ -288,21 +317,20 @@ export class ExternalTaxDocumentsService {
       ...(excludedId ? { idDocumento: { not: excludedId } } : {}),
     }, select: { idDocumento: true } });
     if (!duplicate) return;
-    await this.auditDuplicate(idEmpresa, identity, user);
-    throw new ConflictException('Ya existe un documento con el mismo tipo, emisor y folio en esta empresa');
+    throw new DuplicateDocumentConflict('Ya existe un documento con el mismo tipo, emisor y folio en esta empresa');
   }
 
   private async auditDuplicate(idEmpresa: number, identity: ReturnType<ExternalTaxDocumentsService['identity']>, user: AuthUser) {
-    await this.audit.record({
+    await this.prisma.$transaction(tx => this.audit.record({
       idUsuario: user.idUsuario,
       accion: 'INTENTO_DOCUMENTO_TRIBUTARIO_DUPLICADO',
       entidadAfectada: 'documento_tributario_externo',
       valorNuevo: { idEmpresa, tipoDocumento: identity.tipoDocumento, emisorNormalizado: identity.emisorNormalizado, folioNormalizado: identity.folioNormalizado },
-    });
+    }, tx));
   }
 
-  private async auditLink(idDocumento: number, idEmpresa: number, idFactura: number, user: AuthUser) {
-    await this.audit.record({ idUsuario: user.idUsuario, accion: 'VINCULAR_DOCUMENTO_FACTURA', entidadAfectada: 'documento_tributario_externo', idEntidadAfectada: idDocumento, valorNuevo: { idEmpresa, idFactura } });
+  private async auditLink(idDocumento: number, idEmpresa: number, idFactura: number, user: AuthUser, tx: Prisma.TransactionClient) {
+    await this.audit.record({ idUsuario: user.idUsuario, accion: 'VINCULAR_DOCUMENTO_FACTURA', entidadAfectada: 'documento_tributario_externo', idEntidadAfectada: idDocumento, valorNuevo: { idEmpresa, idFactura } }, tx);
   }
 
   private auditValue(document: Record<string, unknown>) {
@@ -352,8 +380,8 @@ export class ExternalTaxDocumentsService {
     if (user.idEmpresa !== idEmpresa) throw new ForbiddenException('El documento pertenece a otra empresa');
   }
 
-  private async assertCompanyExists(idEmpresa: number) {
-    const company = await this.prisma.empresa.findUnique({ where: { idEmpresa }, select: { idEmpresa: true } });
+  private async assertCompanyExists(idEmpresa: number, tx: Prisma.TransactionClient) {
+    const company = await tx.empresa.findUnique({ where: { idEmpresa }, select: { idEmpresa: true } });
     if (!company) throw new NotFoundException('Empresa no encontrada');
   }
 
@@ -371,8 +399,15 @@ export class ExternalTaxDocumentsService {
     return cleaned;
   }
   private optionalText(value?: string) { return value?.trim() || null; }
-  private decimal(value?: number) { return value === undefined ? null : new Prisma.Decimal(value.toFixed(2)); }
+  private decimal(value?: number | null) { return value == null ? null : new Prisma.Decimal(value.toFixed(2)); }
   private cents(value: number) { return Math.round(value * 100); }
   private numberOrUndefined(value: Prisma.Decimal | null) { return value === null ? undefined : Number(value); }
-  private isUniqueConflict(error: unknown) { return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'; }
+  private isUniqueConflict(error: unknown) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false;
+    const target = error.meta?.target;
+    if (target === 'documento_tributario_externo_identidad_key') return true;
+    if (!Array.isArray(target) || target.length !== 4) return false;
+    const fields = target.map(field => String(field).replace(/_/g, '').toLowerCase());
+    return ['idempresa', 'tipodocumento', 'emisornormalizado', 'folionormalizado'].every(field => fields.includes(field));
+  }
 }

@@ -16,6 +16,7 @@ import { isAdministrator } from '../common/roles';
 import { generateWorkOrderCode } from '../common/work-order-code';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertNoContractDebt, auditContractDebtRejection } from '../contracts/contract-debt.guard';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
@@ -765,6 +766,7 @@ export class ProspectsService {
       if (!currentPlan || currentPlan.activo === false || currentPlan.idEmpresa !== current.idEmpresa || !currentQuote) {
         throw new ConflictException('El plan o la cotizacion cambio durante la confirmacion; vuelve a consultar');
       }
+      await assertNoContractDebt(tx, { idEmpresa: current.idEmpresa, rut: current.rut, idProspecto, idUsuario: currentUser.idUsuario });
       const contractData = {
         idCliente: null,
         idProspecto,
@@ -833,7 +835,8 @@ export class ProspectsService {
       });
 
       return { contrato, prospecto: updatedProspect, direccionInstalacion };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,

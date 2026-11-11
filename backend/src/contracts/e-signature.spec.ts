@@ -8,7 +8,8 @@ const settings = () => ({ NODE_ENV: 'test', CONTRACT_SIGNATURE_ENABLED: 'true',
   CONTRACT_SIGNATURE_OTP_SECRET: randomBytes(32).toString('hex') });
 describe('Configuración de firma y compatibilidad apagada', () => {
   it('apagada y sin tabla privada permite el legado expresamente autorizado sin SMTP', async () => {
-    const db = { contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 99, idEmpresa: 1, estado: 'Pendiente firma contrato' }) },
+    const db = { contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 99, idEmpresa: 1, idCliente: 1, estado: 'Pendiente firma contrato' }) },
+      factura: { findMany: jest.fn().mockResolvedValue([]) },
       contratoDigital: { findFirst: jest.fn().mockResolvedValue({ idEmpresa: 1, estadoFirma: 'Generado' }) },
       logAuditoria: { findFirst: jest.fn().mockResolvedValue(null) }, $queryRaw: jest.fn().mockResolvedValue([]), $transaction: jest.fn() };
     db.$transaction.mockImplementation(async fn => fn(db));

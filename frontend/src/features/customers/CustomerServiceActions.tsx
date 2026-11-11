@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Plan } from '../../api';
 import { dateInputValue } from '../../lib';
 import type { DashboardPermissions } from '../../permissions';
@@ -37,12 +37,15 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
   const [planObservation, setPlanObservation] = useState('');
   const [deactivateObservation, setDeactivateObservation] = useState('');
   const [deactivating, setDeactivating] = useState(false);
+  const withdrawalBusy = useRef(false);
+  const [withdrawalDate, setWithdrawalDate] = useState(dateInputValue(new Date()));
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const activePlans = plans.filter(plan => plan.activo !== false && plan.idPlan !== contract.plan?.idPlan && (!contract.idEmpresa || !plan.idEmpresa || plan.idEmpresa === contract.idEmpresa));
   const changePlanOpen = action === 'plan';
   const observationsOpen = action === 'notes';
   const deactivateOpen = action === 'deactivate';
+  const withdrawalRequired = service.estadoOperativo === 'Suspendido';
   const nextPlan = activePlans.find(plan => plan.idPlan === Number(newPlanId));
 
   async function savePlanChange(event: FormEvent) {
@@ -59,15 +62,25 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
 
   async function deactivateService(event: FormEvent) {
     event.preventDefault();
-    if (deactivating) return;
+    if (withdrawalBusy.current) return;
+    if (withdrawalRequired && (!permissions.manageCustomerRequests || !deactivateObservation.trim() || !withdrawalDate)) {
+      showMessage('Indica fecha y observaciones. El retiro por morosidad requiere aviso previo en Libro de Control.'); return;
+    }
+    withdrawalBusy.current = true;
     setDeactivating(true);
     try {
-      await api.patch('/services/' + service.idServicio + '/deactivate', { observacion: deactivateObservation.trim() || undefined });
-      setAction(null); setDeactivateObservation(''); await onRefresh(service.idServicio); showMessage('Servicio dado de baja.');
-    } catch (error) { showMessage(serviceErrorMessage(error)); } finally { setDeactivating(false); }
+      if (withdrawalRequired) {
+        await api.post('/service-withdrawals', { idServicio: service.idServicio, idContrato: contract.idContrato,
+          motivo: 'MOROSIDAD', fechaSolicitada: withdrawalDate, observaciones: deactivateObservation.trim() });
+      } else {
+        await api.patch('/services/' + service.idServicio + '/deactivate', { observacion: deactivateObservation.trim() || undefined });
+      }
+      setAction(null); setDeactivateObservation(''); await onRefresh(service.idServicio);
+      showMessage(withdrawalRequired ? 'Solicitud de retiro registrada. El servicio sigue suspendido; no se ha confirmado retiro tecnico.' : 'Servicio dado de baja.');
+    } catch (error) { showMessage(serviceErrorMessage(error)); } finally { withdrawalBusy.current = false; setDeactivating(false); }
   }
 
-  if (!permissions.changeCustomerPlan && !permissions.manageObservations && !permissions.manageServices) return null;
+  if (!permissions.changeCustomerPlan && !permissions.manageObservations && !permissions.manageServices && !permissions.manageCustomerRequests) return null;
 
   return <details className="customer-service-options">
     <summary>Acciones del servicio</summary>
@@ -75,7 +88,7 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
     <div className="customer-service-actions" aria-label="Acciones del servicio">
       {permissions.changeCustomerPlan && service.estadoOperativo !== 'Baja' && <button type="button" className="secondary compact" aria-expanded={changePlanOpen} aria-controls={changePlanOpen ? "service-change-plan-" + service.idServicio : undefined} onClick={() => { setAction(changePlanOpen ? null : 'plan'); }}>Modificar plan</button>}
       {permissions.manageObservations && <button type="button" className="secondary compact" aria-expanded={observationsOpen} onClick={() => { setAction(observationsOpen ? null : 'notes'); }}>Observaciones</button>}
-      {permissions.manageServices && service.estadoOperativo !== 'Baja' && <button type="button" className="compact service-deactivate-trigger" aria-expanded={deactivateOpen} aria-controls={deactivateOpen ? "service-deactivate-" + service.idServicio : undefined} onClick={() => { setAction(deactivateOpen ? null : 'deactivate'); }}>Dar de baja</button>}
+      {(withdrawalRequired ? permissions.manageCustomerRequests : permissions.manageServices) && service.estadoOperativo !== 'Baja' && <button type="button" className="compact service-deactivate-trigger" aria-expanded={deactivateOpen} aria-controls={deactivateOpen ? "service-deactivate-" + service.idServicio : undefined} onClick={() => { setAction(deactivateOpen ? null : 'deactivate'); }}>{withdrawalRequired ? 'Solicitar retiro por morosidad' : 'Dar de baja'}</button>}
     </div>
 
     {changePlanOpen && <form id={"service-change-plan-" + service.idServicio} className="workflow-grid service-inline-form" onSubmit={savePlanChange}>
@@ -89,9 +102,10 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
     </form>}
 
       {deactivateOpen && <form id={"service-deactivate-" + service.idServicio} className="workflow-grid service-inline-form" onSubmit={deactivateService}>
-        <header className="service-form-heading"><h3>Dar de baja el servicio</h3><p>Confirma la baja de este servicio. Puedes dejar una observación para el registro.</p></header>
-        <label className="service-form-wide">Observaciones <span className="service-optional">Opcional</span><textarea disabled={deactivating} value={deactivateObservation} onChange={event => setDeactivateObservation(event.target.value)} /></label>
-        <div className="service-form-actions"><button type="button" className="secondary" disabled={deactivating} onClick={() => setAction(null)}>Cancelar</button><button type="submit" className="danger" disabled={deactivating}>Confirmar baja</button></div>
+        <header className="service-form-heading"><h3>{withdrawalRequired ? 'Solicitar retiro por morosidad' : 'Dar de baja el servicio'}</h3><p>{withdrawalRequired ? 'Requiere deuda vencida y aviso previo en Libro de Control. Registrar esta solicitud no da de baja ni confirma retiro tecnico.' : 'Baja administrativa por un motivo distinto del retiro por morosidad. Conserva la observacion del motivo.'}</p></header>
+        {withdrawalRequired && <label>Fecha solicitada<input type="date" required disabled={deactivating} value={withdrawalDate} onChange={event => setWithdrawalDate(event.target.value)} /></label>}
+        <label className="service-form-wide">Observaciones {!withdrawalRequired && <span className="service-optional">Opcional</span>}<textarea required={withdrawalRequired} maxLength={1000} disabled={deactivating} value={deactivateObservation} onChange={event => setDeactivateObservation(event.target.value)} /></label>
+        <div className="service-form-actions"><button type="button" className="secondary" disabled={deactivating} onClick={() => setAction(null)}>Cancelar</button><button type="submit" className="danger" disabled={deactivating}>{withdrawalRequired ? 'Registrar solicitud de retiro' : 'Confirmar baja'}</button></div>
       </form>}
 
     {observationsOpen && permissions.manageObservations && <ObservationsPanel target={{ tipoEntidad: "Servicio", idEntidad: service.idServicio, idCliente: service.idCliente, idEmpresa: service.idEmpresa }} />}

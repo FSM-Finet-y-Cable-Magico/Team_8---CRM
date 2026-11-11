@@ -4,6 +4,12 @@ describe('CommercialStatusService', () => {
   const service = new CommercialStatusService();
   const today = new Date('2026-09-25T00:00:00.000Z');
 
+  it.each(['Pagada', 'Anulada'])('%s no infla cartera con saldo historico', estadoDocumento => {
+    const result = service.calculate({ estadoDocumento, monto: 7000, totalPagado: 3500,
+      fechaVencimiento: new Date('2026-01-01'), hoy: today, retiroPendiente: true });
+    expect(result).toMatchObject({ montoDocumento: 7000, totalPagado: 3500, saldoPendiente: 0, diasAtraso: 0, estadoComercial: 'AL_DIA' });
+  });
+
   it.each([
     ['cliente al día', { monto: 10000, totalPagado: 10000, fechaVencimiento: new Date('2026-09-20'), hoy: today }, 'AL_DIA', 0],
     ['saldo pendiente no vencido', { monto: 10000, totalPagado: 2500, fechaVencimiento: new Date('2026-09-30'), hoy: today }, 'SALDO_PENDIENTE', 7500],

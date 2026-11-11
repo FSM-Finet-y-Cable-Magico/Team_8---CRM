@@ -1,3 +1,4 @@
+import { assertNoContractDebt, auditContractDebtRejection } from './contract-debt.guard';
 import { assignAutomatic, assertManualMode, assertPendingSignature, resolveSignatureMode, SignatureMode } from './signature-policy';
 import { signatureRepository, signatureStorageAvailable } from './signature.repository';
 import { signatureSettings } from './e-signature.config';
@@ -67,6 +68,7 @@ export class ContractsService {
 
     const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
     return this.prisma.$transaction(async tx => {
+    await assertNoContractDebt(tx, { idEmpresa, idCliente: customer.idCliente, rut: customer.rut, idUsuario: currentUser.idUsuario });
     const contract = await tx.contrato.create({
       data: {
         idCliente: customer.idCliente,
@@ -96,7 +98,8 @@ export class ContractsService {
     }, tx);
 
     return contract;
-    }, { timeout: 20000 });
+    }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
@@ -106,8 +109,8 @@ export class ContractsService {
       tx => this.markContractSigned(tx, idContrato, {
         kind: 'manual', actor: currentUser, observation: dto.observacion,
       }),
-      { timeout: 20000 },
-    );
+      { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ).catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   async markContractSigned(
@@ -124,6 +127,9 @@ export class ContractsService {
     // Replays preserve the original signature, financial state and audit.
     if (this.isSignedContract(contract.estado)) return contract;
     assertPendingSignature(contract.estado);
+    await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+      rut: contract.cliente?.rut ?? contract.prospecto?.rut, idContrato, idProspecto: contract.idProspecto ?? undefined,
+      idUsuario: origin.actor.idUsuario });
     const document = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' } });
     if (!document || document.idEmpresa !== contract.idEmpresa || !['Generado','Enviado','Firmado manualmente'].includes(document.estadoFirma)) {
       throw new ConflictException('El contrato necesita un PDF vigente y elegible para firma');
@@ -525,7 +531,12 @@ export class ContractsService {
         }
         return latest;
       }
-      if (dto.estadoFirma === 'Firmado manualmente') assertPendingSignature(contract.estado);
+      if (dto.estadoFirma === 'Firmado manualmente') {
+        assertPendingSignature(contract.estado);
+        await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+          rut: contract.cliente?.rut ?? contract.prospecto?.rut, idContrato,
+          idProspecto: contract.idProspecto ?? undefined, idUsuario: currentUser.idUsuario });
+      }
 
       const updated = await tx.contratoDigital.update({
         where: { idContratoDigital: latest.idContratoDigital },
@@ -546,7 +557,8 @@ export class ContractsService {
         valorNuevo: { estadoFirma: updated.estadoFirma, observaciones: dto.observaciones },
       }, tx);
       return updated;
-    }, { timeout: 20000 });
+    }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   private isSignedDigitalContract(document: { estadoFirma: string; fechaFirma?: Date | null }) {

@@ -4,7 +4,7 @@ import { useSignatureStatus } from './useSignatureStatus';
 export function ContractSignatureActions({ idContrato, canSend, revision, onChanged, compact = false }: {
   idContrato: number; canSend: boolean; revision: number; onChanged?: () => void; compact?: boolean;
 }) {
-  const { status: state, refresh } = useSignatureStatus(idContrato, revision);
+  const { status: state, refresh, error } = useSignatureStatus(idContrato, revision);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const notified = useRef('');
   useEffect(() => {
@@ -13,9 +13,11 @@ export function ContractSignatureActions({ idContrato, canSend, revision, onChan
     }
   }, [state?.solicitud?.estado, state?.solicitud?.idSolicitud, onChanged]);
   useEffect(() => { setBusy(false); setMessage(''); }, [idContrato]);
-  if (!state) return null;
-  if (state.policy.mode === 'unknown') return <p role="status">{state.policy.reason ?? 'Modo de firma pendiente de autorización'}</p>;
-  if (state.policy.mode !== 'automatic' && !state.signedDownloadAvailable) return null;
+  if (!state) return error ? <section><p role="status">{error}</p>
+    <button className="secondary compact" onClick={() => void refresh()}>Consultar estado de firma</button></section> : null;
+  if (state.policy.mode === 'unknown' && !state.signedDownloadAvailable) return <p role="status">{state.policy.reason ?? 'El contrato no tiene una modalidad de firma autorizada. Solicita su asignación al administrador.'}</p>;
+  if (state.policy.mode !== 'automatic' && !state.signedDownloadAvailable) return state.policy.reason
+    ? <p role="status">{state.policy.reason}</p> : null;
   async function action(kind: 'send' | 'cancel' | 'download' | 'retry') {
     if (busy) return; setBusy(true); setMessage('');
     try {

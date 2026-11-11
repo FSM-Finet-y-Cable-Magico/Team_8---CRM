@@ -251,6 +251,10 @@ export class ServicesService {
   async update(idServicio: number, dto: UpdateServiceDto, currentUser: AuthUser) {
     const service = await this.getServiceOrThrow(idServicio, currentUser);
 
+    if (dto.estadoOperativo === 'Baja' && service.estadoOperativo !== 'Baja') {
+      throw new BadRequestException('La baja requiere su operacion autorizada; no puede aplicarse mediante el cambio generico de estado');
+    }
+
     if (dto.estadoOperativo === 'Activo' && service.estadoOperativo !== 'Activo') {
       const completedInstallation = await this.prisma.ordenTrabajo.findFirst({
         where: {
@@ -338,6 +342,24 @@ export class ServicesService {
 
     const observation = dto.observacion?.trim() || null;
     const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${idServicio} FOR UPDATE`;
+      if (service.idContrato) {
+        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${service.idContrato} FOR UPDATE`;
+      }
+      const fresh = await this.getServiceOrThrow(idServicio, currentUser, tx);
+      if (fresh.estadoOperativo === 'Baja') return fresh;
+      if (!fresh.idEmpresa) throw new BadRequestException('El servicio no tiene empresa asociada');
+      if (fresh.idCliente !== service.idCliente || fresh.idEmpresa !== service.idEmpresa || fresh.idContrato !== service.idContrato) {
+        throw new BadRequestException('Las relaciones del servicio cambiaron; vuelve a consultar');
+      }
+      if (fresh.idContrato && (!fresh.contrato || fresh.contrato.idEmpresa !== fresh.idEmpresa || fresh.contrato.idCliente !== fresh.idCliente)) {
+        throw new BadRequestException('El contrato asociado no corresponde al cliente y empresa del servicio');
+      }
+      const withdrawal = await tx.servicioRetiroSolicitud.findFirst({ where: {
+        idServicio, idEmpresa: fresh.idEmpresa, motivo: { equals: 'MOROSIDAD', mode: 'insensitive' },
+        estado: { notIn: ['CANCELADA', 'CERRADA'] },
+      } });
+      if (withdrawal) throw new BadRequestException('El retiro por morosidad requiere cierre tecnico autorizado; la solicitud no confirma la baja');
       const deactivatedService = await tx.servicioContratado.update({
         where: { idServicio },
         data: {
@@ -363,24 +385,24 @@ export class ServicesService {
         }
       }
 
-      return deactivatedService;
-    });
-
-    await this.reconcileCustomerStatus(updated.idCliente);
+      await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${deactivatedService.idCliente} FOR UPDATE`;
+      await this.reconcileCustomerStatus(deactivatedService.idCliente, tx);
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'DAR_BAJA_SERVICIO',
       entidadAfectada: 'servicio_contratado',
       idEntidadAfectada: idServicio,
       valorAnterior: {
-        estadoOperativo: service.estadoOperativo,
-        observaciones: service.observaciones,
+        estadoOperativo: fresh.estadoOperativo,
+        observaciones: fresh.observaciones,
       },
       valorNuevo: {
-        estadoOperativo: updated.estadoOperativo,
+        estadoOperativo: deactivatedService.estadoOperativo,
         observacion: observation,
-        idContrato: updated.idContrato,
+        idContrato: deactivatedService.idContrato,
       },
+    }, tx);
+      return deactivatedService;
     });
 
     return companyResponse(updated, currentUser);
@@ -594,8 +616,8 @@ export class ServicesService {
     return result;
   }
 
-  private async getServiceOrThrow(idServicio: number, currentUser: AuthUser) {
-    const service = await this.prisma.servicioContratado.findUnique({
+  private async getServiceOrThrow(idServicio: number, currentUser: AuthUser, tx: Prisma.TransactionClient = this.prisma) {
+    const service = await tx.servicioContratado.findUnique({
       where: { idServicio },
       include: SERVICE_INCLUDE,
     });
@@ -685,8 +707,8 @@ export class ServicesService {
     return address?.idDireccion;
   }
 
-  private async reconcileCustomerStatus(idCliente: number) {
-    const customer = await this.prisma.cliente.findUnique({
+  private async reconcileCustomerStatus(idCliente: number, tx: Prisma.TransactionClient = this.prisma) {
+    const customer = await tx.cliente.findUnique({
       where: { idCliente },
       include: {
         contratos: { select: { estado: true } },
@@ -705,7 +727,7 @@ export class ServicesService {
     });
 
     if (nextStatus !== customer.estado) {
-      await this.prisma.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
+      await tx.cliente.update({ where: { idCliente }, data: { estado: nextStatus } });
     }
   }
 

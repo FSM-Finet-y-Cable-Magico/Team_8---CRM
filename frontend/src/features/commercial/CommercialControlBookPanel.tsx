@@ -9,6 +9,7 @@ import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlB
 import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
 import { TablePagination } from '../../shared/components/TablePagination';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
+import { ControlBookExternalDocuments } from './ControlBookExternalDocuments';
 import './commercial-control-book.css';
 
 const SPLIT_COLUMNS: Partial<Record<string, string[]>> = {
@@ -228,6 +229,8 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       <button ref={filtersButton} className="control-ribbon-command" disabled={drawerBusy} aria-expanded={optionsPanel === 'filters'} aria-controls="control-filters" onClick={() => { setOptionsPanel(optionsPanel === 'filters' ? null : 'filters'); setOpenMenu(null); }}><Filter size={21} aria-hidden="true"/><span>Filtros {activeFilters.length > 0 && <span className="control-count">{activeFilters.length}</span>}</span></button>
       <button ref={columnsButton} className="control-ribbon-command" aria-expanded={optionsPanel === 'columns'} aria-controls="control-columns" onClick={() => { setOptionsPanel(optionsPanel === 'columns' ? null : 'columns'); setOpenMenu(null); }}><Columns3 size={21} aria-hidden="true"/>Campos</button>
       {permissions.manageBilling && <button type="button" className="control-ribbon-command" disabled={loading || drawerBusy} onClick={() => void synchronizeDelinquency()}><TriangleAlert size={21} aria-hidden="true"/>Actualizar morosidad</button>}
+      <ControlBookExternalDocuments active={active} scope={scope} writeCompanyId={writeCompanyId} customers={customers}
+        canView={permissions.viewExternalTaxDocuments} canManage={permissions.manageExternalTaxDocuments} disabled={drawerBusy}/>
     </div>
 
     <dl className="control-book-summary" aria-label="Resumen de la empresa" aria-busy={loading}>

@@ -42,6 +42,16 @@ function setup(estado = 'Abierto') {
 }
 
 describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
+  it('C2: crea con Consulta historica y conserva idCategoria real y SLA, sin reclasificar ni tocar G3', async () => {
+    const { service, prisma } = setup();
+    const historic = { idCategoria: 3, nombre: 'Consulta', slaHoras: 72 };
+    prisma.categoriaFalla.findMany.mockResolvedValue([historic]);
+    await expect(service.create({ ...request, idCategoria: 3 }, operator)).resolves.toMatchObject({ idCategoria: 3, idEmpresa: 2 });
+    expect(historic).toEqual({ idCategoria: 3, nombre: 'Consulta', slaHoras: 72 });
+    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.update).not.toHaveBeenCalled();
+  });
   // Lista independiente de la implementación: contrato de atención G8/G2,
   // Documento 0, Tabla 11.9 ratificada para este cambio (no prueba del proveedor real).
   const attentionNames = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',

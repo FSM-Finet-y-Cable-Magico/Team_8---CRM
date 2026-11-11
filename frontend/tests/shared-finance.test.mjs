@@ -21,11 +21,14 @@ async function render(t, company, fixedCustomerId) {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
   } });
   const calls = [];
+  const helperExports = {};
+  const helper = readFileSync(new URL('../src/features/billing/external-tax-document-form.ts', import.meta.url), 'utf8');
+  new Function('exports', ts.transpileModule(helper, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(helperExports);
   const api = Object.fromEntries(['get', 'post', 'patch'].map(method => [method, async (...args) => {
-    calls.push([method, ...args]); return { data: { items: [], pagination: { totalRows: 0 } } };
+    calls.push([method, ...args]); return { data: args[0].includes('/history') ? { idCliente: 10, invoices: [] } : { items: [], pagination: { totalRows: 0 } } };
   }]));
   const mocks = { '../../api': { api, apiErrorMessage: () => 'QA error' }, '../../lib': { formatDateOnly: value => value },
-    '../../shared/components': { StatusBadge: () => null, TablePagination: () => null } };
+    '../../shared/components': { StatusBadge: () => null, TablePagination: () => null }, './external-tax-document-form': helperExports };
   const exports = {};
   new Function('require', 'exports', outputText)(name => mocks[name] ?? require(name), exports);
   let tree;
@@ -48,6 +51,10 @@ for (const company of [1, 2]) {
     const contractSelect = ctx.select('Contrato opcional');
     assert.deepEqual(contractSelect.findAllByType('option').map(o => o.props.value), ['', 30 + company]);
     await act(async () => contractSelect.props.onChange({ target: { value: String(30 + company) } }));
+    for (const [label, value] of [['Folio/', 'F-QA'], ['Emisor/', 'Emisor QA'], ['Fecha', '2026-11-11'], ['Monto total', '1000']]) {
+      const input = ctx.tree.root.findAllByType('label').find(node => textOf(node).startsWith(label)).findByType('input');
+      await act(async () => input.props.onChange({ target: { value } }));
+    }
     await act(async () => ctx.tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
     const posted = ctx.calls.find(c => c[0] === 'post');
     assert.equal(posted[1], '/external-tax-documents');

@@ -458,6 +458,7 @@ describe('ProspectsService', () => {
     };
     const transaction = {
       $queryRaw: jest.fn().mockResolvedValue([{ id_prospecto: 20 }]),
+      factura: { findMany: jest.fn().mockResolvedValue([]) },
       cliente: {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn(),

@@ -19,7 +19,7 @@ export class CreateExternalTaxDocumentDto {
   @IsOptional() @IsIn(EXTERNAL_TAX_DOCUMENT_STATES) estado?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCliente?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idFactura?: number;
+  @IsOptional() @Type(() => Number) @IsInt({ message: 'Selecciona una factura CRM válida; no ingreses una referencia bancaria en idFactura' }) @Min(1) @Max(2147483647, { message: 'idFactura debe identificar una factura CRM existente; no una referencia bancaria' }) idFactura?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCargoAdicional?: number;
 }
 
@@ -37,7 +37,7 @@ export class UpdateExternalTaxDocumentDto {
   @IsOptional() @IsIn(EXTERNAL_TAX_DOCUMENT_STATES) estado?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCliente?: number | null;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number | null;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idFactura?: number | null;
+  @IsOptional() @Type(() => Number) @IsInt({ message: 'Selecciona una factura CRM válida; no ingreses una referencia bancaria en idFactura' }) @Min(1) @Max(2147483647, { message: 'idFactura debe identificar una factura CRM existente; no una referencia bancaria' }) idFactura?: number | null;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCargoAdicional?: number | null;
 }
 
