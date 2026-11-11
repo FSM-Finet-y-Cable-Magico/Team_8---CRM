@@ -21,8 +21,18 @@ function setup() {
     cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
-  const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService, {} as MailService, coverage as unknown as CoverageDomainService);
-  return { service, prisma, tx, prospect, coverage, audit };
+  const registerDocument = jest.fn();
+  const contracts = {
+    async registerWithDigitalContract(_actor: AuthUser, register: (transaction: typeof tx) => Promise<{ result: unknown; reuseDocument: boolean }>) {
+      return prisma.$transaction(async (transaction: typeof tx) => {
+        const { result, reuseDocument } = await register(transaction);
+        await registerDocument(result, reuseDocument);
+        return result;
+      });
+    },
+  };
+  const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService, {} as MailService, coverage as unknown as CoverageDomainService, contracts as never);
+  return { service, prisma, tx, prospect, coverage, audit, registerDocument };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
   it('un prospecto con RUT historico endeudado no crea contrato ni mueve pipeline', async () => {
@@ -203,16 +213,21 @@ describe('cotizacion persistida y confirmacion segura', () => {
       c.tx.prospecto.update.mock.invocationCallOrder[0],
     );
   });
-  it('publica solo referencias de cotizaciones factibles de planes propios activos', async () => {
+  it('conserva las cotizaciones propias y distingue cuáles siguen vigentes', async () => {
     const c = setup();
     c.prisma.prospecto.findMany.mockResolvedValue([{ ...c.prospect, cotizaciones: [
-      { idCotizacion: 1, idPlan: 1, fechaEnvio: '2026-10-28', plan: { idEmpresa: 1, activo: true } },
+      { idCotizacion: 1, codigo: 'COT-3A960D8202D145B0', idPlan: 1, fechaEnvio: '2026-10-28', factibilidadVerificada: true, plan: { idEmpresa: 1, activo: true } },
       { idCotizacion: 2, idPlan: 2, fechaEnvio: '2026-10-28', plan: { idEmpresa: 2, activo: true } },
       { idCotizacion: 3, idPlan: 3, fechaEnvio: '2026-10-28', plan: { idEmpresa: 1, activo: false } },
+      { idCotizacion: 4, idPlan: 1, fechaEnvio: '2026-10-28', factibilidadVerificada: false, plan: { idEmpresa: 1, activo: true } },
     ] }]);
     const rows = await c.service.list(user);
-    expect(rows[0].cotizaciones).toEqual([{ idCotizacion: 1, idPlan: 1, fechaEnvio: '2026-10-28' }]);
-    expect(c.prisma.prospecto.findMany.mock.calls[0][0].include.cotizaciones.where).toEqual({ factibilidadVerificada: true, fechaEnvio: { not: null } });
+    expect(rows[0].cotizaciones).toEqual([
+      { idCotizacion: 1, codigo: 'COT-3A960D8202D145B0', idPlan: 1, fechaEnvio: '2026-10-28', vigente: true },
+      { idCotizacion: 3, idPlan: 3, fechaEnvio: '2026-10-28', vigente: false },
+      { idCotizacion: 4, idPlan: 1, fechaEnvio: '2026-10-28', vigente: false },
+    ]);
+    expect(c.prisma.prospecto.findMany.mock.calls[0][0].include.cotizaciones.where).toEqual({ fechaEnvio: { not: null } });
   });
   it.each(['sin cotizacion', 'inactivo', 'otra empresa', 'No Factible', 'Perdido', 'cobertura retirada'])(
     'rechaza %s sin escribir contrato', async reason => {
@@ -234,6 +249,15 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(c.tx.$queryRaw).toHaveBeenCalledWith(expect.any(Array), 1);
     expect(c.tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(c.tx.contrato.findFirst.mock.invocationCallOrder[0]);
     expect(c.tx.contrato.create).not.toHaveBeenCalled();expect(c.tx.contrato.update).toHaveBeenCalledTimes(1);
+    expect(c.registerDocument).toHaveBeenCalledWith(expect.objectContaining({ contrato: { idContrato: 10 } }), true);
+  });
+  it('actualiza el PDF si cambia el plan de un contrato pendiente', async () => {
+    const c = setup();
+    const pending = { idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato', idPlan: 2 };
+    c.tx.contrato.findFirst.mockResolvedValue(pending);
+    c.tx.contrato.update.mockResolvedValue({ ...pending, idPlan: 1 });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.registerDocument).toHaveBeenCalledWith(expect.objectContaining({ contrato: { ...pending, idPlan: 1 } }), false);
   });
   it('rechaza duplicar un contrato ya firmado', async () => {
     const c = setup();c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Firmado' });

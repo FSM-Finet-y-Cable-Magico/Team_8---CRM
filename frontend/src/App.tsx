@@ -185,6 +185,7 @@ export default function App() {
 }
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [focusedTicketId, setFocusedTicketId] = useState<number | null>(null);
   const [visitedModules, setVisitedModules] = useState<Tab[]>([]);
   useEffect(() => {
     if (activeTab === 'customers' || activeTab === 'commercial') {
@@ -417,6 +418,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               billingOverview={billingOverview}
               permissions={permissions}
               onNavigate={setActiveTab}
+              onOpenTicket={(id) => { setFocusedTicketId(id); setActiveTab('tickets'); }}
               onOpenPendingInstallations={(view) => {
                 if (view === 'agenda') {
                   if (!canViewInstallations) return;
@@ -516,7 +518,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             </div>
           )}
           {activeTab === 'tickets' && canViewTickets && (
-            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} showCatalogDetails={permissions.manageCompanyScope} onChanged={() => void loadData()} />
+            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} focusedTicketId={focusedTicketId} onFocusConsumed={() => setFocusedTicketId(null)} onChanged={() => void loadData()} />
           )}
           {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
           {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}

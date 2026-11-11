@@ -15,6 +15,9 @@ function loadComponent(file, mocks) {
   const exports = {};
   new Function('require', 'exports', outputText)(name => {
     if (name in mocks) return mocks[name];
+    if (name === '../../shared/hooks/useTransientMessage') return { useTransientMessage: () => ({ message: '', showMessage() {} }) };
+    if (name === '../../shared/data/chile-territories') return { findChileRegion: () => null };
+    if (name === '../../lib') return { formatDateTime: String };
     if (name.endsWith('.css')) return {};
     if (name.startsWith('.')) throw new Error(`Unmocked dependency: ${name}`);
     return require(name);
@@ -31,7 +34,6 @@ const mocks = {
     TablePagination: () => null,
   },
   '../coverage': { CoveragePicker: () => null },
-  './ContractDateCalendar': { localDateValue: () => '2026-11-04', ContractDateCalendar: () => null },
 };
 const Workflow = loadComponent('ProspectWorkflowPanel', mocks);
 const permissions = { generateQuotes: true, contractPlans: true, recordProspectLoss: true, manageContracts: true };

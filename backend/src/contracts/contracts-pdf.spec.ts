@@ -8,7 +8,7 @@ import { ContractsService } from './contracts.service';
 
 const user = { idUsuario: 5, idEmpresa: 1, email: 'test@example.invalid', nombreCompleto: 'Test', roles: ['Comercial'] };
 
-function setup() {
+function setup(hasDigitalContract = true) {
   const contract = {
     idContrato: 87654321, idCliente: 654321, idEmpresa: 1, idPlan: 7, idZonaPago: null,
     diaVencimiento: 5, estado: 'Activo', direccionInstalacion: 'Calle QA 123',
@@ -24,9 +24,9 @@ function setup() {
       },
     }],
   };
-  let latest: any = { version: 3, idContratoDigital: 10, urlDocumento: 'generated/contracts/contrato-87654321-v3.pdf' };
+  let latest: any = hasDigitalContract ? { version: 3, idContratoDigital: 10, urlDocumento: 'generated/contracts/contrato-87654321-v3.pdf' } : null;
   const digital = {
-    findFirst: jest.fn().mockImplementation(async ({ where }) => where.urlDocumento && where.urlDocumento !== latest.urlDocumento ? null : latest),
+    findFirst: jest.fn().mockImplementation(async ({ where }) => where.urlDocumento && where.urlDocumento !== latest?.urlDocumento ? null : latest),
     create: jest.fn().mockImplementation(async ({ data }) => { latest = { idContratoDigital: 11, ...data }; return latest; }),
   };
   const tx = {
@@ -160,6 +160,24 @@ describe('Contenido y conservación de contratos PDF', () => {
     expect(closes).toHaveBeenCalledTimes(2);
     expect(first.hashDocumento).toBe(createHash('sha256').update(writes.mock.calls[0][0] as Buffer).digest('hex'));
     expect(pdfText(writes.mock.calls[1][0] as Buffer)).toContain('Versión: 5');
+  });
+
+  it('genera el primer PDF del prospecto dentro de la transacción y lo reutiliza al volver a confirmar', async () => {
+    const ctx = setup(false);
+    const files = mockFiles();
+    const prospecto = ctx.contract.cliente;
+    Object.assign(ctx.contract, { cliente: null, prospecto, idCliente: null, servicios: [], estado: 'Pendiente firma contrato' });
+    const result = { contrato: ctx.contract };
+    const register = jest.fn().mockResolvedValue({ result, reuseDocument: true });
+
+    await expect(ctx.service.registerWithDigitalContract(user, register)).resolves.toBe(result);
+    await expect(ctx.service.registerWithDigitalContract(user, register)).resolves.toBe(result);
+    const existing = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user, true);
+
+    expect(register).toHaveBeenCalledWith(ctx.tx);
+    expect(ctx.tx.contratoDigital.create).toHaveBeenCalledTimes(1);
+    expect(existing).toMatchObject({ version: 1, idCliente: null, estadoFirma: 'Generado' });
+    expect(pdfText(files.writes.mock.calls[0][0] as Buffer)).toContain(prospecto.nombreCompleto);
   });
 
   it.each([null, 7])('usa la transacción para precio y auditoría (zona %s)', async zone => {

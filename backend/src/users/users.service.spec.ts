@@ -26,5 +26,41 @@ describe('Usuarios internos', () => {
   it('restablece el acceso y revoca las sesiones', async () => { const { service, db } = setup(); await service.resetPassword(2, 'Prueba-local-12345', admin); expect(db.usuario.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ versionSesion: { increment: 1 } }) })); });
   it('rechaza claves que bcrypt truncaría por longitud en bytes', async () => { const { service } = setup(); await expect(service.resetPassword(2, 'á'.repeat(40), admin)).rejects.toThrow('72 bytes'); });
   it('impide eliminar la propia cuenta', async () => { const { service } = setup(); await expect(service.remove(1, admin)).rejects.toThrow('propia'); });
-  it('desactiva un usuario sin alterar tablas físicas G1', async () => { const { service, db, target } = setup(); target.usuarioRoles = [{ rol: { nombreRol: 'Comercial' } }]; const result = await service.remove(2, admin); expect(db.usuario.update).toHaveBeenCalledWith({ where: { idUsuario: 2 }, data: { activo: false, versionSesion: { increment: 1 } } }); expect(db.usuario.delete).not.toHaveBeenCalled(); expect(db.$executeRaw).not.toHaveBeenCalled(); expect(db.logAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accion: 'DESACTIVAR_USUARIO', idEntidadAfectada: 2 }) })); expect(result).toMatchObject({ desactivado: true, sesionesRevocadas: true }); });
+  it('elimina un usuario conservando referencias e historial', async () => {
+    const { service, db, target } = setup();
+    target.usuarioRoles = [{ rol: { nombreRol: 'Comercial' } }];
+    const result = await service.remove(2, admin);
+    expect(db.usuario.update).toHaveBeenCalledWith({ where: { idUsuario: 2 }, data: {
+      activo: false, fechaEliminacion: expect.any(Date), versionSesion: { increment: 1 },
+    } });
+    expect(db.usuario.delete).not.toHaveBeenCalled();
+    expect(db.logAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accion: 'ELIMINAR_USUARIO', idEntidadAfectada: 2 }) }));
+    expect(result).toMatchObject({ eliminado: true, sesionesRevocadas: true });
+  });
+  it('la lista excluye eliminados y permite mostrar usuarios inactivos', async () => {
+    const { service, db } = setup();
+    await service.list();
+    expect(db.usuario.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { fechaEliminacion: null } }));
+  });
+  it('permite eliminar otro administrador si queda uno activo', async () => {
+    const { service, db } = setup();
+    db.usuario.findMany.mockResolvedValue([{ usuarioRoles: [{ rol: { nombreRol: 'Administrador' } }] }]);
+    await expect(service.remove(2, admin)).resolves.toMatchObject({ eliminado: true });
+  });
+  it('impide eliminar al último administrador activo', async () => {
+    const { service, db } = setup();
+    await expect(service.remove(2, admin)).rejects.toThrow('administrador activo');
+    expect(db.usuario.update).not.toHaveBeenCalled();
+  });
+  it('no permite reactivar usuarios eliminados', async () => {
+    const { service, target } = setup();
+    Object.assign(target, { fechaEliminacion: new Date(), activo: false });
+    await expect(service.save(2, dto, admin)).rejects.toThrow('Usuario no encontrado');
+  });
+  it('reintentar la eliminación devuelve éxito sin volver a modificar al usuario', async () => {
+    const { service, db, target } = setup();
+    Object.assign(target, { fechaEliminacion: new Date(), activo: false });
+    await expect(service.remove(2, admin)).resolves.toMatchObject({ eliminado: true });
+    expect(db.usuario.update).not.toHaveBeenCalled();
+  });
 });

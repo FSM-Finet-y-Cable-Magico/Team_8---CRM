@@ -44,9 +44,9 @@ function completedFields(tracking: G3InstallationTracking | null, service?: Cust
   </dl>;
 }
 
-export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false, installationSummary = false, service }: {
+export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false, installationSummary = false, hideRequest = false, service }: {
   prospectId?: number; contractId?: number; canRequest: boolean; onChanged?: () => void; compact?: boolean;
-  installationSummary?: boolean; service?: CustomerService;
+  installationSummary?: boolean; hideRequest?: boolean; service?: CustomerService;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,7 +143,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   if (installationSummary && !tracking && !canRequest) return <p className="customer-contract-note" role={error ? 'status' : undefined}>{error || 'Sin orden de instalación registrada.'}</p>;
   if (!tracking) return <div className="g3-installation-card">
     {installationSummary ? <p>Sin orden de instalación registrada.</p> : <>
-      <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>
+      {!hideRequest && <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>}
       <p>Se requieren contrato firmado, factibilidad aprobada, identificación del cliente, teléfono móvil, dirección y comuna.</p>
     </>}
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
@@ -155,7 +155,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
       <p>Si la dirección contratada es incorrecta, solicita revisión y la aprobación o firma que corresponda antes de continuar.</p>
       <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna</button>
     </fieldset>}
-    <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>
+    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>}
     {!canRequest && <p className="alert">Primero confirma el contrato firmado y la factibilidad.</p>}
     {error && <p className="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}

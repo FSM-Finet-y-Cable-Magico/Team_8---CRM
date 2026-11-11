@@ -27,6 +27,17 @@
 }
 
 .customer-contract-number { flex-wrap: wrap; }
+.customer-contract-table > table { table-layout: fixed; }
+.customer-contract-table > table > thead th:nth-child(1) { width: 17%; }
+.customer-contract-table > table > thead th:nth-child(2) { width: 16%; }
+.customer-contract-table > table > thead th:nth-child(3) { width: 13%; }
+.customer-contract-table > table > thead th:nth-child(4) { width: 17%; }
+.customer-contract-table > table > thead th:nth-child(5) { width: 25%; }
+.customer-contract-table > table > thead th.customer-contract-status-heading { width: 12%; }
+.customer-contract-table th.customer-contract-status-heading, .customer-contract-table td.customer-contract-status { text-align: left; }
+.customer-contract-row { cursor: pointer; }
+.customer-contract-row-toggle { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; box-shadow: none; }
+.customer-contract-row-toggle:hover { background: transparent; color: inherit; box-shadow: none; transform: none; }
 .customer-contract-number > span:first-child { font-size: .8rem; font-weight: 650; overflow-wrap: anywhere; }
 .customer-contract-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
 .customer-contract-table tr.customer-contract-selected > td { background: var(--contract-highlight); }
@@ -78,6 +89,12 @@
 }
 
 .customer-contract-document-row h4 { font-size: .86rem; margin: 0; }
+.customer-contract-documents h4 { margin: 0; font-size: .86rem; }
+.customer-document-list { list-style: none; padding: 0; margin: 0; }
+.customer-document-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--contract-line); }
+.customer-document-list li div { display: grid; gap: 3px; font-size: .85rem; }
+.customer-document-list small { color: var(--contract-muted); }
+.customer-document-list button { background: transparent; border: 0; color: var(--contract-accent); padding: 8px; box-shadow: none; }
 .customer-contract-document-row h4 svg { color: var(--contract-accent); }
 .customer-installation-order { display: grid; gap: 4px; min-width: 0; }
 .customer-installation-order strong { font-size: 1.04rem; overflow-wrap: anywhere; }

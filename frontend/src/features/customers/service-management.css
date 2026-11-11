@@ -1,11 +1,16 @@
-.customer-service-options .customer-service-actions { margin: 6px 0 12px; }
+.customer-service-options .customer-service-actions { margin: 6px 0 0; justify-content: flex-end; }
 .customer-service-options > details { margin-top: 12px; }
-.customer-service-options .service-deactivate-trigger { margin-left: auto; border: 1px solid transparent; background: transparent; color: #a3483d; box-shadow: none; }
-.customer-service-options .service-deactivate-trigger:hover { background: #fff1ee; color: #933d32; }
-.theme-dark .customer-service-options .service-deactivate-trigger { color: #f2b3a8; }
-.theme-dark .customer-service-options .service-deactivate-trigger:hover { background: #452b27; }
+.customer-service-options .service-change-trigger { background: #237b65; border-color: #237b65; color: #fff; }
+.customer-service-options .service-change-trigger:hover { background: #19634f; }
+.customer-service-options .service-deactivate-trigger { background: #ad3c37; border-color: #ad3c37; color: #fff; }
+.customer-service-options .service-deactivate-trigger:hover { background: #8f302c; color: #fff; }
+.customer-plan-history h4 { margin: 0 0 10px; font-size: .86rem; }
 .customer-service-options .danger { background: #ad3c37; color: #fff; }
-.service-inline-form { margin: 0 0 12px; padding: 14px; gap: 12px; align-items: start; border: 1px solid var(--contract-line); border-radius: 8px; }
+.service-inline-form { margin: 0 0 12px; padding: 8px 0; gap: 12px; align-items: start; }
+.modal-card:has(> .modal-content > .service-action-modal) { width: min(620px, 100%); }
+.service-action-modal { --contract-ink: #293e35; --contract-muted: #52675d; margin: 0; }
+.theme-dark .service-action-modal { --contract-ink: #e0ede8; --contract-muted: #a7bdb4; }
+.service-action-modal .danger { background: #ad3c37; border-color: #ad3c37; color: #fff; }
 .service-form-heading, .service-form-wide, .service-form-actions { grid-column: 1 / -1; }
 .service-form-heading p { margin: 6px 0 0; font-size: .8rem; color: var(--contract-muted); line-height: 1.5; }
 .service-inline-form label { position: relative; min-width: 0; align-content: start; color: var(--contract-ink); font-size: .79rem; }

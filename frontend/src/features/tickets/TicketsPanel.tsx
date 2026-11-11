@@ -1,4 +1,5 @@
 ﻿import { useState } from 'react';
+import { useEffect } from 'react';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory, type UserRow } from '../../api';
 import { rutPattern } from '../../constants';
 import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
@@ -13,6 +14,8 @@ export function TicketsPanel({
   permissions,
   showCatalogDetails = false,
   onChanged,
+  focusedTicketId,
+  onFocusConsumed,
 }: {
   tickets: Ticket[];
   categories: TicketCategory[];
@@ -20,6 +23,8 @@ export function TicketsPanel({
   showCatalogDetails?: boolean;
   users?: UserRow[];
   onChanged: () => void;
+  focusedTicketId?: number | null;
+  onFocusConsumed?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createForm, setCreateForm] = useState({ rut: '', idCategoria: '', idServicio: '', prioridad: 'Media', descripcion: '' });
@@ -30,8 +35,14 @@ export function TicketsPanel({
   const [managementOpen, setManagementOpen] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
-  const catalog = ticketAttentionAvailability(categories);
-  const attentionCategories = catalog.options;
+  useEffect(() => {
+    if (!focusedTicketId || !tickets.some(ticket => ticket.idTicket === focusedTicketId)) return;
+    setSelectedId(focusedTicketId);
+    setManagementOpen(true);
+    onFocusConsumed?.();
+  }, [focusedTicketId, tickets, onFocusConsumed]);
+  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion)
+    && (category.tipo === 'ATENCION' || (category.tipo == null && category.tipoDisponible !== true)));
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {

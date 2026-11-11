@@ -21,13 +21,18 @@ async function harness(t, options = {}) {
     patch: async (...args) => { calls.push(['patch', ...args]); return { data: {} }; },
   };
   const mocks = {
+    'react-dom': { createPortal: element => element },
     '../../api': { api, apiErrorMessage: error => error.message },
+    '../../shared/components': { Modal: ({ title, children }) => React.createElement('section', { role: 'dialog', 'aria-label': title }, children) },
     '../../lib': { dateInputValue: () => '2026-11-04', formatDateOnly: value => value, formatDateTime: value => value, formatWorkOrderValue: value => value },
     '../../shared/hooks/useTransientMessage': { useTransientMessage: () => { const [message, showMessage] = React.useState(''); const clearMessage = React.useCallback(() => showMessage(''), []); return { message, showMessage, clearMessage }; } },
     '../observations/ObservationsModal': { ObservationsPanel: ({ target }) => { observed.push(target); return null; } },
     './PlanChangeHistory': { PlanChangeHistory: () => React.createElement('p', {}, 'Historial disponible') },
   };
   const exports = {};
+  const previousDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  t.after(() => { globalThis.document = previousDocument; });
   new Function('require', 'exports', output)(name => name.endsWith('.css') ? {} : mocks[name] ?? require(name), exports);
   let tree;
   await act(async () => { tree = create(React.createElement(exports.CustomerServiceActions, {
@@ -36,7 +41,7 @@ async function harness(t, options = {}) {
     onRefresh: async id => refreshed.push(id),
   })); });
   t.after(async () => { await act(async () => tree.unmount()); });
-  const button = label => tree.root.findAllByType('button').find(node => text(node) === label);
+  const button = label => tree.root.findAllByType('button').find(node => text(node).trim() === label);
   const click = async label => { await act(async () => { await button(label).props.onClick(); }); };
   const form = id => tree.root.findByProps({ id });
   const change = async (node, value) => { await act(async () => node.props.onChange({ target: { value } })); };
@@ -44,18 +49,21 @@ async function harness(t, options = {}) {
   return { tree, calls, refreshed, observed, button, click, form, change, submit, text: () => JSON.stringify(tree.toJSON()) };
 }
 
-test('las observaciones se abren dentro de las acciones del servicio', async t => {
+test('las acciones se presentan al final del detalle del servicio', async t => {
   const h = await harness(t);
   assert.equal(h.calls.length, 0);
-  await h.click('Observaciones');
-  assert.deepEqual(h.observed, [{ tipoEntidad: 'Servicio', idEntidad: 20, idCliente: 10, idEmpresa: 1 }]);
+  assert.equal(h.button('Observaciones'), undefined);
+  assert.ok(h.button('Cambiar plan'));
+  assert.ok(h.button('Dar de baja'));
   assert.equal(h.tree.root.findAllByProps({ role: 'dialog' }).length, 0);
   assert.doesNotMatch(h.text(), /Garantías del servicio/);
 });
 
 test('modificar plan conserva seleccion por empresa, fecha, observacion y endpoint', async t => {
   const h = await harness(t);
-  await h.click('Modificar plan');
+  await h.click('Cambiar plan');
+  assert.equal(h.tree.root.findByProps({ role: 'dialog' }).props['aria-label'], 'Cambiar plan');
+  assert.doesNotMatch(h.text(), /Selecciona el nuevo plan y la fecha/);
   assert.equal(h.button('Guardar cambio').props.disabled, true);
   const form = h.form('service-change-plan-20');
   assert.doesNotMatch(text(form.findByType('select')), /Plan otra empresa/);
@@ -69,8 +77,10 @@ test('modificar plan conserva seleccion por empresa, fecha, observacion y endpoi
 
 test('baja permanece separada y requiere confirmar con el mismo payload', async t => {
   const h = await harness(t);
-  await h.click('Modificar plan');
+  await h.click('Cambiar plan');
   await h.click('Dar de baja');
+  assert.equal(h.tree.root.findByProps({ role: 'dialog' }).props['aria-label'], 'Dar de baja el servicio');
+  assert.doesNotMatch(h.text(), /Confirma la baja de este servicio/);
   assert.equal(h.tree.root.findAllByProps({ id: 'service-change-plan-20' }).length, 0);
   assert.equal(h.calls.filter(call => call[0] === 'patch').length, 0);
   await h.change(h.form('service-deactivate-20').findByType('textarea'), 'Fin del servicio');
@@ -80,16 +90,16 @@ test('baja permanece separada y requiere confirmar con el mismo payload', async 
 
 test('permisos y estado de baja conservan sus restricciones', async t => {
   const readonly = await harness(t, { permissions: {} });
-  for (const label of ['Modificar plan', 'Dar de baja', 'Observaciones', 'Nueva garantía comercial', 'Desactivar garantía']) assert.equal(readonly.button(label), undefined);
+  for (const label of ['Cambiar plan', 'Dar de baja', 'Observaciones', 'Nueva garantía comercial', 'Desactivar garantía']) assert.equal(readonly.button(label), undefined);
   const inactive = await harness(t, { service: { estadoOperativo: 'Baja' } });
   assert.equal(inactive.button('Dar de baja'), undefined);
-  assert.equal(inactive.button('Modificar plan'), undefined);
-  assert.ok(inactive.button('Observaciones'));
+  assert.equal(inactive.button('Cambiar plan'), undefined);
+  assert.equal(inactive.button('Observaciones'), undefined);
 });
 
 test('errores formales conservan el borrador', async t => {
   const h = await harness(t, { failSave: true });
-  await h.click('Modificar plan');
+  await h.click('Cambiar plan');
   await h.change(h.form('service-change-plan-20').findByType('select'), '2');
   await h.change(h.form('service-change-plan-20').findByType('textarea'), 'Conservar este borrador');
   await h.submit('service-change-plan-20');

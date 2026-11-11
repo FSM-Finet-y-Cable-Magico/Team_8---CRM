@@ -36,7 +36,7 @@ describe('Factibilidad geografica en prospectos', () => {
       consultadoEn: new Date().toISOString(),
     }) };
     const audit = { record: jest.fn() };
-    const service = new ProspectsService(prisma as never, audit as never, {} as never, coverage as never);
+    const service = new ProspectsService(prisma as never, audit as never, {} as never, coverage as never, {} as never);
     return { service, prisma, coverage, audit };
   }
 

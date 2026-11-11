@@ -62,7 +62,7 @@ export type UserRow = {
 
 export type Prospect = {
   ubicacionInstalacion?: { direccion: string | null; comuna: string | null; ciudad: string | null; fuenteComuna: string | null };
-  cotizaciones?: Array<{ idCotizacion: number; idPlan: number; fechaEnvio: string }>;
+  cotizaciones?: Array<{ idCotizacion: number; codigo?: string | null; idPlan: number; fechaEnvio: string; vigente?: boolean }>;
   requiereRevisionComercial?: boolean;
   revisionOrigenG2Disponible?: boolean;
   idProspecto: number;
@@ -87,6 +87,8 @@ export type Prospect = {
   contratos?: Array<{
     idContrato: number;
     estado: string | null;
+    fechaInicio?: string | null;
+    fechaConfirmacion?: string | null;
     fechaFirmaManual?: string | null;
     fechaFirmaEfectiva?: string | null;
     origenFirma?: 'ELECTRONICA' | 'MANUAL' | 'SIN_FECHA';

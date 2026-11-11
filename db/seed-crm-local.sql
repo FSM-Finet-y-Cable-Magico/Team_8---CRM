@@ -213,7 +213,7 @@ BEGIN
       pipeline := CASE fixture.scenario
         WHEN 'nuevo' THEN 'Prospecto Nuevo' WHEN 'factible' THEN 'Factible'
         WHEN 'cotizada' THEN 'Cotizacion Enviada' WHEN 'sin-cobertura' THEN 'No Factible' WHEN 'perdida' THEN 'Perdido'
-        WHEN 'firma' THEN 'Pendiente firma contrato' WHEN 'por-solicitar' THEN 'Pendiente activacion'
+        WHEN 'firma' THEN 'Pendiente firma' WHEN 'por-solicitar' THEN 'Pendiente activacion'
         WHEN 'ausente' THEN 'Cliente ausente' WHEN 'asignada' THEN 'Instalacion en G3' WHEN 'en-curso' THEN 'Instalacion en G3'
         ELSE 'Servicio Activo' END;
       service_state := CASE fixture.scenario WHEN 'suspendido' THEN 'Suspendido' WHEN 'retiro' THEN 'Baja' ELSE 'Activo' END;

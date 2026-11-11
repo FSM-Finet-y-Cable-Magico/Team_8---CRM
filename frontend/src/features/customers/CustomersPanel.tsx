@@ -814,7 +814,7 @@ export function CustomersPanel({
     <section className="customers-module">
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
-          <h2>Clientes activos</h2>
+          <h2>Clientes</h2>
         </div>
         <div className="customer-search-row">
           <div className="customer-search">
@@ -839,7 +839,7 @@ export function CustomersPanel({
           />
         </div>
         <div className="customer-list-filters">
-          <span>Clientes activos: {visibleCustomers.length}</span>
+          <span>Clientes: {visibleCustomers.length}</span>
           <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
             {customerStatusOptions.map((state) => <option key={state} value={state}>{customerStatusPresentation(formatWorkOrderValue(state)).label}</option>)}
