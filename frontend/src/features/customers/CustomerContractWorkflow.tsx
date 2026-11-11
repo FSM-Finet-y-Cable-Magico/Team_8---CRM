@@ -1,6 +1,6 @@
 import { useSignatureStatus } from '../contracts/useSignatureStatus';
 import { Fragment, FormEvent, useEffect, useId, useState } from 'react';
-import { ChevronDown, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { api, apiErrorMessage, Customer, CustomerService, PaymentZone, Plan } from '../../api';
 import { formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
@@ -9,7 +9,6 @@ import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { G3InstallationStatus } from '../installations/G3InstallationStatus';
 import { CustomerServiceActions } from './CustomerServiceActions';
 import { ContractDocuments } from './ContractDocuments';
-import { HistoricalG3Closure } from './HistoricalG3Closure';
 import {
   contractManagementTarget,
   serviceForContract,
@@ -175,7 +174,7 @@ export function CustomerContractWorkflow({
     )}
     {contracts.length ? <div className="table-wrap customer-contract-table">
       <table>
-        <thead><tr><th scope="col">Plan</th><th scope="col">Empresa</th><th scope="col">Contrato</th><th scope="col">Servicio</th><th scope="col">Dirección</th><th scope="col">Acción</th></tr></thead>
+        <thead><tr><th scope="col">Plan</th><th scope="col">Empresa</th><th scope="col">Contrato</th><th scope="col">Servicio</th><th scope="col">Dirección</th><th scope="col" className="customer-contract-status-heading">Estado</th></tr></thead>
         <tbody>
           {contracts.map(contract => {
             const service = serviceForContract(contract.idContrato, services);
@@ -183,20 +182,20 @@ export function CustomerContractWorkflow({
             const panelId = detailsId + "-" + contract.idContrato;
             const contractNumber = contract.numeroContratoExterno || "#" + contract.idContrato;
             return <Fragment key={contract.idContrato}>
-              <tr className={expanded ? "customer-contract-selected" : undefined}>
-                <td>{contract.plan?.nombreComercial ?? "Sin plan asociado"}</td>
-                <td>{companyName(contract, customer)}</td>
-                <td><div className="customer-contract-number"><span>{contractNumber}</span><StatusBadge value={contract.estado ?? "Pendiente firma contrato"} /></div></td>
-                <td>{servicesLoad.status === "loading" ? "Cargando…" : servicesLoad.status === "error" ? "No disponible"
-                  : service ? service.tipoServicio + " · " + formatWorkOrderValue(service.estadoOperativo)
-                  : signed(contract) ? "Sin servicio activo" : "Pendiente de firma"}</td>
-                <td>{serviceAddress(service, contract, customer)}</td>
-                <td><button type="button" className="secondary compact crm-table-action customer-contract-toggle" aria-expanded={expanded} aria-controls={expanded ? panelId : undefined} onClick={() => {
+              <tr className={expanded ? "customer-contract-selected customer-contract-row" : "customer-contract-row"} onClick={() => {
                   setSelectedContractId(expanded ? null : contract.idContrato);
                   setSignatureOpen(false);
                   setSignatureObservation("");
                   clearMessage();
-                }}>{expanded ? "Ocultar" : "Ver"} <ChevronDown size={14} aria-hidden="true" /></button></td>
+                }}>
+                <td><button type="button" className="customer-contract-row-toggle" aria-label={(expanded ? 'Ocultar' : 'Ver') + ' detalle de ' + (contract.plan?.nombreComercial ?? 'plan')} aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}>{contract.plan?.nombreComercial ?? "Sin plan asociado"}</button></td>
+                <td>{companyName(contract, customer)}</td>
+                <td><div className="customer-contract-number"><span>{contractNumber}</span></div></td>
+                <td>{servicesLoad.status === "loading" ? "Cargando…" : servicesLoad.status === "error" ? "No disponible"
+                  : service ? service.tipoServicio + " · " + formatWorkOrderValue(service.estadoOperativo)
+                  : signed(contract) ? "Sin servicio activo" : "Pendiente de firma"}</td>
+                <td>{serviceAddress(service, contract, customer)}</td>
+                <td className="customer-contract-status"><StatusBadge value={contract.estado ?? "Pendiente firma contrato"} /></td>
               </tr>
               {expanded && <tr className="customer-contract-detail-row">
                 <td colSpan={6}>
@@ -215,10 +214,6 @@ export function CustomerContractWorkflow({
                         {(contractSigned || target?.kind === 'service') && target?.kind !== 'loading' && <G3InstallationStatus key={contract.idContrato} contractId={contract.idContrato} compact installationSummary
                           service={selectedService} canRequest={contractSigned && permissions.createInstallOrders && target?.kind === 'contract'}
                           onChanged={() => void onRefresh(selectedService?.idServicio)} />}
-                        {selectedService?.instalacion?.fuente === 'G3' && selectedService.instalacion.fechaProcesamiento && <details>
-                          <summary>Antecedentes técnicos</summary>
-                          <HistoricalG3Closure idServicio={selectedService.idServicio} compact />
-                        </details>}
                         {target?.kind === "service" && selectedService && <CustomerServiceActions key={selectedService.idServicio}
                           contract={contract} service={selectedService} plans={plans} permissions={permissions} onRefresh={onRefresh} />}
                       </section>

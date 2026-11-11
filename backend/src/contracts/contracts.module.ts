@@ -13,5 +13,6 @@ import { PlanChangeProcessor } from './plan-change.processor';
   imports: [AuditModule, ServicesModule, G3IntegrationModule, MailModule],
   controllers: [ContractsController, ContractSignatureController, PublicSignatureController],
   providers: [ContractsService, PlanChangeProcessor, ESignatureService, SignaturePublicGuard],
+  exports: [ContractsService],
 })
 export class ContractsModule {}

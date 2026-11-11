@@ -6,6 +6,7 @@ import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
 import { CoveragePicker, CoverageLocation } from '../coverage';
 import type { CompanyDraft } from '../../shared/hooks/useCompanyDraft';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
 
 export type ProspectRegistrationDraft = {
@@ -55,7 +56,7 @@ export function ProspectsPanel({
       rutInput.current.setSelectionRange(position, position);
     }
   });
-  const [status, setStatus] = useState('');
+  const { message: status, showMessage: setStatus } = useTransientMessage();
   const [coverageBusy, setCoverageBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);

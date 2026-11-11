@@ -29,6 +29,7 @@ export function UsersPanel({
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [rowBusy, setRowBusy] = useState<number | null>(null);
+  const [deletedIds, setDeletedIds] = useState<number[]>([]);
 
   function openEditor(row?: UserRow) {
     clearStatus();
@@ -134,6 +135,7 @@ export function UsersPanel({
       clearStatus();
     try {
       await api.delete(`/users/${deleting.idUsuario}`);
+      setDeletedIds(ids => [...ids, deleting.idUsuario]);
       setDeleting(null);
       setStatus('Usuario eliminado.');
       onUpdated();
@@ -161,7 +163,7 @@ export function UsersPanel({
               <tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Empresa</th><th>Estado</th><th className="users-actions-heading">Acciones</th></tr>
             </thead>
             <tbody>
-              {users.map((row) => {
+              {users.filter(row => !deletedIds.includes(row.idUsuario)).map((row) => {
                 const isCurrentUser = row.idUsuario === currentUserId;
                 const isActive = row.activo !== false;
                 return (
@@ -239,7 +241,7 @@ export function UsersPanel({
 
       <Modal title="Eliminar usuario" open={Boolean(deleting)} onClose={() => { if (!busy) setDeleting(null); }}>
         <section className="user-delete-dialog stack">
-          <p>Se eliminará permanentemente el perfil de <strong>{deleting?.nombreCompleto}</strong>. El historial operativo se conservará sin alterar sus registros.</p>
+          <p>¿Seguro que quieres eliminar a <strong>{deleting?.nombreCompleto}</strong>?</p>
           <div className="user-modal-actions">
             <button type="button" className="secondary" onClick={() => setDeleting(null)}>Cancelar</button>
             <button type="button" className="user-delete-confirm" disabled={busy} onClick={() => void deleteUser()}>{busy ? 'Eliminando…' : 'Eliminar usuario'}</button>

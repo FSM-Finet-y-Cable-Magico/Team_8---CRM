@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
 import { userFacingMessage } from '../../lib/user-facing-messages';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './coverage.css';
 
 export type CoverageLocation = { latitud: number; longitud: number };
@@ -33,7 +34,7 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false }: {
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
@@ -45,19 +46,20 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   autoGeocode?: boolean;
   presentation?: 'editor' | 'status' | 'summary';
   minimal?: boolean;
+  showAddressRetry?: boolean;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
   const [coverage, setResult] = useState<(CoverageResult & { queryKey: string }) | null>(null);
   const [zones, setZones] = useState<Array<CoverageZone & { idEmpresa: number; activo: boolean; fechaInicio?: string | null; fechaFin?: string | null }>>([]);
   const [zonesError, setZonesError] = useState('');
-  const [mapWarning, setMapWarning] = useState('');
+  const { message: mapWarning, showMessage: setMapWarning } = useTransientMessage();
   const today = new Date().toISOString().slice(0, 10);
   const visibleZones = useMemo(() => zones.filter(zone => zone.idEmpresa === idEmpresa && zone.activo === true && zone.poligonoGeojson
     && (!zone.fechaInicio || zone.fechaInicio.slice(0, 10) <= today) && (!zone.fechaFin || zone.fechaFin.slice(0, 10) >= today)), [zones, idEmpresa, today]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
-  const [geocodeMessage, setGeocodeMessage] = useState('');
+  const { message: geocodeMessage, showMessage: setGeocodeMessage } = useTransientMessage();
   const [retry, setRetry] = useState(0);
   const [backgroundRetry, setBackgroundRetry] = useState(0);
   const [coordinates, setCoordinates] = useState({ latitud: '', longitud: '' });
@@ -86,7 +88,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     setGeocoding(false);
     setGeocodeMessage('');
     current.current.onChange(location);
-  }, [rememberAttempt]);
+  }, [rememberAttempt, setGeocodeMessage]);
   const selection = useRef({ onChange: selectLocation, disabled });
   const resultListener = useRef(onResult);
   const busyListener = useRef(onBusyChange);
@@ -138,7 +140,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     const resize = new ResizeObserver(() => instance.invalidateSize());
     resize.observe(container.current);
     return () => { window.clearTimeout(tileTimer); tiles.off(); resize.disconnect(); instance.remove(); map.current = null; layers.current = null; };
-  }, [presentation]);
+  }, [presentation, setMapWarning]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -270,13 +272,13 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     } finally {
       if (!controller.signal.aborted && current.current.version === version) setGeocoding(false);
     }
-  }, [direccion, version, rememberAttempt, presentation]);
+  }, [direccion, version, rememberAttempt, presentation, setGeocodeMessage]);
 
   useEffect(() => {
     setGeocoding(false);
     setGeocodeMessage('');
     return () => { geocodeController.current?.abort(); };
-  }, [version, disabled]);
+  }, [version, disabled, setGeocodeMessage]);
 
   useEffect(() => {
     if (!autoGeocode || disabled || value || attempted.current.has(version)) return;
@@ -317,6 +319,10 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       : result?.estado === 'NO_FACTIBLE' ? 'Sin cobertura comercial'
       : value ? 'Cobertura pendiente' : 'Ubicación pendiente';
     return <section className={`coverage-simple coverage-simple-${presentation}`} aria-label="Consulta de cobertura comercial">
+      {presentation === 'summary' && <div className="coverage-heading"><strong>Cobertura comercial</strong>
+        {showAddressRetry && !disabled && autoGeocode && !checking && !value &&
+          <button type="button" className="secondary compact" onClick={() => void geocodeAddress()}>Reintentar dirección</button>}
+      </div>}
       {showStatus && <div className={`coverage-summary coverage-summary-${tone}`} role="status" aria-live="polite" aria-busy={checking}>
         <Icon size={presentation === 'summary' ? 24 : 19} aria-hidden="true" />
         <div><strong>{title}</strong></div>

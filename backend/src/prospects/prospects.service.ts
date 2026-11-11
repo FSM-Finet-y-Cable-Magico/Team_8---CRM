@@ -1,7 +1,6 @@
-import { ConfigService } from '@nestjs/config';
-import { assignAutomatic } from '../contracts/signature-policy';
+import { ContractsService } from '../contracts/contracts.service';
 import { effectiveSignatureDates } from '../contracts/signature.repository';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
@@ -33,6 +32,7 @@ import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidat
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { CoverageResult } from '../coverage/coverage.types';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
+import { signatureRepository, signatureStorageAvailable } from '../contracts/signature.repository';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
 const FEASIBLE_PIPELINE_STATUS = 'Factible';
@@ -45,6 +45,9 @@ const LOST_PIPELINE_STATUS = LOST_PROSPECT_PIPELINE_STATUS;
 const PENDING_SIGNATURE_DUE_DAY = 1;
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
 const ALTERNATIVE_VISIT_TIMES = ['09:00', '11:00', '14:00', '16:00', '18:00'];
+const QUOTE_DATE_FORMAT = new Intl.DateTimeFormat('es-CL', {
+  timeZone: 'America/Santiago', dateStyle: 'medium', timeStyle: 'medium',
+});
 const PIPELINE_STATUSES = [
   INITIAL_PIPELINE_STATUS,
   'Contactado',
@@ -66,7 +69,7 @@ export class ProspectsService {
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
     private readonly coverageService: CoverageDomainService,
-    @Optional() private readonly signatureConfig?: ConfigService,
+    private readonly contractsService: ContractsService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -80,8 +83,8 @@ export class ProspectsService {
         _count: G2_REVIEW_RELATION_COUNTS,
         empresa: true,
         cotizaciones: {
-          where: { factibilidadVerificada: true, fechaEnvio: { not: null } },
-          select: { idCotizacion: true, idPlan: true, fechaEnvio: true, plan: { select: { idEmpresa: true, activo: true } } },
+          where: { fechaEnvio: { not: null } },
+          select: { idCotizacion: true, codigo: true, idPlan: true, fechaEnvio: true, factibilidadVerificada: true, plan: { select: { idEmpresa: true, activo: true } } },
           orderBy: { idCotizacion: 'desc' },
         },
         usuarioComercial: {
@@ -94,6 +97,7 @@ export class ProspectsService {
           where: companyScope,
           select: {
             idContrato: true,
+            fechaInicio: true,
             estado: true,
             fechaFirmaManual: true,
             idPlan: true,
@@ -103,16 +107,33 @@ export class ProspectsService {
       },
     });
     const evidenceRows = await readG2OriginAudits(this.prisma, prospects.filter(isG2ProspectReviewCandidate).map(p => p.idProspecto));
+    const pendingContractIds = prospects.flatMap(prospect => prospect.contratos
+      .filter(contract => contract.estado === PENDING_SIGNATURE_STATUS).map(contract => contract.idContrato));
+    const confirmations = pendingContractIds.length ? await this.prisma.logAuditoria.findMany({
+      where: {
+        accion: 'GENERAR_CONTRATO_PROSPECTO', entidadAfectada: 'contrato',
+        idEntidadAfectada: { in: pendingContractIds }, fechaHora: { not: null },
+      },
+      select: { idEntidadAfectada: true, fechaHora: true },
+      orderBy: [{ fechaHora: 'desc' }, { idLog: 'desc' }],
+      distinct: ['idEntidadAfectada'],
+    }) : [];
+    const confirmationByContract = new Map(confirmations.map(event => [event.idEntidadAfectada, event.fechaHora]));
     return prospects.map(({ _count, ...prospect }) => ({
       ...prospect,
+      contratos: prospect.contratos.map(contract => ({
+        ...contract, fechaConfirmacion: confirmationByContract.get(contract.idContrato) ?? null,
+      })),
       revisionOrigenG2Disponible: isG2ProspectReviewCandidate({ ...prospect, _count }) && g2OriginEvidence(prospect, evidenceRows) !== null,
       cotizaciones: (prospect.cotizaciones ?? [])
-        .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa && quote.plan?.activo !== false)
-        .map(({ idCotizacion, idPlan, fechaEnvio }) => ({ idCotizacion, idPlan, fechaEnvio })),
+        .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa)
+        .map(({ idCotizacion, codigo, idPlan, fechaEnvio, factibilidadVerificada, plan }) => ({
+          idCotizacion, codigo, idPlan, fechaEnvio, vigente: factibilidadVerificada === true && plan?.activo !== false,
+        })),
       requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
         || (!([...PIPELINE_STATUSES.slice(0, 6), null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
-            && [PENDING_SIGNATURE_PIPELINE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
+            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
     }));
   }
 
@@ -405,6 +426,8 @@ export class ProspectsService {
     const cobertura = dto.ubicacion
       ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
       : null;
+    const refreshFeasibility = Boolean(cobertura && (restartQuoteFlow || addressChanged
+      || dto.ubicacion?.latitud !== prospect.latitud || dto.ubicacion?.longitud !== prospect.longitud));
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
@@ -440,7 +463,7 @@ export class ProspectsService {
           ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
           ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
           ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
-          ...(restartQuoteFlow ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
+          ...(refreshFeasibility ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
         },
         include: { empresa: true, zonaPago: true },
       });
@@ -595,7 +618,7 @@ export class ProspectsService {
         prospectName: prospect.nombreCompleto ?? 'Cliente',
         companyName: updatedQuote.prospecto?.empresa?.nombre ?? 'FiNet',
         pdf,
-        filename: `cotizacion-${quote.idCotizacion}.pdf`,
+        filename: `${updatedQuote.codigo ?? 'cotizacion-' + quote.idCotizacion}.pdf`,
       });
     } catch {
       emailDelivery = { status: 'failed' };
@@ -637,24 +660,14 @@ export class ProspectsService {
 
   async recordLoss(idProspecto: number, dto: RecordLossDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
-    await this.assertManualCommercialChange(prospect);
-    if (![...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline)) {
-      throw new BadRequestException('La perdida comercial no puede cancelar contratos o instalaciones; requiere revision');
-    }
-
-    const updated = await this.prisma.prospecto.update({
-      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
-      data: {
-        estadoPipeline: LOST_PIPELINE_STATUS,
-        motivoPerdida: dto.motivo,
-        observacionPerdida: dto.detalleMotivoPerdida?.trim() || dto.observaciones.trim(),
-        fechaPerdida: new Date(),
-        idUsuarioPerdida: currentUser.idUsuario,
-      },
-      include: { empresa: true },
-    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
-
-    await this.auditService.record({
+    const data = {
+      estadoPipeline: LOST_PIPELINE_STATUS,
+      motivoPerdida: dto.motivo,
+      observacionPerdida: dto.detalleMotivoPerdida?.trim() || dto.observaciones.trim(),
+      fechaPerdida: new Date(),
+      idUsuarioPerdida: currentUser.idUsuario,
+    };
+    const audit = {
       idUsuario: currentUser.idUsuario,
       accion: 'REGISTRAR_PERDIDA_PROSPECTO',
       entidadAfectada: 'prospecto',
@@ -666,8 +679,70 @@ export class ProspectsService {
         observaciones: dto.observaciones,
         detalleMotivoPerdida: dto.detalleMotivoPerdida,
       },
-    });
-
+    };
+    if ([PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')) {
+      if (dto.motivo === 'Sin cobertura') {
+        throw new BadRequestException('Selecciona un motivo de pérdida comercial para el contrato pendiente de firma.');
+      }
+      return this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+        const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+        if (current.estadoPipeline !== prospect.estadoPipeline || current.idEmpresa !== prospect.idEmpresa) {
+          throw new ConflictException('El prospecto cambió durante la operación. Vuelve a consultar su estado.');
+        }
+        const related = await tx.contrato.findMany({
+          where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } },
+          select: { idContrato: true },
+        });
+        if (current.idCliente != null || related.length !== 1 || await tx.ordenTrabajo.findFirst({ where: { idProspecto }, select: { idOt: true } })) {
+          throw new BadRequestException('La baja requiere un único contrato sin firma y sin instalación asociada.');
+        }
+        const { idContrato } = related[0];
+        // La firma toma primero el contrato y luego el prospecto. NOWAIT evita invertir esa espera.
+        try {
+          await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE NOWAIT`;
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' && error.meta?.code === '55P03') {
+            throw new ConflictException('El contrato se está actualizando. Vuelve a consultar su estado.');
+          }
+          throw error;
+        }
+        const contract = await tx.contrato.findFirst({
+          where: { idContrato, idProspecto, idEmpresa: current.idEmpresa, idCliente: null,
+            estado: PENDING_SIGNATURE_STATUS, fechaFirmaManual: null,
+            facturas: { none: {} }, servicios: { none: {} }, integracionesInstalacionG3: { none: {} },
+            contratosDigitales: { none: { OR: [{ fechaFirma: { not: null } }, { estadoFirma: { in: ['Firmado', 'Firmado manualmente'] } }] } },
+          },
+          select: { idContrato: true },
+        });
+        const signatures = await signatureStorageAvailable(tx) ? signatureRepository(tx) : null;
+        if (!contract || await signatures?.findFirst({ where: { idContrato, estado: 'FIRMADA' } })) {
+          throw new BadRequestException('El contrato debe seguir pendiente de firma y sin servicios ni facturas para registrar la pérdida.');
+        }
+        await tx.contrato.update({ where: { idContrato }, data: { estado: 'Anulado' } });
+        await tx.contratoDigital.updateMany({ where: { idContrato }, data: { estadoFirma: 'Anulado' } });
+        if (signatures) {
+          for (const estado of ['BORRADOR', 'PENDIENTE']) {
+            await signatures.updateMany({ where: { idContrato, estado }, data: { estado: 'ANULADA', motivoAnulacion: 'PERDIDA_PROSPECTO', otpHash: null } });
+          }
+        }
+        const updated = await tx.prospecto.update({ where: { idProspecto }, data, include: { empresa: true } });
+        await this.auditService.record({
+          ...audit, valorNuevo: { ...audit.valorNuevo, idContrato, estadoContrato: 'Anulado' },
+        }, tx);
+        return updated;
+      });
+    }
+    await this.assertManualCommercialChange(prospect);
+    if (![...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline)) {
+      throw new BadRequestException('La perdida comercial no puede cancelar contratos o instalaciones; requiere revision');
+    }
+    const updated = await this.prisma.prospecto.update({
+      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
+      data,
+      include: { empresa: true },
+    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
+    await this.auditService.record(audit);
     return updated;
   }
 
@@ -738,12 +813,12 @@ export class ProspectsService {
       }
     }
 
-    const fechaInicio = dto.fechaInicio ? this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date() : new Date();
+    const fechaInicio = this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date(todayDateOnly());
     const fechaGeneracionContrato = this.parseOptionalDate(dto.fechaGeneracionContrato, 'fechaGeneracionContrato');
     const fechaEnvioCliente = this.parseOptionalDate(dto.fechaEnvioCliente, 'fechaEnvioCliente');
     const direccionInstalacion = prospect.direccion?.trim() || undefined;
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.contractsService.registerWithDigitalContract(currentUser, async (tx) => {
       // Serialize confirmations of the same prospect; a pending contract is reused.
       await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
       const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
@@ -822,7 +897,6 @@ export class ProspectsService {
           }).catch((error: unknown) => this.rethrowConcurrentChange(error))
         : await tx.contrato.create({ data: contractData });
 
-      await assignAutomatic(tx, contrato, this.signatureConfig, currentUser.idUsuario);
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
@@ -832,7 +906,12 @@ export class ProspectsService {
         include: { empresa: true },
       });
 
-      return { contrato, prospecto: updatedProspect, direccionInstalacion };
+      const reuseDocument = existingContract?.estado === PENDING_SIGNATURE_STATUS
+        && existingContract.idPlan === contrato.idPlan
+        && existingContract.idZonaPago === contrato.idZonaPago
+        && existingContract.diaVencimiento === contrato.diaVencimiento
+        && existingContract.direccionInstalacion === contrato.direccionInstalacion;
+      return { result: { contrato, prospecto: updatedProspect, direccionInstalacion }, reuseDocument };
     });
 
     await this.auditService.record({
@@ -1324,6 +1403,7 @@ export class ProspectsService {
   }
 
   private renderQuotePdfBuffer(quote: {
+    codigo: string | null;
     fechaEnvio: Date | null;
     prospecto: {
       nombreCompleto: string | null;
@@ -1354,7 +1434,8 @@ export class ProspectsService {
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
 
-      doc.fontSize(18).text('Cotizacion de servicio', { align: 'center' });
+      doc.fontSize(18).text('Cotización de servicio', { align: 'center' });
+      if (quote.codigo) doc.fontSize(11).text(quote.codigo, { align: 'center' });
       doc.moveDown();
       doc.fontSize(12).text(`Empresa: ${quoteProspect.empresa?.nombre ?? 'FiNet'}`);
       doc.text(`Prospecto: ${quoteProspect.nombreCompleto ?? '-'}`);
@@ -1369,7 +1450,7 @@ export class ProspectsService {
       doc.text(`Velocidad: ${quotePlan.velocidadMbps ?? '-'} Mbps`);
       doc.text(`Precio mensual: $${quotePlan.precioMensual.toString()}`);
       doc.moveDown();
-      doc.text(`Fecha de envio: ${(quote.fechaEnvio ?? new Date()).toLocaleDateString('es-CL')}`);
+      if (quote.fechaEnvio) doc.text(`Fecha y hora de emisión: ${QUOTE_DATE_FORMAT.format(quote.fechaEnvio)} (Chile)`);
       doc.text('Documento generado por CRM FiNet.');
       doc.end();
     });

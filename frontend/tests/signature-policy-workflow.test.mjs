@@ -13,6 +13,7 @@ function load(path,mocks={}) {
   const exports={};
   new Function('require','exports',outputText)(name=>{
     if(name in mocks)return mocks[name];
+    if(name==='../../shared/hooks/useTransientMessage')return load('shared/hooks/useTransientMessage.ts');
     if(name.endsWith('.css'))return {};
     if(name.startsWith('.'))throw Error('Unmocked '+name);
     return require(name);
@@ -32,13 +33,12 @@ function harness(initial) {
   return {api,hook,mutations,set:next=>{response=next;},
     tick:async()=>{await act(async()=>{for(const fn of [...timers])fn();});},
     restore:()=>{globalThis.setInterval=oldSet;globalThis.clearInterval=oldClear;},
-    common:{'../../api':{api,apiErrorMessage:()=> 'No disponible'},
+    common:{'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String },'../../api':{api,apiErrorMessage:()=> 'No disponible'},
       '../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),
         Modal:({open,children})=>open===false?null:React.createElement('div',null,children)},
       '../contracts/useSignatureStatus':hook,
       '../customers/ContractDocuments':{ContractDocuments:()=>React.createElement('span',null,'PDF disponible')},
       '../coverage':{CoveragePicker:()=>null},
-      './ContractDateCalendar':{localDateValue:()=> '2026-11-10',ContractDateCalendar:()=>null}
     }};
 }
 const button=(tree,label)=>tree.root.findAllByType('button').find(node=>node.children.filter(child=>typeof child==='string').join('').trim()===label);
@@ -59,6 +59,67 @@ for(const mode of ['automatic','unknown','manual'])test('Prospectos: política r
     }
   }finally{if(tree)act(()=>tree.unmount());h.restore();}
 });
+test('Prospectos: muestra el código documental y ofrece motivos comerciales durante la firma', async () => {
+  const h = harness(state('manual'));
+  let tree;
+  try {
+    const { ProspectWorkflowPanel } = load('features/prospects/ProspectWorkflowPanel.tsx', h.common);
+    await act(async () => { tree = create(React.createElement(ProspectWorkflowPanel, {
+      prospect: { ...prospect, cotizaciones: [{ idCotizacion: 271, codigo: 'COT-ABC123', fechaEnvio: '2026-11-11' }] },
+      plans: [], permissions, onChanged() {},
+    })); });
+    assert.ok(tree.root.findAllByType('strong').some(node => node.children.join('') === 'COT-ABC123'));
+    await act(async () => button(tree, 'Marcar como perdido').props.onClick());
+    const reasons = tree.root.findByType('select');
+    assert.equal(reasons.props.value, 'Falta de respuesta');
+    assert.deepEqual(reasons.findAllByType('option').map(node => node.props.value),
+      ['Precio', 'Competencia', 'Falta de respuesta', 'Otro']);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /se anulará el contrato/);
+  } finally {
+    if (tree) act(() => tree.unmount());
+    h.restore();
+  }
+});
+test('Prospectos: el mismo ícono descarga el contrato nuevo y recupera un PDF antiguo faltante', async () => {
+  const digital = { idContratoDigital: 5, version: 1, fechaGeneracion: '2026-11-11' };
+  const pdf = new Blob(['%PDF-']);
+  const originalDocument = globalThis.document;
+  const downloads = [];
+  globalThis.document = { createElement: () => ({ click() { downloads.push(this.download); } }) };
+  try {
+    for (const hasDocument of [true, false]) {
+      const posts = [];
+      const api = {
+        get: async (path, options) => {
+          if (!path.endsWith('/download')) return { data: { documents: hasDocument ? [digital] : [] } };
+          assert.deepEqual(options, { params: { version: 1 }, responseType: 'blob' });
+          return { data: pdf };
+        },
+        post: async (...args) => { posts.push(args); return { data: digital }; },
+      };
+      const { ContractDocuments } = load('features/customers/ContractDocuments.tsx', {
+        '../contracts/ContractSignatureActions': { ContractSignatureActions: () => null },
+        '../../api': { api, apiErrorMessage: String },
+        '../../lib': { formatDateTime: String },
+        '../../shared/components': {},
+      });
+      let tree;
+      try {
+        await act(async () => { tree = create(React.createElement(ContractDocuments, { idContrato: 10, canGenerate: true, prospectList: true })); });
+        const icon = tree.root.findByType('button');
+        assert.equal(icon.props.className, 'prospect-document-download');
+        assert.match(icon.props['aria-label'], /^Descargar contrato/);
+        await act(async () => icon.props.onClick());
+        assert.deepEqual(posts, hasDocument ? [] : [['/contracts/10/digital-contract', undefined, { params: { initial: true } }]]);
+      } finally {
+        if (tree) act(() => tree.unmount());
+      }
+    }
+    assert.deepEqual(downloads, ['contrato-10-v1.pdf', 'contrato-10-v1.pdf']);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
 test('Clientes: cierra y limpia el formulario manual al cambiar a automático',async()=>{
   const h=harness(state('manual'));let tree;
   try{
@@ -73,8 +134,8 @@ test('Clientes: cierra y limpia el formulario manual al cambiar a automático',a
     const props={customer:{idCliente:1,nombreCompleto:'Cliente ficticio',contratos:prospect.contratos},
       services:[],servicesLoad:{status:'empty',customerId:1,error:''},plans:[],permissions,onRefresh:async()=>{}};
     await act(async()=>{tree=create(React.createElement(CustomerContractWorkflow,props));});
-    await act(async()=>button(tree,'Ver').props.onClick());
-    assert.equal(button(tree,'Ocultar').props['aria-expanded'],true);
+    await act(async()=>tree.root.findAllByType('tr').find(node => node.props.className?.includes('customer-contract-row')).props.onClick());
+    assert.equal(tree.root.findByProps({ className: 'customer-contract-row-toggle' }).props['aria-expanded'],true);
     assert.match(JSON.stringify(tree.toJSON()), /PDF disponible/);
     await act(async()=>button(tree,'Registrar firma manual').props.onClick());
     const textareas=tree.root.findAllByType('textarea');
@@ -111,7 +172,7 @@ test('Clientes: contratación pendiente y servicio activo conservan sus acciones
       servicesLoad: { status: 'success', customerId: 1, error: '' }, plans: [], permissions: { ...permissions, createInstallOrders: true },
       onRefresh: async () => {},
     })); });
-    const manage = index => tree.root.findAllByType('button').filter(node => node.props['aria-expanded'] === false && node.props.className?.includes('customer-contract-toggle'))[index];
+    const manage = index => tree.root.findAllByType('tr').filter(node => node.props.className?.includes('customer-contract-row'))[index];
     await act(async () => manage(0).props.onClick());
     assert.equal(tree.root.findAllByProps({ className: 'customer-contract-detail-row' }).length, 1);
     assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Gestionar contratación|Garantías del servicio|Ver facturas y pagos/);
@@ -119,7 +180,7 @@ test('Clientes: contratación pendiente y servicio activo conservan sus acciones
     assert.equal(tree.root.findByType(InstallationStatus).props.contractId, 10);
     assert.equal(tree.root.findByType(InstallationStatus).props.canRequest, true);
     assert.equal(tree.root.findByType(InstallationStatus).props.compact, true);
-    await act(async () => button(tree, 'Ocultar').props.onClick());
+    await act(async () => manage(0).props.onClick());
     await act(async () => manage(1).props.onClick());
     assert.equal(tree.root.findByType(ServiceActions).props.service.idServicio, 21);
     assert.equal(tree.root.findByType(InstallationStatus).props.canRequest, false);

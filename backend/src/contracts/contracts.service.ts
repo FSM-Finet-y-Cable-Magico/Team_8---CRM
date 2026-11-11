@@ -24,6 +24,8 @@ import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dt
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
+type OwnedContractFile = { idContrato?: number; fullPath?: string; relativePath?: string };
+
 @Injectable()
 export class ContractsService {
   private readonly contractsDir = resolve(process.cwd(), 'generated', 'contracts');
@@ -366,87 +368,127 @@ export class ContractsService {
   }
 
   async getDigitalContracts(idContrato: number, currentUser: AuthUser) {
-    await this.getContractOrThrow(idContrato, currentUser);
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
     const documents = await this.prisma.contratoDigital.findMany({
       where: { idContrato },
       orderBy: { version: 'desc' },
     });
 
+    const quotes = contract.idProspecto ? await this.prisma.cotizacion.findMany({
+      where: { idProspecto: contract.idProspecto, idPlan: contract.idPlan ?? undefined, fechaEnvio: { not: null } },
+      select: { idCotizacion: true, codigo: true, fechaEnvio: true },
+      orderBy: { idCotizacion: 'desc' },
+    }) : [];
     return {
       latest: documents[0] ?? null,
       documents,
+      quotes,
+      idProspecto: contract.idProspecto,
     };
   }
 
-  async generateDigitalContract(idContrato: number, currentUser: AuthUser) {
+  async generateDigitalContract(idContrato: number, currentUser: AuthUser, onlyIfMissing = false) {
     // Reject unauthorized callers before taking a lock, then refresh under that lock.
     await this.getContractOrThrow(idContrato, currentUser);
-    const ownedFile: { fullPath?: string; relativePath?: string } = {};
+    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      return this.writeDigitalContract(tx, idContrato, currentUser, ownedFile, onlyIfMissing);
+    });
+  }
+
+  async registerWithDigitalContract<T extends { contrato: { idContrato: number } }>(
+    currentUser: AuthUser,
+    register: (tx: Prisma.TransactionClient) => Promise<{ result: T; reuseDocument: boolean }>,
+  ): Promise<T> {
+    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+      // Registration holds the contract row lock or has just inserted the row.
+      const { result, reuseDocument } = await register(tx);
+      await this.writeDigitalContract(tx, result.contrato.idContrato, currentUser, ownedFile, reuseDocument);
+      return result;
+    });
+  }
+
+  private async writeDigitalContract(
+    tx: Prisma.TransactionClient,
+    idContrato: number,
+    currentUser: AuthUser,
+    ownedFile: OwnedContractFile,
+    onlyIfMissing: boolean,
+  ) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
+    const latest = await tx.contratoDigital.findFirst({
+      where: { idContrato },
+      orderBy: { version: 'desc' },
+    });
+    if (onlyIfMissing && latest) return latest;
+    await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
+    const mode = await resolveSignatureMode(tx, contract, this.config);
+    const settings = signatureSettings(this.config ?? new ConfigService());
+    const storage = await signatureStorageAvailable(tx);
+    const automaticAvailable = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
+    const version = (latest?.version ?? 0) + 1;
+    const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
+    const buffer = await this.renderDigitalContract(contract, version, tx, snapshot, mode);
+    const hash = createHash('sha256').update(buffer).digest('hex');
+    // A rollback may release the version for another attempt. Never share its filename.
+    const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
+    const fullPath = resolve(process.cwd(), relativePath);
+    await mkdir(dirname(fullPath), { recursive: true });
+    const file = await open(fullPath, 'wx');
+    ownedFile.idContrato = idContrato;
+    ownedFile.fullPath = fullPath;
+    ownedFile.relativePath = relativePath;
+    try { await file.writeFile(buffer); }
+    finally { await file.close(); }
+
+    const created = await tx.contratoDigital.create({
+      data: {
+        idContrato,
+        idCliente: contract.idCliente,
+        idEmpresa: contract.idEmpresa,
+        urlDocumento: relativePath,
+        hashDocumento: hash,
+        estadoFirma: 'Generado',
+        fechaGeneracion: new Date(),
+        idUsuarioGenerador: currentUser.idUsuario,
+        version,
+      },
+    });
+    if (mode === 'automatic' && storage) {
+      await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
+    }
+    if (automaticAvailable) {
+      if (buffer.length > 4 * 1024 * 1024) throw new BadRequestException('El PDF supera el límite de firma de 4 MiB');
+      if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
+      await signatureRepository(tx).create({ data: {
+        idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
+        idContratoDigital: created.idContratoDigital, version, idUsuarioCreador: currentUser.idUsuario,
+        tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
+        estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
+        datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
+        pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
+      } });
+    }
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'GENERAR_CONTRATO_DIGITAL',
+      entidadAfectada: 'contrato_digital',
+      idEntidadAfectada: created.idContratoDigital,
+      valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
+    }, tx);
+    return created;
+  }
+
+  private async withDigitalContractTransaction<T>(
+    operation: (tx: Prisma.TransactionClient, ownedFile: OwnedContractFile) => Promise<T>,
+  ): Promise<T> {
+    const ownedFile: OwnedContractFile = {};
     let transactionBodyCompleted = false;
     try {
       return await this.prisma.$transaction(async tx => {
-        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
-        const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
-        const latest = await tx.contratoDigital.findFirst({
-          where: { idContrato },
-          orderBy: { version: 'desc' },
-        });
-        await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
-        const mode = await resolveSignatureMode(tx, contract, this.config);
-        const settings = signatureSettings(this.config ?? new ConfigService());
-        const storage = await signatureStorageAvailable(tx);
-        const automaticAvailable = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
-        const version = (latest?.version ?? 0) + 1;
-        const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
-        const buffer = await this.renderDigitalContract(contract, version, tx, snapshot, mode);
-        const hash = createHash('sha256').update(buffer).digest('hex');
-        // A rollback may release the version for another attempt. Never share its filename.
-        const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
-        const fullPath = resolve(process.cwd(), relativePath);
-        await mkdir(dirname(fullPath), { recursive: true });
-        const file = await open(fullPath, 'wx');
-        ownedFile.fullPath = fullPath;
-        ownedFile.relativePath = relativePath;
-        try { await file.writeFile(buffer); }
-        finally { await file.close(); }
-
-        const created = await tx.contratoDigital.create({
-          data: {
-            idContrato,
-            idCliente: contract.idCliente,
-            idEmpresa: contract.idEmpresa,
-            urlDocumento: relativePath,
-            hashDocumento: hash,
-            estadoFirma: 'Generado',
-            fechaGeneracion: new Date(),
-            idUsuarioGenerador: currentUser.idUsuario,
-            version,
-          },
-        });
-        if (mode === 'automatic' && storage) {
-          await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
-        }
-        if (automaticAvailable) {
-          if (buffer.length > 4 * 1024 * 1024) throw new BadRequestException('El PDF supera el límite de firma de 4 MiB');
-          if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
-          await signatureRepository(tx).create({ data: {
-            idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
-            idContratoDigital: created.idContratoDigital, version, idUsuarioCreador: currentUser.idUsuario,
-            tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
-            estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
-            datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
-            pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
-          } });
-        }
-        await this.auditService.record({
-          idUsuario: currentUser.idUsuario,
-          accion: 'GENERAR_CONTRATO_DIGITAL',
-          entidadAfectada: 'contrato_digital',
-          idEntidadAfectada: created.idContratoDigital,
-          valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
-        }, tx);
+        const result = await operation(tx, ownedFile);
         transactionBodyCompleted = true;
-        return created;
+        return result;
       }, { timeout: 20000 });
     } catch (error) {
       if (ownedFile.fullPath && ownedFile.relativePath) {
@@ -459,11 +501,11 @@ export class ContractsService {
           else if (!persisted) {
             // The COMMIT response is uncertain. An immediate empty read does not
             // prove rollback; retain this attempt's file for explicit inspection.
-            this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+            this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${ownedFile.idContrato}`);
           }
         } catch {
           // No safe DB confirmation or failed unlink: retain for inspection, never delete blindly.
-          this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+          this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${ownedFile.idContrato}`);
         }
       }
       throw error;
