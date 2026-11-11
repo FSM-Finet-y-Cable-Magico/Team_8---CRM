@@ -38,11 +38,6 @@ export function resolveCustomerLifecycleStatus(input: {
   contractStates: Array<string | null | undefined>;
   serviceStates: Array<string | null | undefined>;
 }) {
-  // Financial states are managed by Billing and must not be overwritten here.
-  if (['Suspendido', 'Moroso'].includes(input.currentStatus)) {
-    return input.currentStatus;
-  }
-
   const services = input.serviceStates.filter((state): state is string => Boolean(state));
   const contracts = input.contractStates.filter((state): state is string => Boolean(state));
   const hasActiveService = services.includes('Activo');
@@ -54,11 +49,12 @@ export function resolveCustomerLifecycleStatus(input: {
   const hasOperationalRelationship = services.some((state) => state !== 'Baja')
     || contracts.some((state) => state !== 'Baja' && state !== 'Anulado');
 
+  if (!hasOperationalRelationship && (services.includes('Baja') || contracts.includes('Baja'))) return 'Baja';
+  // Preserve the billing status of an account with an operational relationship.
+  if (['Suspendido', 'Moroso'].includes(input.currentStatus)) return input.currentStatus;
   if (hasActiveService) return 'Activo';
   if (hasPendingInstallation || hasSignedContract) return 'Pendiente Instalacion';
   if (hasPendingSignature) return 'Pendiente firma contrato';
-  if (!hasOperationalRelationship && (services.includes('Baja') || contracts.includes('Baja'))) return 'Baja';
-
   return input.currentStatus;
 }
 

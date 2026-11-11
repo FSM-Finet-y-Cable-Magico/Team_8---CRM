@@ -12,6 +12,26 @@ describe('CustomersService', () => {
     roles: ['Soporte'],
   };
 
+  it('edita contacto de la empresa titular y registra la auditoría en la misma transacción', async () => {
+    const commercial = { ...supportUser, roles: ['Comercial'] };
+    const customer = { idCliente: 7, nombreCompleto: 'Cliente de prueba', email: 'old@example.test', telefono: null };
+    const updated = { ...customer, email: null, telefono: '+56912345678' };
+    const tx = { cliente: { findUnique: jest.fn().mockResolvedValue(customer), update: jest.fn().mockResolvedValue(updated) } };
+    const prisma = { $transaction: jest.fn(async (fn: (value: typeof tx) => unknown) => fn(tx)) };
+    const audit = { record: jest.fn() };
+    const service = new CustomersService(prisma as unknown as PrismaService, audit as unknown as AuditService);
+
+    await expect(service.updateProfile(7, { email: null, telefono: '+56 9 1234-5678' }, commercial)).resolves.toEqual(updated);
+    expect(tx.cliente.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { idCliente: 7, idEmpresa: 2 },
+      data: { email: null, telefono: '+56912345678', nombreCompleto: undefined },
+    }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: { campos: ['email', 'telefono'] } }), tx);
+    tx.cliente.findUnique.mockResolvedValueOnce(null);
+    await expect(service.updateProfile(7, { email: 'other@example.test' }, commercial)).rejects.toThrow('tu empresa');
+    expect(tx.cliente.update).toHaveBeenCalledTimes(1);
+  });
+
   it('busca clientes por telefono normalizado y limita por empresa asociada', async () => {
     const prisma = {
       cliente: {

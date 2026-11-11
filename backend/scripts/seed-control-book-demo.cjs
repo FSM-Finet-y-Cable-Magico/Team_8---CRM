@@ -33,18 +33,18 @@ function demoRut(number) {
 }
 
 const scenarios = [
-  { key: 'pending', name: 'Ana - Saldo pendiente' },
-  { key: 'partial', name: 'Bruno - Pago parcial' },
-  { key: 'monthly', name: 'Carla - Deuda mensual' },
-  { key: 'agreement', name: 'Diego - Convenio aprobado' },
-  { key: 'extension', name: 'Elena - Prorroga vigente' },
-  { key: 'notice', name: 'Fabio - Ultimo aviso' },
-  { key: 'suspended', name: 'Gabriela - Servicio suspendido' },
-  { key: 'paid', name: 'Hugo - Al dia' },
-  { key: 'no-invoice', name: 'Ines - Sin factura' },
-  { key: 'no-plan', name: 'Julia - Sin plan' },
-  { key: 'withdrawal', name: 'Karina - Aviso de retiro' },
-  { key: 'pending-agreement', name: 'Luis - Convenio pendiente' },
+  { slot: 1, key: 'pending', name: 'Ana - Saldo pendiente' },
+  { slot: 2, key: 'partial', name: 'Bruno - Pago parcial' },
+  { slot: 3, key: 'monthly', name: 'Carla - Deuda mensual' },
+  { slot: 4, key: 'agreement', name: 'Diego - Convenio aprobado' },
+  { slot: 5, key: 'extension', name: 'Elena - Prorroga vigente' },
+  { slot: 6, key: 'notice', name: 'Fabio - Ultimo aviso' },
+  { slot: 7, key: 'suspended', name: 'Gabriela - Servicio suspendido' },
+  { slot: 8, key: 'paid', name: 'Hugo - Al dia' },
+  { slot: 9, key: 'no-invoice', name: 'Ines - Sin factura' },
+  // Leave slot 10 reserved for the retired fixture so existing RUTs remain stable.
+  { slot: 11, key: 'withdrawal', name: 'Karina - Aviso de retiro' },
+  { slot: 12, key: 'pending-agreement', name: 'Luis - Convenio pendiente' },
 ];
 
 async function seedCompany(tx, company) {
@@ -64,8 +64,8 @@ async function seedCompany(tx, company) {
   const price = Number(zonePrice?.precioMensual ?? plan.precioMensual);
   if (price <= 10000) throw new Error('El precio del plan debe permitir el caso de pago parcial.');
   const results = [];
-  for (const [index, scenario] of scenarios.entries()) {
-    const rut = demoRut(99000000 + company.idEmpresa * 100 + index + 1);
+  for (const scenario of scenarios) {
+    const rut = demoRut(99000000 + company.idEmpresa * 100 + scenario.slot);
     const existing = await tx.cliente.findUnique({ where: { rut } });
     if (existing) {
       if (existing.idEmpresa !== company.idEmpresa || existing.origenContacto !== MARKER) {
@@ -83,7 +83,6 @@ async function seedCompany(tx, company) {
       datosTecnicos: { demo: MARKER, caso: scenario.key }, fechaCreacion: startedAt,
     } });
     results.push({ idCliente: customer.idCliente, caso: scenario.key, creado: true });
-    if (scenario.key === 'no-plan') continue;
 
     const overdue = !['pending', 'extension', 'paid', 'no-invoice'].includes(scenario.key);
     const contract = await tx.contrato.create({ data: {
@@ -93,7 +92,7 @@ async function seedCompany(tx, company) {
       fechaSuspension: scenario.key === 'suspended' ? offset(-30) : null,
       numeroContratoExterno: `DEMO-LC-${company.idEmpresa}-${scenario.key}`,
       observacionContrato: 'Demostracion local del Libro de control. Contrato historico de prueba.',
-      direccionInstalacion: `Calle Demostracion ${index + 1}`, comunaInstalacion: 'Valparaiso', ciudadInstalacion: 'Valparaiso',
+      direccionInstalacion: `Calle Demostracion ${scenario.slot}`, comunaInstalacion: 'Valparaiso', ciudadInstalacion: 'Valparaiso',
     } });
     const service = await tx.servicioContratado.create({ data: {
       idEmpresa: company.idEmpresa, idCliente: customer.idCliente, idContrato: contract.idContrato,

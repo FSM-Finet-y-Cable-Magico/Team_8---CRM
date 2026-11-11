@@ -80,6 +80,15 @@ describe('P0-03 gestiones sobre identidad compartida', () => {
     expect(prisma.cliente).not.toHaveProperty('update');
   });
 
+  it('permite abrir el contrato exacto de un cliente sin mezclar el resto de la cartera', async () => {
+    const { service } = shared();
+    const query = { idEmpresa: 1, idCliente: 10, idContrato: 20, page: 1, pageSize: 1 };
+    await expect(service.list(query, commercial)).resolves.toMatchObject({ items: [{ idCliente: 10, idContrato: 20 }] });
+    await expect(service.list({ ...query, idContrato: 21 }, commercial)).resolves.toMatchObject({ items: [] });
+    await expect(service.list({ ...query, idCliente: 11 }, commercial)).resolves.toMatchObject({ items: [] });
+    await expect(service.list({ ...query, idFactura: 31 }, commercial)).resolves.toMatchObject({ items: [] });
+  });
+
   it('registra convenio y prórroga en la empresa de la factura', async () => {
     const { service, prisma } = shared();
     await service.createAgreement({ idCliente: 10, idFactura: 30, idContrato: 20, montoComprometido: 6000,

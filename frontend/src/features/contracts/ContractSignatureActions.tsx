@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage } from '../../api';
 import { useSignatureStatus } from './useSignatureStatus';
-export function ContractSignatureActions({ idContrato, canSend, revision, onChanged }: {
-  idContrato: number; canSend: boolean; revision: number; onChanged?: () => void;
+export function ContractSignatureActions({ idContrato, canSend, revision, onChanged, compact = false }: {
+  idContrato: number; canSend: boolean; revision: number; onChanged?: () => void; compact?: boolean;
 }) {
   const { status: state, refresh } = useSignatureStatus(idContrato, revision);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
@@ -33,7 +33,7 @@ export function ContractSignatureActions({ idContrato, canSend, revision, onChan
       }
     } catch (e) { setMessage(apiErrorMessage(e)); } finally { setBusy(false); }
   }
-  return <section><h4>Firma por correo</h4>
+  const content = <>
     {state.policy.reason && <p role="status">{state.policy.reason}</p>}
     <p>Solicitud: {state.solicitud?.estado ?? 'Sin solicitud'}{state.solicitud && ' · Correo: ' + state.solicitud.correoEstado}</p>
     {message && <p role="status">{message}</p>}
@@ -42,5 +42,7 @@ export function ContractSignatureActions({ idContrato, canSend, revision, onChan
     {state.signedDownloadAvailable && <button className="secondary compact" disabled={busy} onClick={() => void action('download')}>Descargar contrato con constancia</button>}
     {canSend && state.enabled && state.solicitud?.estado === 'FIRMADA' && state.solicitud.firmaCorreoEstado === 'FALLIDO' && <button disabled={busy} onClick={() => void action('retry')}>Reintentar entrega confirmada como fallida</button>}
     <button className="secondary compact" disabled={busy} onClick={() => void refresh()}>Consultar estado</button>
-  </section>;
+  </>;
+  return compact ? <details className="customer-contract-document-options"><summary>Firma por correo</summary>{content}</details>
+    : <section><h4>Firma por correo</h4>{content}</section>;
 }

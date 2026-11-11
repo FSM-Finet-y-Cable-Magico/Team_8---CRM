@@ -70,4 +70,8 @@ describe('Customer lifecycle: relaciones, no etiquetas historicas', () => {
   it.each(['Moroso', 'Suspendido'])('no sobreescribe el estado financiero global %s', (currentStatus) => {
     expect(resolveCustomerLifecycleStatus({ currentStatus, contractStates: ['Activo'], serviceStates: ['Activo'] })).toBe(currentStatus);
   });
+
+  it('refleja la baja operativa cuando terminó el último contrato, incluso si había suspensión financiera', () => {
+    expect(resolveCustomerLifecycleStatus({ currentStatus: 'Suspendido', contractStates: ['Baja'], serviceStates: ['Baja'] })).toBe('Baja');
+  });
 });

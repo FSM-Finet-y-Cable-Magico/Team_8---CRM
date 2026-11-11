@@ -29,6 +29,14 @@ docker compose up -d
 
 Con eso queda cargada la base `fsm_db` y se levantan backend y frontend.
 
+Una vez iniciado el backend con el esquema actual, retira las fichas de prueba incompletas que incluye la copia histórica:
+
+```powershell
+Get-Content db/cleanup-legacy-demo.sql | docker compose exec -T db psql -X -U postgres -d fsm_db
+```
+
+La limpieza se puede repetir. Solo aplica a la copia de demostración local y verifica las identidades y sus relaciones.
+
 ## Abrir el sistema
 
 Frontend:

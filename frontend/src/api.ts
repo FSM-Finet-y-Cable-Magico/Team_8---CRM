@@ -215,6 +215,7 @@ export type AuditLog = {
   } | null;
 };
 
+
 export type Customer = {
   idCliente: number;
   idEmpresa: number | null;
@@ -238,6 +239,7 @@ export type Customer = {
     idContrato: number;
     idEmpresa: number | null;
     idZonaPago?: number | null;
+    direccionInstalacion?: string | null;
     estado?: string | null;
     fechaInicio?: string | null;
     fechaFirmaManual?: string | null;
@@ -307,6 +309,7 @@ export type CustomerService = {
   contrato?: {
     idContrato: number;
     estado: string | null;
+    direccionInstalacion?: string | null;
     fechaFirmaManual?: string | null;
     fechaFirmaEfectiva?: string | null;
     origenFirma?: 'ELECTRONICA' | 'MANUAL' | 'SIN_FECHA';

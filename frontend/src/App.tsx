@@ -185,8 +185,12 @@ export default function App() {
 }
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [commercialNavigation, setCommercialNavigation] = useState(0);
-  const [focusedCustomerId, setFocusedCustomerId] = useState<number | null>(null);
+  const [visitedModules, setVisitedModules] = useState<Tab[]>([]);
+  useEffect(() => {
+    if (activeTab === 'customers' || activeTab === 'commercial') {
+      setVisitedModules(current => current.includes(activeTab) ? current : [...current, activeTab]);
+    }
+  }, [activeTab]);
   const [customerPendingView, setCustomerPendingView] = useState<'activation' | null>(null);
   const [installationView, setInstallationView] = useState<'coordination' | 'agenda' | null>(null);
   const [scope, setScope] = useState('consolidado');
@@ -363,7 +367,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         activeTab={activeTab}
         mainItems={mainNavItems}
         secondaryItems={secondaryNavItems}
-        onNavigate={(tab) => { setActiveTab(tab); if (tab === 'commercial') setCommercialNavigation(value => value + 1); }}
+        onNavigate={setActiveTab}
       />
 
       <section className="crm-main">
@@ -462,22 +466,25 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onChanged={() => void loadData()}
             />
           )}
-          {activeTab === 'customers' && canManageCustomers && (
+          {(activeTab === 'customers' || visitedModules.includes('customers')) && canManageCustomers && (
+            <div hidden={activeTab !== 'customers'}>
             <CustomersPanel
+              active={activeTab === 'customers'}
               pendingInstallationsView={customerPendingView}
               onPendingInstallationsViewConsumed={() => setCustomerPendingView(null)}
-              focusedCustomerId={focusedCustomerId}
-              onFocusConsumed={() => setFocusedCustomerId(null)}
               customers={customers}
               plans={plans}
               scope={scope}
               permissions={permissions}
+              profileEditor={{ admin: isAdmin, idEmpresa: user.idEmpresa }}
+              onProfileUpdated={(profile) => setCustomers(current => current.map(customer => customer.idCliente === profile.idCliente ? { ...customer, ...profile } : customer))}
               onManageInstallation={(idProspecto) => {
                 setFocusedInstallationProspectId(idProspecto);
                 setActiveTab('installations');
               }}
               onChanged={() => void loadData()}
             />
+            </div>
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
@@ -495,16 +502,18 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onChanged={() => void loadData()}
             />
           )}
-          {activeTab === 'commercial' && permissions.viewControlBook && (
+          {(activeTab === 'commercial' || visitedModules.includes('commercial')) && permissions.viewControlBook && (
+            <div hidden={activeTab !== 'commercial'}>
             <CommercialControlBookPanel
-              key={commercialNavigation}
+              active={activeTab === 'commercial'}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
-              onOpenCustomers={(row) => { if (permissions.viewCustomers) { setFocusedCustomerId(row.idCliente); setActiveTab('customers'); } }}
               customers={customers}
+              companies={companies}
               onChanged={() => void loadData()}
             />
+            </div>
           )}
           {activeTab === 'tickets' && canViewTickets && (
             <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} onChanged={() => void loadData()} />

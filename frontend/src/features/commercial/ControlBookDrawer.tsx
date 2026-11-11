@@ -1,54 +1,69 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Bell, CalendarClock, CalendarDays, Handshake, Package, Phone, Wallet, X } from 'lucide-react';
-import { api, apiErrorMessage } from '../../api';
+import { Bell, CalendarClock, CalendarDays, Handshake, IdCard, Package, Phone, Wallet } from 'lucide-react';
+import { api, apiErrorMessage, type Customer, type CustomerService } from '../../api';
+import { StatusBadge } from '../../shared/components';
+import { ControlBookCustomerContracts } from './ControlBookCustomerContracts';
 import { ControlBookHistory } from './ControlBookHistory';
-import { ControlBookActionModal } from './ControlBookActionModal';
-import { ACTION_LABELS, ActionName, ControlRow, CONTROL_ACTIONS, actionDisabledReason, buildInstallments, currency, dateLabel, managementRelations, readable, today } from './control-book-model';
+import { ControlBookModal } from './ControlBookModal';
+import { ACTION_LABELS, ActionName, ControlRow, CONTROL_ACTIONS, actionDisabledReason, buildInstallments, currency, dateLabel, managementRelations, today } from './control-book-model';
 
 function DetailList({ values }: { values: Array<[string, string | number | null | undefined]> }) {
   return <dl className="control-detail-list">{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? '—'}</dd></div>)}</dl>;
 }
 
-function RecordFields({ title, values }: { title: string; values: Array<[string, string | number | null | undefined]> }) {
-  return <table className="control-fields-table"><caption>{title}</caption><thead className="control-sr-only"><tr><th scope="col">Campo</th><th scope="col">Información</th></tr></thead><tbody>{values.map(([label, value]) => <tr key={label}><th scope="row">{label}</th><td>{value === null || value === undefined || value === '' ? '—' : value}</td></tr>)}</tbody></table>;
-}
-
 const ACTION_ICONS = { event: Phone, lastNotice: Bell, withdrawal: Package, agreement: Handshake, extension: CalendarClock, paymentDay: CalendarDays, charge: Wallet };
 const SAVE_LABELS: Record<ActionName, string> = { event: 'Guardar contacto', lastNotice: 'Guardar último aviso', withdrawal: 'Guardar aviso de retiro', agreement: 'Crear convenio', extension: 'Guardar prórroga', paymentDay: 'Guardar día de pago', charge: 'Guardar cargo' };
 
-export function ControlBookDrawer({ row, revision, canManage, canViewCustomers, canViewBilling, onClose, onSaved, onBusyChange, onOpenCustomers, onOpenBilling, financialTools }: {
+export type ControlBookRecordView = 'profile' | 'invoices' | 'activity' | 'documents';
+
+export function ControlBookDrawer({ row, customer, companyName, revision, canManage, canViewBilling, canViewDocuments, onClose, onSaved, onBusyChange, onOpenBilling, financialTools, feedback }: {
   row: ControlRow; canManage: boolean; onClose: () => void; onSaved: (message: string) => void;
+  customer?: Customer; companyName?: string;
   revision: number;
-  canViewCustomers: boolean; canViewBilling: boolean;
-  onBusyChange: (busy: boolean) => void; onOpenCustomers: (row: ControlRow) => void; onOpenBilling: (row: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'>) => void; financialTools?: ReactNode;
+  canViewBilling: boolean; canViewDocuments: boolean;
+  onBusyChange: (busy: boolean) => void; onOpenBilling: (row: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'>) => void;
+  financialTools?: (view: ControlBookRecordView) => ReactNode;
+  feedback?: ReactNode;
 }) {
+  const [view, setView] = useState<ControlBookRecordView>('profile');
   const [action, setAction] = useState<ActionName | null>(null);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [services, setServices] = useState<CustomerService[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState(false);
+  const [servicesReload, setServicesReload] = useState(0);
   const initialForm = () => ({ canal: 'TELEFONO', fecha: today(), observacion: '', monto: String(row.saldoPendiente ?? ''), cuotas: '2', condiciones: '', nuevaFecha: '', diaPago: String(row.diaPago ?? ''), tipoCargo: 'REPOSICION' });
   const [form, setForm] = useState(initialForm);
-  const heading = useRef<HTMLHeadingElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
-  const detail = useRef<HTMLElement>(null);
   const mounted = useRef(true);
   const pending = useRef(false);
   const installments = buildInstallments(Number(form.monto), Number(form.cuotas), form.fecha);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { heading.current?.focus(); }, []);
   useEffect(() => { if (step > 0) reviewHeading.current?.focus(); }, [step]);
   useEffect(() => { onBusyChange(saving); }, [saving, onBusyChange]);
-  const closeAction = useCallback(() => { if (!pending.current) { setAction(null); setError(''); } }, []);
   useEffect(() => {
-    if (action) return;
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || saving || detail.current?.querySelector('[aria-modal="true"]')) return;
-      event.preventDefault(); onClose();
-    };
-    document.addEventListener('keydown', escape);
-    return () => document.removeEventListener('keydown', escape);
-  }, [action, saving, onClose]);
+    const controller = new AbortController();
+    setServicesLoading(true);
+    setServicesError(false);
+    void api.get<CustomerService[]>(`/services/customer/${row.idCliente}`, { signal: controller.signal })
+      .then(({ data }) => {
+        if (!controller.signal.aborted) setServices(data.filter(service => service.idCliente === row.idCliente && service.idEmpresa === row.idEmpresa));
+      })
+      .catch(() => { if (!controller.signal.aborted) setServicesError(true); })
+      .finally(() => { if (!controller.signal.aborted) setServicesLoading(false); });
+    return () => controller.abort();
+  }, [row.idCliente, row.idEmpresa, revision, servicesReload]);
+  const closeAction = useCallback(() => { if (!pending.current) { setAction(null); setError(''); } }, []);
+
+  const contracts = customer?.contratos?.filter(contract => contract.idEmpresa === row.idEmpresa) ?? [];
+  const scopedCompany = companyName ?? services.find(service => service.empresa)?.empresa?.nombre
+    ?? contracts.find(contract => contract.plan?.empresa)?.plan?.empresa?.nombre
+    ?? (customer?.empresa?.idEmpresa === row.idEmpresa ? customer?.empresa?.nombre : null);
+  const primaryAddress = customer?.direcciones?.find(address => address.esPrincipal && address.direccionCompleta)?.direccionCompleta
+    ?? customer?.direcciones?.find(address => address.direccionCompleta)?.direccionCompleta;
 
   function openAction(next: ActionName) {
     if (!canManage || !CONTROL_ACTIONS.includes(next) || actionDisabledReason(next, row) || saving) return;
@@ -85,50 +100,51 @@ export function ControlBookDrawer({ row, revision, canManage, canViewCustomers, 
     } catch (err) { if (mounted.current) setError(apiErrorMessage(err)); }
     finally { pending.current = false; if (mounted.current) setSaving(false); }
   }
-  return <section ref={detail} id="control-detail-panel" className="control-drawer" aria-labelledby="control-drawer-title">
-    <div className="control-record-layout"><div className="control-record-card">
-    <button type="button" className="control-icon control-record-close" aria-label="Cerrar ficha y volver al libro de control" title="Cerrar ficha" disabled={saving} onClick={onClose}><X size={20}/></button>
-    <header className="control-drawer-header">
-      <div>
-        <h2 id="control-drawer-title" ref={heading} tabIndex={-1}>{row.nombre}</h2>
-        <p>{row.rut ?? 'Sin RUT'} · {row.plan ?? 'Sin plan'}</p>
-        <span className={'control-status status-' + row.estadoComercial.toLowerCase()}>{readable(row.estadoComercial)}</span>
-      </div>
-    </header>
+  function openInvoice(invoice: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'>) {
+    setView('invoices');
+    onOpenBilling(invoice);
+  }
 
-      <div className="control-drawer-balance">
-        <div className="control-balance-context"><span>Monto del documento</span><strong>{row.montoDocumento === null ? '—' : currency.format(row.montoDocumento)}</strong></div><div className="control-balance-context"><span>Pagado</span><strong>{row.totalPagado === null ? '—' : currency.format(row.totalPagado)}</strong></div>
-        <div><span>Saldo pendiente</span><strong>{row.saldoPendiente === null ? '—' : currency.format(row.saldoPendiente)}</strong></div><div><span>Días de atraso</span><strong>{row.diasAtraso ?? '—'}</strong></div>
+  return <ControlBookModal title={row.nombre} record busy={saving} onClose={onClose}
+    headerDetails={<>
+      <div className="control-customer-meta">
+        <span><IdCard size={15} aria-hidden="true"/>{row.rut ? 'RUT ' + row.rut : 'Sin RUT'}</span>
+        {customer?.estado && <StatusBadge value={customer.estado}/>}
       </div>
-      <div className="control-record-fields">
-        <RecordFields title="Cliente y servicio" values={[
-          ['Plan', row.plan], ['Estado del servicio', readable(row.estadoServicio)], ['Zona', row.zona],
-          ['Día de pago mensual', row.diaPago ? 'Día ' + row.diaPago : null],
-        ]}/>
-        <RecordFields title="Datos de contacto" values={[[ 'Teléfono', row.telefono ], [ 'Correo', row.email ], [ 'Dirección', row.direccion ]]}/>
-        <RecordFields title="Documento seleccionado" values={[
-          ['Estado', row.idFactura ? readable(row.estadoDocumento) : 'Sin facturas'], ['Emisión', dateLabel(row.fechaEmision)],
-          ['Vencimiento original', dateLabel(row.fechaVencimiento)], ['Vencimiento vigente', dateLabel(row.fechaVencimientoEfectiva)],
-          ['Fecha comprometida', dateLabel(row.cambioFecha)], ['Saldo a favor', row.saldoFavor === null ? '—' : currency.format(row.saldoFavor)],
-        ]}/>
-        <RecordFields title="Situación comercial" values={[
-          ['Convenio activo', row.convenioActivo ? 'Sí' : 'No'], ['Prórroga activa', row.prorrogaActiva ? 'Sí' : 'No'],
-          ['Aviso de retiro', row.retiroPendiente ? 'Retiro pendiente' : row.avisoRetiro ? 'Registrado' : 'Sin aviso'], ['Cargos por facturar', currency.format(row.cargosPendientes)],
-          ['Corte comercial', dateLabel(row.fechaCorte)], ['Estado del corte', readable(row.estadoCorte)],
-        ]}/>
-        {row.observacionRelevante && <section className="control-record-note"><h3>Observación reciente</h3><p>{row.observacionRelevante}</p></section>}
+      {view === 'profile' && <DetailList values={[
+        ['Empresa', scopedCompany], ['Origen', customer?.origenContacto], ['Teléfono', customer?.telefono ?? row.telefono],
+        ['Correo', customer?.email ?? row.email], ['Dirección', primaryAddress ?? row.direccion],
+      ]}/>}
+    </>}
+    navigation={<nav className="control-record-views" aria-label="Vistas del cliente">
+      {([['profile', 'Ficha del cliente'], ['invoices', 'Facturas y pagos'], ['activity', 'Contactos y acuerdos'], ...(canViewDocuments ? [['documents', 'Documentos tributarios']] as const : [])] as const).map(([key, label]) => (
+        <button key={key} type="button" aria-current={view === key ? 'page' : undefined} disabled={saving} onClick={event => {
+          setView(key);
+          event.currentTarget.closest('dialog')?.scrollTo({ top: 0 });
+        }}>{label}</button>
+      ))}
+    </nav>}>
+    {feedback}
+    <div className="control-customer-layout">
+      <div className="control-customer-content">
+        {view === 'profile' && <ControlBookCustomerContracts row={row} contracts={contracts} services={services}
+          loading={servicesLoading} error={servicesError} onRetry={() => setServicesReload(value => value + 1)}/>}
+        <ControlBookHistory row={row} revision={revision} view={view}
+          onOpenInvoice={canViewBilling ? openInvoice : undefined}/>
+        {view === 'activity' && row.observacionRelevante && <section className="control-record-note"><h3>Observación reciente</h3><p>{row.observacionRelevante}</p></section>}
+        {financialTools?.(view)}
       </div>
-      <div className="control-detail-links">{canViewCustomers && <button onClick={() => onOpenCustomers(row)}>Editar datos del cliente<ArrowUpRight size={14}/></button>}{canViewBilling && row.idFactura && <button onClick={() => onOpenBilling(row)}>Ver factura / registrar pago<ArrowUpRight size={14}/></button>}</div>
-      <ControlBookHistory row={row} revision={revision} onOpenInvoice={canViewBilling ? onOpenBilling : undefined}/>
-      {financialTools}
-      </div>
-      {canManage && <aside className="control-management" aria-label="Acciones comerciales"><h3>Gestionar cliente</h3><div className="control-management-actions">{CONTROL_ACTIONS.map(value => {
-        const reason = actionDisabledReason(value, row);
-        const Icon = ACTION_ICONS[value];
-        return <button type="button" key={value} disabled={Boolean(reason)} onClick={() => openAction(value)}><Icon size={17} aria-hidden="true"/><span>{ACTION_LABELS[value]}{reason && <small>{reason}</small>}</span></button>;
-      })}</div></aside>}
-      </div>
-    {action && <ControlBookActionModal title={ACTION_LABELS[action]} busy={saving} dark={Boolean(detail.current?.closest('.theme-dark'))} onClose={closeAction}>
+      {canManage && (view === 'profile' || view === 'activity') && <aside className="control-customer-actions" aria-labelledby="control-customer-actions-title">
+        <h3 id="control-customer-actions-title">Gestiones comerciales</h3>
+        <div className="control-customer-action-group">{CONTROL_ACTIONS.map(value => {
+          const Icon = ACTION_ICONS[value];
+          return <button type="button" key={value} disabled={Boolean(actionDisabledReason(value, row)) || saving} onClick={() => openAction(value)}>
+            <Icon size={16} aria-hidden="true"/>{ACTION_LABELS[value]}
+          </button>;
+        })}</div>
+      </aside>}
+    </div>
+    {action && <ControlBookModal title={ACTION_LABELS[action]} busy={saving} onClose={closeAction}>
     <div className="control-modal-customer"><strong>{row.nombre}</strong><span>{row.plan ?? 'Sin plan'}</span></div>
     <form className="control-action-form" onSubmit={(event) => void submit(event)}>
       <fieldset disabled={saving}>
@@ -159,6 +175,6 @@ export function ControlBookDrawer({ row, revision, canManage, canViewCustomers, 
       </fieldset>
       {error && <p className="control-feedback error" role="alert">{error}</p>}
       <footer className="control-form-footer"><button type="button" className="control-text-button" disabled={saving} onClick={() => { if (action === 'agreement' && step > 0) setStep(step - 1); else closeAction(); setError(''); }}>{action === 'agreement' && step > 0 ? 'Atrás' : 'Cancelar'}</button><button type="submit" disabled={saving}>{saving ? 'Guardando…' : action === 'agreement' ? step === 2 ? 'Crear convenio' : 'Continuar' : SAVE_LABELS[action]}</button></footer>
-    </form></ControlBookActionModal>}
-  </section>;
+    </form></ControlBookModal>}
+  </ControlBookModal>;
 }

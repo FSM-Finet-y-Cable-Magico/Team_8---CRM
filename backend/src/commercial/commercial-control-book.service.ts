@@ -494,6 +494,9 @@ export class CommercialControlBookService {
   private filterRows<T extends Record<string, unknown>>(rows: T[], query: ControlBookQueryDto) {
     const search = this.normalize(query.search ?? '');
     return rows.filter((row) => {
+      if (query.idCliente !== undefined && row.idCliente !== query.idCliente) return false;
+      if (query.idContrato !== undefined && row.idContrato !== query.idContrato) return false;
+      if (query.idFactura !== undefined && row.idFactura !== query.idFactura) return false;
       if (search && !['rut', 'nombre', 'telefono', 'numeroContrato', 'numeroDocumento'].some((key) => this.normalize(row[key]).includes(search))) return false;
       if (query.estadoComercial && row.estadoComercial !== query.estadoComercial) return false;
       if (query.estadoServicio && row.estadoServicio !== query.estadoServicio) return false;

@@ -1225,6 +1225,10 @@ th {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.customer-profile-name { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.customer-profile-edit-button { display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; padding: 0; }
+.customer-profile-edit { margin-top: 14px; }
+.customer-profile-edit .button-row { grid-column: 1 / -1; }
 
 .customer-profile-header h3 {
   color: #20302a;

@@ -1,10 +1,11 @@
 import { ContractSignatureActions } from '../contracts/ContractSignatureActions';
 import { useCallback, useEffect, useState } from 'react';
+import { Download, FileText } from 'lucide-react';
 import { api, apiErrorMessage, DigitalContract } from '../../api';
 import { formatDateTime } from '../../lib';
 import { StatusBadge } from '../../shared/components';
 
-export function ContractDocuments({ idContrato, canGenerate, onChanged }: { idContrato: number; canGenerate: boolean; onChanged?: () => void }) {
+export function ContractDocuments({ idContrato, canGenerate, onChanged, compact = false }: { idContrato: number; canGenerate: boolean; onChanged?: () => void; compact?: boolean }) {
   const [documents, setDocuments] = useState<DigitalContract[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,6 +37,28 @@ export function ContractDocuments({ idContrato, canGenerate, onChanged }: { idCo
       link.href = url; link.download = `contrato-${idContrato}-v${row.version}.pdf`; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { setMessage(apiErrorMessage(e)); } finally { setBusy(false); }
+  }
+  if (compact) {
+    const latest = documents[0];
+    return <section className="customer-contract-documents">
+      <div className="customer-contract-document-row">
+        <h4><FileText size={16} aria-hidden="true" /> PDF del contrato</h4>
+        {loading ? <span role="status">Cargando…</span> : latest
+          ? <button type="button" className="secondary compact crm-table-action" disabled={busy} onClick={() => void download(latest)}><Download size={14} aria-hidden="true" /> Descargar PDF</button>
+          : canGenerate
+            ? <button type="button" className="secondary compact crm-table-action" disabled={busy} onClick={() => void generate()}>{busy ? 'Generando…' : 'Generar PDF'}</button>
+            : <span>Sin PDF generado</span>}
+      </div>
+      {message && <p role="status" className="inline-status">{message}</p>}
+      <ContractSignatureActions idContrato={idContrato} canSend={canGenerate} revision={latest?.version ?? 0} onChanged={onChanged} compact />
+      {latest && (canGenerate || documents.length > 1) && <details className="customer-contract-document-options">
+        <summary>Versiones del contrato</summary>
+        <div className="button-row">
+          {documents.slice(1).map(row => <button key={row.idContratoDigital} type="button" className="secondary compact" disabled={busy} onClick={() => void download(row)}>Descargar versión {row.version}</button>)}
+          {canGenerate && <button type="button" className="secondary compact" disabled={busy} onClick={() => void generate()}>Generar nueva versión</button>}
+        </div>
+      </details>}
+    </section>;
   }
   return <section className="workflow-panel"><header className="section-heading compact-heading"><h3>Documentos del contrato</h3>
     {canGenerate && <button className="secondary compact" disabled={busy || loading} onClick={() => void generate()}>{busy ? 'Procesando…' : documents.length ? 'Generar nueva versión' : 'Generar PDF'}</button>}</header>

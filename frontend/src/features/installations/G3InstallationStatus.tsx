@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
-import { api, apiErrorMessage, type G3InstallationTracking } from '../../api';
+import { api, apiErrorMessage, type CustomerService, type G3InstallationTracking } from '../../api';
 import { formatDateTime, userFacingMessage } from '../../lib';
 import { StatusBadge, ToastNotice } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
@@ -19,8 +19,34 @@ function textValue(value: unknown) {
   return '-';
 }
 
-export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false }: {
+function completedFields(tracking: G3InstallationTracking | null, service?: CustomerService) {
+  const installation = service?.instalacion;
+  const g3Data = installation?.fuente === 'G3' ? service?.datosTecnicos : undefined;
+  const result = g3Data?.resultadoInstalacion as { equipos_instalados?: unknown } | null | undefined;
+  const registered = installation?.antecedenteTecnico;
+  const detail = tracking?.detalle;
+  const technicianId = installation?.idTecnicoG3 ?? detail?.idTecnicoG3 ?? installation?.idTecnico;
+  const technician = detail?.tecnico ? textValue(detail.tecnico) : installation?.tecnico?.nombreCompleto;
+  const date = installation?.fechaCompletada ?? registered?.fechaCompletada ?? detail?.fechaCompletada;
+  const power = g3Data?.potenciaOpticaDbm ?? registered?.potenciaOpticaDbm ?? detail?.potenciaOpticaDbm;
+  const series = registered?.equiposDeclarados?.instalados ?? (Array.isArray(result?.equipos_instalados)
+    ? result.equipos_instalados.flatMap((equipment: unknown) => {
+      if (!equipment || typeof equipment !== 'object') return [];
+      const item = equipment as Record<string, unknown>;
+      const serial = item.numero_serie ?? item.numeroSerie ?? item.serial;
+      return typeof serial === 'string' && serial.trim() ? [serial.trim()] : [];
+    }) : []);
+  return <dl className="customer-contract-facts installation-facts">
+    <div><dt>Técnico</dt><dd>{technician && technician !== 'No informado' ? technician : technicianId ? 'ID #' + technicianId : '—'}</dd></div>
+    <div><dt>Fecha y hora de instalación</dt><dd>{date ? formatDateTime(date) : '—'}</dd></div>
+    <div><dt>Equipos declarados en la orden</dt><dd>{series.length ? [...new Set(series)].join(' · ') : '—'}</dd></div>
+    {typeof power === 'number' && <div><dt>Potencia óptica</dt><dd>{power} dBm</dd></div>}
+  </dl>;
+}
+
+export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false, installationSummary = false, service }: {
   prospectId?: number; contractId?: number; canRequest: boolean; onChanged?: () => void; compact?: boolean;
+  installationSummary?: boolean; service?: CustomerService;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,6 +71,9 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   }, [compact, tracking, feedback, loading, busy, showMessage, clearMessage]);
   const loadRevision = useRef(0);
   const loadController = useRef<AbortController | null>(null);
+  const savedInstallation = service?.instalacion;
+  const savedCompletion = Boolean(savedInstallation && (savedInstallation.estado === 'COMPLETADA'
+    || savedInstallation.fechaProcesamiento || savedInstallation.fechaCompletada));
   useEffect(() => { setComuna(''); setSameAddress(false); setNotice(''); }, [contractId, prospectId]);
   const load = useCallback(async () => {
     loadController.current?.abort();
@@ -57,7 +86,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
       const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
       if (revision !== loadRevision.current || controller.signal.aborted) return;
       setTracking(data);
-      if (!data && canRequest) {
+      if (!data && canRequest && !savedCompletion) {
         const result = await api.post('/integrations/g3/installation-requirements', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
         if (revision === loadRevision.current && !controller.signal.aborted) setRequirements(result.data);
       }
@@ -66,7 +95,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     } finally {
       if (revision === loadRevision.current && !controller.signal.aborted) setLoading(false);
     }
-  }, [canRequest, contractId, prospectId]);
+  }, [canRequest, contractId, prospectId, savedCompletion]);
   useEffect(() => {
     void load();
     return () => {
@@ -107,9 +136,16 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   }
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
+  if (installationSummary && !tracking && savedCompletion) return <section className="customer-installation-summary" aria-label="Instalación">
+    <header><div className="customer-installation-order"><span>Orden de instalación</span><strong>{savedInstallation?.codigoSeguimiento ?? savedInstallation?.idOt ?? '—'}</strong></div><StatusBadge value="Completada" /></header>
+    {completedFields(null, service)}
+  </section>;
+  if (installationSummary && !tracking && !canRequest) return <p className="customer-contract-note" role={error ? 'status' : undefined}>{error || 'Sin orden de instalación registrada.'}</p>;
   if (!tracking) return <div className="g3-installation-card">
-    <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>
-    <p>Se requieren contrato firmado, factibilidad aprobada, identificación del cliente, teléfono móvil, dirección y comuna.</p>
+    {installationSummary ? <p>Sin orden de instalación registrada.</p> : <>
+      <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>
+      <p>Se requieren contrato firmado, factibilidad aprobada, identificación del cliente, teléfono móvil, dirección y comuna.</p>
+    </>}
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
     {requirements?.comunaFaltante && requirements.puedeCompletarComuna && <fieldset disabled={busy}>
       <legend>Completar datos de instalación</legend>
@@ -125,21 +161,36 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     {notice && <p role="status">{notice}</p>}
   </div>;
 
-  const state = STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+  const state = completed ? 'Completada' : STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';
-  const consultClosure = delivered && !completed && (
+  const consultClosure = delivered && !completed && (!installationSummary || canRequest) && (
     <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>
   );
+  const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
+    <RefreshCw size={17} aria-hidden="true" />
+  </button>;
+  if (installationSummary) return <section className="customer-installation-summary" aria-label="Instalación">
+    <header>
+      <div className="customer-installation-order"><span>Orden de instalación</span><strong>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Por asignar'}</strong></div>
+      <div className="installation-status-actions"><StatusBadge value={state} />{refreshButton}</div>
+    </header>
+    {completed ? completedFields(tracking, service?.instalacion?.fuente === 'G3' && service.idServicio === tracking.idServicio ? service : undefined)
+      : <dl className="customer-contract-facts installation-facts">
+        <div><dt>Fecha de solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
+        {tracking.fechaUltimaSincronizacion && <div><dt>Última actualización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>}
+      </dl>}
+    {consultClosure && <details className="installation-closure-options"><summary>Opciones de instalación</summary>{consultClosure}</details>}
+    {retryable && canRequest && <div><button type="button" className="secondary compact" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button></div>}
+    <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} />
+  </section>;
   return <div className="g3-installation-card">
     <header>
       <div className="installation-delivery-heading">{delivered ? <CheckCircle2 size={20} aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<strong>{delivered ? 'Orden de instalación enviada a terreno' : 'Orden de instalación pendiente de envío'}</strong></div>
       {compact ? <div className="installation-status-actions">
         <StatusBadge value={state} />
-        {delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
-          <RefreshCw size={17} aria-hidden="true" />
-        </button>}
+        {refreshButton}
       </div> : <StatusBadge value={state} />}
     </header>
     <dl className="customer-readonly-details">

@@ -3,41 +3,34 @@ import { api, apiErrorMessage, OperationalObservation } from '../../api';
 import { formatDateTime } from '../../lib';
 import { Modal } from '../../shared/components';
 
-export function ObservationsModal({
-  target,
-  onClose,
-  onSaved,
-}: {
-  target: {
-    tipoEntidad: string;
-    idEntidad: number;
-    label: string;
-    idCliente?: number;
-    idEmpresa?: number | null;
-  } | null;
+type ObservationTarget = {
+  tipoEntidad: string;
+  idEntidad: number;
+  label: string;
+  idCliente?: number;
+  idEmpresa?: number | null;
+};
+
+export function ObservationsModal({ target, onClose, onSaved }: {
+  target: ObservationTarget | null;
   onClose: () => void;
   onSaved?: () => void;
 }) {
+  return <Modal title={target ? "Observaciones - " + target.label : "Observaciones"} open={Boolean(target)} onClose={onClose}>
+    {target && <ObservationsPanel key={target.tipoEntidad + "-" + target.idEntidad} target={target} onSaved={onSaved} />}
+  </Modal>;
+}
+
+export function ObservationsPanel({ target, onSaved }: { target: Omit<ObservationTarget, "label">; onSaved?: () => void }) {
   const [observations, setObservations] = useState<OperationalObservation[]>([]);
   const [note, setNote] = useState('');
   const [status, setStatus] = useState('');
 
   useEffect(() => {
-    if (!target) {
-      setObservations([]);
-      setNote('');
-      setStatus('');
-      return;
-    }
-
     void loadObservations();
-  }, [target?.tipoEntidad, target?.idEntidad]);
+  }, [target.tipoEntidad, target.idEntidad]);
 
   async function loadObservations() {
-    if (!target) {
-      return;
-    }
-
     try {
       const { data } = await api.get<OperationalObservation[]>(`/observations/${target.tipoEntidad}/${target.idEntidad}`);
       setObservations(data);
@@ -49,7 +42,7 @@ export function ObservationsModal({
   async function saveObservation(event: FormEvent) {
     event.preventDefault();
 
-    if (!target || !note.trim()) {
+    if (!note.trim()) {
       return;
     }
 
@@ -72,30 +65,26 @@ export function ObservationsModal({
   }
 
   return (
-    <Modal title={target ? `Observaciones - ${target.label}` : 'Observaciones'} open={Boolean(target)} onClose={onClose}>
-      {target && (
-        <section className="stack">
-          <form className="stack" onSubmit={saveObservation}>
-            <textarea
-              placeholder="Registrar observación contextual"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-            <button type="submit">Registrar observación</button>
-          </form>
-          {status && <p className="inline-status">{status}</p>}
-          <div className="compact-list">
-            {observations.map((observation) => (
-              <section className="compact-list-item" key={observation.idObservacion}>
-                <strong>{formatDateTime(observation.fechaCreacion)}</strong>
-                <span>{observation.observacion}</span>
-                <small>{observation.usuario?.nombreCompleto ?? 'Sistema'} - {observation.visibilidad ?? 'Interna'}</small>
-              </section>
-            ))}
-            {!observations.length && <p className="empty-state">Sin observaciones registradas.</p>}
-          </div>
-        </section>
-      )}
-    </Modal>
+    <section className="stack">
+      <form className="stack" onSubmit={saveObservation}>
+        <textarea
+          placeholder="Registrar observación contextual"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <button type="submit">Registrar observación</button>
+      </form>
+      {status && <p className="inline-status">{status}</p>}
+      <div className="compact-list">
+        {observations.map((observation) => (
+          <section className="compact-list-item" key={observation.idObservacion}>
+            <strong>{formatDateTime(observation.fechaCreacion)}</strong>
+            <span>{observation.observacion}</span>
+            <small>{observation.usuario?.nombreCompleto ?? 'Sistema'} - {observation.visibilidad ?? 'Interna'}</small>
+          </section>
+        ))}
+        {!observations.length && <p className="empty-state">Sin observaciones registradas.</p>}
+      </div>
+    </section>
   );
 }

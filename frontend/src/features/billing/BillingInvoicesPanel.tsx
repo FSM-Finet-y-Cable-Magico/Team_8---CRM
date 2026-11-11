@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { type ComponentType, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, BillingInvoice, BillingInvoiceDetail, BillingInvoicePage } from '../../api';
 import { formatDateOnly } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
@@ -8,9 +8,14 @@ import { PaymentTaxDocument } from './PaymentTaxDocument';
 
 const money = (value: number | string | null) => value === null ? 'Sin monto' : Number(value).toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 2 });
 type Action = 'payment';
+type InvoiceDetailModal = ComponentType<{ title: string; open: boolean; busy: boolean; onClose: () => void; children: ReactNode }>;
 const initialForm = () => ({ monto: '', pasarela: 'Transferencia', codigoTransaccion: '' });
 
-export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, focusedInvoice, onFocusConsumed, showList = true }: { scope: string; permissions: DashboardPermissions; onChanged: () => void; revision: unknown; focusedInvoice?: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'> | null; onFocusConsumed?: () => void; showList?: boolean }) {
+export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, focusedInvoice, onFocusConsumed, showList = true, detailModal: DetailModal = Modal }: {
+  scope: string; permissions: DashboardPermissions; onChanged: () => void; revision: unknown;
+  focusedInvoice?: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'> | null; onFocusConsumed?: () => void; showList?: boolean;
+  detailModal?: InvoiceDetailModal;
+}) {
   const [page, setPage] = useState(1), [search, setSearch] = useState(''), [estado, setEstado] = useState('');
   const [result, setResult] = useState<BillingInvoicePage | null>(null), [selected, setSelected] = useState<BillingInvoiceDetail | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
@@ -88,7 +93,7 @@ export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, 
     </section>
     </details>}
     {!showList && error && <p role="alert" className="inline-status">{error}</p>}
-    <Modal title={selected ? `Factura ${selected.idFactura}` : 'Factura'} open={Boolean(selected)} onClose={() => { if (!saving) { setSelected(null); setAction(null); } }}>
+    <DetailModal title={selected ? `Factura ${selected.idFactura}` : 'Factura'} open={Boolean(selected)} busy={saving} onClose={() => { if (!saving) { setSelected(null); setAction(null); } }}>
       {selected && <section className="stack">
         <p><strong>{selected.contrato?.cliente?.nombreCompleto ?? 'Sin cliente'}</strong> · Contrato {selected.idContrato ?? '—'}</p>
         <p>Monto: {money(selected.monto)} · Pagado: {money(selected.pagado)} · Saldo: {money(selected.saldo)} · Estado: {selected.estadoCalculado}</p>
@@ -108,6 +113,6 @@ export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, 
         <details open><summary>Pagos ({selected.pagos.length})</summary>{selected.pagos.map(p => <section key={p.idPago}><p>{formatDateOnly(p.fechaPago)} · {money(p.monto)} · {p.pasarela} · {p.codigoTransaccion ?? 'Sin referencia'}</p><PaymentTaxDocument idPago={p.idPago} canManage={permissions.manageBilling} canReconcile={permissions.reconcileTaxDocuments} /></section>)}</details>
         {permissions.approveAgreements && selected.convenios.some(c => c.estado === 'PENDIENTE') && <details open><summary>Convenios pendientes de aprobación</summary>{selected.convenios.filter(c => c.estado === 'PENDIENTE').map(c => <section className="stack" key={c.idConvenio}><h3>Convenio pendiente</h3><p>{money(c.montoComprometido)} · {c.condiciones}</p>{c.cuotas.map(q => <p key={q.idCuota}>Cuota {q.numero}: {money(q.monto)} · {formatDateOnly(q.fechaVencimiento)} · {q.estado}</p>)}<button disabled={saving} onClick={() => void approve(c.idConvenio)}>Aprobar convenio</button></section>)}</details>}
       </section>}
-    </Modal>
+    </DetailModal>
   </>;
 }

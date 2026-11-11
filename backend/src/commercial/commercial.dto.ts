@@ -26,6 +26,9 @@ const optionalBoolean = ({ value }: { value: unknown }) => {
 
 export class ControlBookQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idEmpresa?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCliente?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idFactura?: number;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
   @IsOptional() @IsString() @MaxLength(40) estadoComercial?: string;
   @IsOptional() @IsString() @MaxLength(40) estadoServicio?: string;
