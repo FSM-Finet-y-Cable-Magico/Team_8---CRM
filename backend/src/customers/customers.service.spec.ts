@@ -4,6 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CustomersService } from './customers.service';
 
 describe('CustomersService', () => {
+  it('perfil sin cambios no escribe ni duplica auditoria', async () => {
+    const customer = { idCliente: 7, nombreCompleto: 'Cliente QA', email: 'qa@example.invalid', telefono: '+56911111111' };
+    const tx = { cliente: { findUnique: jest.fn().mockResolvedValue(customer), update: jest.fn() } };
+    const db = { $transaction: jest.fn(async work => work(tx)) };
+    const audit = { record: jest.fn() };
+    const service = new CustomersService(db as never, audit as never);
+    await service.updateProfile(7, { email: customer.email }, { idUsuario: 2, idEmpresa: 1, roles: ['Comercial'] } as never);
+    expect(tx.cliente.update).not.toHaveBeenCalled(); expect(audit.record).not.toHaveBeenCalled();
+  });
   const supportUser: AuthUser = {
     idUsuario: 3,
     idEmpresa: 2,

@@ -43,6 +43,7 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
   const activePlans = plans.filter(plan => plan.activo !== false && plan.idPlan !== contract.plan?.idPlan && (!contract.idEmpresa || !plan.idEmpresa || plan.idEmpresa === contract.idEmpresa));
   const changePlanOpen = action === 'plan';
   const deactivateOpen = action === 'deactivate';
+  const withdrawalRequired = service.estadoOperativo === 'Suspendido';
   const nextPlan = activePlans.find(plan => plan.idPlan === Number(newPlanId));
 
   async function savePlanChange(event: FormEvent) {
@@ -59,12 +60,22 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
 
   async function deactivateService(event: FormEvent) {
     event.preventDefault();
-    if (deactivating) return;
+    if (withdrawalBusy.current) return;
+    if (withdrawalRequired && (!permissions.manageCustomerRequests || !deactivateObservation.trim() || !withdrawalDate)) {
+      showMessage('Indica fecha y observaciones. El retiro por morosidad requiere aviso previo en Libro de Control.'); return;
+    }
+    withdrawalBusy.current = true;
     setDeactivating(true);
     try {
-      await api.patch('/services/' + service.idServicio + '/deactivate', { observacion: deactivateObservation.trim() || undefined });
-      setAction(null); setDeactivateObservation(''); await onRefresh(service.idServicio); showMessage('Servicio dado de baja.');
-    } catch (error) { showMessage(serviceErrorMessage(error)); } finally { setDeactivating(false); }
+      if (withdrawalRequired) {
+        await api.post('/service-withdrawals', { idServicio: service.idServicio, idContrato: contract.idContrato,
+          motivo: 'MOROSIDAD', fechaSolicitada: withdrawalDate, observaciones: deactivateObservation.trim() });
+      } else {
+        await api.patch('/services/' + service.idServicio + '/deactivate', { observacion: deactivateObservation.trim() || undefined });
+      }
+      setAction(null); setDeactivateObservation(''); await onRefresh(service.idServicio);
+      showMessage(withdrawalRequired ? 'Solicitud de retiro registrada. El servicio sigue suspendido; no se ha confirmado retiro tecnico.' : 'Servicio dado de baja.');
+    } catch (error) { showMessage(serviceErrorMessage(error)); } finally { withdrawalBusy.current = false; setDeactivating(false); }
   }
 
   if (!permissions.changeCustomerPlan && !permissions.manageServices) return null;

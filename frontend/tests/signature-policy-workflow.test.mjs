@@ -232,3 +232,64 @@ test('no ofrece enviar sin documento elegible ni repetir un documento anulado',a
     assert.ok(button(tree,'Enviar a firma'));
   }finally{if(tree)act(()=>tree.unmount());h.restore();}
 });
+
+test('motivo seguro automático se muestra sin ofrecer firma manual o envío bloqueado', async () => {
+  const reason = 'Existe deuda pendiente en esta empresa. Regulariza el saldo antes de enviar o confirmar la firma.';
+  const h = harness(state('automatic', true, { sendAllowed: false,
+    policy: { mode: 'automatic', available: true, manualAllowed: false, reason } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(JSON.stringify(tree.toJSON()).includes(reason));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.equal(button(tree, 'Registrar firma manual'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('error al consultar firma queda visible sin exponer respuesta interna ni habilitar acciones', async () => {
+  const h = harness(() => Promise.reject(Error('PRIVATE_STORAGE_ROW'))); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.match(JSON.stringify(tree.toJSON()), /No se pudo consultar el estado de firma/);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /PRIVATE_STORAGE_ROW/);
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    h.set(state('automatic', true, { sendAllowed: true }));
+    await act(async () => button(tree, 'Consultar estado de firma').props.onClick());
+    assert.ok(button(tree, 'Enviar a firma'));
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('modalidad manual con veto muestra el motivo sin inventar botón de firma electrónica', async () => {
+  const reason = 'Se requiere revisión financiera en esta empresa antes de enviar o confirmar la firma.';
+  const h = harness(state('manual', false, { policy: { mode: 'manual', available: false, manualAllowed: false, reason } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(JSON.stringify(tree.toJSON()).includes(reason));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('descarga histórica sigue disponible aunque ya no exista modalidad para nuevas firmas', async () => {
+  const h = harness(state('unknown', false, { signedDownloadAvailable: true,
+    solicitud: { idSolicitud: 'qa-historical-signature', estado: 'FIRMADA', correoEstado: 'ENVIADO' } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(button(tree, 'Descargar contrato con constancia'));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});

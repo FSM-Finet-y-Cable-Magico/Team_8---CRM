@@ -66,6 +66,19 @@ function customerFixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe('P0-03 gestiones sobre identidad compartida', () => {
+  it('evento de cobranza y auditoria comparten transaccion; fallo no retorna exito', async () => {
+    const { service, prisma, audit } = harness();
+    audit.record.mockRejectedValueOnce(new Error('AUDIT_FAILED'));
+    await expect(service.registerEvent({ idCliente: 10, idContrato: 20, tipo: 'CONTACTO_CLIENTE',
+      canal: 'TELEFONO', fecha: '2026-10-25T12:00:00Z' }, commercial)).rejects.toThrow('AUDIT_FAILED');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(audit.record.mock.calls[0][1]).toHaveProperty('eventoGestionComercial', prisma.eventoGestionComercial);
+  });
+  it.each(['Pagada', 'Anulada'])('%s conserva documento sin deuda exigible ficticia', async estado => {
+    const { service } = harness(invoiceFixture({ estado }));
+    const result = await service.list({ page: 1, pageSize: 30 }, commercial);
+    expect(result.items[0]).toMatchObject({ idFactura: 30, saldoPendiente: 0, diasAtraso: 0 });
+  });
   const shared = () => {
     const invoice = invoiceFixture();
     invoice.contrato.cliente.idEmpresa = 2;

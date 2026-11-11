@@ -11,6 +11,7 @@ function setup() {
   const prospect = { idProspecto: 1, idEmpresa: 1, idCliente: null, rut: '99000001-8', nombreCompleto: 'Prospecto QA', telefono: '+56900000001',
     estadoPipeline: 'Cotizacion Enviada', latitud: -33.475, longitud: -70.675, contratos: [], clasificacionComercial: 'PROSPECTO' };
   const tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn(),
+    factura: { findMany: jest.fn().mockResolvedValue([]) },
     plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     cotizacion: {findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }), updateMany: jest.fn().mockResolvedValue({ count: 1 }),},
     contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
@@ -34,6 +35,16 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit, registerDocument };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it('un prospecto con RUT historico endeudado no crea contrato ni mueve pipeline', async () => {
+    const c = setup();
+    c.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled();
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' }), c.tx);
+    expect(c.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+  });
   it.each([
     { microzona: null, expectedZoneId: 21 },
     { microzona: { idZonaPago: 22 }, expectedZoneId: 22 },

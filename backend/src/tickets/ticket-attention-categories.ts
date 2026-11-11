@@ -20,8 +20,20 @@ type CategoryRow = {
   tipoDisponible: boolean;
 };
 
+// Only formatting equivalence and the Consulta alias ratified in C2-TK-01.
+// Do not remove accents, translate technical names or rewrite persisted rows.
+export function ticketCategoryNameKey(name: string) {
+  return name.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase();
+}
+
+export function officialTicketAttentionName(name: string) {
+  const key = ticketCategoryNameKey(name);
+  if (key === 'consulta') return 'Consulta general';
+  return TICKET_ATTENTION_NAMES.find(official => ticketCategoryNameKey(official) === key) ?? null;
+}
+
 export function isGeneralTicketCategory(category: Pick<CategoryRow, 'nombre' | 'tipo' | 'tipoDisponible'>) {
-  if (['cambio_credenciales_wifi', 'asistente virtual'].includes(category.nombre.toLowerCase())) return false;
+  if (['cambio_credenciales_wifi', 'asistente virtual'].includes(ticketCategoryNameKey(category.nombre))) return false;
   return category.tipo === 'ATENCION' || category.tipo === 'TECNICA'
     || (category.tipoDisponible === false && category.tipo === null);
 }
@@ -38,17 +50,20 @@ export async function readTicketCategoryCatalog(prisma: Pick<Prisma.TransactionC
 }
 
 export function ticketAttentionCatalog<T extends { idCategoria: number; nombre: string; tipo: string | null; tipoDisponible: boolean }>(categories: readonly T[]) {
-  const names = new Map(TICKET_ATTENTION_NAMES.map(name => [name.toLowerCase(), name]));
   const counts = new Map<string, number>();
+  const idCounts = new Map<number, number>();
   for (const category of categories) {
-    const key = category.nombre.toLowerCase();
+    const key = officialTicketAttentionName(category.nombre) ?? ticketCategoryNameKey(category.nombre);
     counts.set(key, (counts.get(key) ?? 0) + 1);
+    idCounts.set(category.idCategoria, (idCounts.get(category.idCategoria) ?? 0) + 1);
   }
   return categories.map(category => {
-    const key = category.nombre.toLowerCase();
+    const official = officialTicketAttentionName(category.nombre);
+    const key = official ?? ticketCategoryNameKey(category.nombre);
     // No escoger arbitrariamente un ID si hay nombres equivalentes duplicados.
     const permitsAttention = category.tipo === 'ATENCION' || (category.tipoDisponible === false && category.tipo === null);
-    const nombreAtencion = permitsAttention && counts.get(key) === 1 ? names.get(key) ?? null : null;
+    const validId = Number.isInteger(category.idCategoria) && category.idCategoria > 0 && category.idCategoria <= 2147483647;
+    const nombreAtencion = permitsAttention && validId && idCounts.get(category.idCategoria) === 1 && counts.get(key) === 1 ? official : null;
     return { ...category, nombreAtencion };
   });
 }

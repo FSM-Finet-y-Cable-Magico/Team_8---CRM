@@ -7,6 +7,10 @@ const source = await readFile(new URL('../src/features/commercial/control-book-m
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
 const { actionDisabledReason, buildInstallments, COLUMNS, ESSENTIAL, exportColumns, managementRelations, recordContext, readable, OPERATIONAL, CONTROL_ACTIONS } = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'));
 
+test('bitácora se presenta como gestión de cobranza sin cambiar la acción API', () => {
+  assert.match(source, /event: 'Registrar gestión de cobranza'/);
+});
+
 test('cuotas de fin de mes conservan el día original y respetan febrero', () => {
   const installments = buildInstallments(34991, 3, '2026-01-31');
   assert.deepEqual(installments.map((item) => item.fechaVencimiento), ['2026-01-31', '2026-02-28', '2026-03-31']);

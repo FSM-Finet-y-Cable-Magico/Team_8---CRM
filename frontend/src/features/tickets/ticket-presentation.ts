@@ -1,7 +1,35 @@
 import type { Ticket, TicketCategory } from '../../api';
 
+// Documento 0 / Tabla 11.9. IDs and eligibility still come from the backend.
+export const TICKET_ATTENTION_LABELS = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+  'Facturación y cobro', 'Consulta general', 'Baja de servicio'] as const;
+const categoryKey = (name: string) => name.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase();
+const officialName = (name: string) => categoryKey(name) === 'consulta' ? 'Consulta general'
+  : TICKET_ATTENTION_LABELS.find(label => categoryKey(label) === categoryKey(name)) ?? null;
+
+/** Diagnose the actual catalog response; never enable an ID without the backend
+ * projection. Seven arbitrary rows are not evidence of seven official options. */
+export function ticketAttentionAvailability(categories: TicketCategory[]) {
+  const options: TicketCategory[] = [];
+  const issues: Array<{ name: string; reason: string; rows: TicketCategory[] }> = [];
+  for (const name of TICKET_ATTENTION_LABELS) {
+    const rows = categories.filter(category => officialName(category.nombre) === name);
+    const row = rows[0];
+    let reason = '';
+    if (!row) reason = 'Falta en el catálogo';
+    else if (rows.length !== 1) reason = 'Nombre o alias duplicado; requiere revisión';
+    else if (!Number.isInteger(row.idCategoria) || row.idCategoria < 1 || row.idCategoria > 2147483647
+      || categories.filter(category => category.idCategoria === row.idCategoria).length !== 1) reason = 'Identificador no válido o duplicado';
+    else if (!(row.tipo === 'ATENCION' || (row.tipo == null && row.tipoDisponible !== true))) reason = 'Clasificación incompatible con atención';
+    else if (row.nombreAtencion !== name) reason = 'No habilitada por el catálogo del servidor';
+    if (reason) issues.push({ name, reason, rows });
+    else options.push(row);
+  }
+  return { options, issues, complete: issues.length === 0 };
+}
+
 export function isGeneralTicketCategory(category: TicketCategory) {
-  if (['cambio_credenciales_wifi', 'asistente virtual'].includes(category.nombre.toLowerCase())) return false;
+  if (['cambio_credenciales_wifi', 'asistente virtual'].includes(categoryKey(category.nombre))) return false;
   if (category.tipoDisponible === true || category.tipo != null) return ['ATENCION', 'TECNICA'].includes(category.tipo ?? '');
   return true; // Catálogo local/anterior sin clasificación: conservar gestión histórica.
 }

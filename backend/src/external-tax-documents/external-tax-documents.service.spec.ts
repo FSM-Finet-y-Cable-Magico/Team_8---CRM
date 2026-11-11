@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ExternalTaxDocumentsService } from './external-tax-documents.service';
+import { AuditService } from '../audit/audit.service';
 
 const admin = { idUsuario: 1, idEmpresa: 1, email: null, nombreCompleto: 'Admin', roles: ['Administrador'] };
 const adminCompany2 = { ...admin, idUsuario: 3, idEmpresa: 2 };
@@ -21,6 +22,7 @@ const baseDto = {
 
 function setup() {
   const rows: any[] = [];
+  const persistedAudits: any[] = [];
   const untouched = {
     facturaCreate: jest.fn(), pagoCreate: jest.fn(), cargoUpdate: jest.fn(), convenioUpdate: jest.fn(),
     prorrogaUpdate: jest.fn(), statusCalculate: jest.fn(), serviceUpdate: jest.fn(), workOrderCreate: jest.fn(),
@@ -50,17 +52,31 @@ function setup() {
         return Promise.resolve(row);
       }),
       update: jest.fn().mockImplementation(({ where, data }) => {
-        const row = rows.find((item) => item.idDocumento === where.idDocumento);
-        if (!row) return Promise.resolve(null);
-        Object.assign(row, data, { fechaActualizacion: new Date() });
-        return Promise.resolve(row);
+        const index = rows.findIndex((item) => item.idDocumento === where.idDocumento);
+        if (index < 0) return Promise.resolve(null);
+        const updated = { ...rows[index], ...data, fechaActualizacion: new Date() };
+        rows[index] = updated;
+        return Promise.resolve(updated);
       }),
     },
-    $transaction: jest.fn((operations) => Promise.all(operations)),
+    logAuditoria: { create: jest.fn(({ data }) => { persistedAudits.push(data); return Promise.resolve(data); }) },
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    $transaction: jest.fn(),
   };
+  prisma.$transaction.mockImplementation(async (operations) => {
+    if (typeof operations !== 'function') return Promise.all(operations);
+    const before = rows.map(row => ({ ...row }));
+    const auditsBefore = [...persistedAudits];
+    try { return await operations(prisma); }
+    catch (error) {
+      rows.splice(0, rows.length, ...before);
+      persistedAudits.splice(0, persistedAudits.length, ...auditsBefore);
+      throw error;
+    }
+  });
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const service = new ExternalTaxDocumentsService(prisma as never, audit as never);
-  return { service, prisma, audit, rows, untouched };
+  return { service, prisma, audit, rows, untouched, persistedAudits };
 }
 
 describe('Etapa 5 - documentos tributarios externos CU-86', () => {
@@ -68,7 +84,7 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const { service, audit } = setup();
     const result = await service.create(baseDto, admin);
     expect(result).toMatchObject({ tipoDocumento: 'BOLETA', folioONumero: 'B-100', fuente: 'EXTERNO_MANUAL', estado: 'REGISTRADO' });
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_DOCUMENTO_TRIBUTARIO_EXTERNO' }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_DOCUMENTO_TRIBUTARIO_EXTERNO' }), expect.any(Object));
     expect(audit.record.mock.calls[0][0].valorNuevo.urlDocumento).toBe('https://docs.example.test/documento.pdf');
   });
 
@@ -119,7 +135,7 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const { service, audit } = setup();
     await service.create(baseDto, admin);
     await expect(service.create({ ...baseDto, folioONumero: 'b-100', emisorProveedor: 'PROVEEDOR DEMO' }, admin)).rejects.toBeInstanceOf(ConflictException);
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'INTENTO_DOCUMENTO_TRIBUTARIO_DUPLICADO' }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'INTENTO_DOCUMENTO_TRIBUTARIO_DUPLICADO' }), expect.any(Object));
   });
 
   it('permite el mismo folio y emisor en otra empresa', async () => {
@@ -199,7 +215,7 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const { service, prisma, audit } = setup();
     prisma.factura.findUnique.mockResolvedValue({ idFactura: 30, idContrato: 20, contrato: { idEmpresa: 1, idCliente: 10 } });
     await service.create({ ...baseDto, idFactura: 30 }, admin);
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'VINCULAR_DOCUMENTO_FACTURA' }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'VINCULAR_DOCUMENTO_FACTURA' }), expect.any(Object));
   });
 
   it('rechaza cargo adicional de otra empresa', async () => {
@@ -236,7 +252,7 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const created = await service.create(baseDto, admin);
     const updated = await service.update(created.idDocumento, { folioONumero: 'B-101' }, admin);
     expect(updated.folioNormalizado).toBe('B-101');
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DOCUMENTO_TRIBUTARIO_EXTERNO', valorAnterior: expect.any(Object), valorNuevo: expect.any(Object) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DOCUMENTO_TRIBUTARIO_EXTERNO', valorAnterior: expect.any(Object), valorNuevo: expect.any(Object) }), expect.any(Object));
   });
 
   it('anula sin borrar físicamente y audita', async () => {
@@ -244,7 +260,7 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const created = await service.create(baseDto, admin);
     await expect(service.deactivate(created.idDocumento, admin)).resolves.toMatchObject({ estado: 'ANULADO' });
     expect(rows).toHaveLength(1);
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'DESACTIVAR_DOCUMENTO_TRIBUTARIO_EXTERNO' }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'DESACTIVAR_DOCUMENTO_TRIBUTARIO_EXTERNO' }), expect.any(Object));
   });
 
   it.each(['create', 'update', 'deactivate', 'findOne'] as const)('usuario sin permiso no puede ejecutar %s', async (operation) => {
@@ -307,5 +323,109 @@ describe('Etapa 5 - documentos tributarios externos CU-86', () => {
     const created = await service.create(baseDto, admin);
     await service.update(created.idDocumento, { referenciaExterna: 'corregida' }, admin);
     Object.values(untouched).forEach((spy) => expect(spy).not.toHaveBeenCalled());
+  });
+
+  it('un documento sin cliente conserva una referencia externa sin crear identidad ni deuda', async () => {
+    const { service, prisma, rows, untouched } = setup();
+    await expect(service.create(baseDto, admin)).resolves.toMatchObject({ fuente: 'EXTERNO_MANUAL' });
+    expect(rows[0].idCliente).toBeUndefined();
+    expect(prisma.cliente.findUnique).not.toHaveBeenCalled();
+    Object.values(untouched).forEach(spy => expect(spy).not.toHaveBeenCalled());
+  });
+
+  it('una referencia bancaria fuera del rango de ID se rechaza antes de consultar Factura', async () => {
+    const { service, prisma, rows } = setup();
+    await expect(service.create({ ...baseDto, idFactura: 987654321012 }, admin)).rejects.toThrow('no un folio ni una referencia bancaria');
+    expect(prisma.factura.findUnique).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(0);
+  });
+
+  it('una factura inexistente se informa como referencia CRM, sin guardar documento', async () => {
+    const { service, rows } = setup();
+    await expect(service.create({ ...baseDto, idFactura: 9876 }, admin)).rejects.toThrow('Factura CRM no encontrada');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('componentes opcionales null permanecen ausentes, sin convertirlos en cero', async () => {
+    const { service } = setup();
+    await expect(service.create({ ...baseDto, montoNeto: null, montoExento: null, iva: null } as never, admin)).resolves.toMatchObject({ montoNeto: null, montoExento: null, iva: null });
+  });
+
+  it('revierte el alta cuando AuditService real no puede persistir la auditoría', async () => {
+    const { prisma, rows, persistedAudits } = setup();
+    prisma.logAuditoria.create.mockRejectedValueOnce(new Error('AUDIT_FAILURE'));
+    const service = new ExternalTaxDocumentsService(prisma as never, new AuditService(prisma as never));
+    await expect(service.create(baseDto, admin)).rejects.toThrow('AUDIT_FAILURE');
+    expect(rows).toHaveLength(0);
+    expect(persistedAudits).toHaveLength(0);
+  });
+
+  it('revierte documento y primera auditoría si falla la auditoría de vínculo de factura', async () => {
+    const { prisma, rows, persistedAudits } = setup();
+    prisma.factura.findUnique.mockResolvedValue({ idFactura: 30, idContrato: 20, contrato: { idEmpresa: 1, idCliente: 10 } });
+    const persist = prisma.logAuditoria.create.getMockImplementation()!;
+    prisma.logAuditoria.create.mockImplementationOnce(persist).mockRejectedValueOnce(new Error('LINK_AUDIT_FAILURE'));
+    const service = new ExternalTaxDocumentsService(prisma as never, new AuditService(prisma as never));
+    await expect(service.create({ ...baseDto, idFactura: 30 }, admin)).rejects.toThrow('LINK_AUDIT_FAILURE');
+    expect(rows).toHaveLength(0);
+    expect(persistedAudits).toHaveLength(0);
+  });
+
+  it.each(['update', 'deactivate'] as const)('revierte %s si falla la auditoría y conserva documento anterior', async operation => {
+    const { service, audit, rows, prisma } = setup();
+    const current = await service.create(baseDto, admin);
+    const before = { ...rows[0] };
+    audit.record.mockRejectedValueOnce(new Error('AUDIT_FAILURE'));
+    await expect(operation === 'update' ? service.update(current.idDocumento, { folioONumero: 'CORRECCION' }, admin) : service.deactivate(current.idDocumento, admin)).rejects.toThrow('AUDIT_FAILURE');
+    expect(rows).toEqual([before]);
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.any(Array), current.idDocumento, 1);
+  });
+
+  it('autoriza antes de bloquear una fila ajena y no ejecuta escrituras', async () => {
+    const { service, prisma, rows } = setup();
+    rows.push({ idDocumento: 1, idEmpresa: 2 });
+    await expect(service.deactivate(1, admin)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.documentoTributarioExterno.update).not.toHaveBeenCalled();
+  });
+
+  it('anular dos veces devuelve el estado confirmado sin una segunda escritura ni auditoría', async () => {
+    const { service, prisma, audit } = setup();
+    const current = await service.create(baseDto, admin);
+    await service.deactivate(current.idDocumento, admin);
+    const audits = audit.record.mock.calls.length;
+    await expect(service.deactivate(current.idDocumento, admin)).resolves.toMatchObject({ estado: 'ANULADO' });
+    expect(prisma.documentoTributarioExterno.update).toHaveBeenCalledTimes(1);
+    expect(audit.record).toHaveBeenCalledTimes(audits);
+  });
+
+  it('la auditoría de duplicado es estricta y no modifica el documento existente', async () => {
+    const { service, audit, rows } = setup();
+    await service.create(baseDto, admin);
+    audit.record.mockRejectedValueOnce(new Error('DUPLICATE_AUDIT_FAILURE'));
+    await expect(service.create(baseDto, admin)).rejects.toThrow('DUPLICATE_AUDIT_FAILURE');
+    expect(rows).toHaveLength(1);
+  });
+
+  it.each([
+    new ConflictException('AUDIT_CONFLICT'),
+    new Prisma.PrismaClientKnownRequestError('AUDIT_UNIQUE', { code: 'P2002', clientVersion: 'test', meta: { modelName: 'LogAuditoria', target: ['id_log'] } }),
+  ])('no confunde un error de auditoría con documento duplicado', async error => {
+    const { service, audit, rows } = setup();
+    audit.record.mockRejectedValueOnce(error);
+    await expect(service.create(baseDto, admin)).rejects.toBe(error);
+    expect(rows).toHaveLength(0);
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    expect(audit.record.mock.calls[0][0].accion).toBe('CREAR_DOCUMENTO_TRIBUTARIO_EXTERNO');
+  });
+
+  it('conflicto concurrente de la identidad compuesta devuelve 409 y registra intento', async () => {
+    const { service, audit, prisma, rows } = setup();
+    prisma.documentoTributarioExterno.create.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('DUPLICATE', {
+      code: 'P2002', clientVersion: 'test', meta: { target: ['id_empresa', 'tipo_documento', 'emisor_normalizado', 'folio_normalizado'] },
+    }));
+    await expect(service.create(baseDto, admin)).rejects.toBeInstanceOf(ConflictException);
+    expect(rows).toHaveLength(0);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'INTENTO_DOCUMENTO_TRIBUTARIO_DUPLICADO' }), expect.any(Object));
   });
 });
