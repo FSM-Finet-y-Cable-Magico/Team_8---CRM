@@ -200,20 +200,22 @@ describe('ProspectsService', () => {
     expect(args.include.contratos.take).toBeUndefined();
   });
 
-  it('routes a quotation by the prospect company even when the administrator belongs to another company',async()=>{
-    const prospect={idProspecto:10,idEmpresa:2,latitud:-33.4,longitud:-70.6,email:'qa@example.invalid',nombreCompleto:'QA',estadoPipeline:'Factible',idPlanInteres:3};
-    const plan={idPlan:3,idEmpresa:2,activo:true};
-    const quote={idCotizacion:4,plan,prospecto:{...prospect,empresa:{nombre:'Cable Magico Litoral'}}};
+  it.each([[1, 'FiNet Limitada'], [2, 'Cable Mágico Litoral']])('envía el PDF con diseño de la empresa %s y no de la sesión del administrador',async(idEmpresa, companyName)=>{
+    const prospect={idProspecto:10,idEmpresa,latitud:-33.4,longitud:-70.6,email:'qa@example.invalid',nombreCompleto:'QA',rut:'12345678-5',direccion:'Los Arrayanes 245',estadoPipeline:'Factible',idPlanInteres:3};
+    const plan={idPlan:3,idEmpresa,activo:true,nombreComercial:'Fibra Hogar 600',tipoPlan:'Internet',tipoCliente:'Residencial',velocidadMbps:600,precioMensual:{toString:()=> '34990'}};
+    const quote={idCotizacion:4,codigo:'COT-QA-004',fechaEnvio:new Date('2026-11-12T12:00:00Z'),plan,prospecto:{...prospect,empresa:{nombre:companyName}}};
     const prisma={prospecto:{findUnique:jest.fn().mockResolvedValue(prospect),update:jest.fn()},
       cotizacion:{findFirst:jest.fn().mockResolvedValue({}),create:jest.fn().mockResolvedValue(quote),update:jest.fn().mockResolvedValue(quote)},
       plan:{findUnique:jest.fn().mockResolvedValue(plan)}};
     const mail={sendQuote:jest.fn().mockResolvedValue({status:'sent'})};
     const coverage={plansForLocation:jest.fn().mockResolvedValue({coberturaComercial:true,planes:[plan]})};
     const service=new ProspectsService(prisma as never,{record:jest.fn()} as never,mail as never,coverage as never,{} as never);
-    jest.spyOn(service as any,'renderQuotePdfBuffer').mockResolvedValue(Buffer.from('%PDF-QUOTE-QA'));
-    await service.generateQuote(10,{planId:3},admin);
-    expect(mail.sendQuote).toHaveBeenCalledWith(expect.objectContaining({idEmpresa:2,companyName:'Cable Magico Litoral',to:prospect.email}));
+    await service.generateQuote(10,{planId:3},{...admin,idEmpresa:idEmpresa === 1 ? 2 : 1});
+    expect(mail.sendQuote).toHaveBeenCalledWith(expect.objectContaining({idEmpresa,companyName,to:prospect.email,filename:'COT-QA-004.pdf'}));
     expect(mail.sendQuote).toHaveBeenCalledTimes(1);
+    const attachment = mail.sendQuote.mock.calls[0][0].pdf as Buffer;
+    expect(attachment.subarray(0,5).toString()).toBe('%PDF-');
+    expect(attachment.toString('latin1')).toContain('/Subtype /Image');
   });
 
   it('reactiva un prospecto perdido y limpia el motivo de perdida', async () => {

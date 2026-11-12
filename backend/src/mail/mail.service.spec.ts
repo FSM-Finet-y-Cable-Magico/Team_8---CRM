@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { TLSSocket, createSecureContext, createServer as createTlsServer } from 'node:tls';
 import { MailDeliveryError, MailService } from './mail.service';
 import { smtpSettings } from './smtp.config';
+import { renderQuotePdfBuffer } from '../prospects/quote-pdf.renderer';
+import { ContractsService } from '../contracts/contracts.service';
+import { ESignatureService } from '../contracts/e-signature.service';
+import { createHash } from 'node:crypto';
 
 function createEphemeralTlsFixture() {
   // Generate a fresh key for this test run; no private key is stored in Git.
@@ -255,4 +259,38 @@ describe('SMTP company routing',()=>{
       expect(server.messages[0]).not.toContain('FiNet');expect(server.messages).toHaveLength(1);
     }finally{await server.close();}
   });
+  it.each([[1, 'FINET', 'FiNet Limitada'], [2, 'CABLE_MAGICO', 'Cable Mágico Litoral']])(
+    'preserva los PDF con diseño de cotización y contrato firmado de la empresa %s en el correo SMTP', async (idEmpresa, alias, companyName) => {
+      const server = await fakeSmtp({ mode: 'starttls', auth: true });
+      try {
+        const service = new MailService(new ConfigService({
+          SMTP_COMPANIES: JSON.stringify([{ idEmpresa, alias }]),
+          ...scoped(alias, { ...server.values, SMTP_FROM_NAME: companyName }),
+        }));
+        const quote = await renderQuotePdfBuffer({ codigo: 'COT-QA-001', fechaEnvio: new Date('2026-11-12T12:00:00Z'),
+          prospecto: { nombreCompleto: 'Catalina Rojas', rut: '12345678-5', email: tax.to, direccion: 'Los Arrayanes 245', empresa: { nombre: companyName } },
+          plan: { nombreComercial: 'Fibra Hogar 600', tipoPlan: 'Internet', tipoCliente: 'Residencial', velocidadMbps: 600, precioMensual: { toString: () => '34990' } },
+        });
+        const original = await new ContractsService({} as never, {} as never, {} as never)['renderDigitalContract']({} as never, 1, {} as never, {
+          schema: 1, idEmpresa, idContrato: 1, cliente: { nombre: 'Catalina Rojas', rut: '12345678-5', email: tax.to, telefono: null },
+          comercial: { empresa: companyName, plan: 'Fibra Hogar 600', velocidad: 600, precio: 34990, vencimiento: 10, estado: 'Pendiente firma contrato', zona: null },
+          direccion: 'Los Arrayanes 245', servicios: [],
+        }, 'automatic');
+        const signed = await new ESignatureService({} as never, new ConfigService({}), {} as never, {} as never, {} as never)['seal']({
+          pdfOriginal: original, idSolicitud: 'qa-signature', destinatario: tax.to,
+          hashOriginal: createHash('sha256').update(original).digest('hex'), datosSnapshot: { schema: 1 },
+        } as never, new Date('2026-11-12T12:00:00Z'));
+        expect(await service.sendQuote({ idEmpresa, to: tax.to, prospectName: 'Catalina Rojas', companyName, pdf: quote, filename: 'cotizacion.pdf' })).toMatchObject({ status: 'sent' });
+        expect(await service.sendSignedContract({ idEmpresa, to: tax.to, pdf: signed, filename: 'contrato-firmado.pdf' })).toMatchObject({ status: 'sent' });
+        expect(server.messages).toHaveLength(2);
+        [quote, signed].forEach((expected, index) => {
+          const part = server.messages[index].split('Content-Type: application/pdf;')[1];
+          const payload = part.split('\r\n\r\n')[1].split('\r\n--')[0];
+          const received = Buffer.from(payload.replace(/\s/g, ''), 'base64');
+          expect(received).toEqual(expected);
+          expect(received.toString('latin1')).toContain('/Subtype /Image');
+        });
+      } finally { await server.close(); }
+    },
+  );
 });

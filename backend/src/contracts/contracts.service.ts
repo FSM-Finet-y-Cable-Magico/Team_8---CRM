@@ -8,6 +8,7 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, open, unlink } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import PDFDocument from 'pdfkit';
+import { resolveQuoteBrand } from '../prospects/quote-pdf.renderer';
 import { ConfigService } from '@nestjs/config';
 import { buildContractSnapshot, ContractSnapshot, CONTRACT_INCLUDE } from './contract-snapshot';
 import { Response } from 'express';
@@ -689,7 +690,8 @@ export class ContractsService {
   private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma, savedSnapshot?: ContractSnapshot, mode: SignatureMode = 'manual') {
     const snapshot = savedSnapshot ?? await buildContractSnapshot(client, contract.idContrato, false, contract);
     const chunks: Buffer[] = [];
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
+    doc.info.Title = 'Contrato de servicios - ' + (snapshot.comercial.empresa ?? 'Empresa');
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolveBuffer, reject) => {
       doc.on('end', () => resolveBuffer(Buffer.concat(chunks)));
@@ -697,44 +699,56 @@ export class ContractsService {
     });
 
     const width = doc.page.width - 100;
+    const labelWidth = 145;
+    const rowHeight = (label: string, value: string | number | null) => {
+      doc.font('Helvetica-Bold').fontSize(9);
+      const labelHeight = doc.heightOfString(label + ':', { width: labelWidth - 16 });
+      doc.font('Helvetica').fontSize(9.5);
+      return Math.max(labelHeight, doc.heightOfString(String(value ?? 'No informado'), { width: width - labelWidth - 16, lineGap: 2 })) + 14;
+    };
     const ensureSpace = (height: number) => {
       if (doc.y + height > doc.page.height - doc.page.margins.bottom) doc.addPage();
     };
     const row = (label: string, value: string | number | null) => {
-      doc.font('Helvetica').fontSize(11);
-      const line = `${label}: ${value ?? 'No informado'}`;
-      const options = { width, lineGap: 3 };
       // Keep each bounded label/value together; PDFKit wraps long words within the page width.
-      ensureSpace(doc.heightOfString(line, options) + 5);
-      doc.text(line, 50, doc.y, options);
-      doc.moveDown(0.3);
+      const height = rowHeight(label, value);
+      ensureSpace(height);
+      const top = doc.y;
+      doc.save().rect(50, top, labelWidth, height).fill('#e4eae6');
+      doc.strokeColor('#b9cec5').lineWidth(0.5).rect(50, top, width, height).stroke();
+      doc.moveTo(50 + labelWidth, top).lineTo(50 + labelWidth, top + height).stroke().restore();
+      doc.fillColor('#293a35').font('Helvetica-Bold').fontSize(9).text(label + ':', 58, top + 7, { width: labelWidth - 16 });
+      doc.font('Helvetica').fontSize(9.5).text(String(value ?? 'No informado'), 58 + labelWidth, top + 7, { width: width - labelWidth - 16, lineGap: 2 });
+      doc.y = top + height;
     };
     const section = (title: string) => {
       ensureSpace(80);
       doc.moveDown(0.6);
-      doc.font('Helvetica-Bold').fontSize(14).text(title, 50, doc.y, { width });
+      doc.fillColor('#147e70').font('Helvetica-Bold').fontSize(11).text(title, 50, doc.y, { width });
       doc.moveDown(0.4);
     };
     const block = (title: string, rows: Array<[string, string | number | null]>) => {
-      doc.font('Helvetica').fontSize(11);
-      const height = rows.reduce((total, [label, value]) => total
-        + doc.heightOfString(`${label}: ${value ?? 'No informado'}`, { width, lineGap: 3 }) + 5, 40);
+      const height = rows.reduce((total, [label, value]) => total + rowHeight(label, value), 60);
       // Keep a service and the document notes together instead of leaving orphan rows on a new page.
       ensureSpace(height);
       section(title);
       rows.forEach(([label, value]) => row(label, value));
     };
-    doc.font('Helvetica-Bold').fontSize(18).text('Contrato digital de servicios', { align: 'center' });
-    doc.moveDown();
-    row('Versión', version);
-    row('Fecha de generación (Chile)', new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }));
-    section('Cliente');
+    const brand = resolveQuoteBrand(snapshot.comercial.empresa);
+    doc.fillColor('#61726b').font('Helvetica-Bold').fontSize(8.5).text(`Versión: ${version}`, 50, 38, { width: width - 110 });
+    doc.fillColor('#147e70').font('Helvetica-Bold').fontSize(18).text('CONTRATO DE SERVICIOS', 50, 58, { width: width - 110 });
+    if (brand.logo) doc.image(brand.logo, doc.page.width - 150, 28, { fit: [100, 80] });
+    doc.fillColor('#61726b').font('Helvetica').fontSize(8).text(new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }) + ' (Chile)', 50, 114, { width, align: 'right' });
+    doc.strokeColor('#b9cec5').lineWidth(0.6).moveTo(50, 128).lineTo(50 + width, 128).stroke();
+    doc.y = 140;
+    section('Datos del cliente');
     row('Nombre', snapshot.cliente.nombre);
     row('RUT', snapshot.cliente.rut);
     row('Correo electrónico', snapshot.cliente.email);
     row('Teléfono', snapshot.cliente.telefono);
-    section('Condiciones comerciales');
+    section('Empresa prestadora');
     row('Empresa', snapshot.comercial.empresa);
+    section('Servicio y condiciones comerciales');
     row('Plan', snapshot.comercial.plan);
     row('Velocidad del plan', snapshot.comercial.velocidad ? snapshot.comercial.velocidad + ' Mbps' : null);
     row('Precio mensual', snapshot.comercial.precio !== null ? '$' + snapshot.comercial.precio.toLocaleString('es-CL') : null);
@@ -755,6 +769,15 @@ export class ContractsService {
         : mode === 'manual' ? 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'
         : 'Documento pendiente de autorización del modo de firma. No incorpora firma electrónica avanzada.'],
     ]);
+    const pages = doc.bufferedPageRange();
+    for (let page = pages.start; page < pages.start + pages.count; page++) {
+      doc.switchToPage(page);
+      const bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      doc.fillColor('#61726b').font('Helvetica').fontSize(7).text(`${snapshot.comercial.empresa ?? 'Empresa'} | Versión ${version}`, 50, doc.page.height - 30, { width: width - 50 });
+      doc.text(`${page + 1} / ${pages.count}`, 50 + width - 45, doc.page.height - 30, { width: 45, align: 'right' });
+      doc.page.margins.bottom = bottom;
+    }
     doc.end();
 
     return finished;

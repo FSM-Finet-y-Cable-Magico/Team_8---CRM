@@ -141,7 +141,7 @@ export function renderQuotePdfBuffer(quote: QuotePdfData): Promise<Buffer> {
     const columns = [
       { label: 'Cant.', x: PAGE_MARGIN, width: 34, align: 'center' as const },
       { label: 'Servicio / plan', x: PAGE_MARGIN + 44, width: contentWidth - 44 - 178, align: 'left' as const },
-      { label: 'Cobro', x: PAGE_MARGIN + contentWidth - 126, width: 76, align: 'left' as const },
+      { label: 'Cobro', x: PAGE_MARGIN + contentWidth - 178, width: 76, align: 'left' as const },
       { label: 'Importe', x: PAGE_MARGIN + contentWidth - 95, width: 95, align: 'right' as const },
     ];
     doc.moveTo(PAGE_MARGIN, tableTop).lineTo(PAGE_MARGIN + contentWidth, tableTop).strokeColor(RULE).lineWidth(0.8).stroke();
