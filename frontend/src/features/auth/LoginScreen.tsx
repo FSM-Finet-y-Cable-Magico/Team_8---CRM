@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { Eye, EyeOff, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, type AuthUser } from '../../api';
 import { normalizeAuthUser } from '../../lib';
+import { saveSession } from '../../lib/session';
 
 export function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   const [email, setEmail] = useState('');
@@ -18,8 +19,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) 
     try {
       const { data } = await api.post('/auth/login', { email, password });
       const normalizedUser = normalizeAuthUser(data.user);
-      localStorage.setItem('finet_token', data.accessToken);
-      localStorage.setItem('finet_user', JSON.stringify(normalizedUser));
+      saveSession(data.accessToken, normalizedUser);
       onLogin(normalizedUser);
     } catch (err) {
       setError(apiErrorMessage(err));

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { clearSession, monitorSession, restoreSession } from './lib/session';
 import {
   ArrowRight,
   BarChart3,
@@ -74,7 +75,6 @@ import {
   formatDateOnly,
   formatDateTime,
   formatWorkOrderValue,
-  normalizeAuthUser,
   settledData,
   technicalEntries,
 } from './lib';
@@ -165,10 +165,11 @@ type Summary = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    const stored = localStorage.getItem('finet_user');
-    return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
-  });
+  const [user, setUser] = useState<AuthUser | null>(restoreSession);
+
+  useEffect(() => {
+    if (user) return monitorSession(() => setUser(null));
+  }, [user]);
 
   useEffect(() => {
     const handleExpiredSession = () => setUser(null);
@@ -330,8 +331,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }, [scope]);
 
   function logout() {
-    localStorage.removeItem('finet_token');
-    localStorage.removeItem('finet_user');
+    clearSession();
     onLogout();
   }
 

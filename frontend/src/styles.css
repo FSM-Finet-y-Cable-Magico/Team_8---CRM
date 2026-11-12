@@ -499,6 +499,16 @@ th {
 .prospects-list-section > h2 {
   margin: 0;
 }
+.prospects-workspace { padding-top: 14px; }
+.prospects-workspace-heading {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin: 0 2px 24px;
+}
+.prospects-workspace-heading h2 { margin: 0; font-size: 1.5rem; }
+.prospects-workspace-heading .prospect-search { margin: 0; }
 
 .panel {
   padding: 18px;
@@ -1226,8 +1236,23 @@ th {
   white-space: nowrap;
 }
 .customer-profile-name { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.customer-profile-edit-button { display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; padding: 0; }
-.customer-profile-edit { margin-top: 14px; }
+.customer-profile-edit-button { display: inline-grid; place-items: center; min-width: 26px; min-height: 26px; padding: 0; }
+.customer-profile-edit { margin-top: 0; }
+.customer-profile-edit .customer-profile-header label { display: grid; gap: 6px; width: 100%; }
+.customer-profile-edit .customer-profile-data label { display: grid; gap: 6px; min-width: 0; }
+.customer-profile-edit .customer-profile-data > div { display: grid; gap: 6px; align-content: start; }
+.customer-profile-edit .customer-profile-data span { color: #687b72; font-size: .72rem; text-transform: uppercase; }
+.customer-profile-edit .customer-profile-data strong { font-size: .81rem; }
+.customer-profile-edit input { min-height: 30px; height: 30px; padding: 4px 8px; font-size: .8rem; border-radius: 5px; }
+.customer-profile-edit .customer-profile-header > div { width: min(100%, 410px); }
+.customer-profile-edit .customer-profile-header > .status-badge { margin-inline-start: auto; }
+.customer-profile-edit .customer-profile-header label, .customer-profile-edit .customer-profile-data label { font-size: .68rem; font-weight: 600; gap: 4px; color: #687b72; }
+.customer-profile-edit .customer-profile-data { gap: 12px 20px; }
+.customer-profile-edit-actions { gap: 8px; }
+.customer-profile-edit-actions button { min-height: 30px; padding: 5px 10px; font-size: .75rem; }
+.customer-profile-edit-actions { justify-content: flex-end; margin-top: 18px; }
+.customer-profile-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.customer-profile-status > span[role="status"] { font-size: .76rem; color: #217f6b; }
 .customer-profile-edit .button-row { grid-column: 1 / -1; }
 
 .customer-profile-header h3 {
@@ -3119,6 +3144,7 @@ button.profile-menu-item.danger:hover {
   .metrics,
   .stat-grid,
   .workspace-grid,
+  .prospects-workspace-heading,
   .workflow-grid,
   .customer-search,
   .customer-summary-grid,

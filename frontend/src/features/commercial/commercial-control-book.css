@@ -187,7 +187,17 @@
 }
 .control-book-modal::backdrop { background: rgb(19 32 27 / 48%); }
 .control-action-modal::backdrop { background: rgb(19 32 27 / 36%); }
-.control-record-modal.modal-card { width: min(1120px, calc(100% - 32px)); }
+.control-record-modal.modal-card {
+  --cb-record-subtle: #f6f7f8;
+  width: min(1120px, calc(100% - 32px));
+  height: min(800px, calc(100dvh - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.control-record-modal > .control-book-modal-header { flex: 0 0 auto; }
+.control-record-modal > .control-book-modal-content { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.theme-dark .control-record-modal { --cb-record-subtle: #193329; }
 .control-book-modal-header { padding: 20px 24px 12px; background: var(--cb-surface); }
 .control-record-modal > .control-book-modal-header { position: sticky; top: 0; z-index: 2; padding-bottom: 0; border-bottom: 1px solid var(--cb-line); }
 .control-book-modal-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
@@ -207,6 +217,30 @@
 .control-action-modal .control-action-form legend { margin-bottom: 14px; color: var(--cb-text); font-size: .86rem; }
 .control-action-modal .control-form-footer { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--cb-line); }
 .control-action-modal .control-form-footer button[type="submit"] { background: var(--cb-primary); color: var(--cb-on-primary); }
+.control-action-modal:has(.control-agreement-form) { height: min(720px, calc(100dvh - 32px)); display: flex; flex-direction: column; overflow: hidden; }
+.control-action-modal:has(.control-agreement-form) > .control-book-modal-header { flex-shrink: 0; }
+.control-action-modal:has(.control-agreement-form) > .control-book-modal-content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.control-agreement-form { flex: 1; display: flex; flex-direction: column; }
+.control-agreement-form > .control-form-footer { margin-top: auto; }
+.control-contract-table input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; accent-color: var(--cb-primary); cursor: pointer; }
+.control-contract-table tr:has(input[type="checkbox"]), .control-invoice-parent { cursor: pointer; }
+.control-workbook .control-history-table .control-agreement-quota > th { padding-inline-start: 30px; }
+.control-workbook .control-history-table .control-agreement-quota > * { background: var(--cb-record-subtle); font-size: .73rem; }
+.control-action-document { display: grid; gap: 8px; }
+.control-action-modal:has(.control-manual-payment) { width: min(560px, calc(100% - 32px)); }
+.control-manual-payment > fieldset { display: grid; gap: 16px; padding: 0; margin: 0; border: 0; min-width: 0; }
+.control-payment-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0; padding-block: 4px; }
+.control-payment-summary dt { font-size: .74rem; color: var(--cb-muted); }
+.control-payment-summary dd { margin: 5px 0 0; font-size: .88rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.control-tax-document-file { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 22px 0; }
+.control-tax-document-file > svg { color: var(--cb-primary); }
+.control-tax-document-file strong { font-size: .92rem; }
+.control-tax-document-file p { margin: 7px 0 0; color: var(--cb-muted); font-size: .8rem; }
+.control-tax-document-file a { display: inline-flex; align-items: center; gap: 8px; color: var(--cb-primary); margin-left: auto; }
+.control-contract-table .control-current-contract > * { background: var(--cb-record-subtle); }
+.control-contract-table tr > :last-child { text-align: end; }
+.control-agreement-caption th { background: var(--cb-record-subtle); }
+.control-history-table caption:not(.control-sr-only) { padding: 12px; text-align: start; font-weight: 600; }
 @media (max-width: 520px) {
   .control-book-modal.modal-card { width: calc(100% - 16px); max-height: calc(100dvh - 16px); }
   .control-book-modal-header { padding: 14px 12px 10px; }
@@ -333,8 +367,9 @@
 .control-customer-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; font-size: .79rem; color: var(--cb-muted); }
 .control-customer-meta > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
 .control-customer-meta svg { color: var(--cb-primary); flex-shrink: 0; }
-.control-customer-layout { display: grid; gap: 20px; align-items: start; }
+.control-customer-layout { display: flex; flex-direction: column; gap: 28px; min-height: 100%; }
 .control-customer-content { min-width: 0; }
+.control-customer-layout > .control-customer-content { width: 100%; }
 .control-customer-contracts > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
 .control-customer-contracts h3, .control-customer-actions h3 { margin: 0; font-size: .95rem; }
 .control-contract-table { overflow-x: auto; }
@@ -344,21 +379,24 @@
 .control-contract-table tbody th { color: var(--cb-text); font-weight: 650; text-transform: none; }
 .control-contract-table td span + span { margin-inline-start: 6px; }
 .control-contract-table td small { display: block; margin-top: 4px; color: var(--cb-muted); }
-.control-current-contract > * { background: var(--cb-subtle); }
-.control-customer-actions { min-width: 0; border-top: 1px solid var(--cb-line); padding-top: 14px; }
+.control-current-contract > * { background: transparent; }
+.control-customer-actions { width: 100%; min-width: 0; border-top: 1px solid var(--cb-line); padding-top: 18px; margin-top: auto; }
 .control-customer-actions > p { margin: 6px 0 8px; overflow-wrap: anywhere; }
-.control-customer-action-group { display: grid; gap: 2px; margin-top: 8px; }
+.control-customer-action-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .control-workbook .control-customer-action-group button {
-  width: 100%;
+  flex: 1 1 155px;
   min-height: 37px;
   justify-content: flex-start;
-  padding: 7px 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--cb-line);
   border-radius: 6px;
   text-align: start;
   background: transparent;
   color: var(--cb-text);
 }
 .control-customer-action-group svg { color: var(--cb-primary); flex-shrink: 0; }
+.control-customer-action-group:has(> button:only-child) { justify-content: flex-end; }
+.control-workbook .control-customer-action-group > button:only-child { flex: 0 1 auto; min-width: 160px; }
 .control-workbook .control-customer-action-group button:not(:disabled):hover { background: var(--cb-subtle); }
 .control-invoice-detail { padding: 14px 16px; border: 1px solid var(--cb-line); border-radius: 8px; background: var(--cb-subtle); }
 .control-invoice-detail header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
@@ -370,10 +408,27 @@
 .control-invoice-detail dd { margin: 4px 0 0; font-weight: 650; font-variant-numeric: tabular-nums; }
 .control-record-documents, .control-history-table { min-width: 0; }
 .control-workbook .control-history { margin: 0; padding: 0; border: 0; }
-.control-workbook .control-history-table { margin-top: 0; background: var(--cb-surface); border: 1px solid var(--cb-line); border-radius: 4px; }
+.control-workbook .control-history-table { margin-top: 0; background: var(--cb-surface); border: 1px solid var(--cb-line); border-radius: 6px; }
 .control-workbook .control-history-table th { text-transform: none; }
-.control-workbook .control-history-table thead th { background: var(--cb-accent-surface); color: var(--cb-text); }
-.control-workbook .control-history-table :is(th, td) { border-inline-end: 1px solid var(--cb-line); padding: 8px; }
+.control-workbook .control-history-table thead th { background: var(--cb-record-subtle, var(--cb-subtle)); color: var(--cb-muted); font-weight: 600; white-space: nowrap; }
+.control-workbook .control-history-table :is(th, td) { border-inline-end: 0; padding: 13px 12px; vertical-align: middle; }
+.control-history > header h3 { margin: 2px 0 18px; font-size: .95rem; }
+.control-history-table tbody:last-child tr:last-child > * { border-bottom: 0; }
+.control-history-table tbody th { min-width: 170px; }
+.control-history-table table { min-width: 760px; }
+.control-invoice-table table { min-width: 1000px; }
+.control-invoice-table tbody th { min-width: 140px; }
+.control-invoice-table tbody :is(th, td) { white-space: nowrap; }
+.control-invoice-table tbody td:nth-child(3) { min-width: 150px; max-width: 230px; white-space: normal; }
+.control-workbook .control-history-table .control-money-cell { text-align: end; font-variant-numeric: tabular-nums; }
+.control-workbook .control-invoice-open { padding: 4px; min-height: 28px; color: var(--cb-primary); background: transparent; }
+.control-workbook .control-history-table .control-invoice-action-cell { position: sticky; inset-inline-end: 0; z-index: 1; width: 42px; background: var(--cb-surface); box-shadow: -1px 0 var(--cb-line); }
+.control-workbook .control-history-table thead .control-invoice-action-cell { background: var(--cb-record-subtle, var(--cb-subtle)); }
+.control-movement-context { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 24px; margin: 3px 0 12px; }
+.control-movement-context dt { font-size: .69rem; color: var(--cb-muted); }
+.control-movement-context dd { margin: 5px 0 0; font-size: .76rem; overflow-wrap: anywhere; }
+.control-history-table .control-movement-detail { padding: 16px 20px 18px; background: var(--cb-record-subtle, var(--cb-subtle)); }
+.control-history-table .control-movement-observation { margin-bottom: 0; line-height: 1.65; }
 .control-workbook .control-history-table tr > :last-child { border-inline-end: 0; }
 .control-workbook .control-history-table .control-history-selected > * { background: var(--cb-selection); }
 .control-workbook .control-history-table .control-invoice-select { display: grid; justify-content: start; gap: 0; min-height: 32px; width: 100%; padding: 0; text-align: start; background: transparent; color: var(--cb-text); }
@@ -386,9 +441,8 @@
 .control-workbook .control-record-documents thead th { background: var(--cb-accent-surface); color: var(--cb-text); }
 .control-workbook .control-record-documents :is(th, td) + :is(th, td) { border-inline-start: 1px solid var(--cb-line); }
 
-@container controlWorkspace (min-width: 860px) {
-  .control-customer-layout:has(> .control-customer-actions) { grid-template-columns: minmax(0, 1fr) minmax(225px, 23%); }
-  .control-customer-actions { border-top: 0; border-inline-start: 1px solid var(--cb-line); padding: 8px 0 0 18px; }
+@container controlWorkspace (max-width: 860px) {
+  .control-customer-action-group { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @container controlWorkspace (max-width: 650px) {
   .control-workbook .control-book-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -404,4 +458,5 @@
   .control-invoice-detail header button { margin-inline-start: 0; }
   .control-workbook .control-ribbon-command { min-width: 70px; }
   .control-workbook .control-sort { margin-inline-start: 0; }
+  .control-customer-action-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

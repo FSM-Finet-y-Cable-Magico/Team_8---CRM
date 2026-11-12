@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 import { userFacingApiError } from './lib/user-facing-messages';
+import { clearSession, currentSessionExpired } from './lib/session';
 
 const envApiURL = import.meta.env.VITE_API_URL?.trim();
 const loopbackApiURL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
@@ -811,10 +812,16 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  if (config.url === '/auth/login') return config;
   const token = localStorage.getItem('finet_token');
   const hasAuthorization = Boolean(config.headers?.Authorization ?? config.headers?.authorization);
 
   if (token && !hasAuthorization) {
+    if (currentSessionExpired()) {
+      clearSession();
+      window.dispatchEvent(new Event('finet:auth-expired'));
+      return Promise.reject(new axios.CanceledError('Sesión finalizada'));
+    }
     config.headers.Authorization = `Bearer ${token}`;
   }
 
@@ -827,9 +834,8 @@ api.interceptors.response.use(
     if (axios.isAxiosError(error)) {
       const authorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
 
-      if (error.response?.status === 401 && authorization) {
-        localStorage.removeItem('finet_token');
-        localStorage.removeItem('finet_user');
+      if (error.response?.status === 401 && authorization === `Bearer ${localStorage.getItem('finet_token')}`) {
+        clearSession();
         window.dispatchEvent(new Event('finet:auth-expired'));
       }
     }

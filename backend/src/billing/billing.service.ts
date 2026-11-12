@@ -19,6 +19,7 @@ import { SendBillingNotificationDto } from './dto/send-billing-notification.dto'
 import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 
 import { APPROVED_EXTENSIONS, CLOSED_INVOICE_STATES, invoiceBalance } from './invoice-balance';
+import { prepareAgreementPayment, prepareInstallmentPayment, recordInstallmentPayment } from './installment-payment';
 const CRM_ACTIVATION_FLOW_START = new Date('2026-09-12T15:00:00.000Z');
 
 @Injectable()
@@ -197,6 +198,8 @@ export class BillingService {
 
   async registerPayment(dto: RegisterPaymentDto, currentUser: AuthUser, integration?: { idEmpresa: number }) {
     if (!integration) this.assertBillingWriter(currentUser);
+    if (integration && (dto.idCuota !== undefined || dto.idConvenio !== undefined)) throw new BadRequestException('La integración de pagos no admite cuotas de convenio.');
+    if (dto.idCuota !== undefined && dto.idConvenio !== undefined) throw new BadRequestException('Selecciona una cuota o un convenio completo.');
     if (!Number.isFinite(dto.monto) || dto.monto <= 0 || dto.monto > 99999999.99 || new Prisma.Decimal(dto.monto).decimalPlaces() > 2) throw new BadRequestException('Monto inválido: positivo y máximo dos decimales');
     if (!dto.pasarela.trim()) throw new BadRequestException('Debe indicar el medio de pago');
     const paymentDate = dto.fechaPago ? new Date(dto.fechaPago) : new Date();
@@ -248,6 +251,9 @@ export class BillingService {
       const balance = invoiceBalance(invoice);
       if (!balance.aceptaPagos) throw new BadRequestException('La factura está cerrada o no tiene saldo cobrable');
       if (new Prisma.Decimal(dto.monto).gt(balance.saldo!)) throw new BadRequestException('El pago supera el saldo pendiente');
+      const installmentInput = { idFactura: invoice.idFactura, idContrato: contract.idContrato, idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, monto: dto.monto };
+      const installments = dto.idCuota !== undefined ? [await prepareInstallmentPayment(tx, { ...installmentInput, idCuota: dto.idCuota })]
+        : dto.idConvenio !== undefined ? await prepareAgreementPayment(tx, { ...installmentInput, idConvenio: dto.idConvenio }) : [];
       const payment = await tx.pago.create({ data: {
         idFactura: invoice.idFactura, idCliente: customer.idCliente, monto: dto.monto, fechaPago: paymentDate,
         codigoTransaccion: dto.codigoTransaccion?.trim() || undefined, pasarela: dto.pasarela.trim(),
@@ -259,6 +265,7 @@ export class BillingService {
         pasarela: true, codigoTransaccion: true, codigoAutorizacion: true,
         comprobantePdfUrl: true, comprobanteEstado: true,
       } });
+      for (const installment of installments) await recordInstallmentPayment(tx, this.auditService, installment, payment, currentUser.idUsuario, paymentDate);
       const remaining = new Prisma.Decimal(balance.saldo!).minus(dto.monto);
       const paidInFull = remaining.isZero();
       let reactivatedServiceIds: number[] = [];

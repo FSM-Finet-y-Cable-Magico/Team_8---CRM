@@ -143,6 +143,7 @@ export function CustomersPanel({
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileOverrides, setProfileOverrides] = useState<Record<number, CustomerProfileFields>>({});
   const [statusValue, setStatusValue] = useState('Activo');
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [status, setStatus] = useState('');
@@ -166,6 +167,14 @@ export function CustomersPanel({
     ipReferencia: '',
     observacionesTecnicas: '',
   });
+
+  useEffect(() => {
+    if (!profileSaved) return;
+
+    const timeout = globalThis.setTimeout(() => setProfileSaved(false), 3000);
+
+    return () => globalThis.clearTimeout(timeout);
+  }, [profileSaved]);
   const [requestForm, setRequestForm] = useState({
     tipoSolicitud: 'Cambio de plan',
     canalOrigen: 'CRM',
@@ -217,7 +226,8 @@ export function CustomersPanel({
     : customerList;
   const pageSize = 20;
   const paginatedCustomers = visibleCustomers.slice((page - 1) * pageSize, page * pageSize);
-  const selectedCustomer = customers.find(customer => customer.idCliente === selectedId);
+  const originalCustomer = customers.find(customer => customer.idCliente === selectedId);
+  const selectedCustomer = originalCustomer ? { ...originalCustomer, ...profileOverrides[originalCustomer.idCliente] } : undefined;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
   const today = dateInputValue(new Date());
@@ -891,7 +901,15 @@ export function CustomersPanel({
       <Modal title="Gestionar cliente" open={active && managementOpen} onClose={() => { if (!savingProfile) setManagementOpen(false); }}>
         {selectedCustomer ? (
           <div className="customer-management-modal">
-            <section className="customer-profile-overview">
+            {editingProfile ? <CustomerProfileForm key={`profile-editor-${selectedCustomer.idCliente}`} customer={selectedCustomer}
+              companyLabel={customerCompanyLabel(selectedCustomer)} addressLabel={customerAddressLabel(selectedCustomer)}
+              contractsLabel={`${contractOptions.length} contrato(s) · ${services.length} servicio(s)`}
+              onCancel={() => setEditingProfile(false)} onBusy={setSavingProfile}
+              onSaved={profile => {
+                setProfileOverrides(current => ({ ...current, [selectedCustomer.idCliente]: profile }));
+                setEditingProfile(false); setSavingProfile(false); setProfileSaved(true);
+                onProfileUpdated?.(profile); onChanged();
+              }}/> : <section key={`profile-summary-${selectedCustomer.idCliente}`} className="customer-profile-overview">
               <header className="customer-profile-header">
                 <span className="customer-profile-avatar" aria-hidden="true">
                   <Users size={22} strokeWidth={1.8} />
@@ -905,7 +923,7 @@ export function CustomersPanel({
                   </h3>
                   <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
                 </div>
-                <CustomerStatusBadge value={selectedCustomer.estado} />
+                <div className="customer-profile-status">{profileSaved && <span role="status">Datos guardados</span>}<CustomerStatusBadge value={selectedCustomer.estado} /></div>
               </header>
               <dl className="customer-profile-data">
                 <div>
@@ -939,19 +957,10 @@ export function CustomersPanel({
                   }</dd>
                 </div>
               </dl>
-            </section>
-            {editingProfile && <CustomerProfileForm key={selectedCustomer.idCliente} customer={selectedCustomer}
-              onCancel={() => setEditingProfile(false)} onBusy={setSavingProfile}
-              onSaved={profile => {
-                onProfileUpdated?.(profile);
-                setEditingProfile(false);
-                setProfileSaved(true);
-                onChanged();
-              }}/>}
-            {profileSaved && <p className="inline-status" role="status">Datos del cliente actualizados.</p>}
+            </section>}
 
             <CustomerContractWorkflow
-              key={selectedCustomer.idCliente}
+              key={`contract-workflow-${selectedCustomer.idCliente}`}
               customer={selectedCustomer}
               services={services}
               servicesLoad={servicesLoad.customerId === selectedCustomer.idCliente

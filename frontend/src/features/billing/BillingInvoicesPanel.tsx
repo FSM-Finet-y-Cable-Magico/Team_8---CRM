@@ -11,10 +11,11 @@ type Action = 'payment';
 type InvoiceDetailModal = ComponentType<{ title: string; open: boolean; busy: boolean; onClose: () => void; children: ReactNode }>;
 const initialForm = () => ({ monto: '', pasarela: 'Transferencia', codigoTransaccion: '' });
 
-export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, focusedInvoice, onFocusConsumed, showList = true, detailModal: DetailModal = Modal }: {
+export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, focusedInvoice, onFocusConsumed, showList = true, detailModal: DetailModal = Modal, detailActions }: {
   scope: string; permissions: DashboardPermissions; onChanged: () => void; revision: unknown;
   focusedInvoice?: Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'> | null; onFocusConsumed?: () => void; showList?: boolean;
   detailModal?: InvoiceDetailModal;
+  detailActions?: (invoice: BillingInvoiceDetail) => ReactNode;
 }) {
   const [page, setPage] = useState(1), [search, setSearch] = useState(''), [estado, setEstado] = useState('');
   const [result, setResult] = useState<BillingInvoicePage | null>(null), [selected, setSelected] = useState<BillingInvoiceDetail | null>(null);
@@ -112,6 +113,7 @@ export function BillingInvoicesPanel({ scope, permissions, onChanged, revision, 
         </form>}
         <details open><summary>Pagos ({selected.pagos.length})</summary>{selected.pagos.map(p => <section key={p.idPago}><p>{formatDateOnly(p.fechaPago)} · {money(p.monto)} · {p.pasarela} · {p.codigoTransaccion ?? 'Sin referencia'}</p><PaymentTaxDocument idPago={p.idPago} canManage={permissions.manageBilling} canReconcile={permissions.reconcileTaxDocuments} /></section>)}</details>
         {permissions.approveAgreements && selected.convenios.some(c => c.estado === 'PENDIENTE') && <details open><summary>Convenios pendientes de aprobación</summary>{selected.convenios.filter(c => c.estado === 'PENDIENTE').map(c => <section className="stack" key={c.idConvenio}><h3>Convenio pendiente</h3><p>{money(c.montoComprometido)} · {c.condiciones}</p>{c.cuotas.map(q => <p key={q.idCuota}>Cuota {q.numero}: {money(q.monto)} · {formatDateOnly(q.fechaVencimiento)} · {q.estado}</p>)}<button disabled={saving} onClick={() => void approve(c.idConvenio)}>Aprobar convenio</button></section>)}</details>}
+        {detailActions?.(selected)}
       </section>}
     </DetailModal>
   </>;
