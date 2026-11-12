@@ -1,4 +1,4 @@
-import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere, resolveCustomerLifecycleStatus } from './customer-lifecycle';
+import { activeCustomerWhere, activeProspectWhere, managedProspectWhere, pendingActivationWhere, resolveCustomerLifecycleStatus } from './customer-lifecycle';
 
 // In-memory Prisma predicate subset for fixtures; no database/client is instantiated.
 function matches(row: any, where: any): boolean {
@@ -58,6 +58,14 @@ describe('Customer lifecycle: relaciones, no etiquetas historicas', () => {
     expect(matches(row, activeProspectWhere({ idEmpresa: 1 }))).toBe(prospect);
     expect(matches(row, pendingActivationWhere({ idEmpresa: 1 }))).toBe(pending);
     expect(JSON.stringify(row)).toBe(snapshot);
+  });
+
+  it('managedProspectWhere conserva visibles los Perdido no convertidos y excluye clientes o firmados', () => {
+    const where = managedProspectWhere({ idEmpresa: 1 });
+    expect(matches({ ...base, estadoPipeline: 'Perdido' }, where)).toBe(true);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', idCliente: 3 }, where)).toBe(false);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', contratos: [signed] }, where)).toBe(false);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', idEmpresa: 2 }, where)).toBe(false);
   });
 
   it('consolidado exige la misma empresa en prospecto y contrato', () => {

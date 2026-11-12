@@ -310,6 +310,86 @@ describe('ProspectsService', () => {
     }));
   });
 
+  describe('search (paginado, incluye Perdido)', () => {
+    function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = []) {
+      const prisma = {
+        prospecto: {
+          count: jest.fn().mockResolvedValue(total),
+          findMany: jest.fn().mockResolvedValue(rows),
+          groupBy: jest.fn().mockResolvedValue(grouped),
+        },
+      };
+      const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
+        {} as MailService, {} as CoverageDomainService, {} as never);
+      return { prisma, service };
+    }
+    const lost = { idProspecto: 5, idEmpresa: 1, idCliente: null, estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado',
+      clasificacionComercial: 'PROSPECTO', contratos: [], cotizaciones: [], _count: {} };
+
+    it('no excluye Perdido, pagina en backend y no marca revisión comercial', async () => {
+      const { prisma, service } = searchFixture([lost], 101, [
+        { estadoPipeline: 'Perdido', _count: { _all: 40 } }, { estadoPipeline: null, _count: { _all: 61 } },
+      ]);
+      const result = await service.search(admin, { page: 3, pageSize: 20 });
+      const call = prisma.prospecto.findMany.mock.calls[0][0];
+      expect(JSON.stringify(call.where)).not.toContain('"not":"Perdido"');
+      expect(call.where.AND).toEqual(expect.arrayContaining([{ idCliente: null }]));
+      expect(call).toMatchObject({ skip: 40, take: 20 });
+      expect(result).toMatchObject({ total: 101, page: 3, pageSize: 20, counts: { Perdido: 40, 'Prospecto Nuevo': 61 } });
+      expect(result.items[0]).toMatchObject({ estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado', requiereRevisionComercial: false });
+    });
+
+    it('busca por nombre, correo, teléfono y RUT con o sin puntos y guion sobre todo el conjunto', async () => {
+      const { prisma, service } = searchFixture();
+      await service.search(admin, { q: '12.345.678-5' });
+      const filters = JSON.stringify(prisma.prospecto.findMany.mock.calls[0][0].where);
+      expect(filters).toContain('"nombreCompleto":{"contains":"12.345.678-5"');
+      expect(filters).toContain('"email"');
+      expect(filters).toContain('"telefono"');
+      expect(filters).toContain('"rut":{"contains":"123456785"');
+      expect(filters).toContain('"rut":{"contains":"12345678-5"');
+      expect(prisma.prospecto.findMany.mock.calls[0][0]).not.toHaveProperty('take', 100);
+    });
+
+    it('filtra por estado Perdido solo en listado y total, no en los contadores', async () => {
+      const { prisma, service } = searchFixture();
+      await service.search(admin, { estado: 'Perdido', origen: 'Referido', motivoPerdida: 'Precio elevado' });
+      expect(JSON.stringify(prisma.prospecto.findMany.mock.calls[0][0].where)).toContain('"estadoPipeline":"Perdido"');
+      expect(JSON.stringify(prisma.prospecto.groupBy.mock.calls[0][0].where)).not.toContain('"estadoPipeline":"Perdido"');
+      expect(JSON.stringify(prisma.prospecto.groupBy.mock.calls[0][0].where)).toContain('"origenContacto":"Referido"');
+    });
+
+    it('un usuario comercial queda limitado a su empresa aunque pida otro scope', async () => {
+      const { prisma, service } = searchFixture();
+      await service.search({ ...admin, roles: ['Comercial'], idEmpresa: 1 }, { scope: '2' });
+      expect(prisma.prospecto.findMany.mock.calls[0][0].where.AND).toEqual(expect.arrayContaining([{ AND: [{ idEmpresa: 1 }] }]));
+    });
+
+    it('rechaza fechas de filtro inválidas', async () => {
+      const { service } = searchFixture();
+      await expect(service.search(admin, { desde: '2026-13-45' })).rejects.toThrow('Fecha de filtro inválida');
+    });
+  });
+
+  it('la reactivación conserva en auditoría el motivo, observación, fecha y autor de la pérdida', async () => {
+    const fechaPerdida = new Date('2026-10-01T10:00:00Z');
+    const { service, audit } = manualFixture({
+      estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado', observacionPerdida: 'Dijo que muy caro', fechaPerdida, idUsuarioPerdida: 7,
+    });
+    await service.updatePipeline(10, { estadoPipeline: 'Prospecto Nuevo' }, admin);
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      accion: 'REACTIVAR_PROSPECTO',
+      valorAnterior: expect.objectContaining({ motivoPerdida: 'Precio elevado', observacionPerdida: 'Dijo que muy caro', fechaPerdida, idUsuarioPerdida: 7 }),
+    }));
+  });
+
+  it('no reactiva un Perdido con relaciones comerciales vigentes', async () => {
+    const { service, prisma, audit } = manualFixture({ estadoPipeline: 'Perdido' }, { idContrato: 9, estado: 'Pendiente firma contrato' });
+    await expect(service.updatePipeline(10, { estadoPipeline: 'Prospecto Nuevo' }, admin)).rejects.toThrow('relaciones comerciales');
+    expect(prisma.prospecto.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
   it('lista solo prospectos activos no convertidos', async () => {
     const prisma = {
       prospecto: {

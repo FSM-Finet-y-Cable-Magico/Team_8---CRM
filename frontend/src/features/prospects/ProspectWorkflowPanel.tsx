@@ -122,6 +122,9 @@ export function ProspectWorkflowPanel({
   const quotedPlanIds = new Set(quotes.filter(quote => quote.fechaEnvio && quote.vigente !== false).map(quote => quote.idPlan));
   const canRecordLoss = permissions.recordProspectLoss && !isFinal && currentProspect.idCliente == null
     && (Boolean(pendingContract) || !isWorkflowLocked);
+  const isLost = currentStatus === 'Perdido' && !requiresReview;
+  const canReactivate = isLost && permissions.createProspects && currentProspect.idCliente == null
+    && !(currentProspect.contratos ?? []).some(contract => !['Baja', 'Anulado'].includes(contract.estado ?? ''));
   const contractPlanOptions = planOptions.filter(plan => quotedPlanIds.has(plan.idPlan));
   const acceptedPlan = contractPlanOptions.find(plan => plan.idPlan === Number(contractPlanId));
 
@@ -422,6 +425,19 @@ export function ProspectWorkflowPanel({
           <label><input type="checkbox" checked={originConfirmed} onChange={event => setOriginConfirmed(event.target.checked)} disabled={reviewing} />Confirmo que verifiqué el origen en el portal de clientes y la empresa de esta solicitud</label>
           <button type="button" disabled={reviewing || !originConfirmed} onClick={() => void approveG2Review()}>Aprobar revisión del portal</button>
         </div>}
+      </section>}
+
+      {isLost && <section className="prospect-action-card" aria-label="Prospecto perdido">
+        <p><strong>Prospecto perdido.</strong> Se conserva su historial comercial; no se puede cotizar ni contratar hasta reactivarlo.</p>
+        <dl className="prospect-overview-data">
+          <div><dt>Motivo</dt><dd>{currentProspect.motivoPerdida ?? 'No registrado'}</dd></div>
+          <div><dt>Fecha</dt><dd>{currentProspect.fechaPerdida ? formatDateTime(currentProspect.fechaPerdida) : 'No registrada'}</dd></div>
+          <div><dt>Observación</dt><dd>{currentProspect.observacionPerdida ?? 'Sin observación'}</dd></div>
+        </dl>
+        {canReactivate && <button type="button" onClick={() => void runAction(
+          () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: 'Prospecto Nuevo' }),
+          'Prospecto reactivado como Prospecto Nuevo. Verifica la cobertura antes de cotizar.',
+        )}>Reactivar prospecto</button>}
       </section>}
 
       <div className="workflow-grid prospect-action-grid">

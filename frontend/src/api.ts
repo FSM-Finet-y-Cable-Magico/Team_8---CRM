@@ -100,6 +100,15 @@ export type Prospect = {
   }>;
 };
 
+export type ProspectSearchResult = {
+  items: Prospect[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Prospects per pipeline state for the scope and text/origin/date filters, ignoring the state filter. */
+  counts: Record<string, number>;
+};
+
 export type InstallTechnician = {
   idTecnico: number;
   nombreCompleto: string;

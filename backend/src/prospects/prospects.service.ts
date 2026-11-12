@@ -4,7 +4,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, Prospecto } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
-import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, pendingActivationWhere } from '../common/customer-lifecycle';
+import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, managedProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -27,6 +27,7 @@ import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
 import { UpdateProspectDto } from './dto/update-prospect.dto';
+import { ListProspectsQueryDto } from './dto/list-prospects-query.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidate, readG2OriginAudits } from './g2-prospect-review';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
@@ -60,6 +61,35 @@ const PIPELINE_STATUSES = [
   'Servicio Activo',
 ];
 
+function prospectListInclude(companyScope: { idEmpresa?: number }) {
+  return {
+    _count: G2_REVIEW_RELATION_COUNTS,
+    empresa: true,
+    cotizaciones: {
+      where: { fechaEnvio: { not: null } },
+      select: { idCotizacion: true, codigo: true, idPlan: true, fechaEnvio: true, factibilidadVerificada: true, plan: { select: { idEmpresa: true, activo: true } } },
+      orderBy: { idCotizacion: 'desc' },
+    },
+    usuarioComercial: {
+      select: {
+        nombreCompleto: true,
+        email: true,
+      },
+    },
+    contratos: {
+      where: companyScope,
+      select: {
+        idContrato: true,
+        fechaInicio: true,
+        estado: true,
+        fechaFirmaManual: true,
+        idPlan: true,
+      },
+      orderBy: { idContrato: 'desc' },
+    },
+  } satisfies Prisma.ProspectoInclude;
+}
+
 @Injectable()
 export class ProspectsService {
   constructor(
@@ -77,33 +107,83 @@ export class ProspectsService {
       where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
-      include: {
-        _count: G2_REVIEW_RELATION_COUNTS,
-        empresa: true,
-        cotizaciones: {
-          where: { fechaEnvio: { not: null } },
-          select: { idCotizacion: true, codigo: true, idPlan: true, fechaEnvio: true, factibilidadVerificada: true, plan: { select: { idEmpresa: true, activo: true } } },
-          orderBy: { idCotizacion: 'desc' },
-        },
-        usuarioComercial: {
-          select: {
-            nombreCompleto: true,
-            email: true,
-          },
-        },
-        contratos: {
-          where: companyScope,
-          select: {
-            idContrato: true,
-            fechaInicio: true,
-            estado: true,
-            fechaFirmaManual: true,
-            idPlan: true,
-          },
-          orderBy: { idContrato: 'desc' },
-        },
-      },
+      include: prospectListInclude(companyScope),
     });
+    return this.projectProspectRows(prospects);
+  }
+
+  // Paginated, searchable listing. Unlike list(), lost prospects stay visible so
+  // they can be reviewed and reactivated. Search runs over the whole scoped set.
+  async search(currentUser: AuthUser, query: ListProspectsQueryDto) {
+    const companyScope = this.companyScope(currentUser, query.scope ?? 'consolidado');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const base = this.searchFilters(query);
+    const where: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] });
+    const stateFilter = query.estado ? this.stateWhere(query.estado) : null;
+    const [total, rows, grouped] = await Promise.all([
+      this.prisma.prospecto.count({ where: stateFilter ? { AND: [where, stateFilter] } : where }),
+      this.prisma.prospecto.findMany({
+        where: stateFilter ? { AND: [where, stateFilter] } : where,
+        orderBy: [{ fechaCreacion: 'desc' }, { idProspecto: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: prospectListInclude(companyScope),
+      }),
+      this.prisma.prospecto.groupBy({ by: ['estadoPipeline'], where, _count: { _all: true } }),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const group of grouped) {
+      const key = group.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
+      counts[key] = (counts[key] ?? 0) + group._count._all;
+    }
+    return {
+      items: await this.projectProspectRows(rows),
+      total, page, pageSize, counts,
+    };
+  }
+
+  private stateWhere(estado: string): Prisma.ProspectoWhereInput {
+    return estado === INITIAL_PIPELINE_STATUS
+      ? { OR: [{ estadoPipeline: null }, { estadoPipeline: INITIAL_PIPELINE_STATUS }] }
+      : { estadoPipeline: estado };
+  }
+
+  private searchFilters(query: ListProspectsQueryDto): Prisma.ProspectoWhereInput[] {
+    const filters: Prisma.ProspectoWhereInput[] = [];
+    const q = query.q?.trim();
+    if (q) {
+      const compact = q.replace(/[.\s-]/g, '').toUpperCase();
+      const digits = q.replace(/\D/g, '');
+      const or: Prisma.ProspectoWhereInput[] = [
+        { nombreCompleto: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { telefono: { contains: q.replace(/\s/g, ''), mode: 'insensitive' } },
+      ];
+      if (digits.length >= 3) or.push({ telefono: { contains: digits } });
+      if (/^[0-9K]+$/.test(compact)) {
+        or.push({ rut: { contains: compact, mode: 'insensitive' } });
+        // Stored RUTs are normalized as body-verifier; a full RUT typed without the dash.
+        if (compact.length >= 2) or.push({ rut: { contains: `${compact.slice(0, -1)}-${compact.slice(-1)}`, mode: 'insensitive' } });
+      }
+      filters.push({ OR: or });
+    }
+    if (query.origen) filters.push({ origenContacto: query.origen });
+    if (query.motivoPerdida) filters.push({ motivoPerdida: query.motivoPerdida });
+    const since = query.desde ? parseDateOnly(query.desde) : undefined;
+    const until = query.hasta ? parseDateOnly(query.hasta) : undefined;
+    if (since === null || until === null) throw new BadRequestException('Fecha de filtro inválida');
+    if (since) filters.push({ fechaCreacion: { gte: since } });
+    if (until) {
+      until.setUTCDate(until.getUTCDate() + 1);
+      filters.push({ fechaCreacion: { lt: until } });
+    }
+    return filters;
+  }
+
+  private async projectProspectRows(
+    prospects: Array<Prisma.ProspectoGetPayload<{ include: ReturnType<typeof prospectListInclude> }>>,
+  ) {
     const evidenceRows = await readG2OriginAudits(this.prisma, prospects.filter(isG2ProspectReviewCandidate).map(p => p.idProspecto));
     const pendingContractIds = prospects.flatMap(prospect => prospect.contratos
       .filter(contract => contract.estado === PENDING_SIGNATURE_STATUS).map(contract => contract.idContrato));
@@ -129,7 +209,7 @@ export class ProspectsService {
           idCotizacion, codigo, idPlan, fechaEnvio, vigente: factibilidadVerificada === true && plan?.activo !== false,
         })),
       requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
-        || (!([...PIPELINE_STATUSES.slice(0, 6), null].includes(prospect.estadoPipeline))
+        || (!([...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
             && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
     }));
@@ -345,7 +425,10 @@ export class ProspectsService {
       accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
-      valorAnterior: { estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida },
+      valorAnterior: {
+        estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
+        ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
+      },
       valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
     });
 

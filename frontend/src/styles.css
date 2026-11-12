@@ -4221,3 +4221,13 @@ button.profile-menu-item.danger:hover {
 .public-signature form { display: grid; gap: 1rem; margin-top: 1.5rem; }
 .public-signature label { display: block; }
 .signature-hash { overflow-wrap: anywhere; font-family: monospace; }
+
+.prospect-search { display: grid; gap: 10px; margin-bottom: 12px; }
+.prospect-search-input { width: 100%; box-sizing: border-box; }
+.prospect-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.prospect-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }

@@ -67,3 +67,46 @@ test('prospecto valido con contrato pendiente conserva confirmacion autorizada d
   assert.ok(tree.root.findAllByType('button').some(button => button.children.join('') === 'Registrar firma manual'));
   act(() => tree.unmount());
 });
+
+function workflowWithApi(api) {
+  return loadComponent('ProspectWorkflowPanel', { ...mocks, '../../api': { api, apiErrorMessage: error => error.message } });
+}
+const lostProspect = {
+  idProspecto: 30, idCliente: null, estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado',
+  observacionPerdida: 'Lo encontró caro', fechaPerdida: '2026-10-01T10:00:00Z', requiereRevisionComercial: false,
+  nombreCompleto: 'Cliente Perdido', rut: '11111111-1', contratos: [{ idContrato: 5, estado: 'Anulado' }],
+};
+
+test('prospecto Perdido muestra motivo, no habilita cotizar y permite reactivar por la transición autorizada', async () => {
+  const calls = [];
+  const Component = workflowWithApi({ patch: async (...args) => { calls.push(args); return { data: {} }; } });
+  let changed = 0;
+  let tree;
+  act(() => { tree = create(React.createElement(Component, { prospect: lostProspect, plans: [], permissions: { ...permissions, createProspects: true }, onChanged() { changed++; } })); });
+  const text = JSON.stringify(tree.toJSON());
+  assert.ok(text.includes('Precio elevado') && text.includes('Lo encontró caro'));
+  assert.ok(!text.includes('Revisión comercial requerida'));
+  for (const button of tree.root.findAllByType('button')) {
+    if (/cotiza/i.test(button.children.join(''))) assert.equal(button.props.disabled, true);
+  }
+  const reactivate = tree.root.findAllByType('button').find(button => button.children.join('') === 'Reactivar prospecto');
+  assert.ok(reactivate);
+  await act(async () => { await reactivate.props.onClick(); });
+  assert.deepEqual(calls, [['/prospects/30/pipeline', { estadoPipeline: 'Prospecto Nuevo' }]]);
+  assert.equal(changed, 1);
+  act(() => tree.unmount());
+});
+
+test('no ofrece reactivar sin permiso, para clientes o con contratos vigentes', () => {
+  const Component = workflowWithApi({});
+  for (const [prospect, perms] of [
+    [lostProspect, { ...permissions, createProspects: false }],
+    [{ ...lostProspect, idCliente: 4 }, { ...permissions, createProspects: true }],
+    [{ ...lostProspect, contratos: [{ idContrato: 6, estado: 'Pendiente firma contrato' }] }, { ...permissions, createProspects: true }],
+  ]) {
+    let tree;
+    act(() => { tree = create(React.createElement(Component, { prospect, plans: [], permissions: perms, onChanged() {} })); });
+    assert.ok(!tree.root.findAllByType('button').some(button => button.children.join('') === 'Reactivar prospecto'));
+    act(() => tree.unmount());
+  }
+});

@@ -4,22 +4,39 @@ export const ACTIVE_CUSTOMER_STATUS = 'Activo';
 export const LOST_PROSPECT_PIPELINE_STATUS = 'Perdido';
 export const SIGNED_CONTRACT_STATES = ['Firmado', 'Activo', 'Suspendido', 'Moroso'];
 
+// Prospects that are still commercial leads: never converted to a customer and
+// without a signed contract. managedProspectWhere also includes lost prospects,
+// which stay consultable and reactivable.
+function managedProspectConditions(companyScope: Prisma.ProspectoWhereInput): Prisma.ProspectoWhereInput[] {
+  return [
+    companyScope,
+    // Historical labels are not evidence of conversion. Keep unlinked records
+    // visible for review rather than silently dropping them from both lists.
+    { idCliente: null },
+    { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
+  ];
+}
+
+export function managedProspectWhere(
+  companyScope: Prisma.ProspectoWhereInput,
+): Prisma.ProspectoWhereInput {
+  return { AND: managedProspectConditions(companyScope) };
+}
+
 export function activeProspectWhere(
   companyScope: Prisma.ProspectoWhereInput,
 ): Prisma.ProspectoWhereInput {
+  const [scope, ...relationConditions] = managedProspectConditions(companyScope);
   return {
     AND: [
-      companyScope,
+      scope,
       {
         OR: [
           { estadoPipeline: null },
           { estadoPipeline: { not: LOST_PROSPECT_PIPELINE_STATUS } },
         ],
       },
-      // Historical labels are not evidence of conversion. Keep unlinked records
-      // visible for review rather than silently dropping them from both lists.
-      { idCliente: null },
-      { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
+      ...relationConditions,
     ],
   };
 }

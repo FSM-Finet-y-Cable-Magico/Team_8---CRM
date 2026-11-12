@@ -437,6 +437,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               key={writeCompanyId}
               registration={prospectRegistration}
               prospects={prospects}
+              scope={scope}
               loading={prospectsLoading}
               loadError={prospectsError}
               onReload={() => void loadProspects()}
