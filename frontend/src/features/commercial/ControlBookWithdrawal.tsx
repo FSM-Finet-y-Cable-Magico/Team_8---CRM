@@ -100,9 +100,9 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
               ['Responsable', context.responsable.nombre],
             ] as Array<[string, string | null]>).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? '—'}</dd></div>)}
           </dl>
-          <ul className="control-muted" aria-label="Requisitos">
-            {eligibility!.checks.map(item => <li key={item.code}>{item.ok ? '✓' : '✗'} {item.label}{item.ok ? '' : ` — ${item.message}`}</li>)}
-          </ul>
+          <dl className="control-detail-list" aria-label="Requisitos">
+            {eligibility!.checks.map(item => <div key={item.code}><dt>{item.label}</dt><dd>{item.ok ? '✓ Cumple' : `✗ ${item.message}`}</dd></div>)}
+          </dl>
           {!eligibility!.habilitado && <p role="status" className="control-muted">La baja guiada aún no está habilitada en este ambiente: falta aprobar el registro que vincula solicitud, aviso y ticket. No se registrará nada.</p>}
           {ready && <>
             <label className="control-form-observation">Observaciones de cobranza<textarea required maxLength={1000} value={observation} onChange={event => setObservation(event.target.value)} placeholder="Gestiones realizadas, respuesta del cliente y motivo del retiro."/></label>

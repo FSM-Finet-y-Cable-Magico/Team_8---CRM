@@ -52,7 +52,7 @@ test('consulta los requisitos del servicio suspendido y precarga empresa, client
   const h = await withdrawal(t);
   assert.deepEqual(h.reads, ['/service-withdrawals/eligibility/50']);
   for (const value of ['FiNet', 'Cliente Moroso · 12345678-5', '#20 · Fibra 300 Hogar', 'Internet', 'Suspendido', '41 días', 'Morosidad', 'Comercial FiNet']) assert.ok(h.text().includes(value), value);
-  assert.ok(h.text().includes('✓ Requisito AVISO_PREVIO'));
+  assert.ok(h.text().includes('Requisito AVISO_PREVIO✓ Cumple'));
   assert.ok(!h.text().includes('TV · Baja'), 'un servicio ya dado de baja no se ofrece');
 });
 
@@ -78,7 +78,7 @@ test('un reintento devuelto por el backend informa que la baja ya estaba iniciad
 
 test('requisito incumplido: muestra el motivo y no ofrece registrar', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ eligible: false, checks: checks('AVISO_PREVIO'), firstFailure: { code: 'AVISO_PREVIO', label: 'Aviso', ok: false, message: 'Falla AVISO_PREVIO' } }) });
-  assert.ok(h.text().includes('✗ Requisito AVISO_PREVIO — Falla AVISO_PREVIO'));
+  assert.ok(h.text().includes('Requisito AVISO_PREVIO✗ Falla AVISO_PREVIO'));
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   assert.equal(h.submitButton().props.disabled, true);
   await h.submit(); assert.equal(h.posts.length, 0);
