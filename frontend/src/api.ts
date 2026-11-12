@@ -811,6 +811,18 @@ export const api = axios.create({
   baseURL: apiBaseURL,
 });
 
+let sessionCheck: { token: string; promise: Promise<boolean> } | null = null;
+function sessionRejected(token: string) {
+  if (sessionCheck?.token === token) return sessionCheck.promise;
+  // A resource may forward an integration's 401. Confirm our own session first,
+  // without replaying the operation that failed (it may have changed data).
+  const promise = api.get('/auth/me', { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 })
+    .then(() => false, (error: unknown) => axios.isAxiosError(error) && error.response?.status === 401)
+    .finally(() => { if (sessionCheck?.promise === promise) sessionCheck = null; });
+  sessionCheck = { token, promise };
+  return promise;
+}
+
 api.interceptors.request.use((config) => {
   if (config.url === '/auth/login') return config;
   const token = localStorage.getItem('finet_token');
@@ -830,13 +842,19 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error: unknown) => {
+  async (error: unknown) => {
     if (axios.isAxiosError(error)) {
       const authorization = error.config?.headers?.Authorization ?? error.config?.headers?.authorization;
 
-      if (error.response?.status === 401 && authorization === `Bearer ${localStorage.getItem('finet_token')}`) {
-        clearSession();
-        window.dispatchEvent(new Event('finet:auth-expired'));
+      const token = localStorage.getItem('finet_token');
+      if (error.response?.status === 401 && token && authorization === `Bearer ${token}`) {
+        // /auth/me is the confirmation request; never recursively confirm itself.
+        const isSessionCheck = error.config?.url === '/auth/me';
+        const rejected = isSessionCheck || await sessionRejected(token);
+        if (rejected && token === localStorage.getItem('finet_token')) {
+          clearSession();
+          window.dispatchEvent(new Event('finet:auth-expired'));
+        }
       }
     }
 

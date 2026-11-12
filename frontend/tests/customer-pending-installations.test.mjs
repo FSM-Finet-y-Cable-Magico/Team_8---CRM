@@ -55,11 +55,11 @@ test('acceso de dashboard a activación permite buscar, gestionar y volver en un
 
 test('gestión de un pendiente conserva el id de prospecto y respeta permisos', async t => {
   const managed = [];
-  const tree = await setup(t, { requestedView: 'activation', onManageInstallation: id => managed.push(id) });
+  const tree = await setup(t, { requestedView: 'activation', onManageInstallation: (id, contract) => managed.push([id, contract]) });
   await act(async () => button(tree, 'Gestionar').props.onClick());
   assert.match(JSON.stringify(tree.toJSON()), /Dirección de prueba/);
   await act(async () => button(tree, 'Gestionar instalación').props.onClick());
-  assert.deepEqual(managed, [1]);
+  assert.deepEqual(managed, [[1, 1]]);
   assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
   const readOnly = await setup(t, { requestedView: 'activation', canManage: false });
   await act(async () => button(readOnly, 'Gestionar').props.onClick());

@@ -29,7 +29,7 @@ new Function('require', 'exports', ts.transpileModule(readFileSync(new URL('../s
 
 const prospects = ['Sofía Demo', 'Carlos Prueba', 'Ya coordinado', 'Sin contrato firmado'].map((name, index) => ({
   idProspecto: index + 1, nombreCompleto: name, rut: `QA-${index + 1}`, direccion: 'Dirección QA',
-  empresa: { idEmpresa: 1, nombre: 'Empresa QA' }, contratos: [{ estado: index === 3 ? 'Borrador' : 'Firmado' }],
+  empresa: { idEmpresa: 1, nombre: 'Empresa QA' }, contratos: [{ idContrato: index + 10, estado: index === 3 ? 'Borrador' : 'Firmado' }],
 }));
 const workOrders = [
   { idOt: 10, idEmpresa: 1, idProspecto: 3, tipoOt: 'INSTALACION', estado: 'ASIGNADA', prioridad: 'Media', cliente: { nombreCompleto: 'Visita activa' } },
@@ -88,4 +88,25 @@ test('el foco no se consume antes de que llegue la contratación pendiente', asy
   await act(async () => tree.update(React.createElement(component.InstallationsPanel, { ...defaults, focusedProspectId: 3, onFocusConsumed: () => consumed++ })));
   assert.equal(consumed, 1);
   assert.match(JSON.stringify(tree.toJSON()), /Actualizar estado de 3/);
+});
+
+test('la selección conserva el contrato visible aunque un refresco cambie el orden de contratos', async t => {
+  const tree = await setup(t, { focusedProspectId: 1, focusedContractId: 10 });
+  const Form = mocks['./InstallOrderForm'].InstallOrderForm;
+  assert.equal(tree.root.findByType(Form).props.contractId, 10);
+  const refreshed = [{ ...prospects[0], contratos: [{ idContrato: 99, estado: 'Firmado' }, ...prospects[0].contratos] }];
+  await act(async () => tree.update(React.createElement(component.InstallationsPanel, { ...defaults, pendingActivationProspects: refreshed })));
+  assert.equal(tree.root.findByType(Form).props.contractId, 10);
+  // The pending API projects just one contract. A replacement must not retarget the open modal.
+  await act(async () => tree.update(React.createElement(component.InstallationsPanel, { ...defaults,
+    pendingActivationProspects: [{ ...prospects[0], contratos: [{ idContrato: 99, estado: 'Firmado' }] }] })));
+  assert.equal(tree.root.findByType(Form).props.contractId, 10);
+  assert.equal(tree.root.findByType(Form).props.prospect.contratos[0].idContrato, 10);
+});
+
+test('el acceso desde clientes espera el contrato exacto y no abre otro del mismo prospecto', async t => {
+  let consumed = 0;
+  const tree = await setup(t, { focusedProspectId: 1, focusedContractId: 99, onFocusConsumed: () => consumed++ });
+  assert.equal(consumed, 0);
+  assert.equal(tree.root.findAllByProps({ role: 'dialog' }).length, 0);
 });
