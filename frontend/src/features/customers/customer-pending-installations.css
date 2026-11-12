@@ -66,3 +66,5 @@
   .customer-pending-data { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 }
 @media (max-width: 400px) { .customer-pending-data { grid-template-columns: 1fr; } }
+/* Installation order generated inside the pending-activation modal (same component as Instalaciones). */
+.customer-pending-installations .customer-pending-installation { --install-ink: var(--pending-ink); --install-muted: var(--pending-muted); --install-green: var(--pending-green); --install-line: var(--pending-line); --install-surface: var(--pending-surface); --install-soft: var(--pending-soft); padding-top: 18px; border-top: 1px solid var(--pending-line); }

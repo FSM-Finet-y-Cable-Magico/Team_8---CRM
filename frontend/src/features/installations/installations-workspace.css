@@ -47,10 +47,6 @@
 .installation-workflow-modal .installation-status-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-inline-start: auto; }
 .installation-workflow-modal button.installation-refresh-state { display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 36px; padding: 0; border-radius: 8px; color: var(--install-green); background: var(--install-soft); box-shadow: none; }
 .installation-workflow-modal button.installation-refresh-state:hover:not(:disabled) { background: var(--install-line); box-shadow: none; transform: none; }
-.installation-workflow-modal .installation-closure-options { justify-self: start; color: var(--install-muted); font-size: .78rem; }
-.installation-workflow-modal .installation-closure-options summary { cursor: pointer; }
-.installation-workflow-modal .installation-closure-options summary:hover { color: var(--install-green); }
-.installation-workflow-modal .installation-closure-options > button { margin-top: 8px; }
 .installations-redesign .installation-toolbar > label { display: flex; align-items: center; gap: 10px; color: var(--install-muted); font-size: .75rem; }
 .installations-redesign .installation-toolbar > span { color: var(--install-muted); font-size: .72rem; line-height: 1.5; }
 .installations-redesign .installation-toolbar select { width: auto; min-width: 130px; min-height: 34px; border: 1px solid var(--install-line); border-radius: 8px; padding: 0 32px 0 11px; color: var(--install-ink); background-color: var(--install-surface); font-size: .75rem; }

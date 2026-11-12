@@ -3,6 +3,7 @@ import { ArrowLeft, Search, UserRound } from 'lucide-react';
 import type { Prospect } from '../../api';
 import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
 import { Modal, StatusBadge, TablePagination } from '../../shared/components';
+import { InstallOrderForm } from '../installations/InstallOrderForm';
 import './customer-pending-installations.css';
 
 function contractFor(prospect: Prospect) { return prospect.contratos?.[0] ?? null; }
@@ -12,10 +13,10 @@ function addressFor(prospect: Prospect) {
     .filter(value => Boolean(value?.trim())).join(', ') || prospect.direccion || 'No registrada';
 }
 
-export function CustomerPendingInstallations({ prospects, loading, error, requestedView, onViewConsumed, canManage, onManageInstallation }: {
+export function CustomerPendingInstallations({ prospects, loading, error, requestedView, onViewConsumed, canManage, onChanged }: {
   prospects: Prospect[]; loading: boolean; error: string;
   requestedView?: 'activation' | null; onViewConsumed?: () => void;
-  canManage: boolean; onManageInstallation: (idProspecto: number, idContrato: number) => void;
+  canManage: boolean; onChanged?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -60,7 +61,10 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
             <div><dt>Estado de activación</dt><dd>Pendiente de activación</dd></div>
           </dl>
           <p className="customer-pending-activation-note">La activación del cliente se realizará cuando se complete la instalación.</p>
-          {canManage && contract && <button type="button" className="customer-pending-manage" onClick={() => { close(); onManageInstallation(selectedProspect.idProspecto, contract.idContrato); }}>Gestionar instalación</button>}
+          {/* The installation order is generated from this same modal, for the exact contract shown. */}
+          {contract && <div className="installation-workflow-modal customer-pending-installation">
+            <InstallOrderForm key={contract.idContrato} prospect={selectedProspect} contractId={contract.idContrato} canRequest={canManage} onChanged={() => onChanged?.()} />
+          </div>}
         </> : <>
           <div className="customer-pending-toolbar">
             <label className="customer-pending-search"><Search size={16} aria-hidden="true" /><input autoFocus type="search" aria-label="Buscar pendientes de activación" placeholder="Buscar cliente, RUT o contrato" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label>

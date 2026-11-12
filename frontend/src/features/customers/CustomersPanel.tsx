@@ -120,7 +120,6 @@ export function CustomersPanel({
   plans,
   scope,
   permissions,
-  onManageInstallation,
   onChanged,
   profileEditor,
   onProfileUpdated,
@@ -132,7 +131,6 @@ export function CustomersPanel({
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
-  onManageInstallation: (idProspecto: number, idContrato: number) => void;
   onChanged: () => void;
   profileEditor?: { admin: boolean; idEmpresa: number | null };
   onProfileUpdated?: (profile: CustomerProfileFields) => void;
@@ -845,7 +843,7 @@ export function CustomersPanel({
             requestedView={pendingInstallationsView}
             onViewConsumed={onPendingInstallationsViewConsumed}
             canManage={permissions.createInstallOrders}
-            onManageInstallation={onManageInstallation}
+            onChanged={onChanged}
           />
         </div>
         <div className="customer-list-filters">

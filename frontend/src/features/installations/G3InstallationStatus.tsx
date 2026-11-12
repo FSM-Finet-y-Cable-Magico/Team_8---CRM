@@ -154,7 +154,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
   if (installationSummary && !tracking && !canRequest) return <p className="customer-contract-note" role={error ? 'status' : undefined}>{error || 'Sin orden de instalación registrada.'}</p>;
   if (!tracking) return <div className="g3-installation-card">
     {installationSummary ? <p>Sin orden de instalación registrada.</p> : <>
-      {!hideRequest && canRequest && !error && !requirements?.comunaFaltante && <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>}
+      {!hideRequest && canRequest && !error && !requirements?.comunaFaltante && <p>Genera la orden de instalación para coordinar la visita del equipo técnico. No activa el servicio: la activación se registra al confirmarse el cierre de la instalación.</p>}
     </>}
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
     {requirements?.comunaFaltante && requirements.puedeCompletarComuna && <fieldset disabled={busy}>
@@ -165,7 +165,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       <p>Si la dirección contratada es incorrecta, solicita revisión y la aprobación o firma que corresponda antes de continuar.</p>
       <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna</button>
     </fieldset>}
-    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || Boolean(error) || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>}
+    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || Boolean(error) || busy} aria-busy={busy} onClick={() => void run('request')}>{busy ? 'Generando…' : 'Generar instalación'}</button>}
     {!canRequest && <p className="alert" role="alert">{blockedReason ?? 'No tienes permisos para solicitar instalaciones desde esta vista.'}</p>}
     {error && <><p className="alert" role="alert">{error}</p><button type="button" className="secondary compact" disabled={busy} onClick={() => void load()}>Volver a comprobar</button></>}
     {notice && <p role="status">{notice}</p>}
@@ -175,8 +175,12 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
   const state = completed ? 'Completada' : STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';
-  const consultClosure = delivered && !completed && (!installationSummary || canRequest) && (
-    <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy} onClick={() => void run('reconcile')}>Consultar cierre</button>
+  // Refresh (icon) is a read-only GET. Closure reconciliation is a POST that may record the closure,
+  // so it stays an explicit, labelled action for roles that manage installation orders, and is not
+  // offered in the customer contract summary (G3 also reports closures through its webhook).
+  const consultClosure = delivered && !completed && !installationSummary && canRequest && (
+    <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy}
+      title="Consulta al equipo técnico si la orden ya fue cerrada y registra el cierre confirmado" onClick={() => void run('reconcile')}>Consultar cierre</button>
   );
   const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
     <RefreshCw size={17} aria-hidden="true" />
@@ -191,7 +195,6 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
         <div><dt>Fecha de solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
         {tracking.fechaUltimaSincronizacion && <div><dt>Última actualización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>}
       </dl>}
-    {consultClosure && <details className="installation-closure-options"><summary>Opciones de instalación</summary>{consultClosure}</details>}
     {retryable && canRequest && <div><button type="button" className="secondary compact" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button></div>}
     <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} />
   </section>;
@@ -225,13 +228,9 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
     {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">No fue posible realizar la visita por ausencia del cliente. Está pendiente coordinar una nueva fecha.</p>}
     {!compact && trackingError && <p className="alert">{trackingError}</p>}
-    {compact && consultClosure && <details className="installation-closure-options">
-      <summary>Opciones de instalación</summary>
-      {consultClosure}
-    </details>}
-    {(!compact || retryable) && <div className="button-row">
+    {(!compact || retryable || consultClosure) && <div className="button-row">
       {!compact && delivered && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Detalle</button>}
-      {!compact && consultClosure}
+      {consultClosure}
       {retryable && canRequest && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
     </div>}
     {compact ? <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} /> : <>
