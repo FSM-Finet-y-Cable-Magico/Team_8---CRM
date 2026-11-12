@@ -5,6 +5,7 @@ import { Prisma, Prospecto } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, managedProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
+import { isReturningProspect, returningSituation, ReturningSituation } from '../common/returning-customer';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -119,7 +120,10 @@ export class ProspectsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const base = this.searchFilters(query);
-    const where: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] });
+    // Los excliente (vinculados a su cliente y sin relación operativa vigente) se suman a la misma consulta,
+    // de modo que la búsqueda, el filtro por empresa y la paginación siguen siendo los de siempre.
+    const returningCompanyIds = (await this.prisma.empresa.findMany({ select: { idEmpresa: true } })).map(company => company.idEmpresa);
+    const where: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] }, returningCompanyIds);
     const stateFilter = query.estado ? this.stateWhere(query.estado) : null;
     const [total, rows, grouped] = await Promise.all([
       this.prisma.prospecto.count({ where: stateFilter ? { AND: [where, stateFilter] } : where }),
@@ -197,8 +201,14 @@ export class ProspectsService {
       distinct: ['idEntidadAfectada'],
     }) : [];
     const confirmationByContract = new Map(confirmations.map(event => [event.idEntidadAfectada, event.fechaHora]));
+    // Situación financiera de los excliente: se calcula al listar desde facturas y pagos, nunca se guarda.
+    const returning = new Map<number, ReturningSituation>();
+    for (const prospect of prospects.filter(isReturningProspect)) {
+      returning.set(prospect.idProspecto, await returningSituation(this.prisma, prospect));
+    }
     return prospects.map(({ _count, ...prospect }) => ({
       ...prospect,
+      ...(returning.has(prospect.idProspecto) ? { excliente: returning.get(prospect.idProspecto) } : {}),
       contratos: prospect.contratos.map(contract => ({
         ...contract, fechaConfirmacion: confirmationByContract.get(contract.idContrato) ?? null,
       })),
@@ -208,10 +218,10 @@ export class ProspectsService {
         .map(({ idCotizacion, codigo, idPlan, fechaEnvio, factibilidadVerificada, plan }) => ({
           idCotizacion, codigo, idPlan, fechaEnvio, vigente: factibilidadVerificada === true && plan?.activo !== false,
         })),
-      requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
+      requiereRevisionComercial: !returning.has(prospect.idProspecto) && (prospect.clasificacionComercial !== 'PROSPECTO'
         || (!([...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
-            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
+            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')))),
     }));
   }
 

@@ -313,6 +313,8 @@ describe('ProspectsService', () => {
   describe('search (paginado, incluye Perdido)', () => {
     function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = []) {
       const prisma = {
+        // Sin empresas a considerar, la consulta de búsqueda conserva exactamente su forma anterior.
+        empresa: { findMany: jest.fn().mockResolvedValue([]) },
         prospecto: {
           count: jest.fn().mockResolvedValue(total),
           findMany: jest.fn().mockResolvedValue(rows),

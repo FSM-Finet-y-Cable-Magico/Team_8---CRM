@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { returningProspectWhere } from './returning-customer';
 
 export const ACTIVE_CUSTOMER_STATUS = 'Activo';
 export const LOST_PROSPECT_PIPELINE_STATUS = 'Perdido';
@@ -19,8 +20,13 @@ function managedProspectConditions(companyScope: Prisma.ProspectoWhereInput): Pr
 
 export function managedProspectWhere(
   companyScope: Prisma.ProspectoWhereInput,
+  returningCompanyIds: number[] = [],
 ): Prisma.ProspectoWhereInput {
-  return { AND: managedProspectConditions(companyScope) };
+  const managed: Prisma.ProspectoWhereInput = { AND: managedProspectConditions(companyScope) };
+  // Sin empresas a considerar la forma es exactamente la anterior. Con ellas se suman los excliente
+  // vinculados a su cliente y sin relación operativa vigente; nunca los prospectos de otra empresa.
+  if (!returningCompanyIds.length) return managed;
+  return { OR: [managed, { AND: [companyScope, returningProspectWhere(returningCompanyIds)] }] };
 }
 
 export function activeProspectWhere(
