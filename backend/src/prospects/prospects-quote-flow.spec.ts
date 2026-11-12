@@ -18,7 +18,7 @@ function setup() {
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
   const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ available: false }]), prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     zonaPago: { findUnique: jest.fn().mockResolvedValue({ idZonaPago: 21, idEmpresa: 1, activo: true }) },
-    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
+    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async (callback, _options?: { isolationLevel: Prisma.TransactionIsolationLevel }) => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
   const registerDocument = jest.fn();
@@ -28,7 +28,7 @@ function setup() {
         const { result, reuseDocument } = await register(transaction);
         await registerDocument(result, reuseDocument);
         return result;
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     },
   };
   const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService, {} as MailService, coverage as unknown as CoverageDomainService, contracts as never);
@@ -43,7 +43,18 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(c.tx.contrato.update).not.toHaveBeenCalled();
     expect(c.tx.prospecto.update).not.toHaveBeenCalled();
     expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' }), c.tx);
+    expect(c.prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(c.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+  });
+  it('informa conflicto financiero concurrente sin crear contrato ni PDF', async () => {
+    const c = setup();
+    c.prisma.$transaction.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('QA serialization conflict', {
+      code: 'P2034', clientVersion: '5.22.0',
+    }));
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+    expect(c.registerDocument).not.toHaveBeenCalled();
   });
   it.each([
     { microzona: null, expectedZoneId: 21 },

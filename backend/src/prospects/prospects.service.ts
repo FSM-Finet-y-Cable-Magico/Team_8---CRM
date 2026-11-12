@@ -2,7 +2,6 @@ import { ContractsService } from '../contracts/contracts.service';
 import { effectiveSignatureDates } from '../contracts/signature.repository';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
-import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, pendingActivationWhere } from '../common/customer-lifecycle';
@@ -34,6 +33,7 @@ import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { CoverageResult } from '../coverage/coverage.types';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
 import { signatureRepository, signatureStorageAvailable } from '../contracts/signature.repository';
+import { renderQuotePdfBuffer as renderQuotePdfDocument } from './quote-pdf.renderer';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
 const FEASIBLE_PIPELINE_STATUS = 'Factible';
@@ -46,9 +46,6 @@ const LOST_PIPELINE_STATUS = LOST_PROSPECT_PIPELINE_STATUS;
 const PENDING_SIGNATURE_DUE_DAY = 1;
 const CLOSED_INSTALL_ORDER_STATES = ['Completada', 'Cancelada'];
 const ALTERNATIVE_VISIT_TIMES = ['09:00', '11:00', '14:00', '16:00', '18:00'];
-const QUOTE_DATE_FORMAT = new Intl.DateTimeFormat('es-CL', {
-  timeZone: 'America/Santiago', dateStyle: 'medium', timeStyle: 'medium',
-});
 const PIPELINE_STATUSES = [
   INITIAL_PIPELINE_STATUS,
   'Contactado',
@@ -599,14 +596,14 @@ export class ProspectsService {
         fechaEnvio: new Date(),
         factibilidadVerificada: true,
       },
-      include: { plan: true, prospecto: { include: { empresa: true } } },
+      include: { plan: true, prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } } },
     });
     const pdfUrl = `/prospects/${idProspecto}/quotes/${quote.idCotizacion}/pdf`;
 
     const updatedQuote = await this.prisma.cotizacion.update({
       where: { idCotizacion: quote.idCotizacion },
       data: { pdfUrl },
-      include: { plan: true, prospecto: { include: { empresa: true } } },
+      include: { plan: true, prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } } },
     });
 
     const pdf = await this.renderQuotePdfBuffer(updatedQuote);
@@ -914,7 +911,7 @@ export class ProspectsService {
         && existingContract.diaVencimiento === contrato.diaVencimiento
         && existingContract.direccionInstalacion === contrato.direccionInstalacion;
       return { result: { contrato, prospecto: updatedProspect, direccionInstalacion }, reuseDocument };
-    });
+    }).catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -1392,7 +1389,7 @@ export class ProspectsService {
         idProspecto,
       },
       include: {
-        prospecto: { include: { empresa: true } },
+        prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } },
         plan: true,
       },
     });
@@ -1404,58 +1401,11 @@ export class ProspectsService {
     return this.renderQuotePdfBuffer(quote);
   }
 
-  private renderQuotePdfBuffer(quote: {
-    codigo: string | null;
-    fechaEnvio: Date | null;
-    prospecto: {
-      nombreCompleto: string | null;
-      rut: string | null;
-      email: string | null;
-      direccion: string | null;
-      empresa?: { nombre: string } | null;
-    } | null;
-    plan: {
-      nombreComercial: string;
-      tipoPlan: string;
-      tipoCliente: string;
-      velocidadMbps: number | null;
-      precioMensual: { toString(): string };
-    } | null;
-  }) {
+  private renderQuotePdfBuffer(quote: Parameters<typeof renderQuotePdfDocument>[0]) {
     if (!quote.prospecto || !quote.plan) {
       throw new NotFoundException('Cotizacion no encontrada');
     }
-
-    const quoteProspect = quote.prospecto;
-    const quotePlan = quote.plan;
-
-    return new Promise<Buffer>((resolve) => {
-      const doc = new PDFDocument({ margin: 50 });
-      const chunks: Buffer[] = [];
-
-      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-
-      doc.fontSize(18).text('Cotización de servicio', { align: 'center' });
-      if (quote.codigo) doc.fontSize(11).text(quote.codigo, { align: 'center' });
-      doc.moveDown();
-      doc.fontSize(12).text(`Empresa: ${quoteProspect.empresa?.nombre ?? 'FiNet'}`);
-      doc.text(`Prospecto: ${quoteProspect.nombreCompleto ?? '-'}`);
-      doc.text(`RUT: ${quoteProspect.rut ?? '-'}`);
-      doc.text(`Email: ${quoteProspect.email ?? '-'}`);
-      doc.text(`Direccion: ${quoteProspect.direccion ?? '-'}`);
-      doc.moveDown();
-      doc.fontSize(14).text('Plan ofrecido');
-      doc.fontSize(12).text(`Nombre: ${quotePlan.nombreComercial}`);
-      doc.text(`Tipo: ${quotePlan.tipoPlan}`);
-      doc.text(`Cliente: ${quotePlan.tipoCliente}`);
-      doc.text(`Velocidad: ${quotePlan.velocidadMbps ?? '-'} Mbps`);
-      doc.text(`Precio mensual: $${quotePlan.precioMensual.toString()}`);
-      doc.moveDown();
-      if (quote.fechaEnvio) doc.text(`Fecha y hora de emisión: ${QUOTE_DATE_FORMAT.format(quote.fechaEnvio)} (Chile)`);
-      doc.text('Documento generado por CRM FiNet.');
-      doc.end();
-    });
+    return renderQuotePdfDocument(quote);
   }
 
   private resolveCompanyId(requestedCompanyId: number | undefined, currentUser: AuthUser) {

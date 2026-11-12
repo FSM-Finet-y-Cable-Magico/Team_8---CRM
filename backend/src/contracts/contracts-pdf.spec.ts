@@ -175,6 +175,7 @@ describe('Contenido y conservación de contratos PDF', () => {
     const existing = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user, true);
 
     expect(register).toHaveBeenCalledWith(ctx.tx);
+    expect(ctx.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 20000, isolationLevel: 'Serializable' });
     expect(ctx.tx.contratoDigital.create).toHaveBeenCalledTimes(1);
     expect(existing).toMatchObject({ version: 1, idCliente: null, estadoFirma: 'Generado' });
     expect(pdfText(files.writes.mock.calls[0][0] as Buffer)).toContain(prospecto.nombreCompleto);

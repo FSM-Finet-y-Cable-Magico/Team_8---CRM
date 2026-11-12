@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Plan } from '../../api';
@@ -39,6 +39,8 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
   const [planObservation, setPlanObservation] = useState('');
   const [deactivateObservation, setDeactivateObservation] = useState('');
   const [deactivating, setDeactivating] = useState(false);
+  const withdrawalBusy = useRef(false);
+  const [withdrawalDate, setWithdrawalDate] = useState(dateInputValue(new Date()));
 
   const activePlans = plans.filter(plan => plan.activo !== false && plan.idPlan !== contract.plan?.idPlan && (!contract.idEmpresa || !plan.idEmpresa || plan.idEmpresa === contract.idEmpresa));
   const changePlanOpen = action === 'plan';
@@ -78,7 +80,7 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
     } catch (error) { showMessage(serviceErrorMessage(error)); } finally { withdrawalBusy.current = false; setDeactivating(false); }
   }
 
-  if (!permissions.changeCustomerPlan && !permissions.manageServices) return null;
+  if (!permissions.changeCustomerPlan && !permissions.manageServices && !permissions.manageCustomerRequests) return null;
 
   return <div className="customer-service-options">
     {message && !action && <p role="status" className="inline-status">{message}</p>}
@@ -93,17 +95,18 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
       <div className="service-form-actions"><button type="button" className="secondary" disabled={savingPlan} onClick={() => setAction(null)}>Cancelar</button><button type="submit" disabled={savingPlan || !newPlanId}>{savingPlan ? 'Guardando…' : 'Guardar cambio'}</button></div>
     </form></Modal>, document.body)}
 
-      {deactivateOpen && createPortal(<Modal title="Dar de baja el servicio" open onClose={() => { if (!deactivating) setAction(null); }}>
+      {deactivateOpen && createPortal(<Modal title={withdrawalRequired ? 'Solicitar retiro por morosidad' : 'Dar de baja el servicio'} open onClose={() => { if (!deactivating) setAction(null); }}>
       <form id={"service-deactivate-" + service.idServicio} className="workflow-grid service-inline-form service-action-modal" onSubmit={deactivateService}>
-        <label className="service-form-wide">Observaciones <span className="service-optional">Opcional</span><textarea disabled={deactivating} value={deactivateObservation} onChange={event => setDeactivateObservation(event.target.value)} /></label>
+        {withdrawalRequired && <label>Fecha solicitada<input type="date" required disabled={deactivating} value={withdrawalDate} onChange={event => setWithdrawalDate(event.target.value)} /></label>}
+        <label className="service-form-wide">Observaciones {!withdrawalRequired && <span className="service-optional">Opcional</span>}<textarea required={withdrawalRequired} maxLength={1000} disabled={deactivating} value={deactivateObservation} onChange={event => setDeactivateObservation(event.target.value)} /></label>
         {message && <p role="status" className="inline-status service-form-wide">{message}</p>}
-        <div className="service-form-actions"><button type="button" className="secondary" disabled={deactivating} onClick={() => setAction(null)}>Cancelar</button><button type="submit" className="danger" disabled={deactivating}>Confirmar baja</button></div>
+        <div className="service-form-actions"><button type="button" className="secondary" disabled={deactivating} onClick={() => setAction(null)}>Cancelar</button><button type="submit" className="danger" disabled={deactivating}>{withdrawalRequired ? 'Registrar solicitud de retiro' : 'Confirmar baja'}</button></div>
       </form></Modal>, document.body)}
 
     {permissions.changeCustomerPlan && <PlanChangeHistory idContrato={contract.idContrato} revision={planRevision} />}
     <div className="customer-service-actions" aria-label="Acciones del servicio">
       {permissions.changeCustomerPlan && service.estadoOperativo !== 'Baja' && <button type="button" className="compact service-change-trigger" aria-expanded={changePlanOpen} aria-controls={changePlanOpen ? "service-change-plan-" + service.idServicio : undefined} onClick={() => { setAction(changePlanOpen ? null : 'plan'); }}><Pencil size={15} aria-hidden="true" /> Cambiar plan</button>}
-      {permissions.manageServices && service.estadoOperativo !== 'Baja' && <button type="button" className="compact service-deactivate-trigger" aria-expanded={deactivateOpen} aria-controls={deactivateOpen ? "service-deactivate-" + service.idServicio : undefined} onClick={() => { setAction(deactivateOpen ? null : 'deactivate'); }}>Dar de baja</button>}
+      {(withdrawalRequired ? permissions.manageCustomerRequests : permissions.manageServices) && service.estadoOperativo !== 'Baja' && <button type="button" className="compact service-deactivate-trigger" aria-expanded={deactivateOpen} aria-controls={deactivateOpen ? "service-deactivate-" + service.idServicio : undefined} onClick={() => { setAction(deactivateOpen ? null : 'deactivate'); }}>{withdrawalRequired ? 'Solicitar retiro por morosidad' : 'Dar de baja'}</button>}
     </div>
   </div>;
 }

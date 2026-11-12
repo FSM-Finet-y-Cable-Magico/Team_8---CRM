@@ -11,6 +11,8 @@ const text = node => typeof node === 'string' ? node : (node.children ?? []).map
 async function harness(t, options = {}) {
   const calls = [];
   const mocks = {
+    'react-dom': { createPortal: element => element },
+    '../../shared/components': { Modal: ({ open, children }) => open ? React.createElement('section', { role: 'dialog' }, children) : null },
     '../../api': { apiErrorMessage: error => error.message, api: {
       post: async (...args) => { calls.push(['post', ...args]); if (options.fail) throw Error('Registra el aviso previo'); return { data: {} }; },
       patch: async (...args) => { calls.push(['patch', ...args]); return { data: {} }; },
@@ -26,9 +28,12 @@ async function harness(t, options = {}) {
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020,
     jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const exports = {};
+  const previousDocument = globalThis.document;
+  globalThis.document = { body: {} };
+  t.after(() => { globalThis.document = previousDocument; });
   new Function('require', 'exports', output)(name => name.endsWith('.css') ? {} : mocks[name] ?? require(name), exports);
   const service = { idServicio: 40, idCliente: 10, idEmpresa: 2, estadoOperativo: options.state ?? 'Suspendido' };
-  const permissions = { manageServices: true, manageCustomerRequests: options.authorized !== false };
+  const permissions = { manageServices: true, manageCustomerRequests: options.authorized !== false, ...options.permissions };
   let tree;
   await act(async () => { tree = create(React.createElement(exports.CustomerServiceActions, {
     service, contract: { idContrato: 20, idEmpresa: 2 }, plans: [], permissions, onRefresh: async () => {},
@@ -59,6 +64,15 @@ test('rechazo del aviso preserva observaciones y no anuncia baja', async t => {
   assert.equal(h.tree.root.findByType('textarea').props.value, 'Conservar evidencia');
   assert.match(JSON.stringify(h.tree.toJSON()), /Registra el aviso previo/);
   assert.ok(h.calls.every(call => call[0] === 'post'));
+});
+
+test('permiso de solicitudes permite retiro sin habilitar baja administrativa', async t => {
+  const h = await harness(t, { permissions: { manageServices: false, manageCustomerRequests: true } });
+  assert.equal(h.button('Dar de baja'), undefined);
+  await act(async () => h.button('Solicitar retiro por morosidad').props.onClick());
+  await h.note('Retiro autorizado'); await h.submit();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0][1], '/service-withdrawals');
 });
 
 test('no ofrece retiro sin permiso y conserva baja administrativa ajena a morosidad', async t => {

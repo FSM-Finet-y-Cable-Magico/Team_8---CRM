@@ -411,7 +411,7 @@ export class ContractsService {
       const { result, reuseDocument } = await register(tx);
       await this.writeDigitalContract(tx, result.contrato.idContrato, currentUser, ownedFile, reuseDocument);
       return result;
-    });
+    }, Prisma.TransactionIsolationLevel.Serializable);
   }
 
   private async writeDigitalContract(
@@ -487,6 +487,7 @@ export class ContractsService {
 
   private async withDigitalContractTransaction<T>(
     operation: (tx: Prisma.TransactionClient, ownedFile: OwnedContractFile) => Promise<T>,
+    isolationLevel?: Prisma.TransactionIsolationLevel,
   ): Promise<T> {
     const ownedFile: OwnedContractFile = {};
     let transactionBodyCompleted = false;
@@ -495,7 +496,7 @@ export class ContractsService {
         const result = await operation(tx, ownedFile);
         transactionBodyCompleted = true;
         return result;
-      }, { timeout: 20000 });
+      }, { timeout: 20000, ...(isolationLevel ? { isolationLevel } : {}) });
     } catch (error) {
       if (ownedFile.fullPath && ownedFile.relativePath) {
         try {

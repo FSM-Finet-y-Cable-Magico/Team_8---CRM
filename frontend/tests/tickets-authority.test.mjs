@@ -18,7 +18,7 @@ const ticket = { idTicket: 1, idEmpresa: 2, idCliente: 100, idServicio: 2, idCat
   codigoSeguimiento: 'TK-QA', prioridad: 'Media', estado: 'En progreso', cliente: { nombreCompleto: 'QA' },
   categoria: { nombre: 'Soporte QA' }, workOrders: [], observacionesTecnicas: [{ metadata: 'QA', texto: 'Nota historica' }] };
 
-async function harness(t, name, props) {
+async function harness(t, name, props, { openManually = true } = {}) {
   t.mock.method(globalThis, 'fetch', () => { throw new Error('External traffic prohibited'); });
   const calls = [];
   let refreshed = 0;
@@ -65,11 +65,25 @@ async function harness(t, name, props) {
     let form = button(label); while (form.type !== 'form') form = form.parent;
     await act(async () => { await form.props.onSubmit({ preventDefault() {} }); });
   };
-  await click('Gestionar');
+  if (openManually) await click('Gestionar');
   return { tree, calls, button, click, field, submit, text: () => JSON.stringify(tree.toJSON()), refreshed: () => refreshed,
     failNext: (path, message = 'No se pudo guardar el cambio.') => { failure = { path, message }; },
     change: async (node, value) => { await act(async () => node.props.onChange({ target: { value } })); } };
 }
+
+test('dashboard abre el ticket seleccionado sin perder la validación del catálogo', async t => {
+  let consumed = 0;
+  const target = { ...ticket, idTicket: 42, codigoSeguimiento: 'TK-42' };
+  const ctx = await harness(t, 'TicketsPanel', {
+    tickets: [ticket, target], categories: [], permissions, focusedTicketId: 42,
+    onFocusConsumed: () => { consumed++; },
+  }, { openManually: false });
+  const modal = ctx.tree.root.find(node => node.type.name === 'TicketManagementModal');
+  assert.equal(modal.props.ticket.idTicket, 42);
+  assert.equal(consumed, 1);
+  assert.match(ctx.text(), /Consulta general/);
+  assert.deepEqual(ctx.calls, []);
+});
 
 test('C2: catálogo QA confirmado conserva Consulta y el aviso hasta agregar realmente las dos faltantes', async t => {
   const base = [

@@ -41,8 +41,8 @@ export function TicketsPanel({
     setManagementOpen(true);
     onFocusConsumed?.();
   }, [focusedTicketId, tickets, onFocusConsumed]);
-  const attentionCategories = categories.filter(category => Boolean(category.nombreAtencion)
-    && (category.tipo === 'ATENCION' || (category.tipo == null && category.tipoDisponible !== true)));
+  const catalog = ticketAttentionAvailability(categories);
+  const attentionCategories = catalog.options;
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {

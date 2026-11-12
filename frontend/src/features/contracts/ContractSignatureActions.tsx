@@ -6,7 +6,7 @@ import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 export function ContractSignatureActions({ idContrato, canSend, revision, onChanged, compact = false, prospectList = false }: {
   idContrato: number; canSend: boolean; revision: number; onChanged?: () => void; compact?: boolean; prospectList?: boolean;
 }) {
-  const { status: state, refresh } = useSignatureStatus(idContrato, revision);
+  const { status: state, refresh, error } = useSignatureStatus(idContrato, revision);
   const [busy, setBusy] = useState(false);
   const { message, showMessage: setMessage } = useTransientMessage();
   const notified = useRef('');
@@ -18,8 +18,7 @@ export function ContractSignatureActions({ idContrato, canSend, revision, onChan
   useEffect(() => { setBusy(false); setMessage(''); }, [idContrato]);
   if (!state) return error ? <section><p role="status">{error}</p>
     <button className="secondary compact" onClick={() => void refresh()}>Consultar estado de firma</button></section> : null;
-  if (state.policy.mode === 'unknown' && !state.signedDownloadAvailable) return <p role="status">{state.policy.reason ?? 'El contrato no tiene una modalidad de firma autorizada. Solicita su asignación al administrador.'}</p>;
-  if (state.policy.mode !== 'automatic' && !state.signedDownloadAvailable) return state.policy.reason
+  if (state.policy.mode !== 'automatic' && !state.signedDownloadAvailable) return !prospectList && state.policy.reason
     ? <p role="status">{state.policy.reason}</p> : null;
   async function action(kind: 'send' | 'cancel' | 'download' | 'retry') {
     if (busy) return; setBusy(true); setMessage('');
