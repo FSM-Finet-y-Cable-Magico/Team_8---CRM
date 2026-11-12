@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50; no seeds or credentials.
+// Generated from init-global.sql SHA256 8b744395f2d067592b61f70e09e74f263b2656a8cacb44cbac5e492d85b6ed1e; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -184,6 +184,12 @@ export const GLOBAL_COLUMNS = [
     "table": "usuario",
     "name": "rut",
     "type": "varchar(12)",
+    "nullable": true
+  },
+  {
+    "table": "usuario",
+    "name": "fecha_eliminacion",
+    "type": "timestamptz",
     "nullable": true
   },
   {
@@ -2026,6 +2032,12 @@ export const GLOBAL_COLUMNS = [
     "table": "cotizacion",
     "name": "factibilidad_verificada",
     "type": "boolean",
+    "nullable": true
+  },
+  {
+    "table": "cotizacion",
+    "name": "codigo",
+    "type": "varchar(20)",
     "nullable": true
   },
   {

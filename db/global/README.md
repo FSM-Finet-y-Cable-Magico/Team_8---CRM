@@ -2,7 +2,7 @@
 
 `init-global.sql` es el contrato físico canónico de PostgreSQL compartido por G1, G2, G3/Ops y G8. No contiene datos ni seeds.
 
-- SHA-256 vigente en esta rama: `0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50`.
+- SHA-256 vigente en esta rama: `8b744395f2d067592b61f70e09e74f263b2656a8cacb44cbac5e492d85b6ed1e`.
 - 96 tablas, 982 columnas, 96 PK, 230 FK, 63 checks y 132 índices explícitos.
 - Incluye F3 manual (04-11-2026), autorizado únicamente para desarrollo/QA: dos tablas G8, sin modificar tablas financieras existentes. No implica que la base compartida esté migrada.
 - `db/final/init.sql` es un snapshot histórico de G8 y no representa el contrato global vigente.

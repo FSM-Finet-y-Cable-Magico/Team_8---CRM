@@ -1,6 +1,6 @@
 # Propuesta 002: alinear el contrato global con `usuario.fecha_eliminacion` y `cotizacion.codigo`
 
-Estado: **PROPUESTA, PENDIENTE DE APROBACIÓN del responsable del esquema compartido.** No se modificó `init-global.sql`, ni los scripts de auditoría, ni ninguna base. Fecha: 12-11-2026.
+Estado: **Sección A APLICADA al contrato del repositorio el 12-11-2026, con aprobación de la jefatura del proyecto** (`init-global.sql`, hash `8b744395…`, conteos, README y artefactos regenerados). **Las secciones B (DDL en bases existentes) y C (migración de datos) siguen sin ejecutarse** y requieren su propia aprobación y respaldo.
 
 ## Por qué falla `npm run db:audit:prisma-global` (`PRISMA_GLOBAL_PROJECTION_MISMATCH`)
 
