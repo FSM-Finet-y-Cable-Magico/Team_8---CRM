@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants } from '../rut/rut.util';
 import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
+import { UpdateCustomerProfileDto } from './dto/update-customer-profile.dto';
 
 @Injectable()
 export class CustomersService {
@@ -15,7 +16,7 @@ export class CustomersService {
     private readonly auditService: AuditService,
   ) {}
 
-  async list(currentUser: AuthUser, scope = 'consolidado', query = '') {
+  async list(currentUser: AuthUser, scope = 'consolidado', query = '', idCliente?: number) {
     const idEmpresa = this.readCompanyId(currentUser, scope);
     const companyFilter = idEmpresa === undefined ? {} : { idEmpresa };
     const normalizedQuery = query.trim();
@@ -26,7 +27,7 @@ export class CustomersService {
     }
 
     const customers = await this.prisma.cliente.findMany({
-      where: { AND: filters },
+      where: { ...(idCliente === undefined ? {} : { idCliente }), AND: filters },
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
       include: {
@@ -57,6 +58,39 @@ export class CustomersService {
           ...this.scopedRecords(customer.contratos, idEmpresa).map((contract) => contract.plan?.empresa?.nombre),
         ].filter((name, index, names): name is string => Boolean(name) && names.indexOf(name) === index),
       };
+    });
+  }
+
+  async detail(idCliente: number, currentUser: AuthUser, scope?: string) {
+    const [customer] = await this.list(currentUser, scope, '', idCliente);
+    if (!customer) throw new NotFoundException('Cliente no encontrado en la empresa seleccionada');
+    return customer;
+  }
+
+  async updateProfile(idCliente: number, dto: UpdateCustomerProfileDto, user: AuthUser) {
+    const admin = isAdministrator(user.roles);
+    if (!admin && !user.idEmpresa) throw new ForbiddenException('No tienes permiso para editar este cliente');
+    return this.prisma.$transaction(async tx => {
+      const where = { idCliente, ...(admin ? {} : { idEmpresa: user.idEmpresa }) };
+      const select = { idCliente: true, nombreCompleto: true, email: true, telefono: true } as const;
+      const current = await tx.cliente.findUnique({ where, select });
+      if (!current) throw new NotFoundException('Cliente no encontrado en tu empresa');
+      const data = {
+        nombreCompleto: dto.nombreCompleto,
+        email: dto.email,
+        telefono: dto.telefono?.replace(/[() -]/g, '') ?? dto.telefono,
+      };
+      const changed = (Object.keys(data) as Array<keyof typeof data>).filter(field => data[field] !== undefined && data[field] !== current[field]);
+      if (!changed.length) return current;
+      const updated = await tx.cliente.update({ where, data, select });
+      await this.auditService.record({
+        idUsuario: user.idUsuario,
+        accion: 'ACTUALIZAR_FICHA_CLIENTE',
+        entidadAfectada: 'cliente',
+        idEntidadAfectada: idCliente,
+        valorNuevo: { campos: changed },
+      }, tx);
+      return updated;
     });
   }
 

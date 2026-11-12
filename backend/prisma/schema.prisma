@@ -49,6 +49,7 @@ model Usuario {
   passwordHash                     String                       @map("password_hash") @db.VarChar(255)
   versionSesion                    Int?                         @default(0) @map("version_sesion")
   activo                           Boolean?                     @default(true)
+  fechaEliminacion                 DateTime?                    @map("fecha_eliminacion") @db.Timestamptz(6)
   fechaCreacion                    DateTime?                    @default(now()) @map("fecha_creacion") @db.Timestamptz(6)
   esPasswordTemporal               Boolean?                     @default(true) @map("es_password_temporal")
   intentosFallidos                 Int?                         @default(0) @map("intentos_fallidos")
@@ -213,6 +214,7 @@ model Plan {
 
 model Cotizacion {
   idCotizacion           Int        @id @default(autoincrement()) @map("id_cotizacion")
+  codigo                 String?    @unique(map: "cotizacion_codigo_key") @default(dbgenerated("('COT-' || upper(left(replace((gen_random_uuid())::text, '-'::text, ''::text), 16)))")) @db.VarChar(20)
   idProspecto            Int?       @map("id_prospecto")
   idPlan                 Int?       @map("id_plan")
   pdfUrl                 String?    @map("pdf_url")

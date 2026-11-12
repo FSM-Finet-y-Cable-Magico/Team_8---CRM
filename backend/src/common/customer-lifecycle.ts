@@ -4,22 +4,39 @@ export const ACTIVE_CUSTOMER_STATUS = 'Activo';
 export const LOST_PROSPECT_PIPELINE_STATUS = 'Perdido';
 export const SIGNED_CONTRACT_STATES = ['Firmado', 'Activo', 'Suspendido', 'Moroso'];
 
+// Prospects that are still commercial leads: never converted to a customer and
+// without a signed contract. managedProspectWhere also includes lost prospects,
+// which stay consultable and reactivable.
+function managedProspectConditions(companyScope: Prisma.ProspectoWhereInput): Prisma.ProspectoWhereInput[] {
+  return [
+    companyScope,
+    // Historical labels are not evidence of conversion. Keep unlinked records
+    // visible for review rather than silently dropping them from both lists.
+    { idCliente: null },
+    { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
+  ];
+}
+
+export function managedProspectWhere(
+  companyScope: Prisma.ProspectoWhereInput,
+): Prisma.ProspectoWhereInput {
+  return { AND: managedProspectConditions(companyScope) };
+}
+
 export function activeProspectWhere(
   companyScope: Prisma.ProspectoWhereInput,
 ): Prisma.ProspectoWhereInput {
+  const [scope, ...relationConditions] = managedProspectConditions(companyScope);
   return {
     AND: [
-      companyScope,
+      scope,
       {
         OR: [
           { estadoPipeline: null },
           { estadoPipeline: { not: LOST_PROSPECT_PIPELINE_STATUS } },
         ],
       },
-      // Historical labels are not evidence of conversion. Keep unlinked records
-      // visible for review rather than silently dropping them from both lists.
-      { idCliente: null },
-      { contratos: { none: { estado: { in: SIGNED_CONTRACT_STATES } } } },
+      ...relationConditions,
     ],
   };
 }
@@ -38,11 +55,6 @@ export function resolveCustomerLifecycleStatus(input: {
   contractStates: Array<string | null | undefined>;
   serviceStates: Array<string | null | undefined>;
 }) {
-  // Financial states are managed by Billing and must not be overwritten here.
-  if (['Suspendido', 'Moroso'].includes(input.currentStatus)) {
-    return input.currentStatus;
-  }
-
   const services = input.serviceStates.filter((state): state is string => Boolean(state));
   const contracts = input.contractStates.filter((state): state is string => Boolean(state));
   const hasActiveService = services.includes('Activo');
@@ -54,11 +66,12 @@ export function resolveCustomerLifecycleStatus(input: {
   const hasOperationalRelationship = services.some((state) => state !== 'Baja')
     || contracts.some((state) => state !== 'Baja' && state !== 'Anulado');
 
+  if (!hasOperationalRelationship && (services.includes('Baja') || contracts.includes('Baja'))) return 'Baja';
+  // Preserve the billing status of an account with an operational relationship.
+  if (['Suspendido', 'Moroso'].includes(input.currentStatus)) return input.currentStatus;
   if (hasActiveService) return 'Activo';
   if (hasPendingInstallation || hasSignedContract) return 'Pendiente Instalacion';
   if (hasPendingSignature) return 'Pendiente firma contrato';
-  if (!hasOperationalRelationship && (services.includes('Baja') || contracts.includes('Baja'))) return 'Baja';
-
   return input.currentStatus;
 }
 

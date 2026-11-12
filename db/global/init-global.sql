@@ -1,3 +1,6 @@
+-- CONTRACT_CHANGE 2026-11-12 (propuesta 002, aprobada por la jefatura del proyecto):
+-- - ADD usuario.fecha_eliminacion TIMESTAMPTZ NULL (G8: eliminación lógica de usuarios; aditiva, nullable).
+-- - ADD cotizacion.codigo VARCHAR(20) NULL con DEFAULT generado y UNIQUE cotizacion_codigo_key (G8).
 -- CONTRACT_CHANGE 2026-09-29:
 -- - REMOVE invalid unique prospecto_id_cliente_key (un cliente puede relacionarse con varios prospectos).
 -- - ADD integracion_activacion_g1.payload_snapshot JSONB NULL.
@@ -83,7 +86,8 @@ CREATE TABLE IF NOT EXISTS usuario (
     version_sesion               INTEGER DEFAULT 0,
     bloqueado_hasta              TIMESTAMPTZ,
     debe_cambiar_password        BOOLEAN DEFAULT FALSE,
-    rut                          VARCHAR(12)
+    rut                          VARCHAR(12),
+    fecha_eliminacion            TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS usuario_rol (
@@ -504,8 +508,10 @@ CREATE TABLE IF NOT EXISTS cotizacion (
     id_plan                      INTEGER,
     pdf_url                      TEXT,
     fecha_envio                  TIMESTAMP,
-    factibilidad_verificada      BOOLEAN DEFAULT false
+    factibilidad_verificada      BOOLEAN DEFAULT false,
+    codigo                       VARCHAR(20) DEFAULT ('COT-' || upper(left(replace(gen_random_uuid()::text, '-', ''), 16)))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS cotizacion_codigo_key ON cotizacion (codigo);
 
 CREATE TABLE IF NOT EXISTS credenciales_tvip (
     id_credencial                SERIAL PRIMARY KEY,

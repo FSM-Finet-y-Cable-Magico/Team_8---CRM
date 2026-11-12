@@ -5,6 +5,16 @@ export class RegisterPaymentDto {
   @Min(1)
   idFactura!: number;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  idCuota?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  idConvenio?: number;
+
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   @Max(99999999.99)

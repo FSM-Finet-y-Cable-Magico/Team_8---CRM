@@ -15,11 +15,11 @@ const ToastNotice = ({ message }) => message ? React.createElement('p', { role: 
 function component(api) {
   const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const exports = {};
-  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: () => '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null, ToastNotice }, '../../shared/hooks/useTransientMessage': transientMessage };
+  const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: value => value ?? '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null, ToastNotice }, '../../shared/hooks/useTransientMessage': transientMessage };
   new Function('require', 'exports', out)(name => name in mocks ? mocks[name] : require(name), exports);
   return exports.G3InstallationStatus;
 }
-async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false } = {}) {
+async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false, installationSummary = false, service } = {}) {
   const calls = [];
   const api = {
     get: async path => { calls.push(['GET', path]); return { data: tracking }; },
@@ -33,7 +33,7 @@ async function mount({ missing = true, error = false, tracking = null, mayComple
     },
     patch: async (path, body) => { calls.push(['PATCH', path, body]); return { data: { idContrato: 4, comunaFaltante: false } }; },
   };
-  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true, compact })); });
+  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true, compact, installationSummary, service })); });
   const button = label => tree.root.findAllByType('button').find(b => b.props.children === label);
   return { tree, calls, button, close: async () => act(async () => tree.unmount()) };
 }
@@ -121,5 +121,19 @@ test('el refresco compacto consulta el estado y el cierre sigue siendo una acci�
     assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path === '/integrations/g3/installations/2/reconcile').length, 1);
     assert.match(toast().props.message, /cierre técnico aún no está confirmado/);
     assert.equal(toast().props.tone, 'info');
+  } finally { await h.close(); }
+});
+
+test('el resumen muestra el cierre de la orden correlacionada y sus equipos declarados', async () => {
+  const tracking = { idIntegracion: 2, idOtG3: '9700002', idServicio: 12, estadoPresentacion: 'COMPLETADA', estadoIntegracion: 'COMPLETADA' };
+  const service = { idServicio: 12, instalacion: { fuente: 'G3', idTecnicoG3: 8, fechaCompletada: '2026-11-10T17:45:00Z' },
+    datosTecnicos: { resultadoInstalacion: { equipos_instalados: [{ numero_serie: 'ONT-DEMO' }] }, potenciaOpticaDbm: -20 } };
+  const h = await mount({ compact: true, installationSummary: true, tracking, service });
+  try {
+    const visible = JSON.stringify(h.tree.toJSON());
+    for (const value of ['9700002', 'ID #8', '2026-11-10T17:45:00Z', 'Equipos declarados en la orden', 'ONT-DEMO']) assert.ok(visible.includes(value));
+    assert.equal(h.button('Consultar cierre'), undefined);
+    assert.equal(h.button('Detalle'), undefined);
+    assert.equal(h.calls.length, 1);
   } finally { await h.close(); }
 });

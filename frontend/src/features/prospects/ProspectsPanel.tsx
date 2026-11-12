@@ -1,11 +1,12 @@
 import { type ChangeEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { api, apiErrorMessage, Plan, Prospect } from '../../api';
+import { api, apiErrorMessage, Plan, Prospect, type ProspectSearchResult } from '../../api';
 import { emptyProspectForm, formatChileanMobileInput, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
 import { CoveragePicker, CoverageLocation } from '../coverage';
 import type { CompanyDraft } from '../../shared/hooks/useCompanyDraft';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
 
 export type ProspectRegistrationDraft = {
@@ -18,8 +19,12 @@ export function createProspectRegistrationDraft(): ProspectRegistrationDraft {
   return { form: { ...emptyProspectForm }, located: null, submitting: false };
 }
 
+const PROSPECT_PAGE_SIZE = 20;
+const emptyProspectFilters = { q: '', estado: '', origen: '', desde: '', hasta: '' };
+
 export function ProspectsPanel({
-  prospects,
+  prospects: reloadedProspects,
+  scope,
   loading,
   loadError,
   onReload,
@@ -31,6 +36,8 @@ export function ProspectsPanel({
   registration,
 }: {
   prospects: Prospect[];
+  /** When provided, the list is searched and paginated by the backend (includes lost prospects). */
+  scope?: string;
   loading: boolean;
   loadError: string;
   onReload: () => void;
@@ -55,7 +62,7 @@ export function ProspectsPanel({
       rutInput.current.setSelectionRange(position, position);
     }
   });
-  const [status, setStatus] = useState('');
+  const { message: status, showMessage: setStatus } = useTransientMessage();
   const [coverageBusy, setCoverageBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
@@ -79,11 +86,57 @@ export function ProspectsPanel({
     changeDraft(current => ({ ...current, located: next ? { version: addressVersion, location: next } : null }));
   }
 
-  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
-  const pageSize = 20;
-  const visibleProspects = prospects.slice((page - 1) * pageSize, page * pageSize);
+  const [filters, setFilters] = useState(emptyProspectFilters);
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const [remote, setRemote] = useState<ProspectSearchResult | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState('');
+  const searchRequest = useRef(0);
+  const serverSide = scope !== undefined;
+  const pageSize = PROSPECT_PAGE_SIZE;
 
-  useEffect(() => { setPage(1); }, [prospects.length]);
+  // Debounce free-text search so each keystroke does not hit the backend.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedQuery(filters.q.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [filters.q]);
+  useEffect(() => { setPage(1); }, [appliedQuery, filters.estado, filters.origen, filters.desde, filters.hasta, scope]);
+
+  useEffect(() => {
+    if (!serverSide) return;
+    const request = ++searchRequest.current;
+    setRemoteLoading(true);
+    setRemoteError('');
+    const params: Record<string, string | number | boolean> = { paginated: true, scope: scope as string, page, pageSize };
+    if (appliedQuery) params.q = appliedQuery;
+    if (filters.estado) params.estado = filters.estado;
+    if (filters.origen) params.origen = filters.origen;
+    if (filters.desde) params.desde = filters.desde;
+    if (filters.hasta) params.hasta = filters.hasta;
+    api.get<ProspectSearchResult>('/prospects', { params, timeout: 15000 })
+      .then(({ data }) => { if (request === searchRequest.current) setRemote(data); })
+      .catch(err => { if (request === searchRequest.current) setRemoteError(apiErrorMessage(err)); })
+      .finally(() => { if (request === searchRequest.current) setRemoteLoading(false); });
+    // reloadedProspects changes identity whenever the parent reloads after a mutation.
+  }, [serverSide, scope, page, appliedQuery, filters.estado, filters.origen, filters.desde, filters.hasta, reloadedProspects]);
+
+  const localMatches = serverSide ? [] : reloadedProspects.filter(prospect => {
+    const text = appliedQuery.toLocaleLowerCase('es-CL');
+    const compact = appliedQuery.replace(/[.\s-]/g, '').toLocaleLowerCase('es-CL');
+    return (!text || [prospect.nombreCompleto, prospect.email, prospect.telefono].some(value => value?.toLocaleLowerCase('es-CL').includes(text))
+      || (compact && (prospect.rut ?? '').replace(/[.\s-]/g, '').toLocaleLowerCase('es-CL').includes(compact)))
+      && (!filters.estado || (prospect.estadoPipeline ?? 'Prospecto Nuevo') === filters.estado)
+      && (!filters.origen || prospect.origenContacto === filters.origen);
+  });
+  const prospects = serverSide ? remote?.items ?? [] : reloadedProspects;
+  const visibleProspects = serverSide ? prospects : localMatches.slice((page - 1) * pageSize, page * pageSize);
+  const totalProspects = serverSide ? remote?.total ?? 0 : localMatches.length;
+  const listLoading = serverSide ? remoteLoading && !remote : loading;
+  const listError = serverSide ? remoteError : loadError;
+  const hasFilters = Object.values(filters).some(Boolean);
+  const selectedProspect = prospects.find((prospect) => prospect.idProspecto === selectedId) ?? null;
+
+  useEffect(() => { if (!serverSide) setPage(1); }, [reloadedProspects.length, serverSide]);
 
   function changeRut(event: ChangeEvent<HTMLInputElement>) {
     const raw = event.target.value;
@@ -144,10 +197,17 @@ export function ProspectsPanel({
   }
 
   return (
-    <section className="workspace-grid">
+    <section className="prospects-workspace">
+      <div className="prospects-workspace-heading">
+        <h2>Gestión de prospectos</h2>
+        <div className="prospect-search" role="search" aria-label="Buscar prospectos">
+          <input type="search" className="prospect-search-input" aria-label="Buscar prospecto" placeholder="Buscar por nombre, RUT, correo o teléfono" maxLength={120}
+            value={filters.q} onChange={event => setFilters({ ...filters, q: event.target.value })} />
+        </div>
+      </div>
+      <div className="workspace-grid">
       {permissions.createProspects && (
         <form className="stack prospect-create-form" onSubmit={submit}>
-          <h2>Registro</h2>
           <label>
             RUT
             <input
@@ -256,14 +316,13 @@ export function ProspectsPanel({
       )}
 
       <section className="prospects-list-section">
-        <h2>Gestión de Prospectos</h2>
-        {loadError && (
+        {listError && (
           <div role="alert" className="inline-status">
-            <p>{loadError}</p>
+            <p>{listError}</p>
             <button type="button" className="secondary compact" onClick={onReload}>Reintentar</button>
           </div>
         )}
-        <div className="table-wrap" aria-busy={loading}>
+        <div className="table-wrap" aria-busy={listLoading}>
           <table>
             <thead>
               <tr>
@@ -272,21 +331,25 @@ export function ProspectsPanel({
                 <th>Estado</th>
                 <th>Origen</th>
                 <th>Empresa</th>
+                <th>Pérdida</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={6} role="status">Cargando prospectos…</td></tr>}
-              {!loading && !loadError && prospects.length === 0 && (
-                <tr><td colSpan={6}>No hay prospectos pendientes de gestión para la empresa seleccionada.</td></tr>
+              {listLoading && <tr><td colSpan={7} role="status">Cargando prospectos…</td></tr>}
+              {!listLoading && !listError && visibleProspects.length === 0 && (
+                <tr><td colSpan={7}>{hasFilters ? 'Ningún prospecto coincide con la búsqueda o los filtros.' : 'No hay prospectos pendientes de gestión para la empresa seleccionada.'}</td></tr>
               )}
-              {!loading && !loadError && visibleProspects.map((prospect) => (
+              {!listLoading && !listError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
                   <td>{prospect.rut}</td>
                   <td>{prospect.nombreCompleto}</td>
-                  <td>{prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline}</td>
+                  <td>{prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline ?? 'Prospecto Nuevo'}</td>
                   <td>{prospect.origenContacto ?? '-'}</td>
                   <td>{prospect.empresa?.nombre ?? '-'}</td>
+                  <td>{prospect.estadoPipeline === 'Perdido'
+                    ? [prospect.motivoPerdida, prospect.fechaPerdida ? new Date(prospect.fechaPerdida).toLocaleDateString('es-CL') : null].filter(Boolean).join(' · ') || '-'
+                    : '-'}</td>
                   <td>
                     <button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
@@ -297,7 +360,7 @@ export function ProspectsPanel({
             </tbody>
           </table>
         </div>
-        <TablePagination currentPage={page} totalItems={prospects.length} pageSize={pageSize} onPageChange={setPage} />
+        <TablePagination currentPage={page} totalItems={totalProspects} pageSize={pageSize} onPageChange={setPage} />
         <Modal
           title="Gestionar prospecto"
           open={Boolean(selectedProspect)}
@@ -316,6 +379,7 @@ export function ProspectsPanel({
           )}
         </Modal>
       </section>
+      </div>
     </section>
   );
 }

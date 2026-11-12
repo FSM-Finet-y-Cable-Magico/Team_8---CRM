@@ -42,7 +42,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     post:async(path,body)=>{calls.push({path,body});
       if(path==='/coverage/geocode'){
         if(geocodeFailure)throw Error('QA geocoding unavailable');
-        return {data:{candidatos:[],mensaje:'Sin resultados QA'}};
+        return {data:{candidatos:[{latitud:-33.475,longitud:-70.675}]}};
       }
       if(path.endsWith('/g2-review')){
         if(reviewFailure||!reviewAvailable||body.confirmarOrigenG2!==true)throw Error('QA review rejected');
@@ -58,22 +58,29 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
       if(!path.endsWith('/location') && !/^\/prospects\/\d+$/.test(path))throw Error(path);
       const wasQuoted=persisted.estadoPipeline==='Cotizacion Enviada';
       persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion')),
-        ...(wasQuoted?{estadoPipeline:coverageOutside?'No Factible':'Factible',cotizaciones:[]}: {})};
+        ...(body.ubicacion ? {estadoPipeline:coverageOutside?'No Factible':'Factible'} : {}),
+        ...(wasQuoted ? {cotizaciones:persisted.cotizaciones.map(quote=>({...quote,vigente:false}))} : {})};
       return {data:{...persisted,...(wasQuoted?{cobertura:{coberturaComercial:!coverageOutside,planes:coverageOutside?[]:[{idPlan:company,precioAplicable:19990}]}}:{})}};
     }};
-  const mocks={'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
+  const mocks={'../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String },'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
-  const calendar=load('features/prospects/ContractDateCalendar.tsx',{});
   const {ProspectWorkflowPanel:Workflow}=load('features/prospects/ProspectWorkflowPanel.tsx',{
-    ...mocks,'../contracts/useSignatureStatus':{useSignatureStatus:()=>({status:null,refresh:async()=>null})},'../customers/ContractDocuments':{ContractDocuments:()=>null},'./ContractDateCalendar':calendar,'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
+    ...mocks,'../contracts/useSignatureStatus':{useSignatureStatus:()=>({status:null,refresh:async()=>null})},'../customers/ContractDocuments':{ContractDocuments:()=>null},'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});
   props={prospect:persisted,plans:[{idPlan:1,idEmpresa:1,activo:true,nombreComercial:'Internet QA 1'},{idPlan:2,idEmpresa:2,activo:true,nombreComercial:'Internet QA 2'},
     {idPlan:3,idEmpresa:company,activo:false,nombreComercial:'Inactivo'},{idPlan:4,idEmpresa:company,activo:true,nombreComercial:'Sin cotizar'}],
     permissions:{verifyFeasibility:true,generateQuotes:true,contractPlans:true,createProspects:canEdit||(g2&&commercial)},onNotify(message){notices.push(message);},onChanged(){props={...props,prospect:persisted};tree.update(React.createElement(Workflow,props));}};
   const mount=()=>create(React.createElement(Workflow,props),{createNodeMock:()=>({})});
   await act(async()=>{tree=mount();});
-  const tick=async()=>{await act(async()=>{t.mock.timers.tick(350);});await act(async()=>{t.mock.timers.tick(0);});};await tick();
+  const tick=async()=>{await act(async()=>{t.mock.timers.tick(700);});await act(async()=>{t.mock.timers.tick(350);});await act(async()=>{t.mock.timers.tick(0);});};await tick();
   t.after(async()=>{await act(async()=>tree.unmount());Object.assign(globalThis,saved);});
   return {calls,maps,tiles,notices,tick,get tree(){return tree;},pdfOpened:()=>pdfOpened,
+    advance:async ms=>{await act(async()=>t.mock.timers.tick(ms));},
+    address:async()=>{
+      const selects=tree.root.findByProps({className:'prospect-edit-form'}).findAllByType('select');
+      const region=selects[0].findAllByType('option').find(item=>item.props.value?.startsWith('Metropolitana'));
+      await act(async()=>selects[0].props.onChange({target:{value:region.props.value}}));
+      await act(async()=>selects[1].props.onChange({target:{value:'La Florida'}}));
+    },
     select:async(index,value)=>{await act(async()=>{tree.root.findAllByType('select')[index].props.onChange({target:{value:String(value)}});});},
     button:label=>tree.root.findAllByType('button').find(b=>b.props['aria-label']===label || b.children.join('')===label),
     save:async()=>{await act(async()=>tree.root.findByProps({className:'prospect-edit-form'}).props.onSubmit({preventDefault(){}}));},
@@ -108,7 +115,8 @@ test('cancelar descarta los datos y el punto editados sin guardar', async t => {
   const h = await harness(t, { g2: true, requiresReview: false });
   await act(async () => h.button('Editar prospecto').props.onClick());
   await h.changeField('Nombre completo', 'Borrador sin guardar');
-  await act(async () => h.maps.at(-1).handlers.click({ latlng: { lat: -33.475, lng: -70.675 } }));
+  await h.address(); await h.tick();
+  assert.deepEqual(h.maps.at(-1).pins, [[-33.475,-70.675]]);
   await act(async () => h.button('Cancelar').props.onClick());
   await h.tick();
   assert.equal(h.calls.filter(call => call.path === '/prospects/10' || call.path.endsWith('/location')).length, 0);
@@ -127,14 +135,13 @@ test('G2 NUEVO: revisión explícita → ubicación → cobertura real del flujo
   assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
   assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().origenContacto,null);
   await act(async()=>h.button('Editar prospecto').props.onClick());
-  await h.changeField('Comuna','Comuna QA');await h.changeField('Región','Región QA');
-  await h.changeField('Latitud','-33.475');await h.changeField('Longitud','-70.675');
-  await act(async()=>h.button('Ubicar punto').props.onClick());
-  await h.save();await h.tick();await h.tick();
-  assert.equal(h.persisted().comuna,'Comuna QA');assert.equal(h.persisted().region,'Región QA');
+  await h.address(); await h.tick();
+  assert.deepEqual(h.maps.at(-1).pins, [[-33.475,-70.675]]);
+  assert.equal(h.calls.filter(c=>c.path==='/prospects/10').length,0);
+  await h.save(); await h.tick();
+  assert.equal(h.persisted().comuna,'La Florida');
   assert.equal(h.persisted().estadoPipeline,'Factible');
   assert.ok(h.calls.some(c=>c.path==='/coverage/check'));
-  assert.ok(h.calls.some(c=>c.path.endsWith('/feasibility/tomodat')));
   assert.deepEqual(h.optionIds(0),[1,4]);
   await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());
   await h.select(1,1);await act(async()=>h.button('Confirmar contratación').props.onClick());
@@ -166,17 +173,6 @@ test('ubicación ausente tras revisión exige coordenadas y no infiere comuna o 
   assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
 });
 
-test('prospecto G2 ya recuperado abre editor: clic persiste ubicación antes de factibilidad y conserva al recargar',async t=>{
-  const h=await harness(t,{g2:true,requiresReview:false});
-  assert.equal(h.button('Aprobar revisión del portal'),undefined);
-  assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,1);
-  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
-  const location=h.calls.findIndex(c=>c.path.endsWith('/location'));
-  const feasibility=h.calls.findIndex(c=>c.path.endsWith('/feasibility/tomodat'));
-  assert.ok(location>=0&&feasibility>location);
-  assert.equal(h.persisted().estadoPipeline,'Factible');assert.equal(h.persisted().comuna,null);
-  await h.remount();assert.equal(h.persisted().latitud,-33.475);assert.deepEqual(h.optionIds(0),[1,4]);
-});
 
 for(const options of [{existingContract:true},{commercial:false}])test('contrato o permisos insuficientes conservan resumen y el mapa no escribe: '+JSON.stringify(options),async t=>{
   const h=await harness(t,{g2:true,requiresReview:false,...options});
@@ -187,18 +183,19 @@ for(const options of [{existingContract:true},{commercial:false}])test('contrato
 
 for(const options of [{outside:true},{noPlans:true},{locationFailure:true}])test('cobertura negativa, falta de planes o conflicto no habilitan contratación: '+JSON.stringify(options),async t=>{
   const h=await harness(t,{g2:true,requiresReview:false,...options});
-  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
+  await act(async()=>h.button('Editar prospecto').props.onClick());await h.address();await h.tick();await h.save();await h.tick();
   assert.equal(h.button('Generar cotización'),undefined);assert.equal(h.button('Confirmar contratación'),undefined);
   if(options.locationFailure)assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
 });
 
-test('error de geocodificación conserva selección manual y no inventa factibilidad ni geografía',async t=>{
+test('geocodificación fallida deja reintentar, quita el aviso a los tres segundos y conserva la dirección',async t=>{
   const h=await harness(t,{g2:true,requiresReview:false,geocodeFailure:true});
-  await act(async()=>h.button('Ubicar dirección').props.onClick());
-  assert.ok(h.text().includes('Selecciona el punto manualmente'));
-  assert.equal(h.persisted().latitud,null);assert.equal(h.persisted().comuna,null);assert.equal(h.persisted().estadoPipeline,'Prospecto Nuevo');
-  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();await h.tick();
-  assert.equal(h.persisted().estadoPipeline,'Factible');assert.equal(h.persisted().region,null);
+  await act(async()=>h.button('Editar prospecto').props.onClick());await h.address();await h.tick();
+  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.ok(h.button('Reintentar dirección'));
+  await h.advance(3000);
+  assert.ok(!h.text().includes('No se pudo ubicar la dirección'));
+  assert.equal(h.persisted().latitud,null); assert.equal(h.persisted().comuna,null);
 });
 test('React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nueva sesión recupera cotización persistida',async t=>{
   const h=await harness(t);assert.deepEqual(h.optionIds(0),[1,4]);assert.deepEqual(h.optionIds(1),[]);
@@ -219,24 +216,22 @@ test('React: editar después de cotizar invalida esa cotización y permite emiti
   const h=await harness(t,{state:'Cotizacion Enviada',quoted:true,canEdit:true});
   await act(async()=>h.button('Editar prospecto').props.onClick());
   await h.changeField('Teléfono','+56900000007');await h.save();
-  assert.equal(h.persisted().estadoPipeline,'Factible');assert.deepEqual(h.persisted().cotizaciones,[]);
+  assert.equal(h.persisted().estadoPipeline,'Factible');assert.equal(h.persisted().cotizaciones[0].vigente,false);
+  assert.ok(h.text().includes('No vigente'));
   assert.ok(h.text().includes('La cotización anterior quedó invalidada'));
   assert.deepEqual(h.optionIds(0),[1]);assert.equal(h.button('Confirmar contratación'),undefined);
   await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());
   assert.equal(h.persisted().estadoPipeline,'Cotizacion Enviada');assert.equal(h.persisted().cotizaciones.length,1);
 });
-test('React: contratación conserva comuna, omite ciudad y envía la fecha elegida en el calendario', async t => {
+test('React: la contratación usa la dirección guardada y envía el plan y la observación', async t => {
   const h = await harness(t, { state: 'Cotizacion Enviada', quoted: true });
-  const inputs = h.tree.root.findAllByType('input').filter(input => input.props.maxLength === 80);
-  assert.equal(inputs.length, 1);
-  await act(async () => inputs[0].props.onChange({ target: { value: 'Comuna QA' } }));
-  const calendar = h.tree.root.findAll(node => node.type?.name === 'ContractDateCalendar')[0];
-  await act(async () => calendar.props.onChange('2026-12-18'));
-  assert.ok(h.tree.root.findAllByType('button').some(button => button.props['aria-pressed'] === true && button.children.join('') === '18'));
-  await h.select(1, 1); await act(async () => h.button('Confirmar contratación').props.onClick());
-  assert.equal(h.calls.find(c => c.path.endsWith('/contracts')).body.comuna, 'Comuna QA');
-  assert.equal(h.calls.find(c => c.path.endsWith('/contracts')).body.ciudad, undefined);
-  assert.equal(h.calls.find(c => c.path.endsWith('/contracts')).body.fechaInicio, '2026-12-18');
+  assert.ok(!h.text().includes('Comuna de instalación'));
+  assert.ok(!h.text().includes('Fecha de confirmación'));
+  const observation = h.tree.root.findByProps({ maxLength: 500 });
+  await act(async () => observation.props.onChange({ target: { value: 'Confirmación en sucursal' } }));
+  await h.select(1, 1);
+  await act(async () => h.button('Confirmar contratación').props.onClick());
+  assert.deepEqual(h.calls.find(c => c.path.endsWith('/contracts')).body, { planId: 1, observacionContrato: 'Confirmación en sucursal' });
 });
 for(const state of ['Perdido','No Factible'])test('React bloquea '+state,async t=>{
   const h=await harness(t,{state,quoted:true,outside:state==='No Factible'});

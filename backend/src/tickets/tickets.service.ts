@@ -8,6 +8,7 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
+import { compareTicketsByUrgency } from './ticket-priority';
 import { isGeneralTicketCategory, readTicketCategoryCatalog } from './ticket-attention-categories';
 import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -19,6 +20,7 @@ import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 
 const TICKET_STATUSES = ['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'];
+type AuditEntry = Parameters<AuditService['record']>[0];
 
 @Injectable()
 export class TicketsService {
@@ -33,11 +35,13 @@ export class TicketsService {
   }
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
-    const tickets = await this.prisma.ticket.findMany({
+    const fetched = await this.prisma.ticket.findMany({
       where: this.companyScope(currentUser, scope),
       orderBy: [{ prioridad: 'asc' }, { fechaCreacion: 'desc' }],
       take: 150,
     });
+    // El texto de la prioridad no ordena por urgencia (Baja < Media) ni entre vocabularios.
+    const tickets = [...fetched].sort(compareTicketsByUrgency);
 
     const customerIds = [...new Set(tickets.map((ticket) => ticket.idCliente).filter((id): id is number => Boolean(id)))];
     const categoryIds = [...new Set(tickets.map((ticket) => ticket.idCategoria))];
@@ -169,35 +173,33 @@ export class TicketsService {
       throw new BadRequestException('La categoría no está disponible para clasificación manual de tickets');
     }
 
-    const updated = await this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'CLASIFICAR_TICKET',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: idTicket,
-      valorAnterior: { idCategoria: ticket.idCategoria },
-      valorNuevo: { idCategoria: dto.idCategoria, categoria: category.nombre },
-    });
-
-    return updated;
+    return this.writeAudited(
+      tx => this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria }, tx),
+      () => ({
+        idUsuario: currentUser.idUsuario,
+        accion: 'CLASIFICAR_TICKET',
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: idTicket,
+        valorAnterior: { idCategoria: ticket.idCategoria },
+        valorNuevo: { idCategoria: dto.idCategoria, categoria: category.nombre },
+      }),
+    );
   }
 
   async updatePriority(idTicket: number, dto: UpdateTicketPriorityDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
     this.assertCrmWrite(ticket.estado);
-    const updated = await this.updateCrmTicket(ticket, { prioridad: dto.prioridad });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ASIGNAR_PRIORIDAD_TICKET',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: idTicket,
-      valorAnterior: { prioridad: ticket.prioridad },
-      valorNuevo: { prioridad: dto.prioridad },
-    });
-
-    return updated;
+    return this.writeAudited(
+      tx => this.updateCrmTicket(ticket, { prioridad: dto.prioridad }, tx),
+      () => ({
+        idUsuario: currentUser.idUsuario,
+        accion: 'ASIGNAR_PRIORIDAD_TICKET',
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: idTicket,
+        valorAnterior: { prioridad: ticket.prioridad },
+        valorNuevo: { prioridad: dto.prioridad },
+      }),
+    );
   }
 
   async updateStatus(idTicket: number, dto: UpdateTicketStatusDto, currentUser: AuthUser) {
@@ -214,22 +216,21 @@ export class TicketsService {
       await this.assertNoPendingWorkOrderForClosure(idTicket);
     }
 
-    const updated = await this.updateCrmTicket(ticket, {
-      estado: dto.estado,
-      fechaCierre: dto.estado === 'Cerrado' ? new Date() : ticket.fechaCierre,
-      descripcion: dto.comentario ? `${ticket.descripcion ?? ''}\nComentario: ${dto.comentario}` : ticket.descripcion,
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'ACTUALIZAR_ESTADO_TICKET',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: idTicket,
-      valorAnterior: { estado: ticket.estado },
-      valorNuevo: { estado: dto.estado, comentario: dto.comentario },
-    });
-
-    return updated;
+    return this.writeAudited(
+      tx => this.updateCrmTicket(ticket, {
+        estado: dto.estado,
+        fechaCierre: dto.estado === 'Cerrado' ? new Date() : ticket.fechaCierre,
+        descripcion: dto.comentario ? `${ticket.descripcion ?? ''}\nComentario: ${dto.comentario}` : ticket.descripcion,
+      }, tx),
+      () => ({
+        idUsuario: currentUser.idUsuario,
+        accion: 'ACTUALIZAR_ESTADO_TICKET',
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: idTicket,
+        valorAnterior: { estado: ticket.estado },
+        valorNuevo: { estado: dto.estado, comentario: dto.comentario },
+      }),
+    );
   }
 
   async registerDiagnosis(idTicket: number, dto: RegisterDiagnosisDto, currentUser: AuthUser) {
@@ -288,20 +289,21 @@ export class TicketsService {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
     this.assertCrmWrite(ticket.estado);
     const block = this.technicalNoteBlock(dto.observacion, currentUser.nombreCompleto);
-    const updated = await this.updateCrmTicket(ticket, {
-      descripcion: `${ticket.descripcion ?? ''}\n\n${block}`.trim(),
-    });
-
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: 'REGISTRAR_OBSERVACION_TECNICA_TICKET',
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: idTicket,
-      valorNuevo: {
-        estado: ticket.estado,
-        observacion: dto.observacion,
-      },
-    });
+    const updated = await this.writeAudited(
+      tx => this.updateCrmTicket(ticket, {
+        descripcion: `${ticket.descripcion ?? ''}\n\n${block}`.trim(),
+      }, tx),
+      () => ({
+        idUsuario: currentUser.idUsuario,
+        accion: 'REGISTRAR_OBSERVACION_TECNICA_TICKET',
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: idTicket,
+        valorNuevo: {
+          estado: ticket.estado,
+          observacion: dto.observacion,
+        },
+      }),
+    );
 
     return {
       ...updated,
@@ -364,38 +366,48 @@ export class TicketsService {
       throw new BadRequestException('El ticket requiere un contrato vinculado al cliente y empresa seleccionados');
     }
 
-    const ticket = await this.prisma.ticket.create({
-      data: {
-        idCliente: cliente.idCliente,
-        idEmpresa,
-        idServicio: servicio?.idServicio,
-        idUsuarioAsignado: options.idUsuarioAsignado,
-        idCategoria: dto.idCategoria,
-        codigoSeguimiento: this.trackingCode(),
-        prioridad: dto.prioridad,
-        estado: 'Abierto',
-        descripcion: dto.descripcion,
-        fechaCreacion: new Date(),
-        origen: options.origen,
-      },
-    });
+    return this.writeAudited(
+      tx => tx.ticket.create({
+        data: {
+          idCliente: cliente.idCliente,
+          idEmpresa,
+          idServicio: servicio?.idServicio,
+          idUsuarioAsignado: options.idUsuarioAsignado,
+          idCategoria: dto.idCategoria,
+          codigoSeguimiento: this.trackingCode(),
+          prioridad: dto.prioridad,
+          estado: 'Abierto',
+          descripcion: dto.descripcion,
+          fechaCreacion: new Date(),
+          origen: options.origen,
+        },
+      }),
+      ticket => ({
+        idUsuario: options.idUsuario,
+        accion: options.accion,
+        entidadAfectada: 'ticket',
+        idEntidadAfectada: ticket.idTicket,
+        valorNuevo: {
+          idCliente: cliente.idCliente,
+          rut: cliente.rut,
+          categoria: categoria.nombre,
+          prioridad: dto.prioridad,
+          idServicio: servicio?.idServicio,
+          origen: options.origen,
+        },
+      }),
+    );
+  }
 
-    await this.auditService.record({
-      idUsuario: options.idUsuario,
-      accion: options.accion,
-      entidadAfectada: 'ticket',
-      idEntidadAfectada: ticket.idTicket,
-      valorNuevo: {
-        idCliente: cliente.idCliente,
-        rut: cliente.rut,
-        categoria: categoria.nombre,
-        prioridad: dto.prioridad,
-        idServicio: servicio?.idServicio,
-        origen: options.origen,
-      },
+  // La escritura y su auditoría se confirman juntas: si la auditoría no puede
+  // persistirse se revierte el cambio, en vez de dejar un ticket sin registro
+  // y con respuesta de éxito (la auditoría fuera de transacción falla en silencio).
+  private writeAudited<T>(write: (tx: Prisma.TransactionClient) => Promise<T>, audit: (result: T) => AuditEntry) {
+    return this.prisma.$transaction(async (tx) => {
+      const result = await write(tx);
+      await this.auditService.record(audit(result), tx);
+      return result;
     });
-
-    return ticket;
   }
 
   private async getTicketOrThrow(idTicket: number, currentUser: AuthUser) {

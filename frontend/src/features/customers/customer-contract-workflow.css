@@ -1,6 +1,121 @@
 .customer-contracts-section {
   margin-top: 18px;
+  --contract-ink: #293e35;
+  --contract-muted: #52675d;
+  --contract-line: #d8e6df;
+  --contract-surface: #f4f8f6;
+  --contract-accent: #237b65;
+  --contract-highlight: #e8f3ed;
 }
+
+.theme-dark .customer-contracts-section {
+  --contract-ink: #e0ede8;
+  --contract-muted: #a7bdb4;
+  --contract-line: #36534a;
+  --contract-surface: #162f29;
+  --contract-accent: #a5dfca;
+  --contract-highlight: #24453b;
+}
+
+.customer-contract-number,
+.customer-contract-toggle,
+.customer-contract-document-row h4,
+.customer-installation-summary .installation-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customer-contract-number { flex-wrap: wrap; }
+.customer-contract-table > table { table-layout: fixed; }
+.customer-contract-table > table > thead th:nth-child(1) { width: 17%; }
+.customer-contract-table > table > thead th:nth-child(2) { width: 16%; }
+.customer-contract-table > table > thead th:nth-child(3) { width: 13%; }
+.customer-contract-table > table > thead th:nth-child(4) { width: 17%; }
+.customer-contract-table > table > thead th:nth-child(5) { width: 25%; }
+.customer-contract-table > table > thead th.customer-contract-status-heading { width: 12%; }
+.customer-contract-table th.customer-contract-status-heading, .customer-contract-table td.customer-contract-status { text-align: left; }
+.customer-contract-row { cursor: pointer; }
+.customer-contract-row-toggle { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; box-shadow: none; }
+.customer-contract-row-toggle:hover { background: transparent; color: inherit; box-shadow: none; transform: none; }
+.customer-contract-number > span:first-child { font-size: .8rem; font-weight: 650; overflow-wrap: anywhere; }
+.customer-contract-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
+.customer-contract-table tr.customer-contract-selected > td { background: var(--contract-highlight); }
+.customer-contract-table tr.customer-contract-detail-row > td { padding: 0; background: var(--contract-surface); }
+.customer-contract-expansion { display: grid; grid-template-rows: 1fr; animation: customer-contract-open 200ms ease-out; }
+.customer-contract-expansion > div { min-height: 0; animation: customer-contract-reveal 200ms; }
+@keyframes customer-contract-open { from { grid-template-rows: 0fr; opacity: .4; } }
+@keyframes customer-contract-reveal { from, to { overflow: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .customer-contract-expansion, .customer-contract-expansion > div { animation: none; }
+}
+
+.customer-contract-detail {
+  display: grid;
+  gap: 14px;
+  padding: 18px clamp(12px, 2vw, 24px);
+  color: var(--contract-ink);
+  text-align: start;
+}
+
+.customer-contract-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 12px 20px;
+  margin: 0;
+}
+
+.customer-contract-facts dt, .customer-installation-order span, .customer-contract-document-row > span, .customer-contract-note {
+  color: var(--contract-muted);
+  font-size: .78rem;
+}
+
+.customer-contract-facts dd { margin: 4px 0 0; font-size: .88rem; font-weight: 650; overflow-wrap: anywhere; }
+.customer-contract-note { margin: 0; }
+.customer-add-plan { padding: 14px; border: 1px solid var(--contract-line); border-radius: 8px; background: var(--contract-surface); }
+.customer-contract-documents, .customer-installation-summary, .customer-service-options {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--contract-line);
+  padding-top: 12px;
+}
+
+.customer-contract-document-row, .customer-installation-summary > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.customer-contract-document-row h4 { font-size: .86rem; margin: 0; }
+.customer-contract-documents h4 { margin: 0; font-size: .86rem; }
+.customer-document-list { list-style: none; padding: 0; margin: 0; }
+.customer-document-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--contract-line); }
+.customer-document-list li div { display: grid; gap: 3px; font-size: .85rem; }
+.customer-document-list small { color: var(--contract-muted); }
+.customer-document-list button { background: transparent; border: 0; color: var(--contract-accent); padding: 8px; box-shadow: none; }
+.customer-contract-document-row h4 svg { color: var(--contract-accent); }
+.customer-installation-order { display: grid; gap: 4px; min-width: 0; }
+.customer-installation-order strong { font-size: 1.04rem; overflow-wrap: anywhere; }
+.customer-installation-summary button.installation-refresh-state {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  width: 34px;
+  height: 34px;
+  background: var(--contract-highlight);
+  color: var(--contract-accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.customer-installation-summary button.installation-refresh-state:hover:not(:disabled) { border-color: var(--contract-accent); }
+.customer-contract-detail summary { width: fit-content; cursor: pointer; color: var(--contract-accent); font-size: .8rem; }
+.customer-contract-detail details[open] > summary { margin-bottom: 10px; }
+.customer-contract-detail .g3-installation-card { padding: 12px 0 0; border: 0; border-top: 1px solid var(--contract-line); background: transparent; }
+.customer-contract-detail .g3-installation-card > p { margin: 0; }
+.customer-contract-detail .g3-installation-card > button { justify-self: start; }
 
 .customer-workflow-steps,
 .customer-operation-tabs,

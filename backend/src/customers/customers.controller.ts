@@ -8,6 +8,7 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { CustomersService } from './customers.service';
 import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
+import { UpdateCustomerProfileDto } from './dto/update-customer-profile.dto';
 
 @Controller('customers')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -30,6 +31,18 @@ export class CustomersController {
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMERS)
   history(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.customersService.history(id, user);
+  }
+
+  @Get(':id')
+  @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
+  detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
+    return this.customersService.detail(id, user, scope);
+  }
+
+  @Patch(':id/profile')
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  updateProfile(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCustomerProfileDto, @CurrentUser() user: AuthUser) {
+    return this.customersService.updateProfile(id, dto, user);
   }
 
   @Patch(':id/status')

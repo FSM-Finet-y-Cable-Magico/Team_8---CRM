@@ -67,9 +67,11 @@ async function harness(t, { geocode = async () => response(), check = async () =
     polygon: () => ({ bindTooltip() { return this; }, addTo() {} }),
   };
   const { CoveragePicker } = load('features/coverage/CommercialCoveragePicker.tsx', {
+    '../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),
     leaflet, '../../api': { api, apiErrorMessage: () => 'Error local' }, '../../lib/user-facing-messages': require('./helpers/user-facing-messages.cjs'),
   });
   const { ProspectsPanel } = load('features/prospects/ProspectsPanel.tsx', {
+    '../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),
     '../../api': { api },
     '../../lib': {
       emptyProspectForm: { rut: '', nombreCompleto: '', email: '', telefono: '', direccion: '', comuna: '', region: '', origenContacto: 'Formulario web' },

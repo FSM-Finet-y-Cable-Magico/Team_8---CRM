@@ -17,6 +17,8 @@ export type ControlResponse = {
   filterOptions: { plans: Array<{ id: number; label: string }>; zones: Array<{ id: number; label: string }>; commercialStatuses: string[]; serviceStatuses: string[] };
 };
 
+export type InvoiceFocus = Pick<ControlRow, 'idFactura' | 'idCliente' | 'idEmpresa'> & { idConvenio?: number; idCuota?: number };
+
 export type ActionName = 'event' | 'lastNotice' | 'agreement' | 'extension' | 'paymentDay' | 'charge' | 'withdrawal';
 export type Filters = {
   search: string; estadoComercial: string; estadoServicio: string; idPlan: string; idZona: string;
@@ -45,7 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 export const readable = (value: string | null | undefined) => value ? STATUS_LABELS[value] ?? value.replace(/_/g, ' ').toLocaleLowerCase('es-CL') : '—';
 export const ACTION_LABELS: Record<ActionName, string> = {
-  event: 'Registrar contacto', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
+  event: 'Registrar gestión de cobranza', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
 };
 export function actionDisabledReason(action: ActionName, row: ControlRow) {

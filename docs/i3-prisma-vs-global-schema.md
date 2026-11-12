@@ -1,10 +1,10 @@
 # Proyección Prisma G8 frente al contrato global
 
-Hash canónico: 0472cdc09051404b5c3c41de30de02d9c8859eb212cb2c02b8307c160da70f50. Modelos G8: 63.
+Hash canónico: 8b744395f2d067592b61f70e09e74f263b2656a8cacb44cbac5e492d85b6ed1e. Modelos G8: 63.
 
 Prisma es una proyección; los objetos globales no modelados se conservan. OWNER_EXTERNAL significa fuera de la proyección; ownership funcional se indica por separado. FK_MISMATCH con Prisma null significa relación física fuera de la proyección (se conserva en PostgreSQL). INDEX_MISMATCH con Prisma null significa índice global no modelado (incluye parciales/expresiones); conservarlo, jamás usar db push para quitarlo. El contrato vigente incluye integracion_activacion_g1.payload_snapshot, solicitud_instalacion_integracion con definición G3 confirmada y la propuesta coordinada G2 de plan de interés, metadatos de pago/comprobante y resultado WiFi idempotente. Tambien incorpora el estado final de tax_emission_intent, tax_payment_job y la extension Meta de log_notificacion; los indices parciales se conservan aunque Prisma no pueda declararlos. Los default y checks SQL se validan en el verificador físico, no se infieren de @default de aplicación.
 
-Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":929,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}.
+Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrato anterior. Después: {"MATCH":932,"COLUMN_GLOBAL_ONLY":35,"OWNER_EXTERNAL":325,"INDEX_MISMATCH":53,"FK_MISMATCH":65}.
 
 |Tabla|Objeto|Owner|Estado|Prisma|Global|
 |---|---|---|---|---|---|
@@ -22,6 +22,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |usuario|password_hash|COMPARTIDO|MATCH|{"type":"varchar(255)","nullable":false}|{"type":"varchar(255)","nullable":false}|
 |usuario|version_sesion|COMPARTIDO|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |usuario|activo|COMPARTIDO|MATCH|{"type":"boolean","nullable":true}|{"type":"boolean","nullable":true}|
+|usuario|fecha_eliminacion|COMPARTIDO|MATCH|{"type":"timestamptz","nullable":true}|{"type":"timestamptz","nullable":true}|
 |usuario|fecha_creacion|COMPARTIDO|MATCH|{"type":"timestamptz","nullable":true}|{"type":"timestamptz","nullable":true}|
 |usuario|es_password_temporal|COMPARTIDO|MATCH|{"type":"boolean","nullable":true}|{"type":"boolean","nullable":true}|
 |usuario|intentos_fallidos|COMPARTIDO|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
@@ -117,6 +118,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |plan|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_plan"]|["id_plan"]|
 |plan|FK:empresa|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |cotizacion|id_cotizacion|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
+|cotizacion|codigo|G8 (coordinar columnas compartidas)|MATCH|{"type":"varchar(20)","nullable":true}|{"type":"varchar(20)","nullable":true}|
 |cotizacion|id_prospecto|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |cotizacion|id_plan|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |cotizacion|pdf_url|G8 (coordinar columnas compartidas)|MATCH|{"type":"text","nullable":true}|{"type":"text","nullable":true}|
@@ -125,6 +127,7 @@ Antes: ver i3-prisma-vs-global-before.json como evidencia histórica del contrat
 |cotizacion|PRIMARY KEY|G8 (coordinar columnas compartidas)|MATCH|["id_cotizacion"]|["id_cotizacion"]|
 |cotizacion|FK:prospecto|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
 |cotizacion|FK:plan|G8 (coordinar columnas compartidas)|MATCH|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|{"onDelete":"NO ACTION","onUpdate":"NO ACTION"}|
+|cotizacion|INDEX:codigo|G8 (coordinar columnas compartidas)|MATCH|{"columns":["codigo"],"unique":true}|null|
 |contrato|id_contrato|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":false}|{"type":"integer","nullable":false}|
 |contrato|id_cliente|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|
 |contrato|id_prospecto|G8 (coordinar columnas compartidas)|MATCH|{"type":"integer","nullable":true}|{"type":"integer","nullable":true}|

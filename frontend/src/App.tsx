@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { clearSession, monitorSession, restoreSession } from './lib/session';
 import {
   ArrowRight,
   BarChart3,
@@ -74,7 +75,6 @@ import {
   formatDateOnly,
   formatDateTime,
   formatWorkOrderValue,
-  normalizeAuthUser,
   settledData,
   technicalEntries,
 } from './lib';
@@ -165,10 +165,11 @@ type Summary = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    const stored = localStorage.getItem('finet_user');
-    return stored ? normalizeAuthUser(JSON.parse(stored) as AuthUser) : null;
-  });
+  const [user, setUser] = useState<AuthUser | null>(restoreSession);
+
+  useEffect(() => {
+    if (user) return monitorSession(() => setUser(null));
+  }, [user]);
 
   useEffect(() => {
     const handleExpiredSession = () => setUser(null);
@@ -185,8 +186,13 @@ export default function App() {
 }
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [commercialNavigation, setCommercialNavigation] = useState(0);
-  const [focusedCustomerId, setFocusedCustomerId] = useState<number | null>(null);
+  const [focusedTicketId, setFocusedTicketId] = useState<number | null>(null);
+  const [visitedModules, setVisitedModules] = useState<Tab[]>([]);
+  useEffect(() => {
+    if (activeTab === 'customers' || activeTab === 'commercial') {
+      setVisitedModules(current => current.includes(activeTab) ? current : [...current, activeTab]);
+    }
+  }, [activeTab]);
   const [customerPendingView, setCustomerPendingView] = useState<'activation' | null>(null);
   const [installationView, setInstallationView] = useState<'coordination' | 'agenda' | null>(null);
   const [scope, setScope] = useState('consolidado');
@@ -325,8 +331,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }, [scope]);
 
   function logout() {
-    localStorage.removeItem('finet_token');
-    localStorage.removeItem('finet_user');
+    clearSession();
     onLogout();
   }
 
@@ -363,7 +368,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         activeTab={activeTab}
         mainItems={mainNavItems}
         secondaryItems={secondaryNavItems}
-        onNavigate={(tab) => { setActiveTab(tab); if (tab === 'commercial') setCommercialNavigation(value => value + 1); }}
+        onNavigate={setActiveTab}
       />
 
       <section className="crm-main">
@@ -413,6 +418,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               billingOverview={billingOverview}
               permissions={permissions}
               onNavigate={setActiveTab}
+              onOpenTicket={(id) => { setFocusedTicketId(id); setActiveTab('tickets'); }}
               onOpenPendingInstallations={(view) => {
                 if (view === 'agenda') {
                   if (!canViewInstallations) return;
@@ -431,6 +437,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               key={writeCompanyId}
               registration={prospectRegistration}
               prospects={prospects}
+              scope={scope}
               loading={prospectsLoading}
               loadError={prospectsError}
               onReload={() => void loadProspects()}
@@ -462,22 +469,25 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onChanged={() => void loadData()}
             />
           )}
-          {activeTab === 'customers' && canManageCustomers && (
+          {(activeTab === 'customers' || visitedModules.includes('customers')) && canManageCustomers && (
+            <div hidden={activeTab !== 'customers'}>
             <CustomersPanel
+              active={activeTab === 'customers'}
               pendingInstallationsView={customerPendingView}
               onPendingInstallationsViewConsumed={() => setCustomerPendingView(null)}
-              focusedCustomerId={focusedCustomerId}
-              onFocusConsumed={() => setFocusedCustomerId(null)}
               customers={customers}
               plans={plans}
               scope={scope}
               permissions={permissions}
+              profileEditor={{ admin: isAdmin, idEmpresa: user.idEmpresa }}
+              onProfileUpdated={(profile) => setCustomers(current => current.map(customer => customer.idCliente === profile.idCliente ? { ...customer, ...profile } : customer))}
               onManageInstallation={(idProspecto) => {
                 setFocusedInstallationProspectId(idProspecto);
                 setActiveTab('installations');
               }}
               onChanged={() => void loadData()}
             />
+            </div>
           )}
           {activeTab === 'inventory' && canViewInventory && (
             <InventoryPanel
@@ -495,19 +505,21 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               onChanged={() => void loadData()}
             />
           )}
-          {activeTab === 'commercial' && permissions.viewControlBook && (
+          {(activeTab === 'commercial' || visitedModules.includes('commercial')) && permissions.viewControlBook && (
+            <div hidden={activeTab !== 'commercial'}>
             <CommercialControlBookPanel
-              key={commercialNavigation}
+              active={activeTab === 'commercial'}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}
-              onOpenCustomers={(row) => { if (permissions.viewCustomers) { setFocusedCustomerId(row.idCliente); setActiveTab('customers'); } }}
               customers={customers}
+              companies={companies}
               onChanged={() => void loadData()}
             />
+            </div>
           )}
           {activeTab === 'tickets' && canViewTickets && (
-            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} onChanged={() => void loadData()} />
+            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} focusedTicketId={focusedTicketId} onFocusConsumed={() => setFocusedTicketId(null)} onChanged={() => void loadData()} />
           )}
           {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
           {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}

@@ -1,84 +1,27 @@
-.modal-card:has(> .modal-content > .service-management-view) { width: min(820px, 100%); }
-.modal-card:has(> .modal-content > .service-management-view) > .modal-header { flex-direction: row; align-items: center; margin-bottom: 0; padding: 20px 24px 16px; }
-.modal-card:has(> .modal-content > .service-management-view) > .modal-content { padding: 0; }
-.customer-service-management.service-management-view { --service-ink: #293e35; --service-muted: #6d7d75; --service-line: #dce6e0; --service-surface: #f5f9f7; --service-accent: #247c68; gap: 0; color: var(--service-ink); outline: none; }
-.service-management-view > .customer-transient-status { margin: 0 24px 16px; }
-.service-summary { margin: 0 24px; padding: 6px 0 16px; }
-.service-summary header { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }
-.service-summary header > div { min-width: 0; }
-.service-summary h3 { margin: 5px 0 7px; font-size: 1.04rem; line-height: 1.4; overflow-wrap: anywhere; color: var(--service-ink); }
-.service-summary header p, .service-summary header > div > span { margin: 0; color: var(--service-muted); font-size: .77rem; line-height: 1.5; }
-.service-summary header > .status-badge { flex-shrink: 0; margin-top: 3px; }
-.service-summary dl { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: 16px; border-top: 1px solid var(--service-line); padding-top: 14px; margin: 16px 0 0; }
-.service-summary dt { color: var(--service-muted); font-size: .74rem; }
-.service-summary dd { margin: 5px 0 0; color: var(--service-ink); font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
-.service-management-view .service-actions { gap: 8px; padding: 16px 24px 20px; }
-.service-actions button { font-size: .8rem; font-weight: 600; box-shadow: none; }
-.service-actions .service-deactivate-trigger { margin-left: auto; border: 1px solid transparent; background: transparent; color: #a3483d; }
-.service-actions .service-deactivate-trigger:hover { background: #fff1ee; color: #933d32; box-shadow: none; }
-.service-details-list { margin: 0 24px 22px; border-top: 1px solid var(--service-line); }
-.service-details-section + .service-details-section { border-top: 1px solid var(--service-line); }
-.service-details-section > :is(summary, .service-section-trigger) { display: flex; align-items: center; gap: 12px; padding: 16px 4px; list-style: none; cursor: pointer; }
-.service-details-section > .service-section-trigger { width: 100%; border-radius: 0; color: inherit; background: transparent; text-align: start; box-shadow: none; }
-.service-details-section > .service-section-trigger:disabled { cursor: default; }
-.service-details-section > summary::-webkit-details-marker { display: none; }
-.service-details-section > :is(summary, .service-section-trigger) > svg { flex-shrink: 0; color: var(--service-accent); }
-.service-details-section > :is(summary, .service-section-trigger) > span { display: grid; gap: 5px; font-size: .87rem; font-weight: 650; }
-.service-details-section > :is(summary, .service-section-trigger) small { color: var(--service-muted); font-size: .75rem; font-weight: 400; line-height: 1.5; }
-.service-details-section > :is(summary, .service-section-trigger)::after { content: ''; width: 7px; height: 7px; flex-shrink: 0; border-right: 1.5px solid var(--service-muted); border-bottom: 1.5px solid var(--service-muted); transform: rotate(45deg); margin: 0 2px 4px auto; }
-.service-details-section[open] > summary::after,
-.service-details-section > .service-section-trigger[aria-expanded='true']::after { transform: rotate(225deg); margin-top: 5px; }
-.service-details-section > :is(summary, .service-section-trigger:not(:disabled)):hover { background: var(--service-surface); }
-.service-details-content { display: grid; gap: 18px; min-width: 0; padding: 4px 4px 18px; }
-.service-details-content > .g3-installation-card { padding: 0; border: 0; background: transparent; }
-.service-details-content > .crm-table-action { justify-self: start; }
-.service-details-content .customer-readonly-details { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 0; padding: 0; }
-.service-management-view .customer-readonly-details dt { color: var(--service-muted); font-size: .74rem; font-weight: 400; text-transform: none; letter-spacing: normal; }
-.service-management-view .customer-readonly-details dd { color: var(--service-ink); font-size: .84rem; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
-.service-details-content .workflow-panel { margin: 0; padding-top: 18px; border-top-color: var(--service-line); gap: 12px; }
-.service-details-content .workflow-panel > p, .service-details-content .customer-service-history > p { color: var(--service-muted); font-size: .79rem; line-height: 1.55; margin: 0; }
-.service-management-view .service-subsection, .service-management-view .customer-service-history { display: grid; gap: 15px; border: 0; padding: 0; background: transparent; }
-.service-subsection + .service-subsection, .service-details-content > .customer-service-history { border-top: 1px solid var(--service-line); padding-top: 20px; }
-.service-management-view h3 { color: var(--service-ink); }
-.service-details-content h3, .service-form-heading h3 { font-size: .87rem; margin: 0; }
-.service-details-content .empty-state { border: 0; border-radius: 0; background: transparent; padding: 0; text-align: left; }
-.service-management-view .service-inline-form { margin: 0 24px 20px; padding: 18px; align-items: start; border: 1px solid var(--service-line); border-radius: 12px; background: var(--service-surface); gap: 16px; }
-.service-details-content .service-inline-form { margin: 0; }
+.customer-service-options .customer-service-actions { margin: 6px 0 0; justify-content: flex-end; }
+.customer-service-options > details { margin-top: 12px; }
+.customer-service-options .service-change-trigger { background: #237b65; border-color: #237b65; color: #fff; }
+.customer-service-options .service-change-trigger:hover { background: #19634f; }
+.customer-service-options .service-deactivate-trigger { background: #ad3c37; border-color: #ad3c37; color: #fff; }
+.customer-service-options .service-deactivate-trigger:hover { background: #8f302c; color: #fff; }
+.customer-plan-history h4 { margin: 0 0 10px; font-size: .86rem; }
+.customer-service-options .danger { background: #ad3c37; color: #fff; }
+.service-inline-form { margin: 0 0 12px; padding: 8px 0; gap: 12px; align-items: start; }
+.modal-card:has(> .modal-content > .service-action-modal) { width: min(620px, 100%); }
+.service-action-modal { --contract-ink: #293e35; --contract-muted: #52675d; margin: 0; }
+.theme-dark .service-action-modal { --contract-ink: #e0ede8; --contract-muted: #a7bdb4; }
+.service-action-modal .danger { background: #ad3c37; border-color: #ad3c37; color: #fff; }
 .service-form-heading, .service-form-wide, .service-form-actions { grid-column: 1 / -1; }
-.service-form-heading p { margin: 6px 0 0; font-size: .8rem; color: var(--service-muted); line-height: 1.5; }
-.service-inline-form label { position: relative; min-width: 0; align-content: start; color: var(--service-ink); font-size: .79rem; }
+.service-form-heading p { margin: 6px 0 0; font-size: .8rem; color: var(--contract-muted); line-height: 1.5; }
+.service-inline-form label { position: relative; min-width: 0; align-content: start; color: var(--contract-ink); font-size: .79rem; }
 .service-inline-form input, .service-inline-form select { min-height: 42px; height: 42px; font-size: .84rem; font-weight: 400; }
 .service-inline-form textarea { min-height: 80px; font-size: .84rem; font-weight: 400; line-height: 1.5; }
-.service-optional { position: absolute; right: 0; top: 0; color: var(--service-muted); font-size: .71rem; font-weight: 400; }
+.service-optional { position: absolute; right: 0; top: 0; color: var(--contract-muted); font-size: .71rem; font-weight: 400; }
 .service-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .service-form-actions button { font-size: .8rem; }
-.service-new-plan { margin: 0; color: var(--service-ink); font-size: .8rem; }
-.service-muted { color: var(--service-muted); font-size: .8rem; line-height: 1.55; margin: 0; }
-.service-availability-note { margin: 0 24px 12px; }
-.service-record { display: grid; gap: 16px; border: 1px solid var(--service-line); border-radius: 9px; padding: 15px; }
-.service-details-content dl.service-record { padding: 15px; }
-.service-record-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.service-record > button, .service-warranty-trigger { justify-self: start; }
-.service-modal-footer { position: sticky; bottom: 0; z-index: 1; display: flex; justify-content: flex-end; border-top: 1px solid var(--service-line); padding: 15px 24px; background: #fff; }
-.service-modal-footer button { font-size: .81rem; font-weight: 600; }
-.service-management-view summary:focus-visible, .service-management-view button:focus-visible { outline: 2px solid #247c68; outline-offset: 3px; }
-.theme-dark .service-management-view { --service-ink: #e0ede8; --service-muted: #a7bdb4; --service-line: #29483e; --service-surface: #162f29; --service-accent: #a5dfca; }
-.theme-dark .service-modal-footer { background: #102732; }
-.theme-dark .service-actions .service-deactivate-trigger { color: #f2b3a8; }
-.theme-dark .service-actions .service-deactivate-trigger:hover { background: #452b27; }
+.service-new-plan { margin: 0; color: var(--contract-ink); font-size: .8rem; }
+.service-muted { color: var(--contract-muted); font-size: .8rem; line-height: 1.55; margin: 0; }
+.service-form-heading h3 { font-size: .87rem; margin: 0; }
 @media (max-width: 600px) {
-  .modal-card:has(> .modal-content > .service-management-view) > .modal-header { padding: 16px; }
-  .service-summary { margin: 0 16px; }
-  .service-summary dl { grid-template-columns: 1fr; gap: 12px; }
-  .service-summary h3 { font-size: .95rem; }
-  .service-summary header { gap: 10px; }
-  .service-management-view .service-actions { padding: 14px 16px 18px; gap: 7px; }
-  .service-actions button { padding: 0 8px; font-size: .76rem; }
-  .service-details-list { margin: 0 16px 18px; }
-  .service-details-section > :is(summary, .service-section-trigger) { padding-block: 14px; }
-  .service-availability-note { margin-inline: 16px; }
-  .service-details-content .customer-readonly-details { grid-template-columns: 1fr; }
-  .service-management-view .service-inline-form { margin: 0 16px 18px; padding: 14px; grid-template-columns: 1fr; }
-  .service-details-content .service-inline-form { margin: 0; }
-  .service-modal-footer { padding: 14px 16px; }
+  .service-inline-form { grid-template-columns: 1fr; }
 }

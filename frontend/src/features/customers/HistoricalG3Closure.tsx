@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, G3HistoricalClosure } from '../../api';
 import { formatDateTime } from '../../lib';
 
-export function HistoricalG3Closure({ idServicio }: { idServicio: number }) {
+export function HistoricalG3Closure({ idServicio, compact = false }: { idServicio: number; compact?: boolean }) {
   const [result, setResult] = useState<G3HistoricalClosure | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,8 +36,8 @@ export function HistoricalG3Closure({ idServicio }: { idServicio: number }) {
 
   const data = result?.estadoConsulta === 'DISPONIBLE' ? result.datos : null;
   return <section className="customer-service-history">
-    <header><h3>Antecedentes del cierre técnico</h3></header>
-    <p>Consulta los detalles del cierre de la instalación. Esta consulta es de solo lectura.</p>
+    {!compact && <><header><h3>Antecedentes del cierre técnico</h3></header>
+      <p>Consulta los detalles del cierre de la instalación. Esta consulta es de solo lectura.</p></>}
     <button type="button" className="secondary compact" disabled={loading} onClick={consult}>
       {loading ? 'Consultando…' : 'Consultar antecedentes'}
     </button>

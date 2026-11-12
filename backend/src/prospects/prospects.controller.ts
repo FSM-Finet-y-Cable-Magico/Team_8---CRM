@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
+import { ListProspectsQueryDto } from './dto/list-prospects-query.dto';
 import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
 import { CreateProspectDto } from './dto/create-prospect.dto';
@@ -32,8 +33,10 @@ export class ProspectsController {
 
   @Get()
   @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
-  list(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
-    return this.prospectsService.list(user, scope ?? 'consolidado');
+  list(@CurrentUser() user: AuthUser, @Query() query: ListProspectsQueryDto) {
+    // Without `paginated=true` the legacy array contract is preserved.
+    if (query.paginated === 'true') return this.prospectsService.search(user, query);
+    return this.prospectsService.list(user, query.scope ?? 'consolidado');
   }
 
   @Get('pending-activation')
