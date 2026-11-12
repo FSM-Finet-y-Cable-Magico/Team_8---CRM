@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import { Readable } from 'stream';
-import { inflateSync } from 'zlib';
+import { deflateSync, inflateSync } from 'zlib';
 import PDFDocument from 'pdfkit';
 import { ContractsService } from './contracts.service';
 import { PDFDocument as ReadPdf } from 'pdf-lib';
@@ -64,16 +64,49 @@ function mockFiles() {
 }
 
 // Extract text from the real PDFKit content streams (WinAnsi standard fonts), not mocked render calls.
+// Each stream is read with the byte count declared in its own /Length. Guessing the end with
+// /\r?\nendstream/ dropped a compressed last byte equal to 0x0D (random with dates/ids in the PDF)
+// and made inflateSync fail with "unexpected end of file" intermittently.
+function pdfStreams(buffer: Buffer) {
+  const text = buffer.toString('latin1');
+  const streams: Buffer[] = [];
+  for (const header of text.matchAll(/<<((?:(?!>>)[\s\S])*?)>>\s*stream\r?\n/g)) {
+    const length = /\/Length (\d+)/.exec(header[1]);
+    if (!length || !/\/FlateDecode/.test(header[1])) continue;
+    const start = header.index! + header[0].length;
+    streams.push(buffer.subarray(start, start + Number(length[1])));
+  }
+  return streams;
+}
+
 function pdfText(buffer: Buffer) {
   const lines: string[] = [];
-  for (const match of buffer.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-    const content = inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1');
+  for (const stream of pdfStreams(buffer)) {
+    const content = inflateSync(stream).toString('latin1');
     for (const text of content.matchAll(/\[([^\]]*)\]\s*TJ/g)) {
       lines.push([...text[1].matchAll(/<([\da-f]+)>/gi)].map(hex => Buffer.from(hex[1], 'hex').toString('latin1')).join(''));
     }
   }
   return lines.join('\n');
 }
+
+describe('Lector de streams PDF de las pruebas', () => {
+  it('conserva el último byte comprimido aunque sea 0x0D (antes fallaba al azar con "unexpected end of file")', () => {
+    let compressed = Buffer.alloc(0);
+    for (let i = 0; i < 100000 && compressed[compressed.length - 1] !== 0x0d; i += 1) {
+      const label = `Linea ${createHash('sha256').update(String(i)).digest('hex').slice(0, 12)}`;
+      compressed = deflateSync(Buffer.from(`BT /F1 9 Tf [<${Buffer.from(label, 'latin1').toString('hex')}>] TJ ET`, 'latin1'));
+    }
+    expect(compressed[compressed.length - 1]).toBe(0x0d);
+    const pdf = Buffer.concat([
+      Buffer.from(`<<\n/Length ${compressed.length}\n/Filter /FlateDecode\n>>\nstream\n`, 'latin1'), compressed, Buffer.from('\nendstream\n', 'latin1'),
+    ]);
+    expect(pdfText(pdf)).toMatch(/^Linea [0-9a-f]{12}$/);
+    // La lectura anterior (fin adivinado con \r?\nendstream) perdía ese byte y no podía descomprimir.
+    const guessed = /stream\r?\n([\s\S]*?)\r?\nendstream/.exec(pdf.toString('latin1'))![1];
+    expect(() => inflateSync(Buffer.from(guessed, 'latin1'))).toThrow('unexpected end of file');
+  });
+});
 
 describe('Contenido y conservación de contratos PDF', () => {
   afterEach(() => jest.restoreAllMocks());
