@@ -13,6 +13,20 @@ const comercial: AuthUser = {
 };
 
 describe('ContractsService', () => {
+  it('rechaza nueva contratacion por deuda antes de crear contrato o servicio', async () => {
+    const db = {
+      cliente: { findUnique: jest.fn().mockResolvedValue({ idCliente: 10, idEmpresa: 1, rut: '11111111-1', contratos: [{ idEmpresa: 1 }] }) },
+      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 7, idEmpresa: 1, activo: true }) },
+      factura: { findMany: jest.fn().mockResolvedValue([{ estado: 'Pendiente', monto: 7000, pagos: [], fechaLimitePago: new Date('2026-01-01') }]) },
+      contrato: { create: jest.fn() }, servicioContratado: { create: jest.fn() },
+    };
+    Object.assign(db, { $transaction: jest.fn(async work => work(db)) });
+    const audit = { record: jest.fn() };
+    const service = new ContractsService(db as never, audit as never, {} as never);
+    await expect(service.createCustomerContract({ idCliente: 10, idPlan: 7 }, comercial)).rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(db.contrato.create).not.toHaveBeenCalled(); expect(db.servicioContratado.create).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' }), db);
+  });
   it('crea una contratación pendiente de firma sin crear servicio ni OT', async () => {
     const createdContract = {
       idContrato: 40,
@@ -32,6 +46,7 @@ describe('ContractsService', () => {
           .mockResolvedValueOnce({ idCliente: 10, estado: 'Activo', contratos: [{ estado: 'Activo' }, { estado: 'Pendiente firma contrato' }], servicios: [{ estadoOperativo: 'Activo' }] }),
         update: jest.fn(),
       },
+      factura: { findMany: jest.fn().mockResolvedValue([]) },
       plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 7, idEmpresa: 1, activo: true }) },
       contrato: { create: jest.fn().mockResolvedValue(createdContract) },
       servicioContratado: { create: jest.fn() },
@@ -69,7 +84,7 @@ function signatureSetup() {
       observacionFirmaManual: null as string | null,
     },
     customer: { idCliente: 10, estado: 'Pendiente firma contrato' },
-    prospect: { idProspecto: 20, estadoPipeline: 'Pendiente firma contrato', direccion: 'Direccion QA' },
+    prospect: { rut: '11111111-1', idProspecto: 20, estadoPipeline: 'Pendiente firma contrato', direccion: 'Direccion QA' },
     addresses: [] as Array<{ direccionCompleta: string }>,
     otherContracts: [] as string[],
     document: {
@@ -87,6 +102,7 @@ function signatureSetup() {
     plan: null, zonaPago: null, servicios: [],
   });
   const tx = {
+    factura: { findMany: jest.fn().mockResolvedValue([]) },
     $queryRaw: jest.fn().mockResolvedValue([]),
     contrato: {
       findUnique: jest.fn().mockImplementation(async () => present()),
@@ -137,6 +153,42 @@ function signatureSetup() {
 }
 
 describe('Firma manual atomica', () => {
+  it('la etiqueta documental de firma manual tampoco evita el veto financiero', async () => {
+    const ctx = signatureSetup();
+    ctx.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);
+    const before = structuredClone(ctx.state);
+    await expect(ctx.service.updateDigitalContractStatus(30, { estadoFirma: 'Firmado manualmente' }, comercial))
+      .rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(ctx.state.contract).toEqual(before.contract); expect(ctx.state.document).toEqual(before.document);
+    expect(ctx.tx.contratoDigital.update).not.toHaveBeenCalled();
+    expect(ctx.state.audits).toEqual([expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' })]);
+  });
+  it('deuda conserva contrato y PDF pendientes y permite continuar solo tras regularizacion', async () => {
+    const ctx = signatureSetup(); const before = structuredClone(ctx.state);
+    ctx.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [{ monto: 3500 }], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);
+    await expect(ctx.service.confirmManualSignature(30, {}, comercial)).rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(ctx.state.contract).toEqual(before.contract);
+    expect(ctx.state.document).toEqual(before.document);
+    expect(ctx.tx.contrato.update).not.toHaveBeenCalled();
+    expect(ctx.state.audits).toEqual([expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' })]);
+    ctx.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [{ monto: 7000 }], estado: 'Pagada', fechaLimitePago: new Date('2026-01-01') }]);
+    expect(ctx.state.contract.estado).toBe('Pendiente firma contrato');
+    await ctx.service.confirmManualSignature(30, {}, comercial);
+    expect(ctx.state.contract.estado).toBe('Firmado');
+    expect(ctx.services.ensureInstallationServiceForContract).not.toHaveBeenCalled();
+    expect(ctx.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ isolationLevel: 'Serializable' }));
+  });
+
+  it('firma electronica aplica el mismo veto transaccional sin alterar evidencias', async () => {
+    const ctx = signatureSetup(); ctx.config.set('CONTRACT_SIGNATURE_AUTOMATIC_COMPANIES', '[1]');
+    ctx.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);
+    const before = structuredClone(ctx.state);
+    await expect(ctx.prisma.$transaction((tx: Parameters<ContractsService['markContractSigned']>[0]) => ctx.service.markContractSigned(tx, 30, { kind: 'electronic', actor: comercial })))
+      .rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(ctx.state).toEqual(before);
+    expect(ctx.tx.contrato.update).not.toHaveBeenCalled();
+    expect(ctx.tx.contratoDigital.update).not.toHaveBeenCalled();
+  });
   it('confirma, reconcilia y audita dentro de la misma transaccion sin crear instalacion', async () => {
     const ctx = signatureSetup();
     const result = await ctx.service.confirmManualSignature(30, { observacion: '  Corroborada en oficina  ' }, comercial);
@@ -192,11 +244,13 @@ describe('Firma manual atomica', () => {
   it.each(['Firmado', 'Activo', 'Suspendido', 'Moroso'])('conserva un contrato ya %s', async estado => {
     const ctx = signatureSetup();
     ctx.state.contract.estado = estado;
+    ctx.tx.factura.findMany.mockRejectedValue(new Error('NO_REEVALUAR_FIRMA_HISTORICA'));
     const before = structuredClone(ctx.state);
     expect((await ctx.service.confirmManualSignature(30, {}, comercial)).estado).toBe(estado);
     expect(ctx.state).toEqual(before);
     expect(ctx.tx.contrato.update).not.toHaveBeenCalled();
     expect(ctx.record).not.toHaveBeenCalled();
+    expect(ctx.tx.factura.findMany).not.toHaveBeenCalled();
   });
 
   it.each(['Moroso', 'Suspendido'])('no pisa el estado financiero %s del cliente', async estado => {

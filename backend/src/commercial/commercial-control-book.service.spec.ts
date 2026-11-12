@@ -42,7 +42,7 @@ function harness(invoice = invoiceFixture()) {
     servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 40, idCliente: 10, idEmpresa: 1, idContrato: 20 }) },
     contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 20, idCliente: 10, idEmpresa: 1, diaVencimiento: 10 }), update: jest.fn() },
     eventoGestionComercial: { create: jest.fn().mockResolvedValue({ idEvento: 1 }) },
-    convenioPago: { create: jest.fn().mockResolvedValue({ idConvenio: 1, estado: 'PENDIENTE', cuotas: [{ numero: 1 }] }), findUnique: jest.fn(), update: jest.fn() },
+    convenioPago: { create: jest.fn().mockResolvedValue({ idConvenio: 1, estado: 'APROBADO', cuotas: [{ numero: 1 }] }), findUnique: jest.fn(), update: jest.fn() },
     prorrogaPago: { create: jest.fn().mockResolvedValue({ idProrroga: 1 }) },
     cambioCondicionPago: { create: jest.fn().mockResolvedValue({ idCambio: 1 }) },
     cargoAdicional: { create: jest.fn().mockResolvedValue({ idCargo: 1, estado: 'PENDIENTE_FACTURACION' }) },
@@ -66,6 +66,19 @@ function customerFixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe('P0-03 gestiones sobre identidad compartida', () => {
+  it('evento de cobranza y auditoria comparten transaccion; fallo no retorna exito', async () => {
+    const { service, prisma, audit } = harness();
+    audit.record.mockRejectedValueOnce(new Error('AUDIT_FAILED'));
+    await expect(service.registerEvent({ idCliente: 10, idContrato: 20, tipo: 'CONTACTO_CLIENTE',
+      canal: 'TELEFONO', fecha: '2026-10-25T12:00:00Z' }, commercial)).rejects.toThrow('AUDIT_FAILED');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(audit.record.mock.calls[0][1]).toHaveProperty('eventoGestionComercial', prisma.eventoGestionComercial);
+  });
+  it.each(['Pagada', 'Anulada'])('%s conserva documento sin deuda exigible ficticia', async estado => {
+    const { service } = harness(invoiceFixture({ estado }));
+    const result = await service.list({ page: 1, pageSize: 30 }, commercial);
+    expect(result.items[0]).toMatchObject({ idFactura: 30, saldoPendiente: 0, diasAtraso: 0 });
+  });
   const shared = () => {
     const invoice = invoiceFixture();
     invoice.contrato.cliente.idEmpresa = 2;
@@ -78,6 +91,15 @@ describe('P0-03 gestiones sobre identidad compartida', () => {
     expect(rows.items[0]).toMatchObject({ idEmpresa: 1, idCliente: 10, idContrato: 20, idFactura: 30 });
     expect(prisma.cliente.findMany.mock.calls[0][0].include).not.toHaveProperty('direcciones');
     expect(prisma.cliente).not.toHaveProperty('update');
+  });
+
+  it('permite abrir el contrato exacto de un cliente sin mezclar el resto de la cartera', async () => {
+    const { service } = shared();
+    const query = { idEmpresa: 1, idCliente: 10, idContrato: 20, page: 1, pageSize: 1 };
+    await expect(service.list(query, commercial)).resolves.toMatchObject({ items: [{ idCliente: 10, idContrato: 20 }] });
+    await expect(service.list({ ...query, idContrato: 21 }, commercial)).resolves.toMatchObject({ items: [] });
+    await expect(service.list({ ...query, idCliente: 11 }, commercial)).resolves.toMatchObject({ items: [] });
+    await expect(service.list({ ...query, idFactura: 31 }, commercial)).resolves.toMatchObject({ items: [] });
   });
 
   it('registra convenio y prórroga en la empresa de la factura', async () => {
@@ -320,6 +342,8 @@ describe('CommercialControlBookService', () => {
     const { service, prisma, audit } = harness();
     const result = await service.createAgreement({ idCliente: 10, idFactura: 30, montoComprometido: 6000, cantidadCuotas: 2, condiciones: 'Dos cuotas mensuales', fechaInicio: '2026-09-25', cuotas: [{ numero: 1, monto: 3000, fechaVencimiento: '2026-09-25' }, { numero: 2, monto: 3000, fechaVencimiento: '2026-10-25' }] }, commercial);
     expect(result.cuotas).toHaveLength(1); expect(prisma.convenioPago.create).toHaveBeenCalled(); expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_CONVENIO_PAGO' }));
+    expect(prisma.convenioPago.create).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({estado:'APROBADO',idUsuarioResponsable:commercial.idUsuario,idUsuarioAprobador:commercial.idUsuario,fechaAprobacion:expect.any(Date)})}));
+    expect(result.estado).toBe('APROBADO');
   });
 
   it.each([

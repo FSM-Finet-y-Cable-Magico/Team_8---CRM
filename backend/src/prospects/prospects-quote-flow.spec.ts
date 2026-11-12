@@ -11,19 +11,51 @@ function setup() {
   const prospect = { idProspecto: 1, idEmpresa: 1, idCliente: null, rut: '99000001-8', nombreCompleto: 'Prospecto QA', telefono: '+56900000001',
     estadoPipeline: 'Cotizacion Enviada', latitud: -33.475, longitud: -70.675, contratos: [], clasificacionComercial: 'PROSPECTO' };
   const tx = { $queryRaw: jest.fn(), $executeRaw: jest.fn(),
+    factura: { findMany: jest.fn().mockResolvedValue([]) },
     plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     cotizacion: {findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }), updateMany: jest.fn().mockResolvedValue({ count: 1 }),},
     contrato: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ idContrato: 10, estado: 'Pendiente firma contrato' }), update: jest.fn() },
     prospecto: { findUniqueOrThrow: jest.fn().mockResolvedValue(prospect), update: jest.fn().mockResolvedValue(prospect) } };
   const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ available: false }]), prospecto: { findUnique: jest.fn().mockResolvedValue(prospect), findMany: jest.fn() }, plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 1, idEmpresa: 1, activo: true }) },
     zonaPago: { findUnique: jest.fn().mockResolvedValue({ idZonaPago: 21, idEmpresa: 1, activo: true }) },
-    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async callback => callback(tx)) };
+    cotizacion: { findFirst: jest.fn().mockResolvedValue({ idCotizacion: 1 }) }, $transaction: jest.fn(async (callback, _options?: { isolationLevel: Prisma.TransactionIsolationLevel }) => callback(tx)) };
   const coverage = { check: jest.fn().mockResolvedValue({ estado: 'FACTIBLE' }), plansForLocation: jest.fn().mockResolvedValue({ coberturaComercial: true, planes: [{ idPlan: 1 }] }) };
   const audit = { record: jest.fn() };
-  const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService, {} as MailService, coverage as unknown as CoverageDomainService);
-  return { service, prisma, tx, prospect, coverage, audit };
+  const registerDocument = jest.fn();
+  const contracts = {
+    async registerWithDigitalContract(_actor: AuthUser, register: (transaction: typeof tx) => Promise<{ result: unknown; reuseDocument: boolean }>) {
+      return prisma.$transaction(async (transaction: typeof tx) => {
+        const { result, reuseDocument } = await register(transaction);
+        await registerDocument(result, reuseDocument);
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    },
+  };
+  const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService, {} as MailService, coverage as unknown as CoverageDomainService, contracts as never);
+  return { service, prisma, tx, prospect, coverage, audit, registerDocument };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it('un prospecto con RUT historico endeudado no crea contrato ni mueve pipeline', async () => {
+    const c = setup();
+    c.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled();
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' }), c.tx);
+    expect(c.prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(c.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+  });
+  it('informa conflicto financiero concurrente sin crear contrato ni PDF', async () => {
+    const c = setup();
+    c.prisma.$transaction.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('QA serialization conflict', {
+      code: 'P2034', clientVersion: '5.22.0',
+    }));
+    await expect(c.service.contractPlan(1, { planId: 1 }, user)).rejects.toMatchObject({ status: 409 });
+    expect(c.tx.contrato.create).not.toHaveBeenCalled();
+    expect(c.tx.prospecto.update).not.toHaveBeenCalled();
+    expect(c.registerDocument).not.toHaveBeenCalled();
+  });
   it.each([
     { microzona: null, expectedZoneId: 21 },
     { microzona: { idZonaPago: 22 }, expectedZoneId: 22 },
@@ -192,16 +224,21 @@ describe('cotizacion persistida y confirmacion segura', () => {
       c.tx.prospecto.update.mock.invocationCallOrder[0],
     );
   });
-  it('publica solo referencias de cotizaciones factibles de planes propios activos', async () => {
+  it('conserva las cotizaciones propias y distingue cuáles siguen vigentes', async () => {
     const c = setup();
     c.prisma.prospecto.findMany.mockResolvedValue([{ ...c.prospect, cotizaciones: [
-      { idCotizacion: 1, idPlan: 1, fechaEnvio: '2026-10-28', plan: { idEmpresa: 1, activo: true } },
+      { idCotizacion: 1, codigo: 'COT-3A960D8202D145B0', idPlan: 1, fechaEnvio: '2026-10-28', factibilidadVerificada: true, plan: { idEmpresa: 1, activo: true } },
       { idCotizacion: 2, idPlan: 2, fechaEnvio: '2026-10-28', plan: { idEmpresa: 2, activo: true } },
       { idCotizacion: 3, idPlan: 3, fechaEnvio: '2026-10-28', plan: { idEmpresa: 1, activo: false } },
+      { idCotizacion: 4, idPlan: 1, fechaEnvio: '2026-10-28', factibilidadVerificada: false, plan: { idEmpresa: 1, activo: true } },
     ] }]);
     const rows = await c.service.list(user);
-    expect(rows[0].cotizaciones).toEqual([{ idCotizacion: 1, idPlan: 1, fechaEnvio: '2026-10-28' }]);
-    expect(c.prisma.prospecto.findMany.mock.calls[0][0].include.cotizaciones.where).toEqual({ factibilidadVerificada: true, fechaEnvio: { not: null } });
+    expect(rows[0].cotizaciones).toEqual([
+      { idCotizacion: 1, codigo: 'COT-3A960D8202D145B0', idPlan: 1, fechaEnvio: '2026-10-28', vigente: true },
+      { idCotizacion: 3, idPlan: 3, fechaEnvio: '2026-10-28', vigente: false },
+      { idCotizacion: 4, idPlan: 1, fechaEnvio: '2026-10-28', vigente: false },
+    ]);
+    expect(c.prisma.prospecto.findMany.mock.calls[0][0].include.cotizaciones.where).toEqual({ fechaEnvio: { not: null } });
   });
   it.each(['sin cotizacion', 'inactivo', 'otra empresa', 'No Factible', 'Perdido', 'cobertura retirada'])(
     'rechaza %s sin escribir contrato', async reason => {
@@ -223,6 +260,15 @@ describe('cotizacion persistida y confirmacion segura', () => {
     expect(c.tx.$queryRaw).toHaveBeenCalledWith(expect.any(Array), 1);
     expect(c.tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(c.tx.contrato.findFirst.mock.invocationCallOrder[0]);
     expect(c.tx.contrato.create).not.toHaveBeenCalled();expect(c.tx.contrato.update).toHaveBeenCalledTimes(1);
+    expect(c.registerDocument).toHaveBeenCalledWith(expect.objectContaining({ contrato: { idContrato: 10 } }), true);
+  });
+  it('actualiza el PDF si cambia el plan de un contrato pendiente', async () => {
+    const c = setup();
+    const pending = { idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Pendiente firma contrato', idPlan: 2 };
+    c.tx.contrato.findFirst.mockResolvedValue(pending);
+    c.tx.contrato.update.mockResolvedValue({ ...pending, idPlan: 1 });
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.registerDocument).toHaveBeenCalledWith(expect.objectContaining({ contrato: { ...pending, idPlan: 1 } }), false);
   });
   it('rechaza duplicar un contrato ya firmado', async () => {
     const c = setup();c.tx.contrato.findFirst.mockResolvedValue({ idContrato: 10, idEmpresa: 1, idProspecto: 1, estado: 'Firmado' });

@@ -1,0 +1,80 @@
+.tax-documents {
+  --tax-ink: #293e36;
+  --tax-muted: #687b73;
+  --tax-line: #d8e4de;
+  --tax-primary: #217f6b;
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+  color: var(--tax-ink);
+}
+.modal-card:has(.tax-documents) { width: min(1120px, 100%); }
+.modal-card:has(.tax-documents) > .modal-header { padding: 24px 28px 16px; margin: 0; }
+.modal-card:has(.tax-documents) > .modal-content { position: relative; padding: 0 28px 24px; }
+.tax-document-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.tax-document-heading h3 { margin: 0; font-size: 1rem; }
+.tax-document-heading p { margin: 7px 0 0; color: var(--tax-muted); font-size: .82rem; line-height: 1.6; }
+.modal-card:has(.tax-documents) .tax-document-listing-heading {
+  position: absolute;
+  inset-block-start: -47px;
+  inset-inline-end: 72px;
+  z-index: 2;
+}
+.tax-documents button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-shadow: none; font-size: .82rem; }
+.tax-documents button:hover { transform: none; box-shadow: none; }
+.tax-document-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tax-document-search { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--tax-line); border-radius: 8px; padding: 0 12px; color: var(--tax-muted); }
+.tax-documents .tax-document-search input { border: 0; box-shadow: none; background: transparent; padding-inline: 0; min-width: 0; }
+.tax-document-search:focus-within { outline: 2px solid var(--tax-primary); outline-offset: 2px; }
+.tax-document-toolbar > select { width: auto; flex: 0 1 160px; }
+.tax-documents .tax-document-filter-button { background: transparent; color: var(--tax-primary); border: 1px solid var(--tax-line); min-height: 40px; }
+.tax-document-filter-button span { font-weight: 700; }
+.tax-documents .tax-document-filters { margin: 0; padding: 16px 0; border-block: 1px solid var(--tax-line); }
+.tax-documents .tax-document-form { display: block; margin: 0; }
+.tax-documents .tax-document-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 16px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.tax-document-fields h4 { margin: 8px 0 0; padding: 0 0 10px; border-bottom: 1px solid var(--tax-line); font-size: .88rem; }
+.tax-document-fields h4 small { margin-left: 5px; color: var(--tax-muted); font-weight: 400; font-size: .75rem; }
+.tax-document-fields label { min-width: 0; font-size: .8rem; font-weight: 500; color: var(--tax-muted); }
+.tax-document-fields :is(input, select) { color: var(--tax-ink); background: transparent; min-height: 40px; }
+.tax-document-full { grid-column: 1 / -1; }
+.tax-document-context { grid-column: 1 / -1; display: flex; gap: 9px; align-items: center; padding: 10px 0 17px; border-bottom: 2px solid var(--tax-primary); color: var(--tax-primary); font-weight: 650; font-size: .86rem; }
+.tax-document-context small { margin-left: auto; color: var(--tax-muted); font-size: .75rem; font-weight: 400; }
+.tax-document-links { margin-top: 8px; border-block: 1px solid var(--tax-line); }
+.tax-document-links summary { display: flex; align-items: center; gap: 8px; padding: 17px 0; cursor: pointer; font-size: .84rem; font-weight: 600; list-style: none; }
+.tax-document-links summary::-webkit-details-marker { display: none; }
+.tax-document-links summary span { color: var(--tax-muted); font-weight: 400; font-size: .75rem; }
+.tax-document-links summary svg { margin-left: auto; transition: transform .15s; }
+.tax-document-links[open] summary svg { transform: rotate(180deg); }
+.tax-document-link-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-bottom: 20px; }
+.tax-documents .tax-document-link-grid .tax-document-wide { grid-column: 1 / -1; }
+.tax-document-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding-top: 6px; }
+.tax-documents .tax-document-text-button { background: transparent; color: var(--tax-primary); padding-inline: 8px; }
+.tax-document-table { min-width: 0; overflow-x: auto; }
+.tax-document-table table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+.tax-document-table :is(td, th) { padding: 13px 10px; border-bottom: 1px solid var(--tax-line); text-align: left; }
+.tax-document-table thead th { font-size: .7rem; color: var(--tax-muted); font-weight: 600; text-transform: uppercase; background: transparent; }
+.tax-document-table td { font-size: .82rem; }
+.tax-document-table td small { display: block; margin-top: 5px; color: var(--tax-muted); font-size: .75rem; }
+.tax-document-table .tax-document-money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tax-document-row-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.tax-document-row-actions button { padding: 7px; color: var(--tax-primary); background: transparent; }
+.tax-document-row-actions button:last-child:not(:first-child) { color: #b2433a; }
+.tax-document-empty { display: grid; gap: 9px; justify-items: center; padding: 32px 16px; margin: 0; text-align: center; color: var(--tax-muted); }
+.tax-document-empty svg { color: var(--tax-primary); opacity: .7; }
+.tax-document-empty strong { font-size: .9rem; color: var(--tax-ink); }
+.tax-document-empty p { margin: 0; font-size: .8rem; }
+.tax-document-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.theme-dark .tax-documents { --tax-ink: #e0eee7; --tax-muted: #a1b8ad; --tax-line: #355348; --tax-primary: #8bd4b4; }
+@media (max-width: 760px) {
+  .tax-documents .tax-document-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tax-document-toolbar > select { flex: 1 1 130px; }
+  .tax-document-search { flex-basis: 100%; }
+}
+@media (max-width: 480px) {
+  .tax-documents .tax-document-fields, .tax-document-link-grid { grid-template-columns: minmax(0, 1fr); }
+  .modal-card:has(.tax-documents) > .modal-header { padding: 18px 16px; }
+  .modal-card:has(.tax-documents) > .modal-content { padding: 0 16px 20px; }
+  .modal-card:has(.tax-documents) .tax-document-listing-heading { position: static; margin-bottom: 14px; }
+  .tax-document-context { flex-wrap: wrap; }
+  .tax-document-context small { margin-left: 0; }
+}

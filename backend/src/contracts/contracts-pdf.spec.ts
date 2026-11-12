@@ -2,13 +2,16 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import { Readable } from 'stream';
-import { inflateSync } from 'zlib';
+import { deflateSync, inflateSync } from 'zlib';
 import PDFDocument from 'pdfkit';
 import { ContractsService } from './contracts.service';
+import { PDFDocument as ReadPdf } from 'pdf-lib';
+import { ESignatureService } from './e-signature.service';
+import { ConfigService } from '@nestjs/config';
 
 const user = { idUsuario: 5, idEmpresa: 1, email: 'test@example.invalid', nombreCompleto: 'Test', roles: ['Comercial'] };
 
-function setup() {
+function setup(hasDigitalContract = true) {
   const contract = {
     idContrato: 87654321, idCliente: 654321, idEmpresa: 1, idPlan: 7, idZonaPago: null,
     diaVencimiento: 5, estado: 'Activo', direccionInstalacion: 'Calle QA 123',
@@ -24,9 +27,9 @@ function setup() {
       },
     }],
   };
-  let latest: any = { version: 3, idContratoDigital: 10, urlDocumento: 'generated/contracts/contrato-87654321-v3.pdf' };
+  let latest: any = hasDigitalContract ? { version: 3, idContratoDigital: 10, urlDocumento: 'generated/contracts/contrato-87654321-v3.pdf' } : null;
   const digital = {
-    findFirst: jest.fn().mockImplementation(async ({ where }) => where.urlDocumento && where.urlDocumento !== latest.urlDocumento ? null : latest),
+    findFirst: jest.fn().mockImplementation(async ({ where }) => where.urlDocumento && where.urlDocumento !== latest?.urlDocumento ? null : latest),
     create: jest.fn().mockImplementation(async ({ data }) => { latest = { idContratoDigital: 11, ...data }; return latest; }),
   };
   const tx = {
@@ -61,16 +64,49 @@ function mockFiles() {
 }
 
 // Extract text from the real PDFKit content streams (WinAnsi standard fonts), not mocked render calls.
+// Each stream is read with the byte count declared in its own /Length. Guessing the end with
+// /\r?\nendstream/ dropped a compressed last byte equal to 0x0D (random with dates/ids in the PDF)
+// and made inflateSync fail with "unexpected end of file" intermittently.
+function pdfStreams(buffer: Buffer) {
+  const text = buffer.toString('latin1');
+  const streams: Buffer[] = [];
+  for (const header of text.matchAll(/<<((?:(?!>>)[\s\S])*?)>>\s*stream\r?\n/g)) {
+    const length = /\/Length (\d+)/.exec(header[1]);
+    if (!length || !/\/FlateDecode/.test(header[1])) continue;
+    const start = header.index! + header[0].length;
+    streams.push(buffer.subarray(start, start + Number(length[1])));
+  }
+  return streams;
+}
+
 function pdfText(buffer: Buffer) {
   const lines: string[] = [];
-  for (const match of buffer.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-    const content = inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1');
+  for (const stream of pdfStreams(buffer)) {
+    const content = inflateSync(stream).toString('latin1');
     for (const text of content.matchAll(/\[([^\]]*)\]\s*TJ/g)) {
       lines.push([...text[1].matchAll(/<([\da-f]+)>/gi)].map(hex => Buffer.from(hex[1], 'hex').toString('latin1')).join(''));
     }
   }
   return lines.join('\n');
 }
+
+describe('Lector de streams PDF de las pruebas', () => {
+  it('conserva el último byte comprimido aunque sea 0x0D (antes fallaba al azar con "unexpected end of file")', () => {
+    let compressed = Buffer.alloc(0);
+    for (let i = 0; i < 100000 && compressed[compressed.length - 1] !== 0x0d; i += 1) {
+      const label = `Linea ${createHash('sha256').update(String(i)).digest('hex').slice(0, 12)}`;
+      compressed = deflateSync(Buffer.from(`BT /F1 9 Tf [<${Buffer.from(label, 'latin1').toString('hex')}>] TJ ET`, 'latin1'));
+    }
+    expect(compressed[compressed.length - 1]).toBe(0x0d);
+    const pdf = Buffer.concat([
+      Buffer.from(`<<\n/Length ${compressed.length}\n/Filter /FlateDecode\n>>\nstream\n`, 'latin1'), compressed, Buffer.from('\nendstream\n', 'latin1'),
+    ]);
+    expect(pdfText(pdf)).toMatch(/^Linea [0-9a-f]{12}$/);
+    // La lectura anterior (fin adivinado con \r?\nendstream) perdía ese byte y no podía descomprimir.
+    const guessed = /stream\r?\n([\s\S]*?)\r?\nendstream/.exec(pdf.toString('latin1'))![1];
+    expect(() => inflateSync(Buffer.from(guessed, 'latin1'))).toThrow('unexpected end of file');
+  });
+});
 
 describe('Contenido y conservación de contratos PDF', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -84,18 +120,30 @@ describe('Contenido y conservación de contratos PDF', () => {
       await ctx.service.generateDigitalContract(ctx.contract.idContrato, { ...user, idEmpresa: ctx.contract.idEmpresa });
       expect(ctx.tx.empresa.findUnique).toHaveBeenCalledWith({ where: { idEmpresa: ctx.contract.idEmpresa }, select: { nombre: true } });
       expect(ctx.prisma.empresa.findUnique).not.toHaveBeenCalled();
-      const content = pdfText(files.writes.mock.calls[0][0] as Buffer);
-      expect(content).toContain(`Empresa: ${contractCompany}`);
-      expect(content).not.toContain(`Empresa: ${mainCompany}`);
+      const original = files.writes.mock.calls[0][0] as Buffer;
+      expect(original.toString('latin1')).toContain('/Subtype /Image');
+      const content = pdfText(original);
+      expect(content).toContain(`Empresa:\n${contractCompany}`);
+      expect(content).not.toContain(`Empresa:\n${mainCompany}`);
+      const signature = new ESignatureService({} as never, new ConfigService({}), {} as never, {} as never, {} as never);
+      const signed = await signature['seal']({
+        pdfOriginal: original, idSolicitud: 'qa-signature', destinatario: 'qa@example.invalid',
+        hashOriginal: createHash('sha256').update(original).digest('hex'), datosSnapshot: { schema: 1 },
+      } as never, new Date('2026-11-12T12:00:00Z'));
+      const originalPdf = await ReadPdf.load(original), signedPdf = await ReadPdf.load(signed);
+      expect(signedPdf.getPageCount()).toBe(originalPdf.getPageCount() + 1);
+      expect(signedPdf.getTitle()).toBe(originalPdf.getTitle());
+      expect(signed.toString('latin1')).toContain('/Subtype /Image');
     },
   );
 
   it('genera un PDF legible con etiquetas españolas sin identificadores ni payloads', async () => {
     const buffer = await setup().render();
     expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(buffer.toString('latin1')).toContain('/Subtype /Image');
     const content = pdfText(buffer);
-    for (const value of ['María QA', 'FiNet QA', 'Fibra QA 600', '600 Mbps', '$15.990', 'Potencia óptica registrada: -19.25 dBm',
-      'MAC registrada: AA:BB:CC:DD:EE:FF', 'Puerto OLT registrado: PON 1/2', 'Finalización de instalación (Chile):', '07-10-2026']) {
+    for (const value of ['María QA', 'FiNet QA', 'Fibra QA 600', '600 Mbps', '$15.990', '-19.25 dBm',
+      'AA:BB:CC:DD:EE:FF', 'PON 1/2', 'Finalización de instalación', '07-10-2026']) {
       expect(content).toContain(value);
     }
     for (const forbidden of ['87654321', '7654321', '654321', '999888777', '888777', 'PAYLOAD', 'SECRET-REQUEST', 'LEGACY-SERIAL', 'resultadoInstalacion', 'idOtG3', 'G1', 'G3', 'G8', '{', '}']) {
@@ -117,7 +165,7 @@ describe('Contenido y conservación de contratos PDF', () => {
     ctx.contract.cliente = null as never;
     const pending = pdfText(await ctx.render());
     expect(pending).toContain('María QA');
-    expect(pending).toContain('Dirección de instalación: Calle QA 123');
+    expect(pending).toContain('Calle QA 123');
     expect(pending).toContain('Todavía no registrados');
   });
 
@@ -131,8 +179,9 @@ describe('Contenido y conservación de contratos PDF', () => {
     const placements: { text: string; page: unknown }[] = [];
     jest.spyOn(PDFDocument.prototype, 'text').mockImplementation(function (this: PDFKit.PDFDocument, ...args: any[]) {
       const options = typeof args[1] === 'object' ? args[1] : args[3];
-      bounds.push({ bottom: this.y + this.heightOfString(args[0], options), limit: this.page.height - this.page.margins.bottom });
-      placements.push({ text: args[0], page: this.page });
+      const y = typeof args[2] === 'number' ? args[2] : this.y;
+      bounds.push({ bottom: y + this.heightOfString(args[0], options), limit: this.page.height - this.page.margins.bottom });
+      if (!/ \| Versión \d+$|^\d+ \/ \d+$/.test(args[0])) placements.push({ text: args[0], page: this.page });
       return originalText.apply(this, args as never);
     });
     const buffer = await ctx.render();
@@ -160,6 +209,25 @@ describe('Contenido y conservación de contratos PDF', () => {
     expect(closes).toHaveBeenCalledTimes(2);
     expect(first.hashDocumento).toBe(createHash('sha256').update(writes.mock.calls[0][0] as Buffer).digest('hex'));
     expect(pdfText(writes.mock.calls[1][0] as Buffer)).toContain('Versión: 5');
+  });
+
+  it('genera el primer PDF del prospecto dentro de la transacción y lo reutiliza al volver a confirmar', async () => {
+    const ctx = setup(false);
+    const files = mockFiles();
+    const prospecto = ctx.contract.cliente;
+    Object.assign(ctx.contract, { cliente: null, prospecto, idCliente: null, servicios: [], estado: 'Pendiente firma contrato' });
+    const result = { contrato: ctx.contract };
+    const register = jest.fn().mockResolvedValue({ result, reuseDocument: true });
+
+    await expect(ctx.service.registerWithDigitalContract(user, register)).resolves.toBe(result);
+    await expect(ctx.service.registerWithDigitalContract(user, register)).resolves.toBe(result);
+    const existing = await ctx.service.generateDigitalContract(ctx.contract.idContrato, user, true);
+
+    expect(register).toHaveBeenCalledWith(ctx.tx);
+    expect(ctx.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 20000, isolationLevel: 'Serializable' });
+    expect(ctx.tx.contratoDigital.create).toHaveBeenCalledTimes(1);
+    expect(existing).toMatchObject({ version: 1, idCliente: null, estadoFirma: 'Generado' });
+    expect(pdfText(files.writes.mock.calls[0][0] as Buffer)).toContain(prospecto.nombreCompleto);
   });
 
   it.each([null, 7])('usa la transacción para precio y auditoría (zona %s)', async zone => {

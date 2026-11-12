@@ -1,3 +1,4 @@
+import { assertNoContractDebt, auditContractDebtRejection, ContractDebtException } from './contract-debt.guard';
 import { inspectPrivateSignatureSchema } from './signature-schema';
 import { signatureRepository, signatureStorageAvailable, SignatureRow } from './signature.repository';
 import { assignAutomatic, assertPendingSignature, resolveSignatureMode } from './signature-policy';
@@ -63,21 +64,70 @@ export class ESignatureService implements OnModuleInit {
       const contract = await this.authorize(tx, idContrato, actor);
       await assignAutomatic(tx, contract, this.config, actor.idUsuario);
       const mode = await resolveSignatureMode(tx, contract, this.config);
-      const settings = signatureSettings(this.config);
+      let settings: ReturnType<typeof signatureSettings> = null;
+      let configurationReason: string | null = null;
+      try { settings = signatureSettings(this.config); }
+      catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith('CONTRACT_SIGNATURE_')) throw error;
+        configurationReason = error.message === 'CONTRACT_SIGNATURE_PUBLIC_URL_INVALID'
+          ? 'La dirección pública de firma no está configurada de forma segura. Solicita revisión al administrador.'
+          : 'La configuración de firma requiere revisión del administrador antes de habilitar envíos.';
+      }
       const storage = await signatureStorageAvailable(tx);
-      const available = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
+      const authorizedCompany = !!settings && settings.companies.includes(contract.idEmpresa!);
+      const mailReady = mode === 'automatic' && authorizedCompany && storage && this.mail.isConfigured(contract.idEmpresa!);
+      const available = mode === 'automatic' && authorizedCompany && storage && mailReady;
       const latest = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' } });
-      const manualAllowed = mode === 'manual' && contract.estado === 'Pendiente firma contrato'
+      let financialReason: string | null = null;
+      if (mode !== 'unknown' && contract.estado === 'Pendiente firma contrato') {
+        try { await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+          idContrato, idProspecto: contract.idProspecto ?? undefined,
+          rut: contract.cliente?.rut ?? contract.prospecto?.rut, idUsuario: actor.idUsuario }); }
+        catch (error) {
+          if (!(error instanceof ContractDebtException)) throw error;
+          financialReason = error.reason === 'DEUDA_PENDIENTE'
+            ? 'Existe deuda pendiente en esta empresa. Regulariza el saldo antes de enviar o confirmar la firma.'
+            : 'Se requiere revisión financiera en esta empresa antes de enviar o confirmar la firma.';
+        }
+      }
+      const manualAllowed = mode === 'manual' && !financialReason && contract.estado === 'Pendiente firma contrato'
         && !!latest && latest.idEmpresa === contract.idEmpresa && ['Generado','Enviado','Firmado manualmente'].includes(latest.estadoFirma);
       const repo = signatureRepository(tx);
       const row = storage ? await repo.findFirst({ where: { idContrato, idEmpresa: contract.idEmpresa!, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } })
         ?? await repo.findFirst({ where: { idContrato, idEmpresa: contract.idEmpresa! }, orderBy: { documento: { version: 'desc' } } }) : null;
-      const sendAllowed = available && contract.estado === 'Pendiente firma contrato' && !!latest && !!row
+      const email = contract.cliente?.email ?? contract.prospecto?.email;
+      let reason: string | null = mode === 'unknown'
+        ? 'El contrato no tiene una modalidad de firma autorizada. Solicita su asignación al administrador.'
+        : mode === 'automatic' && configurationReason ? configurationReason
+        : mode === 'automatic' && !settings ? 'La firma por correo está deshabilitada en este entorno; generar un PDF no envía una solicitud.'
+        : mode === 'automatic' && !authorizedCompany ? 'Esta empresa no está habilitada para firma por correo.'
+        : mode === 'automatic' && !storage ? 'La firma por correo no está disponible: falta completar su habilitación segura. Solicita revisión al administrador.'
+        : mode === 'automatic' && !mailReady ? 'El correo de esta empresa no está configurado para enviar solicitudes de firma.'
+        : financialReason;
+      if (!reason && contract.estado === 'Pendiente firma contrato') {
+        if (!latest) reason = 'Genera un PDF vigente del contrato antes de continuar con la firma.';
+        else if (latest.idEmpresa !== contract.idEmpresa || !['Generado','Enviado','Firmado manualmente'].includes(latest.estadoFirma)
+          || mode === 'automatic' && latest.fechaFirma) {
+          reason = 'El documento no está vigente para una firma pendiente. Revisa el contrato y sus versiones.';
+        } else if (mode === 'automatic') {
+          if (!row || row.idContratoDigital !== latest.idContratoDigital || row.idEmpresa !== contract.idEmpresa) {
+            reason = 'Genera una nueva versión del PDF para preparar su solicitud de firma por correo.';
+          } else if (row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() <= Date.now()) {
+            reason = 'El enlace de firma expiró. Genera una nueva versión del PDF para continuar.';
+          } else if (!['BORRADOR','PENDIENTE'].includes(row.estado) || latest.estadoFirma === 'Firmado manualmente') {
+            reason = 'La solicitud no admite un nuevo envío. Revisa su estado antes de generar otra versión.';
+          } else if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            reason = 'Registra un correo válido del titular antes de enviar el contrato a firma.';
+          }
+        }
+      } else if (!reason && !['Firmado','Activo','Suspendido','Moroso'].includes(contract.estado)) {
+        reason = 'El contrato no está pendiente de firma. Revisa su estado comercial.';
+      }
+      const sendAllowed = available && !reason && contract.estado === 'Pendiente firma contrato' && !!latest && !!row
         && row.idContratoDigital === latest.idContratoDigital && row.idEmpresa === contract.idEmpresa
         && ['Generado','Enviado'].includes(latest.estadoFirma) && !latest.fechaFirma
         && (row.estado === 'BORRADOR' || row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() > Date.now());
-      return { enabled: available, sendAllowed, policy: { mode, available, manualAllowed,
-        reason: mode === 'unknown' ? 'Modo de firma pendiente de autorización' : mode === 'automatic' && !available ? 'Firma automática temporalmente no disponible; no admite firma manual' : null },
+      return { enabled: available, sendAllowed, policy: { mode, available, manualAllowed, reason },
         solicitud: row ? { idSolicitud: row.idSolicitud, estado: row.estado, correoEstado: row.correoEstado,
           fechaExpiracion: row.fechaExpiracion, firmaFecha: row.firmaFecha, firmaCorreoEstado: row.firmaCorreoEstado } : null,
         signedDownloadAvailable: row?.estado === 'FIRMADA' };
@@ -93,7 +143,10 @@ export class ESignatureService implements OnModuleInit {
   }
 
   private async authorize(tx: Tx, idContrato: number, actor: AuthUser) {
-    const contract = await tx.contrato.findUnique({ where: { idContrato }, select: { idContrato: true, idEmpresa: true, estado: true } });
+    const contract = await tx.contrato.findUnique({ where: { idContrato }, select: {
+      idContrato: true, idEmpresa: true, idCliente: true, idProspecto: true, estado: true,
+      cliente: { select: { rut: true, email: true } }, prospecto: { select: { rut: true, email: true } },
+    } });
     if (!contract || (!isAdministrator(actor.roles) && (!actor.idEmpresa || contract.idEmpresa !== actor.idEmpresa))) {
       throw new NotFoundException('Contrato no encontrado');
     }
@@ -115,6 +168,9 @@ export class ESignatureService implements OnModuleInit {
       assertPendingSignature(contract.estado);
       await assignAutomatic(tx, contract, this.config, actor.idUsuario);
       if (await resolveSignatureMode(tx, contract, this.config) !== 'automatic') throw new ConflictException('Contrato no asignado a firma automática');
+      await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+        idContrato, idProspecto: contract.idProspecto ?? undefined,
+        rut: contract.cliente?.rut ?? contract.prospecto?.rut, idUsuario: actor.idUsuario });
       if (!await signatureStorageAvailable(tx)) throw new ConflictException('Almacenamiento de firma no disponible');
       const latest = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' },
         select: { idContratoDigital: true, idEmpresa: true, version: true, hashDocumento: true, estadoFirma: true, fechaFirma: true } });
@@ -142,7 +198,7 @@ export class ESignatureService implements OnModuleInit {
         entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
         valorNuevo: { modo: 'automatic' } }, tx);
       return { existing: false as const, row: updated };
-    });
+    }).catch(error => auditContractDebtRejection(this.db, this.audit, error));
     if (isFailure(result)) throw new ConflictException(result.failure);
     if (!result.existing) {
       let estado = 'INDETERMINADO';
@@ -302,7 +358,7 @@ export class ESignatureService implements OnModuleInit {
       await this.audit.record({ accion: 'FIRMAR_CONTRATO_CORREO', entidadAfectada: 'contrato',
         idEntidadAfectada: row.idContrato, valorNuevo: { estado: 'Firmado', origenFirma: 'electronic' } }, tx);
       return { estado: 'FIRMADA', idSolicitud: row.idSolicitud };
-    });
+    }).catch(error => auditContractDebtRejection(this.db, this.audit, error));
     try { await this.deliverSigned(result.idSolicitud); } catch { /* A delivery/status failure cannot undo a committed signature. */ }
     return { estado: result.estado };
   }

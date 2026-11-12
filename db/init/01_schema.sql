@@ -13,6 +13,7 @@ CREATE TABLE usuario (
     email                          VARCHAR(120)   UNIQUE,
     password_hash                  VARCHAR(72)    NOT NULL,
     activo                         BOOLEAN        DEFAULT TRUE,
+    fecha_eliminacion              TIMESTAMPTZ,
     fecha_creacion                 TIMESTAMP      DEFAULT NOW()
 );
 
@@ -505,6 +506,7 @@ CREATE TABLE prospecto (
 
 CREATE TABLE cotizacion (
     id_cotizacion                  SERIAL         PRIMARY KEY,
+    codigo                         VARCHAR(20)    DEFAULT ('COT-' || upper(left(replace(gen_random_uuid()::text, '-', ''), 16))) CONSTRAINT cotizacion_codigo_key UNIQUE,
     id_prospecto                   INTEGER       ,
     id_plan                        INTEGER       ,
     pdf_url                        TEXT          ,

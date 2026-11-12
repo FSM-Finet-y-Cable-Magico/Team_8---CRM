@@ -40,7 +40,7 @@ function setup() {
   const audit = { record: jest.fn() };
   const coverage = { check: jest.fn(), plansForLocation: jest.fn() };
   const mail = { send: jest.fn() };
-  return { prospect, logs, prisma, audit, coverage, service: new ProspectsService(prisma as never, audit as never, mail as never, coverage as never) };
+  return { prospect, logs, prisma, audit, coverage, service: new ProspectsService(prisma as never, audit as never, mail as never, coverage as never, {} as never) };
 }
 
 describe('Revisión explícita de solicitudes G2, sin conversión implícita', () => {

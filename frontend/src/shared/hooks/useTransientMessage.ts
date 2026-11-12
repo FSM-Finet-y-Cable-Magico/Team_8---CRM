@@ -16,9 +16,11 @@ export function useTransientMessage(timeoutMs = 3000) {
   const showMessage = useCallback((nextMessage: string) => {
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
 
     setMessage(nextMessage);
+    if (!nextMessage) return;
     timeoutRef.current = window.setTimeout(() => {
       timeoutRef.current = null;
       setMessage('');

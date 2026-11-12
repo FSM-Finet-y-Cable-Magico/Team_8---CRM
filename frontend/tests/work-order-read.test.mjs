@@ -31,7 +31,6 @@ test('Inventario consulta catálogo por empresa sin presentar sus tipos como asi
   let tree; await act(async () => { tree = create(React.createElement(component.InventoryPanel, { companyId: 2, companyName: 'Empresa QA' })); });
   const text = JSON.stringify(tree.toJSON());
   assert.match(text, /TIPO-QA/);
-  assert.match(text, /El catálogo de tipos de equipo no acredita asignaciones a servicios/);
   assert.match(calls[0][0], /integrations\/g1\/equipment-types/);
   assert.equal(calls[0][1].params.idEmpresa, 2);
   assert.equal(calls.length, 1);

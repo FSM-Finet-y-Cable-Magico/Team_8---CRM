@@ -16,6 +16,7 @@ export class UsersService {
 
   async list() {
     const users = await this.prisma.usuario.findMany({
+      where: { fechaEliminacion: null },
       orderBy: { idUsuario: 'asc' },
       include: {
         empresa: true,
@@ -66,11 +67,11 @@ export class UsersService {
         if (dto.idEmpresa && !company) throw new BadRequestException('Empresa inexistente');
         if (!isAdministrator([role.nombreRol]) && !company) throw new BadRequestException('Asigna una empresa a este perfil');
         const before = id === null ? null : await tx.usuario.findUnique({ where: { idUsuario: id }, include: { usuarioRoles: { include: { rol: true } } } });
-        if (id !== null && !before) throw new NotFoundException('Usuario no encontrado');
+        if (id !== null && (!before || before.fechaEliminacion != null)) throw new NotFoundException('Usuario no encontrado');
         const losesAdmin = !dto.activo || !isAdministrator([role.nombreRol]);
         if (id === currentUser.idUsuario && losesAdmin) throw new BadRequestException('No puedes desactivar tu propia cuenta ni quitarte el perfil administrador');
         if (before && before.activo !== false && isAdministrator(before.usuarioRoles.map(r => r.rol.nombreRol)) && losesAdmin) {
-          const others = await tx.usuario.findMany({ where: { idUsuario: { not: id! }, activo: { not: false } }, include: { usuarioRoles: { include: { rol: true } } } });
+          const others = await tx.usuario.findMany({ where: { idUsuario: { not: id! }, activo: { not: false }, fechaEliminacion: null }, include: { usuarioRoles: { include: { rol: true } } } });
           if (!others.some(u => isAdministrator(u.usuarioRoles.map(r => r.rol.nombreRol)))) throw new BadRequestException('Debe quedar al menos un administrador activo');
         }
         const data = { nombreCompleto: dto.nombreCompleto.trim(), email: dto.email.trim().toLowerCase(), idEmpresa: dto.idEmpresa ?? null, activo: dto.activo };
@@ -94,7 +95,7 @@ export class UsersService {
     const hash = await this.passwordHash(password);
     await this.prisma.$transaction(async tx => {
       const target = await tx.usuario.findUnique({ where: { idUsuario: id } });
-      if (!target) throw new NotFoundException('Usuario no encontrado');
+      if (!target || target.fechaEliminacion != null) throw new NotFoundException('Usuario no encontrado');
       if (target.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: id, versionSesion: null }, data: { versionSesion: 0 } });
       await tx.usuario.update({ where: { idUsuario: id }, data: { passwordHash: hash, versionSesion: { increment: 1 }, intentosFallidos: 0, esPasswordTemporal: false } });
       await tx.logAuditoria.create({ data: { idUsuario: currentUser.idUsuario, accion: 'RESTABLECER_ACCESO', entidadAfectada: 'usuario', idEntidadAfectada: id, valorNuevo: { sesionesRevocadas: true } } });
@@ -103,7 +104,7 @@ export class UsersService {
   }
 
   async remove(id: number, currentUser: AuthUser) {
-    if (id === currentUser.idUsuario) throw new BadRequestException('No puedes desactivar tu propia cuenta');
+    if (id === currentUser.idUsuario) throw new BadRequestException('No puedes eliminar tu propia cuenta');
 
     return this.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
@@ -112,11 +113,12 @@ export class UsersService {
         include: { usuarioRoles: { include: { rol: true } } },
       });
       if (!target) throw new NotFoundException('Usuario no encontrado');
+      if (target.fechaEliminacion != null) return { idUsuario: id, eliminado: true, sesionesRevocadas: true };
 
       const targetRoles = target.usuarioRoles.map((item) => item.rol.nombreRol);
       if (target.activo !== false && isAdministrator(targetRoles)) {
         const others = await tx.usuario.findMany({
-          where: { idUsuario: { not: id }, activo: { not: false } },
+          where: { idUsuario: { not: id }, activo: { not: false }, fechaEliminacion: null },
           include: { usuarioRoles: { include: { rol: true } } },
         });
         if (!others.some((user) => isAdministrator(user.usuarioRoles.map((item) => item.rol.nombreRol)))) {
@@ -127,19 +129,19 @@ export class UsersService {
       if (target.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: id, versionSesion: null }, data: { versionSesion: 0 } });
       const saved = await tx.usuario.update({
         where: { idUsuario: id },
-        data: { activo: false, versionSesion: { increment: 1 } },
+        data: { activo: false, fechaEliminacion: new Date(), versionSesion: { increment: 1 } },
       });
       await tx.logAuditoria.create({
         data: {
           idUsuario: currentUser.idUsuario,
-          accion: 'DESACTIVAR_USUARIO',
+          accion: 'ELIMINAR_USUARIO',
           entidadAfectada: 'usuario',
           idEntidadAfectada: id,
           valorAnterior: { activo: target.activo, roles: targetRoles },
-          valorNuevo: { activo: false, sesionesRevocadas: true, inventarioFisicoModificado: false },
+          valorNuevo: { activo: false, eliminado: true, sesionesRevocadas: true },
         },
       });
-      return { idUsuario: saved.idUsuario, desactivado: true, sesionesRevocadas: true };
+      return { idUsuario: saved.idUsuario, eliminado: true, sesionesRevocadas: true };
     });
   }
 

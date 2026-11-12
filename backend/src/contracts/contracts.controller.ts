@@ -70,8 +70,8 @@ export class ContractsController {
 
   @Post(':id/digital-contract')
   @Roles(...ACCESS_ROLES.GENERATE_DIGITAL_CONTRACT)
-  generateDigitalContract(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser) {
-    return this.contractsService.generateDigitalContract(idContrato, user);
+  generateDigitalContract(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser, @Query('initial') initial?: string) {
+    return this.contractsService.generateDigitalContract(idContrato, user, initial === 'true');
   }
 
   @Get(':id/digital-contract')

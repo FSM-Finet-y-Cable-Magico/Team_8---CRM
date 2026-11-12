@@ -1,12 +1,10 @@
-import { ConfigService } from '@nestjs/config';
-import { assignAutomatic } from '../contracts/signature-policy';
+import { ContractsService } from '../contracts/contracts.service';
 import { effectiveSignatureDates } from '../contracts/signature.repository';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
-import PDFDocument from 'pdfkit';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
-import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, pendingActivationWhere } from '../common/customer-lifecycle';
+import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, managedProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -16,6 +14,7 @@ import { isAdministrator } from '../common/roles';
 import { generateWorkOrderCode } from '../common/work-order-code';
 import { MailDeliveryResult, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertNoContractDebt, auditContractDebtRejection } from '../contracts/contract-debt.guard';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ContractPlanDto } from './dto/contract-plan.dto';
 import { CreateInstallOrderDto } from './dto/create-install-order.dto';
@@ -28,11 +27,14 @@ import { UpdatePipelineDto } from './dto/update-pipeline.dto';
 import { VerifyFeasibilityDto } from './dto/verify-feasibility.dto';
 import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
 import { UpdateProspectDto } from './dto/update-prospect.dto';
+import { ListProspectsQueryDto } from './dto/list-prospects-query.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { G2_REVIEW_RELATION_COUNTS, g2OriginEvidence, isG2ProspectReviewCandidate, readG2OriginAudits } from './g2-prospect-review';
 import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { CoverageResult } from '../coverage/coverage.types';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
+import { signatureRepository, signatureStorageAvailable } from '../contracts/signature.repository';
+import { renderQuotePdfBuffer as renderQuotePdfDocument } from './quote-pdf.renderer';
 
 const INITIAL_PIPELINE_STATUS = 'Prospecto Nuevo';
 const FEASIBLE_PIPELINE_STATUS = 'Factible';
@@ -59,6 +61,35 @@ const PIPELINE_STATUSES = [
   'Servicio Activo',
 ];
 
+function prospectListInclude(companyScope: { idEmpresa?: number }) {
+  return {
+    _count: G2_REVIEW_RELATION_COUNTS,
+    empresa: true,
+    cotizaciones: {
+      where: { fechaEnvio: { not: null } },
+      select: { idCotizacion: true, codigo: true, idPlan: true, fechaEnvio: true, factibilidadVerificada: true, plan: { select: { idEmpresa: true, activo: true } } },
+      orderBy: { idCotizacion: 'desc' },
+    },
+    usuarioComercial: {
+      select: {
+        nombreCompleto: true,
+        email: true,
+      },
+    },
+    contratos: {
+      where: companyScope,
+      select: {
+        idContrato: true,
+        fechaInicio: true,
+        estado: true,
+        fechaFirmaManual: true,
+        idPlan: true,
+      },
+      orderBy: { idContrato: 'desc' },
+    },
+  } satisfies Prisma.ProspectoInclude;
+}
+
 @Injectable()
 export class ProspectsService {
   constructor(
@@ -66,7 +97,7 @@ export class ProspectsService {
     private readonly auditService: AuditService,
     private readonly mailService: MailService,
     private readonly coverageService: CoverageDomainService,
-    @Optional() private readonly signatureConfig?: ConfigService,
+    private readonly contractsService: ContractsService,
   ) {}
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
@@ -76,43 +107,111 @@ export class ProspectsService {
       where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
       take: 100,
-      include: {
-        _count: G2_REVIEW_RELATION_COUNTS,
-        empresa: true,
-        cotizaciones: {
-          where: { factibilidadVerificada: true, fechaEnvio: { not: null } },
-          select: { idCotizacion: true, idPlan: true, fechaEnvio: true, plan: { select: { idEmpresa: true, activo: true } } },
-          orderBy: { idCotizacion: 'desc' },
-        },
-        usuarioComercial: {
-          select: {
-            nombreCompleto: true,
-            email: true,
-          },
-        },
-        contratos: {
-          where: companyScope,
-          select: {
-            idContrato: true,
-            estado: true,
-            fechaFirmaManual: true,
-            idPlan: true,
-          },
-          orderBy: { idContrato: 'desc' },
-        },
-      },
+      include: prospectListInclude(companyScope),
     });
+    return this.projectProspectRows(prospects);
+  }
+
+  // Paginated, searchable listing. Unlike list(), lost prospects stay visible so
+  // they can be reviewed and reactivated. Search runs over the whole scoped set.
+  async search(currentUser: AuthUser, query: ListProspectsQueryDto) {
+    const companyScope = this.companyScope(currentUser, query.scope ?? 'consolidado');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const base = this.searchFilters(query);
+    const where: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] });
+    const stateFilter = query.estado ? this.stateWhere(query.estado) : null;
+    const [total, rows, grouped] = await Promise.all([
+      this.prisma.prospecto.count({ where: stateFilter ? { AND: [where, stateFilter] } : where }),
+      this.prisma.prospecto.findMany({
+        where: stateFilter ? { AND: [where, stateFilter] } : where,
+        orderBy: [{ fechaCreacion: 'desc' }, { idProspecto: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: prospectListInclude(companyScope),
+      }),
+      this.prisma.prospecto.groupBy({ by: ['estadoPipeline'], where, _count: { _all: true } }),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const group of grouped) {
+      const key = group.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
+      counts[key] = (counts[key] ?? 0) + group._count._all;
+    }
+    return {
+      items: await this.projectProspectRows(rows),
+      total, page, pageSize, counts,
+    };
+  }
+
+  private stateWhere(estado: string): Prisma.ProspectoWhereInput {
+    return estado === INITIAL_PIPELINE_STATUS
+      ? { OR: [{ estadoPipeline: null }, { estadoPipeline: INITIAL_PIPELINE_STATUS }] }
+      : { estadoPipeline: estado };
+  }
+
+  private searchFilters(query: ListProspectsQueryDto): Prisma.ProspectoWhereInput[] {
+    const filters: Prisma.ProspectoWhereInput[] = [];
+    const q = query.q?.trim();
+    if (q) {
+      const compact = q.replace(/[.\s-]/g, '').toUpperCase();
+      const digits = q.replace(/\D/g, '');
+      const or: Prisma.ProspectoWhereInput[] = [
+        { nombreCompleto: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { telefono: { contains: q.replace(/\s/g, ''), mode: 'insensitive' } },
+      ];
+      if (digits.length >= 3) or.push({ telefono: { contains: digits } });
+      if (/^[0-9K]+$/.test(compact)) {
+        or.push({ rut: { contains: compact, mode: 'insensitive' } });
+        // Stored RUTs are normalized as body-verifier; a full RUT typed without the dash.
+        if (compact.length >= 2) or.push({ rut: { contains: `${compact.slice(0, -1)}-${compact.slice(-1)}`, mode: 'insensitive' } });
+      }
+      filters.push({ OR: or });
+    }
+    if (query.origen) filters.push({ origenContacto: query.origen });
+    if (query.motivoPerdida) filters.push({ motivoPerdida: query.motivoPerdida });
+    const since = query.desde ? parseDateOnly(query.desde) : undefined;
+    const until = query.hasta ? parseDateOnly(query.hasta) : undefined;
+    if (since === null || until === null) throw new BadRequestException('Fecha de filtro inválida');
+    if (since) filters.push({ fechaCreacion: { gte: since } });
+    if (until) {
+      until.setUTCDate(until.getUTCDate() + 1);
+      filters.push({ fechaCreacion: { lt: until } });
+    }
+    return filters;
+  }
+
+  private async projectProspectRows(
+    prospects: Array<Prisma.ProspectoGetPayload<{ include: ReturnType<typeof prospectListInclude> }>>,
+  ) {
     const evidenceRows = await readG2OriginAudits(this.prisma, prospects.filter(isG2ProspectReviewCandidate).map(p => p.idProspecto));
+    const pendingContractIds = prospects.flatMap(prospect => prospect.contratos
+      .filter(contract => contract.estado === PENDING_SIGNATURE_STATUS).map(contract => contract.idContrato));
+    const confirmations = pendingContractIds.length ? await this.prisma.logAuditoria.findMany({
+      where: {
+        accion: 'GENERAR_CONTRATO_PROSPECTO', entidadAfectada: 'contrato',
+        idEntidadAfectada: { in: pendingContractIds }, fechaHora: { not: null },
+      },
+      select: { idEntidadAfectada: true, fechaHora: true },
+      orderBy: [{ fechaHora: 'desc' }, { idLog: 'desc' }],
+      distinct: ['idEntidadAfectada'],
+    }) : [];
+    const confirmationByContract = new Map(confirmations.map(event => [event.idEntidadAfectada, event.fechaHora]));
     return prospects.map(({ _count, ...prospect }) => ({
       ...prospect,
+      contratos: prospect.contratos.map(contract => ({
+        ...contract, fechaConfirmacion: confirmationByContract.get(contract.idContrato) ?? null,
+      })),
       revisionOrigenG2Disponible: isG2ProspectReviewCandidate({ ...prospect, _count }) && g2OriginEvidence(prospect, evidenceRows) !== null,
       cotizaciones: (prospect.cotizaciones ?? [])
-        .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa && quote.plan?.activo !== false)
-        .map(({ idCotizacion, idPlan, fechaEnvio }) => ({ idCotizacion, idPlan, fechaEnvio })),
+        .filter(quote => quote.plan?.idEmpresa === prospect.idEmpresa)
+        .map(({ idCotizacion, codigo, idPlan, fechaEnvio, factibilidadVerificada, plan }) => ({
+          idCotizacion, codigo, idPlan, fechaEnvio, vigente: factibilidadVerificada === true && plan?.activo !== false,
+        })),
       requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
-        || (!([...PIPELINE_STATUSES.slice(0, 6), null].includes(prospect.estadoPipeline))
+        || (!([...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
-            && [PENDING_SIGNATURE_PIPELINE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
+            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
     }));
   }
 
@@ -326,7 +425,10 @@ export class ProspectsService {
       accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
       entidadAfectada: 'prospecto',
       idEntidadAfectada: idProspecto,
-      valorAnterior: { estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida },
+      valorAnterior: {
+        estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
+        ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
+      },
       valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
     });
 
@@ -405,6 +507,8 @@ export class ProspectsService {
     const cobertura = dto.ubicacion
       ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
       : null;
+    const refreshFeasibility = Boolean(cobertura && (restartQuoteFlow || addressChanged
+      || dto.ubicacion?.latitud !== prospect.latitud || dto.ubicacion?.longitud !== prospect.longitud));
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
@@ -440,7 +544,7 @@ export class ProspectsService {
           ...(dto.direccion !== undefined ? { direccion: dto.direccion.trim() } : {}),
           ...(dto.comuna !== undefined ? { comuna: dto.comuna.trim() || null } : {}),
           ...(dto.region !== undefined ? { region: dto.region.trim() || null } : {}),
-          ...(restartQuoteFlow ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
+          ...(refreshFeasibility ? { estadoPipeline: cobertura?.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS } : {}),
         },
         include: { empresa: true, zonaPago: true },
       });
@@ -575,14 +679,14 @@ export class ProspectsService {
         fechaEnvio: new Date(),
         factibilidadVerificada: true,
       },
-      include: { plan: true, prospecto: { include: { empresa: true } } },
+      include: { plan: true, prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } } },
     });
     const pdfUrl = `/prospects/${idProspecto}/quotes/${quote.idCotizacion}/pdf`;
 
     const updatedQuote = await this.prisma.cotizacion.update({
       where: { idCotizacion: quote.idCotizacion },
       data: { pdfUrl },
-      include: { plan: true, prospecto: { include: { empresa: true } } },
+      include: { plan: true, prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } } },
     });
 
     const pdf = await this.renderQuotePdfBuffer(updatedQuote);
@@ -595,7 +699,7 @@ export class ProspectsService {
         prospectName: prospect.nombreCompleto ?? 'Cliente',
         companyName: updatedQuote.prospecto?.empresa?.nombre ?? 'FiNet',
         pdf,
-        filename: `cotizacion-${quote.idCotizacion}.pdf`,
+        filename: `${updatedQuote.codigo ?? 'cotizacion-' + quote.idCotizacion}.pdf`,
       });
     } catch {
       emailDelivery = { status: 'failed' };
@@ -637,24 +741,14 @@ export class ProspectsService {
 
   async recordLoss(idProspecto: number, dto: RecordLossDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
-    await this.assertManualCommercialChange(prospect);
-    if (![...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline)) {
-      throw new BadRequestException('La perdida comercial no puede cancelar contratos o instalaciones; requiere revision');
-    }
-
-    const updated = await this.prisma.prospecto.update({
-      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
-      data: {
-        estadoPipeline: LOST_PIPELINE_STATUS,
-        motivoPerdida: dto.motivo,
-        observacionPerdida: dto.detalleMotivoPerdida?.trim() || dto.observaciones.trim(),
-        fechaPerdida: new Date(),
-        idUsuarioPerdida: currentUser.idUsuario,
-      },
-      include: { empresa: true },
-    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
-
-    await this.auditService.record({
+    const data = {
+      estadoPipeline: LOST_PIPELINE_STATUS,
+      motivoPerdida: dto.motivo,
+      observacionPerdida: dto.detalleMotivoPerdida?.trim() || dto.observaciones.trim(),
+      fechaPerdida: new Date(),
+      idUsuarioPerdida: currentUser.idUsuario,
+    };
+    const audit = {
       idUsuario: currentUser.idUsuario,
       accion: 'REGISTRAR_PERDIDA_PROSPECTO',
       entidadAfectada: 'prospecto',
@@ -666,8 +760,70 @@ export class ProspectsService {
         observaciones: dto.observaciones,
         detalleMotivoPerdida: dto.detalleMotivoPerdida,
       },
-    });
-
+    };
+    if ([PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')) {
+      if (dto.motivo === 'Sin cobertura') {
+        throw new BadRequestException('Selecciona un motivo de pérdida comercial para el contrato pendiente de firma.');
+      }
+      return this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+        const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
+        if (current.estadoPipeline !== prospect.estadoPipeline || current.idEmpresa !== prospect.idEmpresa) {
+          throw new ConflictException('El prospecto cambió durante la operación. Vuelve a consultar su estado.');
+        }
+        const related = await tx.contrato.findMany({
+          where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } },
+          select: { idContrato: true },
+        });
+        if (current.idCliente != null || related.length !== 1 || await tx.ordenTrabajo.findFirst({ where: { idProspecto }, select: { idOt: true } })) {
+          throw new BadRequestException('La baja requiere un único contrato sin firma y sin instalación asociada.');
+        }
+        const { idContrato } = related[0];
+        // La firma toma primero el contrato y luego el prospecto. NOWAIT evita invertir esa espera.
+        try {
+          await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE NOWAIT`;
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' && error.meta?.code === '55P03') {
+            throw new ConflictException('El contrato se está actualizando. Vuelve a consultar su estado.');
+          }
+          throw error;
+        }
+        const contract = await tx.contrato.findFirst({
+          where: { idContrato, idProspecto, idEmpresa: current.idEmpresa, idCliente: null,
+            estado: PENDING_SIGNATURE_STATUS, fechaFirmaManual: null,
+            facturas: { none: {} }, servicios: { none: {} }, integracionesInstalacionG3: { none: {} },
+            contratosDigitales: { none: { OR: [{ fechaFirma: { not: null } }, { estadoFirma: { in: ['Firmado', 'Firmado manualmente'] } }] } },
+          },
+          select: { idContrato: true },
+        });
+        const signatures = await signatureStorageAvailable(tx) ? signatureRepository(tx) : null;
+        if (!contract || await signatures?.findFirst({ where: { idContrato, estado: 'FIRMADA' } })) {
+          throw new BadRequestException('El contrato debe seguir pendiente de firma y sin servicios ni facturas para registrar la pérdida.');
+        }
+        await tx.contrato.update({ where: { idContrato }, data: { estado: 'Anulado' } });
+        await tx.contratoDigital.updateMany({ where: { idContrato }, data: { estadoFirma: 'Anulado' } });
+        if (signatures) {
+          for (const estado of ['BORRADOR', 'PENDIENTE']) {
+            await signatures.updateMany({ where: { idContrato, estado }, data: { estado: 'ANULADA', motivoAnulacion: 'PERDIDA_PROSPECTO', otpHash: null } });
+          }
+        }
+        const updated = await tx.prospecto.update({ where: { idProspecto }, data, include: { empresa: true } });
+        await this.auditService.record({
+          ...audit, valorNuevo: { ...audit.valorNuevo, idContrato, estadoContrato: 'Anulado' },
+        }, tx);
+        return updated;
+      });
+    }
+    await this.assertManualCommercialChange(prospect);
+    if (![...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline)) {
+      throw new BadRequestException('La perdida comercial no puede cancelar contratos o instalaciones; requiere revision');
+    }
+    const updated = await this.prisma.prospecto.update({
+      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
+      data,
+      include: { empresa: true },
+    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
+    await this.auditService.record(audit);
     return updated;
   }
 
@@ -738,12 +894,12 @@ export class ProspectsService {
       }
     }
 
-    const fechaInicio = dto.fechaInicio ? this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date() : new Date();
+    const fechaInicio = this.parseOptionalDate(dto.fechaInicio, 'fechaInicio') ?? new Date(todayDateOnly());
     const fechaGeneracionContrato = this.parseOptionalDate(dto.fechaGeneracionContrato, 'fechaGeneracionContrato');
     const fechaEnvioCliente = this.parseOptionalDate(dto.fechaEnvioCliente, 'fechaEnvioCliente');
     const direccionInstalacion = prospect.direccion?.trim() || undefined;
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.contractsService.registerWithDigitalContract(currentUser, async (tx) => {
       // Serialize confirmations of the same prospect; a pending contract is reused.
       await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
       const current = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
@@ -765,6 +921,7 @@ export class ProspectsService {
       if (!currentPlan || currentPlan.activo === false || currentPlan.idEmpresa !== current.idEmpresa || !currentQuote) {
         throw new ConflictException('El plan o la cotizacion cambio durante la confirmacion; vuelve a consultar');
       }
+      await assertNoContractDebt(tx, { idEmpresa: current.idEmpresa, rut: current.rut, idProspecto, idUsuario: currentUser.idUsuario });
       const contractData = {
         idCliente: null,
         idProspecto,
@@ -822,7 +979,6 @@ export class ProspectsService {
           }).catch((error: unknown) => this.rethrowConcurrentChange(error))
         : await tx.contrato.create({ data: contractData });
 
-      await assignAutomatic(tx, contrato, this.signatureConfig, currentUser.idUsuario);
       const updatedProspect = await tx.prospecto.update({
         where: { idProspecto },
         data: {
@@ -832,8 +988,13 @@ export class ProspectsService {
         include: { empresa: true },
       });
 
-      return { contrato, prospecto: updatedProspect, direccionInstalacion };
-    });
+      const reuseDocument = existingContract?.estado === PENDING_SIGNATURE_STATUS
+        && existingContract.idPlan === contrato.idPlan
+        && existingContract.idZonaPago === contrato.idZonaPago
+        && existingContract.diaVencimiento === contrato.diaVencimiento
+        && existingContract.direccionInstalacion === contrato.direccionInstalacion;
+      return { result: { contrato, prospecto: updatedProspect, direccionInstalacion }, reuseDocument };
+    }).catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
 
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
@@ -1311,7 +1472,7 @@ export class ProspectsService {
         idProspecto,
       },
       include: {
-        prospecto: { include: { empresa: true } },
+        prospecto: { include: { empresa: true, usuarioComercial: { select: { nombreCompleto: true } } } },
         plan: true,
       },
     });
@@ -1323,56 +1484,11 @@ export class ProspectsService {
     return this.renderQuotePdfBuffer(quote);
   }
 
-  private renderQuotePdfBuffer(quote: {
-    fechaEnvio: Date | null;
-    prospecto: {
-      nombreCompleto: string | null;
-      rut: string | null;
-      email: string | null;
-      direccion: string | null;
-      empresa?: { nombre: string } | null;
-    } | null;
-    plan: {
-      nombreComercial: string;
-      tipoPlan: string;
-      tipoCliente: string;
-      velocidadMbps: number | null;
-      precioMensual: { toString(): string };
-    } | null;
-  }) {
+  private renderQuotePdfBuffer(quote: Parameters<typeof renderQuotePdfDocument>[0]) {
     if (!quote.prospecto || !quote.plan) {
       throw new NotFoundException('Cotizacion no encontrada');
     }
-
-    const quoteProspect = quote.prospecto;
-    const quotePlan = quote.plan;
-
-    return new Promise<Buffer>((resolve) => {
-      const doc = new PDFDocument({ margin: 50 });
-      const chunks: Buffer[] = [];
-
-      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-
-      doc.fontSize(18).text('Cotizacion de servicio', { align: 'center' });
-      doc.moveDown();
-      doc.fontSize(12).text(`Empresa: ${quoteProspect.empresa?.nombre ?? 'FiNet'}`);
-      doc.text(`Prospecto: ${quoteProspect.nombreCompleto ?? '-'}`);
-      doc.text(`RUT: ${quoteProspect.rut ?? '-'}`);
-      doc.text(`Email: ${quoteProspect.email ?? '-'}`);
-      doc.text(`Direccion: ${quoteProspect.direccion ?? '-'}`);
-      doc.moveDown();
-      doc.fontSize(14).text('Plan ofrecido');
-      doc.fontSize(12).text(`Nombre: ${quotePlan.nombreComercial}`);
-      doc.text(`Tipo: ${quotePlan.tipoPlan}`);
-      doc.text(`Cliente: ${quotePlan.tipoCliente}`);
-      doc.text(`Velocidad: ${quotePlan.velocidadMbps ?? '-'} Mbps`);
-      doc.text(`Precio mensual: $${quotePlan.precioMensual.toString()}`);
-      doc.moveDown();
-      doc.text(`Fecha de envio: ${(quote.fechaEnvio ?? new Date()).toLocaleDateString('es-CL')}`);
-      doc.text('Documento generado por CRM FiNet.');
-      doc.end();
-    });
+    return renderQuotePdfDocument(quote);
   }
 
   private resolveCompanyId(requestedCompanyId: number | undefined, currentUser: AuthUser) {

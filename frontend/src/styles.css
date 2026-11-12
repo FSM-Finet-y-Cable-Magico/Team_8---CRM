@@ -499,6 +499,16 @@ th {
 .prospects-list-section > h2 {
   margin: 0;
 }
+.prospects-workspace { padding-top: 14px; }
+.prospects-workspace-heading {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin: 0 2px 24px;
+}
+.prospects-workspace-heading h2 { margin: 0; font-size: 1.5rem; }
+.prospects-workspace-heading .prospect-search { margin: 0; }
 
 .panel {
   padding: 18px;
@@ -1225,6 +1235,25 @@ th {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.customer-profile-name { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.customer-profile-edit-button { display: inline-grid; place-items: center; min-width: 26px; min-height: 26px; padding: 0; }
+.customer-profile-edit { margin-top: 0; }
+.customer-profile-edit .customer-profile-header label { display: grid; gap: 6px; width: 100%; }
+.customer-profile-edit .customer-profile-data label { display: grid; gap: 6px; min-width: 0; }
+.customer-profile-edit .customer-profile-data > div { display: grid; gap: 6px; align-content: start; }
+.customer-profile-edit .customer-profile-data span { color: #687b72; font-size: .72rem; text-transform: uppercase; }
+.customer-profile-edit .customer-profile-data strong { font-size: .81rem; }
+.customer-profile-edit input { min-height: 30px; height: 30px; padding: 4px 8px; font-size: .8rem; border-radius: 5px; }
+.customer-profile-edit .customer-profile-header > div { width: min(100%, 410px); }
+.customer-profile-edit .customer-profile-header > .status-badge { margin-inline-start: auto; }
+.customer-profile-edit .customer-profile-header label, .customer-profile-edit .customer-profile-data label { font-size: .68rem; font-weight: 600; gap: 4px; color: #687b72; }
+.customer-profile-edit .customer-profile-data { gap: 12px 20px; }
+.customer-profile-edit-actions { gap: 8px; }
+.customer-profile-edit-actions button { min-height: 30px; padding: 5px 10px; font-size: .75rem; }
+.customer-profile-edit-actions { justify-content: flex-end; margin-top: 18px; }
+.customer-profile-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.customer-profile-status > span[role="status"] { font-size: .76rem; color: #217f6b; }
+.customer-profile-edit .button-row { grid-column: 1 / -1; }
 
 .customer-profile-header h3 {
   color: #20302a;
@@ -3115,6 +3144,7 @@ button.profile-menu-item.danger:hover {
   .metrics,
   .stat-grid,
   .workspace-grid,
+  .prospects-workspace-heading,
   .workflow-grid,
   .customer-search,
   .customer-summary-grid,
@@ -3871,15 +3901,20 @@ button.profile-menu-item.danger:hover {
 
 .dashboard-support-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .95fr) minmax(290px, 1.35fr); gap: 16px; }
 .dashboard-support-row > .panel { display: grid; align-content: start; gap: 13px; }
+.dashboard-support-row > .expiry-panel, .dashboard-support-row > .dashboard-tickets-panel { grid-template-rows: auto 1fr auto; align-content: stretch; }
+.dashboard-support-row .expiry-alert-list, .dashboard-support-row .compact-list { align-content: start; }
+.dashboard-support-row .expiry-view-more { align-self: end; }
+.dashboard-support-row .dashboard-ticket-item { width: 100%; min-height: 0; display: grid; gap: 3px; text-align: left; color: inherit; box-shadow: none; }
+.dashboard-support-row .dashboard-ticket-item:hover { background: #eef7f2; box-shadow: none; }
 .dashboard-support-row .section-heading p { display: none; }
 .dashboard-support-row .expiry-panel-header { align-items: flex-start; flex-wrap: wrap; gap: 10px; }
 .dashboard-support-row .expiry-filters { width: 100%; max-width: 100%; transform: none; transform-origin: right center; }
 .dashboard-support-row .expiry-filter { flex: 1 1 0; justify-content: center; }
 .dashboard-support-row .empty-state { min-height: 98px; display: grid; place-items: center; padding: 14px; border-style: dashed; background: #f8fbfa; color: #6f8078; text-align: center; font-size: .79rem; }
 .dashboard-support-row .compact-list { gap: 6px; }.dashboard-support-row .compact-list-item { padding: 10px; border-radius: 9px; }.dashboard-support-row .compact-list-item strong { font-size: .8rem; }.dashboard-support-row .compact-list-item span { font-size: .7rem; }
-.dashboard-support-actions { display: grid; align-content: start; gap: 13px; }
-.dashboard-support-actions .quick-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.dashboard-support-actions .quick-action-card { min-height: 110px; display: grid; grid-template-columns: 1fr; align-content: start; justify-items: start; gap: 8px; border: 0; border-radius: 9px; padding: 10px; background: #f8fbfa; box-shadow: none; }
+.dashboard-support-actions { display: grid; grid-template-rows: auto 1fr; gap: 13px; }
+.dashboard-support-actions .quick-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; gap: 8px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
+.dashboard-support-actions .quick-action-card { min-height: 96px; display: grid; grid-template-columns: 1fr; align-content: center; justify-items: center; text-align: center; gap: 8px; border: 0; border-radius: 9px; padding: 10px; background: #f8fbfa; box-shadow: none; }
 .dashboard-support-actions .quick-action-card:hover { background: #eef7f2; box-shadow: none; transform: none; }
 .dashboard-support-actions .quick-action-icon { width: 34px; height: 34px; border-radius: 9px; }.dashboard-support-actions .quick-action-copy { gap: 3px; }.dashboard-support-actions .quick-action-copy strong { font-size: .7rem; }.dashboard-support-actions .quick-action-copy small { font-size: .62rem; }.dashboard-support-actions .quick-action-arrow { display: none; }
 
@@ -4212,3 +4247,13 @@ button.profile-menu-item.danger:hover {
 .public-signature form { display: grid; gap: 1rem; margin-top: 1.5rem; }
 .public-signature label { display: block; }
 .signature-hash { overflow-wrap: anywhere; font-family: monospace; }
+
+.prospect-search { display: grid; gap: 10px; margin-bottom: 12px; }
+.prospect-search-input { width: 100%; box-sizing: border-box; }
+.prospect-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.prospect-filters label { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }

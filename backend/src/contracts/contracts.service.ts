@@ -1,3 +1,4 @@
+import { assertNoContractDebt, auditContractDebtRejection } from './contract-debt.guard';
 import { assignAutomatic, assertManualMode, assertPendingSignature, resolveSignatureMode, SignatureMode } from './signature-policy';
 import { signatureRepository, signatureStorageAvailable } from './signature.repository';
 import { signatureSettings } from './e-signature.config';
@@ -7,6 +8,7 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, open, unlink } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import PDFDocument from 'pdfkit';
+import { resolveQuoteBrand } from '../prospects/quote-pdf.renderer';
 import { ConfigService } from '@nestjs/config';
 import { buildContractSnapshot, ContractSnapshot, CONTRACT_INCLUDE } from './contract-snapshot';
 import { Response } from 'express';
@@ -23,6 +25,8 @@ import { ChangePlanDto } from './dto/change-plan.dto';
 import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
+
+type OwnedContractFile = { idContrato?: number; fullPath?: string; relativePath?: string };
 
 @Injectable()
 export class ContractsService {
@@ -67,6 +71,7 @@ export class ContractsService {
 
     const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
     return this.prisma.$transaction(async tx => {
+    await assertNoContractDebt(tx, { idEmpresa, idCliente: customer.idCliente, rut: customer.rut, idUsuario: currentUser.idUsuario });
     const contract = await tx.contrato.create({
       data: {
         idCliente: customer.idCliente,
@@ -96,7 +101,8 @@ export class ContractsService {
     }, tx);
 
     return contract;
-    }, { timeout: 20000 });
+    }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   async confirmManualSignature(idContrato: number, dto: ConfirmContractSignatureDto, currentUser: AuthUser) {
@@ -106,8 +112,8 @@ export class ContractsService {
       tx => this.markContractSigned(tx, idContrato, {
         kind: 'manual', actor: currentUser, observation: dto.observacion,
       }),
-      { timeout: 20000 },
-    );
+      { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ).catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   async markContractSigned(
@@ -124,6 +130,9 @@ export class ContractsService {
     // Replays preserve the original signature, financial state and audit.
     if (this.isSignedContract(contract.estado)) return contract;
     assertPendingSignature(contract.estado);
+    await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+      rut: contract.cliente?.rut ?? contract.prospecto?.rut, idContrato, idProspecto: contract.idProspecto ?? undefined,
+      idUsuario: origin.actor.idUsuario });
     const document = await tx.contratoDigital.findFirst({ where: { idContrato }, orderBy: { version: 'desc' } });
     if (!document || document.idEmpresa !== contract.idEmpresa || !['Generado','Enviado','Firmado manualmente'].includes(document.estadoFirma)) {
       throw new ConflictException('El contrato necesita un PDF vigente y elegible para firma');
@@ -366,88 +375,129 @@ export class ContractsService {
   }
 
   async getDigitalContracts(idContrato: number, currentUser: AuthUser) {
-    await this.getContractOrThrow(idContrato, currentUser);
+    const contract = await this.getContractOrThrow(idContrato, currentUser);
     const documents = await this.prisma.contratoDigital.findMany({
       where: { idContrato },
       orderBy: { version: 'desc' },
     });
 
+    const quotes = contract.idProspecto ? await this.prisma.cotizacion.findMany({
+      where: { idProspecto: contract.idProspecto, idPlan: contract.idPlan ?? undefined, fechaEnvio: { not: null } },
+      select: { idCotizacion: true, codigo: true, fechaEnvio: true },
+      orderBy: { idCotizacion: 'desc' },
+    }) : [];
     return {
       latest: documents[0] ?? null,
       documents,
+      quotes,
+      idProspecto: contract.idProspecto,
     };
   }
 
-  async generateDigitalContract(idContrato: number, currentUser: AuthUser) {
+  async generateDigitalContract(idContrato: number, currentUser: AuthUser, onlyIfMissing = false) {
     // Reject unauthorized callers before taking a lock, then refresh under that lock.
     await this.getContractOrThrow(idContrato, currentUser);
-    const ownedFile: { fullPath?: string; relativePath?: string } = {};
+    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      return this.writeDigitalContract(tx, idContrato, currentUser, ownedFile, onlyIfMissing);
+    });
+  }
+
+  async registerWithDigitalContract<T extends { contrato: { idContrato: number } }>(
+    currentUser: AuthUser,
+    register: (tx: Prisma.TransactionClient) => Promise<{ result: T; reuseDocument: boolean }>,
+  ): Promise<T> {
+    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+      // Registration holds the contract row lock or has just inserted the row.
+      const { result, reuseDocument } = await register(tx);
+      await this.writeDigitalContract(tx, result.contrato.idContrato, currentUser, ownedFile, reuseDocument);
+      return result;
+    }, Prisma.TransactionIsolationLevel.Serializable);
+  }
+
+  private async writeDigitalContract(
+    tx: Prisma.TransactionClient,
+    idContrato: number,
+    currentUser: AuthUser,
+    ownedFile: OwnedContractFile,
+    onlyIfMissing: boolean,
+  ) {
+    const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
+    const latest = await tx.contratoDigital.findFirst({
+      where: { idContrato },
+      orderBy: { version: 'desc' },
+    });
+    if (onlyIfMissing && latest) return latest;
+    await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
+    const mode = await resolveSignatureMode(tx, contract, this.config);
+    const settings = signatureSettings(this.config ?? new ConfigService());
+    const storage = await signatureStorageAvailable(tx);
+    const automaticAvailable = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
+    const version = (latest?.version ?? 0) + 1;
+    const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
+    const buffer = await this.renderDigitalContract(contract, version, tx, snapshot, mode);
+    const hash = createHash('sha256').update(buffer).digest('hex');
+    // A rollback may release the version for another attempt. Never share its filename.
+    const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
+    const fullPath = resolve(process.cwd(), relativePath);
+    await mkdir(dirname(fullPath), { recursive: true });
+    const file = await open(fullPath, 'wx');
+    ownedFile.idContrato = idContrato;
+    ownedFile.fullPath = fullPath;
+    ownedFile.relativePath = relativePath;
+    try { await file.writeFile(buffer); }
+    finally { await file.close(); }
+
+    const created = await tx.contratoDigital.create({
+      data: {
+        idContrato,
+        idCliente: contract.idCliente,
+        idEmpresa: contract.idEmpresa,
+        urlDocumento: relativePath,
+        hashDocumento: hash,
+        estadoFirma: 'Generado',
+        fechaGeneracion: new Date(),
+        idUsuarioGenerador: currentUser.idUsuario,
+        version,
+      },
+    });
+    if (mode === 'automatic' && storage) {
+      await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
+    }
+    if (automaticAvailable) {
+      if (buffer.length > 4 * 1024 * 1024) throw new BadRequestException('El PDF supera el límite de firma de 4 MiB');
+      if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
+      await signatureRepository(tx).create({ data: {
+        idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
+        idContratoDigital: created.idContratoDigital, version, idUsuarioCreador: currentUser.idUsuario,
+        tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
+        estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
+        datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
+        pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
+      } });
+    }
+    await this.auditService.record({
+      idUsuario: currentUser.idUsuario,
+      accion: 'GENERAR_CONTRATO_DIGITAL',
+      entidadAfectada: 'contrato_digital',
+      idEntidadAfectada: created.idContratoDigital,
+      valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
+    }, tx);
+    return created;
+  }
+
+  private async withDigitalContractTransaction<T>(
+    operation: (tx: Prisma.TransactionClient, ownedFile: OwnedContractFile) => Promise<T>,
+    isolationLevel?: Prisma.TransactionIsolationLevel,
+  ): Promise<T> {
+    const ownedFile: OwnedContractFile = {};
     let transactionBodyCompleted = false;
     try {
       return await this.prisma.$transaction(async tx => {
-        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
-        const contract = await this.getContractOrThrow(idContrato, currentUser, tx);
-        const latest = await tx.contratoDigital.findFirst({
-          where: { idContrato },
-          orderBy: { version: 'desc' },
-        });
-        await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
-        const mode = await resolveSignatureMode(tx, contract, this.config);
-        const settings = signatureSettings(this.config ?? new ConfigService());
-        const storage = await signatureStorageAvailable(tx);
-        const automaticAvailable = mode === 'automatic' && !!settings && settings.companies.includes(contract.idEmpresa!) && storage;
-        const version = (latest?.version ?? 0) + 1;
-        const snapshot = await buildContractSnapshot(tx, idContrato, false, contract);
-        const buffer = await this.renderDigitalContract(contract, version, tx, snapshot, mode);
-        const hash = createHash('sha256').update(buffer).digest('hex');
-        // A rollback may release the version for another attempt. Never share its filename.
-        const relativePath = join('generated', 'contracts', `contrato-${idContrato}-v${version}-${randomUUID()}.pdf`).replace(/\\/g, '/');
-        const fullPath = resolve(process.cwd(), relativePath);
-        await mkdir(dirname(fullPath), { recursive: true });
-        const file = await open(fullPath, 'wx');
-        ownedFile.fullPath = fullPath;
-        ownedFile.relativePath = relativePath;
-        try { await file.writeFile(buffer); }
-        finally { await file.close(); }
-
-        const created = await tx.contratoDigital.create({
-          data: {
-            idContrato,
-            idCliente: contract.idCliente,
-            idEmpresa: contract.idEmpresa,
-            urlDocumento: relativePath,
-            hashDocumento: hash,
-            estadoFirma: 'Generado',
-            fechaGeneracion: new Date(),
-            idUsuarioGenerador: currentUser.idUsuario,
-            version,
-          },
-        });
-        if (mode === 'automatic' && storage) {
-          await signatureRepository(tx).updateMany({ where: { idContrato, estado: 'PENDIENTE' }, data: { estado: 'ANULADA', motivoAnulacion: 'NUEVA_VERSION', otpHash: null } });
-        }
-        if (automaticAvailable) {
-          if (buffer.length > 4 * 1024 * 1024) throw new BadRequestException('El PDF supera el límite de firma de 4 MiB');
-          if (!contract.idEmpresa) throw new BadRequestException('El contrato necesita una empresa');
-          await signatureRepository(tx).create({ data: {
-            idSolicitud: randomUUID(), idEmpresa: contract.idEmpresa, idContrato,
-            idContratoDigital: created.idContratoDigital, version, idUsuarioCreador: currentUser.idUsuario,
-            tokenHash: createHash('sha256').update(randomUUID() + randomUUID()).digest('hex'),
-            estado: 'BORRADOR', destinatario: snapshot.cliente.email ?? '',
-            datosSnapshot: snapshot as unknown as Prisma.InputJsonObject, hashOriginal: hash,
-            pdfOriginal: buffer, fechaExpiracion: new Date(Date.now() + 48 * 3600000),
-          } });
-        }
-        await this.auditService.record({
-          idUsuario: currentUser.idUsuario,
-          accion: 'GENERAR_CONTRATO_DIGITAL',
-          entidadAfectada: 'contrato_digital',
-          idEntidadAfectada: created.idContratoDigital,
-          valorNuevo: { idContrato, idCliente: created.idCliente, version, hashDocumento: hash, estadoFirma: created.estadoFirma },
-        }, tx);
+        const result = await operation(tx, ownedFile);
         transactionBodyCompleted = true;
-        return created;
-      }, { timeout: 20000 });
+        return result;
+      }, { timeout: 20000, ...(isolationLevel ? { isolationLevel } : {}) });
     } catch (error) {
       if (ownedFile.fullPath && ownedFile.relativePath) {
         try {
@@ -459,11 +509,11 @@ export class ContractsService {
           else if (!persisted) {
             // The COMMIT response is uncertain. An immediate empty read does not
             // prove rollback; retain this attempt's file for explicit inspection.
-            this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+            this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${ownedFile.idContrato}`);
           }
         } catch {
           // No safe DB confirmation or failed unlink: retain for inspection, never delete blindly.
-          this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${idContrato}`);
+          this.logger.error(`CONTRACT_PDF_CLEANUP_PENDING contrato=${ownedFile.idContrato}`);
         }
       }
       throw error;
@@ -525,7 +575,12 @@ export class ContractsService {
         }
         return latest;
       }
-      if (dto.estadoFirma === 'Firmado manualmente') assertPendingSignature(contract.estado);
+      if (dto.estadoFirma === 'Firmado manualmente') {
+        assertPendingSignature(contract.estado);
+        await assertNoContractDebt(tx, { idEmpresa: contract.idEmpresa, idCliente: contract.idCliente,
+          rut: contract.cliente?.rut ?? contract.prospecto?.rut, idContrato,
+          idProspecto: contract.idProspecto ?? undefined, idUsuario: currentUser.idUsuario });
+      }
 
       const updated = await tx.contratoDigital.update({
         where: { idContratoDigital: latest.idContratoDigital },
@@ -546,7 +601,8 @@ export class ContractsService {
         valorNuevo: { estadoFirma: updated.estadoFirma, observaciones: dto.observaciones },
       }, tx);
       return updated;
-    }, { timeout: 20000 });
+    }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
   private isSignedDigitalContract(document: { estadoFirma: string; fechaFirma?: Date | null }) {
@@ -634,7 +690,8 @@ export class ContractsService {
   private async renderDigitalContract(contract: Awaited<ReturnType<ContractsService['getContractOrThrow']>>, version: number, client: Prisma.TransactionClient = this.prisma, savedSnapshot?: ContractSnapshot, mode: SignatureMode = 'manual') {
     const snapshot = savedSnapshot ?? await buildContractSnapshot(client, contract.idContrato, false, contract);
     const chunks: Buffer[] = [];
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
+    doc.info.Title = 'Contrato de servicios - ' + (snapshot.comercial.empresa ?? 'Empresa');
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolveBuffer, reject) => {
       doc.on('end', () => resolveBuffer(Buffer.concat(chunks)));
@@ -642,44 +699,56 @@ export class ContractsService {
     });
 
     const width = doc.page.width - 100;
+    const labelWidth = 145;
+    const rowHeight = (label: string, value: string | number | null) => {
+      doc.font('Helvetica-Bold').fontSize(9);
+      const labelHeight = doc.heightOfString(label + ':', { width: labelWidth - 16 });
+      doc.font('Helvetica').fontSize(9.5);
+      return Math.max(labelHeight, doc.heightOfString(String(value ?? 'No informado'), { width: width - labelWidth - 16, lineGap: 2 })) + 14;
+    };
     const ensureSpace = (height: number) => {
       if (doc.y + height > doc.page.height - doc.page.margins.bottom) doc.addPage();
     };
     const row = (label: string, value: string | number | null) => {
-      doc.font('Helvetica').fontSize(11);
-      const line = `${label}: ${value ?? 'No informado'}`;
-      const options = { width, lineGap: 3 };
       // Keep each bounded label/value together; PDFKit wraps long words within the page width.
-      ensureSpace(doc.heightOfString(line, options) + 5);
-      doc.text(line, 50, doc.y, options);
-      doc.moveDown(0.3);
+      const height = rowHeight(label, value);
+      ensureSpace(height);
+      const top = doc.y;
+      doc.save().rect(50, top, labelWidth, height).fill('#e4eae6');
+      doc.strokeColor('#b9cec5').lineWidth(0.5).rect(50, top, width, height).stroke();
+      doc.moveTo(50 + labelWidth, top).lineTo(50 + labelWidth, top + height).stroke().restore();
+      doc.fillColor('#293a35').font('Helvetica-Bold').fontSize(9).text(label + ':', 58, top + 7, { width: labelWidth - 16 });
+      doc.font('Helvetica').fontSize(9.5).text(String(value ?? 'No informado'), 58 + labelWidth, top + 7, { width: width - labelWidth - 16, lineGap: 2 });
+      doc.y = top + height;
     };
     const section = (title: string) => {
       ensureSpace(80);
       doc.moveDown(0.6);
-      doc.font('Helvetica-Bold').fontSize(14).text(title, 50, doc.y, { width });
+      doc.fillColor('#147e70').font('Helvetica-Bold').fontSize(11).text(title, 50, doc.y, { width });
       doc.moveDown(0.4);
     };
     const block = (title: string, rows: Array<[string, string | number | null]>) => {
-      doc.font('Helvetica').fontSize(11);
-      const height = rows.reduce((total, [label, value]) => total
-        + doc.heightOfString(`${label}: ${value ?? 'No informado'}`, { width, lineGap: 3 }) + 5, 40);
+      const height = rows.reduce((total, [label, value]) => total + rowHeight(label, value), 60);
       // Keep a service and the document notes together instead of leaving orphan rows on a new page.
       ensureSpace(height);
       section(title);
       rows.forEach(([label, value]) => row(label, value));
     };
-    doc.font('Helvetica-Bold').fontSize(18).text('Contrato digital de servicios', { align: 'center' });
-    doc.moveDown();
-    row('Versión', version);
-    row('Fecha de generación (Chile)', new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }));
-    section('Cliente');
+    const brand = resolveQuoteBrand(snapshot.comercial.empresa);
+    doc.fillColor('#61726b').font('Helvetica-Bold').fontSize(8.5).text(`Versión: ${version}`, 50, 38, { width: width - 110 });
+    doc.fillColor('#147e70').font('Helvetica-Bold').fontSize(18).text('CONTRATO DE SERVICIOS', 50, 58, { width: width - 110 });
+    if (brand.logo) doc.image(brand.logo, doc.page.width - 150, 28, { fit: [100, 80] });
+    doc.fillColor('#61726b').font('Helvetica').fontSize(8).text(new Date().toLocaleString('es-CL', { timeZone: 'America/Santiago' }) + ' (Chile)', 50, 114, { width, align: 'right' });
+    doc.strokeColor('#b9cec5').lineWidth(0.6).moveTo(50, 128).lineTo(50 + width, 128).stroke();
+    doc.y = 140;
+    section('Datos del cliente');
     row('Nombre', snapshot.cliente.nombre);
     row('RUT', snapshot.cliente.rut);
     row('Correo electrónico', snapshot.cliente.email);
     row('Teléfono', snapshot.cliente.telefono);
-    section('Condiciones comerciales');
+    section('Empresa prestadora');
     row('Empresa', snapshot.comercial.empresa);
+    section('Servicio y condiciones comerciales');
     row('Plan', snapshot.comercial.plan);
     row('Velocidad del plan', snapshot.comercial.velocidad ? snapshot.comercial.velocidad + ' Mbps' : null);
     row('Precio mensual', snapshot.comercial.precio !== null ? '$' + snapshot.comercial.precio.toLocaleString('es-CL') : null);
@@ -700,6 +769,15 @@ export class ContractsService {
         : mode === 'manual' ? 'El estado de firma se gestiona manualmente en el CRM. Este documento no incorpora firma electrónica avanzada.'
         : 'Documento pendiente de autorización del modo de firma. No incorpora firma electrónica avanzada.'],
     ]);
+    const pages = doc.bufferedPageRange();
+    for (let page = pages.start; page < pages.start + pages.count; page++) {
+      doc.switchToPage(page);
+      const bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      doc.fillColor('#61726b').font('Helvetica').fontSize(7).text(`${snapshot.comercial.empresa ?? 'Empresa'} | Versión ${version}`, 50, doc.page.height - 30, { width: width - 50 });
+      doc.text(`${page + 1} / ${pages.count}`, 50 + width - 45, doc.page.height - 30, { width: 45, align: 'right' });
+      doc.page.margins.bottom = bottom;
+    }
     doc.end();
 
     return finished;

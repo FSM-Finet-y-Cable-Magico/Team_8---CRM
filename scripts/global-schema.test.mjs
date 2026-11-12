@@ -35,7 +35,7 @@ const postgres18PartialIndexes = [
  {table:'tax_emission_intent',name:'tax_intent_email_pending_idx',observed:"CREATE INDEX tax_intent_email_pending_idx ON public.tax_emission_intent USING btree (id_empresa, email_estado, fecha_proximo_email) WHERE ((estado)::text = 'GENERADO'::text)"},
 ];
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:96,columns:982,pk:96,fk:230,checks:63,indexes:132});
+ assert.deepEqual(global.counts,{tables:96,columns:984,pk:96,fk:230,checks:63,indexes:133});
  const taxIntent=global.tables.find(table=>table.name==='tax_emission_intent');
  assert.ok(taxIntent);
  assert.equal(taxIntent.columns.length,28);

@@ -220,7 +220,8 @@ export class CommercialControlBookService {
       throw new BadRequestException('El aviso de retiro requiere servicio y observación');
     }
 
-    const event = await this.prisma.eventoGestionComercial.create({ data: {
+    return this.prisma.$transaction(async tx => {
+    const event = await tx.eventoGestionComercial.create({ data: {
       idEmpresa: companyId,
       idCliente: customer.idCliente,
       idServicio: service?.idServicio,
@@ -232,8 +233,9 @@ export class CommercialControlBookService {
       observacion: dto.observacion?.trim() || null,
       idUsuarioResponsable: user.idUsuario,
     } });
-    await this.audit.record({ idUsuario: user.idUsuario, accion: dto.tipo === 'ULTIMO_AVISO_CORTE' ? 'REGISTRAR_ULTIMO_AVISO' : dto.tipo === 'AVISO_PREVIO_RETIRO' ? 'REGISTRAR_AVISO_RETIRO' : 'REGISTRAR_GESTION_COMERCIAL', entidadAfectada: 'evento_gestion_comercial', idEntidadAfectada: event.idEvento, valorNuevo: { idCliente: customer.idCliente, idFactura: invoice?.idFactura, idServicio: service?.idServicio, tipo: dto.tipo, canal: dto.canal } });
+    await this.audit.record({ idUsuario: user.idUsuario, accion: dto.tipo === 'ULTIMO_AVISO_CORTE' ? 'REGISTRAR_ULTIMO_AVISO' : dto.tipo === 'AVISO_PREVIO_RETIRO' ? 'REGISTRAR_AVISO_RETIRO' : 'REGISTRAR_GESTION_COMERCIAL', entidadAfectada: 'evento_gestion_comercial', idEntidadAfectada: event.idEvento, valorNuevo: { idCliente: customer.idCliente, idFactura: invoice?.idFactura, idServicio: service?.idServicio, tipo: dto.tipo, canal: dto.canal } }, tx);
     return event;
+    });
   }
 
   async createAgreement(dto: CreateAgreementDto, user: AuthUser) {
@@ -266,7 +268,8 @@ export class CommercialControlBookService {
         idEmpresa: companyId, idCliente: customer.idCliente, idFactura: invoice.idFactura,
         idContrato: invoice.idContrato, idServicio: dto.idServicio,
         montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas,
-        condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'PENDIENTE', idUsuarioResponsable: user.idUsuario,
+        condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'APROBADO', idUsuarioResponsable: user.idUsuario,
+        idUsuarioAprobador: user.idUsuario, fechaAprobacion: new Date(),
         cuotas: { create: dto.cuotas.map((item) => ({ numero: item.numero, monto: item.monto, fechaVencimiento: this.dateOnly(item.fechaVencimiento, 'fechaVencimiento') })) },
       }, include: { cuotas: true },
     });
@@ -446,7 +449,7 @@ export class CommercialControlBookService {
       const lastNotice = events.find((event) => event.tipo === 'ULTIMO_AVISO_CORTE');
       const withdrawal = events.find((event) => event.tipo === 'AVISO_PREVIO_RETIRO');
       const extension = invoice?.prorrogasPago[0] ?? null;
-      const status = invoice ? this.statusService.calculate({ monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: extension?.nuevaFecha, convenioActivo: invoice.conveniosPago.length > 0, ultimoAviso: Boolean(lastNotice), retiroPendiente: Boolean(withdrawal), umbralUltimoAvisoDias: this.cutDays() }) : {
+      const status = invoice ? this.statusService.calculate({ estadoDocumento: invoice.estado, monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: extension?.nuevaFecha, convenioActivo: invoice.conveniosPago.length > 0, ultimoAviso: Boolean(lastNotice), retiroPendiente: Boolean(withdrawal), umbralUltimoAvisoDias: this.cutDays() }) : {
         montoDocumento: null, totalPagado: null, saldoPendiente: null, saldoFavor: null, fechaVencimientoEfectiva: null,
         diasAtraso: null, estadoComercial: 'SIN_FACTURAS', accionSugerida: 'Registrar contacto con el cliente',
       };
@@ -494,6 +497,9 @@ export class CommercialControlBookService {
   private filterRows<T extends Record<string, unknown>>(rows: T[], query: ControlBookQueryDto) {
     const search = this.normalize(query.search ?? '');
     return rows.filter((row) => {
+      if (query.idCliente !== undefined && row.idCliente !== query.idCliente) return false;
+      if (query.idContrato !== undefined && row.idContrato !== query.idContrato) return false;
+      if (query.idFactura !== undefined && row.idFactura !== query.idFactura) return false;
       if (search && !['rut', 'nombre', 'telefono', 'numeroContrato', 'numeroDocumento'].some((key) => this.normalize(row[key]).includes(search))) return false;
       if (query.estadoComercial && row.estadoComercial !== query.estadoComercial) return false;
       if (query.estadoServicio && row.estadoServicio !== query.estadoServicio) return false;
@@ -521,8 +527,8 @@ export class CommercialControlBookService {
     rows.sort((left, right) => String(left[key] ?? '').localeCompare(String(right[key] ?? ''), 'es', { numeric: true }) * direction);
   }
 
-  private invoiceStatus(invoice: { monto: Prisma.Decimal | null; pagos: Array<{ monto: Prisma.Decimal }>; fechaLimitePago: Date; prorrogasPago: Array<{ nuevaFecha: Date }> }) {
-    return this.statusService.calculate({ monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: invoice.prorrogasPago[0]?.nuevaFecha, umbralUltimoAvisoDias: this.cutDays() });
+  private invoiceStatus(invoice: { estado: string; monto: Prisma.Decimal | null; pagos: Array<{ monto: Prisma.Decimal }>; fechaLimitePago: Date; prorrogasPago: Array<{ nuevaFecha: Date }> }) {
+    return this.statusService.calculate({ estadoDocumento: invoice.estado, monto: invoice.monto === null ? null : Number(invoice.monto), totalPagado: invoice.pagos.reduce((sum, payment) => sum + Number(payment.monto), 0), fechaVencimiento: invoice.fechaLimitePago, nuevaFechaProrroga: invoice.prorrogasPago[0]?.nuevaFecha, umbralUltimoAvisoDias: this.cutDays() });
   }
 
   private debtInvoice(idFactura: number) {

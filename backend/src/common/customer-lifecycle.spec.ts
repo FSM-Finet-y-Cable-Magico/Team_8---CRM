@@ -1,4 +1,4 @@
-import { activeCustomerWhere, activeProspectWhere, pendingActivationWhere, resolveCustomerLifecycleStatus } from './customer-lifecycle';
+import { activeCustomerWhere, activeProspectWhere, managedProspectWhere, pendingActivationWhere, resolveCustomerLifecycleStatus } from './customer-lifecycle';
 
 // In-memory Prisma predicate subset for fixtures; no database/client is instantiated.
 function matches(row: any, where: any): boolean {
@@ -60,6 +60,14 @@ describe('Customer lifecycle: relaciones, no etiquetas historicas', () => {
     expect(JSON.stringify(row)).toBe(snapshot);
   });
 
+  it('managedProspectWhere conserva visibles los Perdido no convertidos y excluye clientes o firmados', () => {
+    const where = managedProspectWhere({ idEmpresa: 1 });
+    expect(matches({ ...base, estadoPipeline: 'Perdido' }, where)).toBe(true);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', idCliente: 3 }, where)).toBe(false);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', contratos: [signed] }, where)).toBe(false);
+    expect(matches({ ...base, estadoPipeline: 'Perdido', idEmpresa: 2 }, where)).toBe(false);
+  });
+
   it('consolidado exige la misma empresa en prospecto y contrato', () => {
     const predicate = { OR: [1, 2].map((idEmpresa) => pendingActivationWhere({ idEmpresa })) };
     expect(matches({ ...base, contratos: [{ ...signed, idEmpresa: 2 }] }, predicate)).toBe(false);
@@ -69,5 +77,9 @@ describe('Customer lifecycle: relaciones, no etiquetas historicas', () => {
 
   it.each(['Moroso', 'Suspendido'])('no sobreescribe el estado financiero global %s', (currentStatus) => {
     expect(resolveCustomerLifecycleStatus({ currentStatus, contractStates: ['Activo'], serviceStates: ['Activo'] })).toBe(currentStatus);
+  });
+
+  it('refleja la baja operativa cuando terminó el último contrato, incluso si había suspensión financiera', () => {
+    expect(resolveCustomerLifecycleStatus({ currentStatus: 'Suspendido', contractStates: ['Baja'], serviceStates: ['Baja'] })).toBe('Baja');
   });
 });

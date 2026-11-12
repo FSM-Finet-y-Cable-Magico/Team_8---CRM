@@ -1,6 +1,32 @@
 # Accesos y base de datos demo
 
-Esta guia sirve para levantar el CRM en otro computador y cargar la misma base de datos demo.
+Esta guía sirve para levantar el CRM local y compartir una base de pruebas.
+
+## Base sintética compartida para el CRM local
+
+El archivo [seed-crm-local.sql](../db/seed-crm-local.sql) recrea los registros operativos de FiNet y Cable Mágico en el PostgreSQL de Docker local. Conserva empresas, usuarios, roles, planes y catálogos. Los nombres son ficticios y los correos usan `example.invalid`. La carga incluye antecedentes simulados de G2 y G3 y se ejecuta íntegramente en PostgreSQL.
+
+Con el Compose local iniciado, desde la raíz de la rama en PowerShell:
+
+```powershell
+docker compose exec -T backend npx --no-install prisma migrate deploy --schema prisma/schema.prisma
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+# Ensayar y verificar los datos. PostgreSQL revierte la transacción.
+Get-Content -Raw -Encoding UTF8 db/seed-crm-local.sql | docker compose exec -T db psql -X -U postgres -d fsm_db
+# Reemplazar los datos operativos locales después de verificar la carga.
+Get-Content -Raw -Encoding UTF8 db/seed-crm-local.sql | docker compose exec -T db psql -X -U postgres -d fsm_db -v aplicar=true
+```
+
+| Caso | Buscar en FiNet |
+| --- | --- |
+| Prospecto nuevo, cotización enviada y firma pendiente | Martina Rivas, Josefa Cisternas y Gabriel Saavedra |
+| Contrato firmado por instalar, orden asignada, en curso y cliente ausente | Paula Valdés, Catalina Yáñez, Nicolás Olivares y Fernanda Correa |
+| Cambio WiFi remoto y escalamiento con visita | María Paz Araya y Marcelo Riquelme |
+| Pago parcial, convenio con cuotas y prórroga vigente | Felipe Rojas, Francisca Mora y Álvaro Barrientos |
+| Varias facturas vencidas, último aviso, suspensión y retiro | Constanza Molina, Verónica Céspedes, Cristóbal Pizarro y Macarena Ortega |
+| Al día con documento externo, alta sin facturas y segundo plan por firmar | Andrés Salinas, Javiera Henríquez y Rodrigo Cárdenas |
+
+## Copia histórica de demostración
 
 ## Requisitos
 
@@ -28,6 +54,14 @@ docker compose up -d
 ```
 
 Con eso queda cargada la base `fsm_db` y se levantan backend y frontend.
+
+Una vez iniciado el backend con el esquema actual, retira las fichas de prueba incompletas que incluye la copia histórica:
+
+```powershell
+Get-Content db/cleanup-legacy-demo.sql | docker compose exec -T db psql -X -U postgres -d fsm_db
+```
+
+La limpieza se puede repetir. Solo aplica a la copia de demostración local y verifica las identidades y sus relaciones.
 
 ## Abrir el sistema
 

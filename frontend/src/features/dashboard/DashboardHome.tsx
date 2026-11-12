@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ArrowRight,
   Boxes,
   CalendarPlus,
   CircleCheckBig,
@@ -13,7 +12,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { type BillingOverview, type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
-import { expiryAlertKey, expiryUrgency, formatDateOnly, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder, isInProgressWorkOrder } from '../../lib';
+import { expiryAlertKey, expiryUrgency, formatDateOnly, formatWorkOrderValue, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder, isInProgressWorkOrder } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import {
   DashboardStatCard,
@@ -89,6 +88,7 @@ export function DashboardHome({
   permissions,
   onNavigate,
   onOpenPendingInstallations,
+  onOpenTicket,
 }: {
   summary: Summary | null;
   prospects: Prospect[];
@@ -99,6 +99,7 @@ export function DashboardHome({
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
   onOpenPendingInstallations?: (view: 'activation' | 'agenda') => void;
+  onOpenTicket: (id: number) => void;
 }) {
   const [expiryFilter, setExpiryFilter] = useState<'overdue' | 'upcoming'>('upcoming');
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
@@ -129,15 +130,15 @@ export function DashboardHome({
     {
       label: 'Clientes activos',
       value: summary?.metricas.clientes ?? 0,
-      description: 'Clientes de la vista actual',
+      description: 'Con al menos un servicio activo',
       icon: Users,
       tone: 'teal' as const,
       tab: 'customers' as Tab,
     },
     {
       label: 'Instalaciones pendientes',
-      value: summary?.metricas.instalacionesPendientes ?? pendingInstallations,
-      description: 'Órdenes técnicas abiertas',
+      value: summary?.metricas.pendientesActivacion ?? pendingInstallations,
+      description: 'Contrataciones pendientes de activación',
       icon: Wrench,
       tone: 'blue' as const,
       tab: 'installations' as Tab,
@@ -187,7 +188,6 @@ export function DashboardHome({
   const quickActions = [
     {
       label: 'Nuevo prospecto',
-      description: 'Registrar oportunidad comercial',
       icon: UserRoundPlus,
       tone: 'mint' as const,
       tab: 'prospects' as Tab,
@@ -195,23 +195,20 @@ export function DashboardHome({
     },
     {
       label: 'Crear ticket',
-      description: 'Atender solicitud de soporte',
       icon: TicketIcon,
       tone: 'orange' as const,
       tab: 'tickets' as Tab,
       visible: permissions.viewTickets,
     },
     {
-      label: 'Agendar instalación',
-      description: 'Coordinar visita técnica',
+      label: 'Ver instalaciones',
       icon: CalendarPlus,
       tone: 'blue' as const,
       tab: 'installations' as Tab,
       visible: permissions.viewInstallations,
     },
     {
-      label: 'Nueva orden',
-      description: 'Revisar órdenes de trabajo',
+      label: 'Consultar órdenes',
       icon: ClipboardList,
       tone: 'violet' as const,
       tab: 'workOrders' as Tab,
@@ -236,7 +233,7 @@ export function DashboardHome({
     (order) => isInstallationWorkOrder(order.tipoOt) && isInProgressWorkOrder(order.estado),
   ).length;
   const installationSegments = [
-    { label: 'Pendientes', value: Number(summary?.metricas.instalacionesPendientes ?? pendingInstallations), tone: 'pending' },
+    { label: 'Pendientes', value: pendingInstallations - inProgressInstallations, tone: 'pending' },
     { label: 'Completadas', value: completedInstallations, tone: 'completed' },
     { label: 'En progreso', value: inProgressInstallations, tone: 'progress' },
   ];
@@ -314,7 +311,7 @@ export function DashboardHome({
         </article>
 
         <article className="dashboard-installation-panel">
-          <div className="dashboard-panel-heading"><h2>Instalaciones</h2></div>
+          <div className="dashboard-panel-heading"><h2>Órdenes de instalación</h2></div>
           <div className="installation-chart-layout">
             <div className="installation-donut-wrap">
               <svg className="installation-donut" viewBox="0 0 120 120" aria-label={`${installationSegments[0].value} instalaciones pendientes`} role="img">
@@ -401,7 +398,6 @@ export function DashboardHome({
               </div>
               <button type="button" className="expiry-view-more" onClick={() => openExpiryDetails()}>
                 Ver más
-                <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
               </button>
             </>
           ) : (
@@ -451,23 +447,21 @@ export function DashboardHome({
           </Modal>
         </article>
 
-        <article className="panel stack">
-          <div className="section-heading">
-            <h2>Tickets cerrados por falla</h2>
-            <p>Resumen mensual por categoría de soporte.</p>
-          </div>
-          {(summary?.ticketsCerradosPorTipo?.length ?? 0) > 0 ? (
+        <article className="panel stack dashboard-tickets-panel">
+          <div className="section-heading"><h2>Tickets</h2></div>
+          {!permissions.viewTickets ? <p className="empty-state">No tienes acceso a los tickets.</p> : tickets.length > 0 ? (
             <div className="compact-list">
-              {summary?.ticketsCerradosPorTipo?.map((item) => (
-                <div key={item.idCategoria} className="compact-list-item">
-                  <strong>{item.categoria}</strong>
-                  <span>{item.total} ticket(s) cerrado(s)</span>
-                </div>
+              {tickets.slice(0, 4).map((ticket) => (
+                <button type="button" key={ticket.idTicket} className="compact-list-item dashboard-ticket-item" onClick={() => onOpenTicket(ticket.idTicket)}>
+                  <strong>{ticket.codigoSeguimiento || `Ticket #${ticket.idTicket}`} · {ticket.cliente?.nombreCompleto ?? 'Sin cliente'}</strong>
+                  <span>{ticket.categoria?.nombreAtencion || ticket.categoria?.nombre || 'Sin categoría'} · {ticket.estadoPresentacion || formatWorkOrderValue(ticket.estado)}</span>
+                </button>
               ))}
             </div>
           ) : (
-            <p className="empty-state">No hay tickets cerrados en el periodo actual.</p>
+            <p className="empty-state">No hay tickets para mostrar.</p>
           )}
+          {permissions.viewTickets && <button type="button" className="expiry-view-more" onClick={() => onNavigate('tickets')}>Ver tickets</button>}
         </article>
         <section className="dashboard-actions dashboard-support-actions">
           <div className="dashboard-panel-heading"><h2>Acciones rápidas</h2></div>
@@ -488,7 +482,6 @@ export function DashboardHome({
             </div>
             <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('commercial')}>
               Ver libro de control
-              <ArrowRight size={16} strokeWidth={1.8} aria-hidden="true" />
             </button>
           </div>
           <div className="dashboard-financial-metrics">

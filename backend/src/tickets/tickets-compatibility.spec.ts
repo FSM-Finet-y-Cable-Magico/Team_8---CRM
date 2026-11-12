@@ -42,6 +42,16 @@ function setup(estado = 'Abierto') {
 }
 
 describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
+  it('C2: crea con Consulta historica y conserva idCategoria real y SLA, sin reclasificar ni tocar G3', async () => {
+    const { service, prisma } = setup();
+    const historic = { idCategoria: 3, nombre: 'Consulta', slaHoras: 72 };
+    prisma.categoriaFalla.findMany.mockResolvedValue([historic]);
+    await expect(service.create({ ...request, idCategoria: 3 }, operator)).resolves.toMatchObject({ idCategoria: 3, idEmpresa: 2 });
+    expect(historic).toEqual({ idCategoria: 3, nombre: 'Consulta', slaHoras: 72 });
+    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
+    expect(prisma.cliente.update).not.toHaveBeenCalled();
+    expect(prisma.servicioContratado.update).not.toHaveBeenCalled();
+  });
   // Lista independiente de la implementación: contrato de atención G8/G2,
   // Documento 0, Tabla 11.9 ratificada para este cambio (no prueba del proveedor real).
   const attentionNames = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
@@ -73,7 +83,8 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
     prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 914, nombre: name.toUpperCase(), slaHoras: 9 }]);
     await expect(service.create({ ...request, idCategoria: 914 }, operator)).resolves.toMatchObject({ idCategoria: 914, idEmpresa: 2 });
     expect(prisma.ticket.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idCategoria: 914 }) }));
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ categoria: name.toUpperCase() }) }));
+    // La auditoría se escribe dentro de la misma transacción que el ticket (segundo argumento).
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ categoria: name.toUpperCase() }) }), prisma);
   });
 
   it.each(['FIBRA_CORTADA', 'CAMBIO_CREDENCIALES_WIFI', 'Facturacion y cobro', 'Consulta QA'])
@@ -149,7 +160,7 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
     const { service, prisma, audit } = setup();
     prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 811, nombre: 'Falla de Internet', tipo }]);
     await expect(service.updateCategory(10, { idCategoria: 811 }, operator)).resolves.toMatchObject({ idCategoria: 811 });
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CLASIFICAR_TICKET' }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CLASIFICAR_TICKET' }), prisma);
   });
 
   it.each(['INTERNA', 'DESCONOCIDA', null])('clasificación manual no admite tipo %s ni modifica el ticket', async tipo => {

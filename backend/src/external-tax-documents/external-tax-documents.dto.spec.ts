@@ -58,4 +58,10 @@ describe('Etapa 5 - DTO de documentos tributarios', () => {
     expect(dto.page).toBe(2);
     expect(await validate(dto)).not.toHaveLength(0);
   });
+
+  it('explica que un código bancario largo no es una factura CRM', async () => {
+    const result = await errors(CreateExternalTaxDocumentDto, { ...valid, idFactura: '987654321012' });
+    const invoiceError = result.find(error => error.property === 'idFactura');
+    expect(invoiceError?.constraints?.max).toContain('no una referencia bancaria');
+  });
 });

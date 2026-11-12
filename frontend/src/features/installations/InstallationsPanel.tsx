@@ -51,7 +51,7 @@ export function InstallationsPanel({
         <InstallationHistoryPanel key={scope} scope={scope} revision={workOrders} localOrders={workOrders.filter(order => isInstallationWorkOrder(order.tipoOt))} companies={companies} customers={customers} />
       </div>
       <div className="table-wrap installation-table-wrap"><table className="installation-table installation-coordination-table" aria-label="Instalaciones en proceso">
-        <thead><tr><th>Cliente / empresa</th><th>Plan / contrato</th><th>Dirección de instalación</th><th>Acción</th></tr></thead>
+        <thead><tr><th>Cliente / empresa</th><th>Plan / contrato</th><th>Dirección de instalación</th><th><span className="sr-only">Gestionar</span></th></tr></thead>
         <tbody>{filtered.slice((page - 1) * pageSize, page * pageSize).map(prospect => {
           const contract = prospect.contratos?.[0];
           return <tr key={prospect.idProspecto}>

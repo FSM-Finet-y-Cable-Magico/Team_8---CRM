@@ -13,6 +13,7 @@ function load(path,mocks={}) {
   const exports={};
   new Function('require','exports',outputText)(name=>{
     if(name in mocks)return mocks[name];
+    if(name==='../../shared/hooks/useTransientMessage')return load('shared/hooks/useTransientMessage.ts');
     if(name.endsWith('.css'))return {};
     if(name.startsWith('.'))throw Error('Unmocked '+name);
     return require(name);
@@ -32,13 +33,12 @@ function harness(initial) {
   return {api,hook,mutations,set:next=>{response=next;},
     tick:async()=>{await act(async()=>{for(const fn of [...timers])fn();});},
     restore:()=>{globalThis.setInterval=oldSet;globalThis.clearInterval=oldClear;},
-    common:{'../../api':{api,apiErrorMessage:()=> 'No disponible'},
+    common:{'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String },'../../api':{api,apiErrorMessage:()=> 'No disponible'},
       '../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),
         Modal:({open,children})=>open===false?null:React.createElement('div',null,children)},
       '../contracts/useSignatureStatus':hook,
       '../customers/ContractDocuments':{ContractDocuments:()=>React.createElement('span',null,'PDF disponible')},
       '../coverage':{CoveragePicker:()=>null},
-      './ContractDateCalendar':{localDateValue:()=> '2026-11-10',ContractDateCalendar:()=>null}
     }};
 }
 const button=(tree,label)=>tree.root.findAllByType('button').find(node=>node.children.filter(child=>typeof child==='string').join('').trim()===label);
@@ -59,26 +59,84 @@ for(const mode of ['automatic','unknown','manual'])test('Prospectos: política r
     }
   }finally{if(tree)act(()=>tree.unmount());h.restore();}
 });
+test('Prospectos: muestra el código documental y ofrece motivos comerciales durante la firma', async () => {
+  const h = harness(state('manual'));
+  let tree;
+  try {
+    const { ProspectWorkflowPanel } = load('features/prospects/ProspectWorkflowPanel.tsx', h.common);
+    await act(async () => { tree = create(React.createElement(ProspectWorkflowPanel, {
+      prospect: { ...prospect, cotizaciones: [{ idCotizacion: 271, codigo: 'COT-ABC123', fechaEnvio: '2026-11-11' }] },
+      plans: [], permissions, onChanged() {},
+    })); });
+    assert.ok(tree.root.findAllByType('strong').some(node => node.children.join('') === 'COT-ABC123'));
+    await act(async () => button(tree, 'Marcar como perdido').props.onClick());
+    const reasons = tree.root.findByType('select');
+    assert.equal(reasons.props.value, 'Falta de respuesta');
+    assert.deepEqual(reasons.findAllByType('option').map(node => node.props.value),
+      ['Precio', 'Competencia', 'Falta de respuesta', 'Otro']);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /se anulará el contrato/);
+  } finally {
+    if (tree) act(() => tree.unmount());
+    h.restore();
+  }
+});
+test('Prospectos: el mismo ícono descarga el contrato nuevo y recupera un PDF antiguo faltante', async () => {
+  const digital = { idContratoDigital: 5, version: 1, fechaGeneracion: '2026-11-11' };
+  const pdf = new Blob(['%PDF-']);
+  const originalDocument = globalThis.document;
+  const downloads = [];
+  globalThis.document = { createElement: () => ({ click() { downloads.push(this.download); } }) };
+  try {
+    for (const hasDocument of [true, false]) {
+      const posts = [];
+      const api = {
+        get: async (path, options) => {
+          if (!path.endsWith('/download')) return { data: { documents: hasDocument ? [digital] : [] } };
+          assert.deepEqual(options, { params: { version: 1 }, responseType: 'blob' });
+          return { data: pdf };
+        },
+        post: async (...args) => { posts.push(args); return { data: digital }; },
+      };
+      const { ContractDocuments } = load('features/customers/ContractDocuments.tsx', {
+        '../contracts/ContractSignatureActions': { ContractSignatureActions: () => null },
+        '../../api': { api, apiErrorMessage: String },
+        '../../lib': { formatDateTime: String },
+        '../../shared/components': {},
+      });
+      let tree;
+      try {
+        await act(async () => { tree = create(React.createElement(ContractDocuments, { idContrato: 10, canGenerate: true, prospectList: true })); });
+        const icon = tree.root.findByType('button');
+        assert.equal(icon.props.className, 'prospect-document-download');
+        assert.match(icon.props['aria-label'], /^Descargar contrato/);
+        await act(async () => icon.props.onClick());
+        assert.deepEqual(posts, hasDocument ? [] : [['/contracts/10/digital-contract', undefined, { params: { initial: true } }]]);
+      } finally {
+        if (tree) act(() => tree.unmount());
+      }
+    }
+    assert.deepEqual(downloads, ['contrato-10-v1.pdf', 'contrato-10-v1.pdf']);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
 test('Clientes: cierra y limpia el formulario manual al cambiar a automático',async()=>{
   const h=harness(state('manual'));let tree;
   try{
     const mocks={...h.common,'../../lib':{formatDateOnly:()=> 'Fecha QA',formatWorkOrderValue:String},
       '../../shared/hooks/useTransientMessage':{useTransientMessage:()=>({message:'',showMessage(){},clearMessage(){}})},
       '../installations/G3InstallationStatus':{G3InstallationStatus:()=>null},
-      './CustomerServiceManagementModal':{CustomerServiceManagementModal:()=>null},
+      './CustomerServiceActions':{CustomerServiceActions:()=>null},
+      './HistoricalG3Closure':{HistoricalG3Closure:()=>null},
       './ContractDocuments':h.common['../customers/ContractDocuments'],
       './customer-services-state':load('features/customers/customer-services-state.ts')};
     const {CustomerContractWorkflow}=load('features/customers/CustomerContractWorkflow.tsx',mocks);
     const props={customer:{idCliente:1,nombreCompleto:'Cliente ficticio',contratos:prospect.contratos},
-      services:[],servicesLoad:{status:'empty',customerId:1,error:''},plans:[],permissions,onRefresh:async()=>{},onOpenObservations(){}};
+      services:[],servicesLoad:{status:'empty',customerId:1,error:''},plans:[],permissions,onRefresh:async()=>{}};
     await act(async()=>{tree=create(React.createElement(CustomerContractWorkflow,props));});
-    await act(async()=>button(tree,'Gestionar').props.onClick());
-    const [contractSection, installationSection] = tree.root.findAllByProps({className:'service-section-trigger'});
-    assert.equal(contractSection.props['aria-expanded'], false);
-    assert.equal(installationSection.props['aria-expanded'], false);
-    assert.equal(installationSection.props.disabled, true);
-    assert.equal(button(tree,'Registrar firma manual'),undefined);
-    await act(async()=>contractSection.props.onClick());
+    await act(async()=>tree.root.findAllByType('tr').find(node => node.props.className?.includes('customer-contract-row')).props.onClick());
+    assert.equal(tree.root.findByProps({ className: 'customer-contract-row-toggle' }).props['aria-expanded'],true);
+    assert.match(JSON.stringify(tree.toJSON()), /PDF disponible/);
     await act(async()=>button(tree,'Registrar firma manual').props.onClick());
     const textareas=tree.root.findAllByType('textarea');
     assert.ok(textareas.length>0);
@@ -96,14 +154,15 @@ test('Clientes: contratación pendiente y servicio activo conservan sus acciones
   const h = harness(state('automatic'));
   let tree;
   const InstallationStatus = () => React.createElement('p', null, 'Seguimiento de instalación');
-  const ServiceModal = () => React.createElement('button', null, 'Dar de baja');
+  const ServiceActions = () => React.createElement('button', null, 'Dar de baja');
   try {
     const { CustomerContractWorkflow } = load('features/customers/CustomerContractWorkflow.tsx', {
       ...h.common,
       '../../lib': { formatDateOnly: () => 'Fecha QA', formatWorkOrderValue: String },
       '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage() {}, clearMessage() {} }) },
       '../installations/G3InstallationStatus': { G3InstallationStatus: InstallationStatus },
-      './CustomerServiceManagementModal': { CustomerServiceManagementModal: ServiceModal },
+      './CustomerServiceActions': { CustomerServiceActions: ServiceActions },
+      './HistoricalG3Closure': { HistoricalG3Closure: () => null },
       './ContractDocuments': h.common['../customers/ContractDocuments'],
       './customer-services-state': load('features/customers/customer-services-state.ts'),
     });
@@ -111,19 +170,20 @@ test('Clientes: contratación pendiente y servicio activo conservan sus acciones
       customer: { idCliente: 1, nombreCompleto: 'Cliente ficticio', contratos: [{ idContrato: 10, estado: 'Firmado' }, { idContrato: 11, estado: 'Activo' }] },
       services: [{ idContrato: 10, idServicio: 20, estadoOperativo: 'Pendiente Instalacion' }, { idContrato: 11, idServicio: 21, estadoOperativo: 'Activo' }],
       servicesLoad: { status: 'success', customerId: 1, error: '' }, plans: [], permissions: { ...permissions, createInstallOrders: true },
-      onRefresh: async () => {}, onOpenObservations() {},
+      onRefresh: async () => {},
     })); });
-    const manage = index => tree.root.findAllByType('button').filter(node => node.props.children === 'Gestionar')[index];
+    const manage = index => tree.root.findAllByType('tr').filter(node => node.props.className?.includes('customer-contract-row'))[index];
     await act(async () => manage(0).props.onClick());
-    assert.match(JSON.stringify(tree.toJSON()), /La gestión del servicio estará disponible cuando se active/);
+    assert.equal(tree.root.findAllByProps({ className: 'customer-contract-detail-row' }).length, 1);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Gestionar contratación|Garantías del servicio|Ver facturas y pagos/);
     assert.equal(button(tree, 'Dar de baja'), undefined);
-    assert.equal(tree.root.findAllByType(InstallationStatus).length, 0);
-    await act(async () => tree.root.findAllByProps({ className: 'service-section-trigger' })[1].props.onClick());
     assert.equal(tree.root.findByType(InstallationStatus).props.contractId, 10);
     assert.equal(tree.root.findByType(InstallationStatus).props.canRequest, true);
-    await act(async () => button(tree, 'Cerrar').props.onClick());
+    assert.equal(tree.root.findByType(InstallationStatus).props.compact, true);
+    await act(async () => manage(0).props.onClick());
     await act(async () => manage(1).props.onClick());
-    assert.equal(tree.root.findByType(ServiceModal).props.service.idServicio, 21);
+    assert.equal(tree.root.findByType(ServiceActions).props.service.idServicio, 21);
+    assert.equal(tree.root.findByType(InstallationStatus).props.canRequest, false);
     assert.ok(button(tree, 'Dar de baja'));
     assert.deepEqual(h.mutations, []);
   } finally {
@@ -171,4 +231,65 @@ test('no ofrece enviar sin documento elegible ni repetir un documento anulado',a
     h.set(state('automatic',true,{sendAllowed:true,solicitud:{estado:'BORRADOR'}}));await h.tick();
     assert.ok(button(tree,'Enviar a firma'));
   }finally{if(tree)act(()=>tree.unmount());h.restore();}
+});
+
+test('motivo seguro automático se muestra sin ofrecer firma manual o envío bloqueado', async () => {
+  const reason = 'Existe deuda pendiente en esta empresa. Regulariza el saldo antes de enviar o confirmar la firma.';
+  const h = harness(state('automatic', true, { sendAllowed: false,
+    policy: { mode: 'automatic', available: true, manualAllowed: false, reason } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(JSON.stringify(tree.toJSON()).includes(reason));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.equal(button(tree, 'Registrar firma manual'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('error al consultar firma queda visible sin exponer respuesta interna ni habilitar acciones', async () => {
+  const h = harness(() => Promise.reject(Error('PRIVATE_STORAGE_ROW'))); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.match(JSON.stringify(tree.toJSON()), /No se pudo consultar el estado de firma/);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()), /PRIVATE_STORAGE_ROW/);
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    h.set(state('automatic', true, { sendAllowed: true }));
+    await act(async () => button(tree, 'Consultar estado de firma').props.onClick());
+    assert.ok(button(tree, 'Enviar a firma'));
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('modalidad manual con veto muestra el motivo sin inventar botón de firma electrónica', async () => {
+  const reason = 'Se requiere revisión financiera en esta empresa antes de enviar o confirmar la firma.';
+  const h = harness(state('manual', false, { policy: { mode: 'manual', available: false, manualAllowed: false, reason } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(JSON.stringify(tree.toJSON()).includes(reason));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('descarga histórica sigue disponible aunque ya no exista modalidad para nuevas firmas', async () => {
+  const h = harness(state('unknown', false, { signedDownloadAvailable: true,
+    solicitud: { idSolicitud: 'qa-historical-signature', estado: 'FIRMADA', correoEstado: 'ENVIADO' } })); let tree;
+  try {
+    const { ContractSignatureActions } = load('features/contracts/ContractSignatureActions.tsx', {
+      '../../api': h.common['../../api'], './useSignatureStatus': h.hook,
+    });
+    await act(async () => { tree = create(React.createElement(ContractSignatureActions, { idContrato: 10, canSend: true, revision: 0 })); });
+    assert.ok(button(tree, 'Descargar contrato con constancia'));
+    assert.equal(button(tree, 'Enviar a firma'), undefined);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
 });

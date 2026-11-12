@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, BarChart3, Boxes, ChevronDown, CircleCheckBig, Router, Ticket as TicketIcon, UserCog, Users, Wifi } from 'lucide-react';
+import { ArrowRight, BarChart3, Boxes, ChevronDown, CircleCheckBig, Pencil, Router, Ticket as TicketIcon, UserCog, Users, Wifi } from 'lucide-react';
 import {
   api,
   apiErrorMessage,
@@ -31,11 +31,11 @@ import {
   userFacingMessage,
 } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
-import { HistoryBox, Modal, MonitoringStatusView, StatusBadge, TablePagination } from '../../shared/components';
-import { ObservationsModal } from '../observations';
+import { HistoryBox, Modal, MonitoringStatusView, TablePagination } from '../../shared/components';
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
-import { CustomerRequestsPanel } from './CustomerRequestsPanel';
 import { CustomerPendingInstallations } from './CustomerPendingInstallations';
+import { CustomerProfileForm, type CustomerProfileFields } from './CustomerProfileForm';
+import { CustomerStatusBadge, customerStatusPresentation } from './CustomerStatusBadge';
 import {
   CustomerServicesRequestGate,
   type CustomerServicesLoadState,
@@ -115,29 +115,35 @@ function customerAddressLabel(customer: Customer) {
 }
 
 export function CustomersPanel({
+  active = true,
   customers,
   plans,
   scope,
   permissions,
   onManageInstallation,
   onChanged,
-  focusedCustomerId,
-  onFocusConsumed,
+  profileEditor,
+  onProfileUpdated,
   pendingInstallationsView,
   onPendingInstallationsViewConsumed,
 }: {
+  active?: boolean;
   customers: Customer[];
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
   onManageInstallation: (idProspecto: number) => void;
   onChanged: () => void;
-  focusedCustomerId?: number | null;
-  onFocusConsumed?: () => void;
+  profileEditor?: { admin: boolean; idEmpresa: number | null };
+  onProfileUpdated?: (profile: CustomerProfileFields) => void;
   pendingInstallationsView?: 'activation' | null;
   onPendingInstallationsViewConsumed?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileOverrides, setProfileOverrides] = useState<Record<number, CustomerProfileFields>>({});
   const [statusValue, setStatusValue] = useState('Activo');
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [status, setStatus] = useState('');
@@ -161,6 +167,14 @@ export function CustomersPanel({
     ipReferencia: '',
     observacionesTecnicas: '',
   });
+
+  useEffect(() => {
+    if (!profileSaved) return;
+
+    const timeout = globalThis.setTimeout(() => setProfileSaved(false), 3000);
+
+    return () => globalThis.clearTimeout(timeout);
+  }, [profileSaved]);
   const [requestForm, setRequestForm] = useState({
     tipoSolicitud: 'Cambio de plan',
     canalOrigen: 'CRM',
@@ -176,13 +190,6 @@ export function CustomersPanel({
     motivo: '',
     observaciones: '',
   });
-  const [observationTarget, setObservationTarget] = useState<{
-    tipoEntidad: string;
-    idEntidad: number;
-    label: string;
-    idCliente?: number;
-    idEmpresa?: number | null;
-  } | null>(null);
   const [managementOpen, setManagementOpen] = useState(false);
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
   const [serviceMonitoringStatus, setServiceMonitoringStatus] = useState<MonitoringStatus | null>(null);
@@ -219,7 +226,8 @@ export function CustomersPanel({
     : customerList;
   const pageSize = 20;
   const paginatedCustomers = visibleCustomers.slice((page - 1) * pageSize, page * pageSize);
-  const selectedCustomer = visibleCustomers.find((customer) => customer.idCliente === selectedId) ?? null;
+  const originalCustomer = customers.find(customer => customer.idCliente === selectedId);
+  const selectedCustomer = originalCustomer ? { ...originalCustomer, ...profileOverrides[originalCustomer.idCliente] } : undefined;
   const selectedService =
     services.find((service) => service.idServicio === selectedServiceId) ?? services[0] ?? null;
   const today = dateInputValue(new Date());
@@ -349,16 +357,9 @@ export function CustomersPanel({
 
   useEffect(() => { setPage(1); }, [customers.length, searchTerm, customerStatusFilter]);
 
-  useEffect(() => {
-    if (!focusedCustomerId) return;
-    const customer = customers.find(value => value.idCliente === focusedCustomerId);
-    setSearchTerm(''); setCustomerStatusFilter('');
-    if (customer) { setSelectedId(customer.idCliente); setManagementOpen(true); setStatus(''); }
-    else { setManagementOpen(false); setStatus('No se encontró el cliente solicitado en este alcance.'); }
-    onFocusConsumed?.();
-  }, [focusedCustomerId, customers, onFocusConsumed]);
-
   function openCustomerManagement(customerId: number) {
+    setEditingProfile(false);
+    setProfileSaved(false);
     setSelectedId(customerId);
     setManagementOpen(true);
     setStatus('');
@@ -522,7 +523,9 @@ export function CustomersPanel({
 
   async function loadServicesForCustomer(idCliente: number, silent = false, preferredServiceId?: number) {
     const token = servicesRequestGate.current.begin(idCliente);
-    setServicesLoad({ customerId: idCliente, status: 'loading', error: '' });
+    setServicesLoad(current => silent && current.customerId === idCliente && (current.status === 'success' || current.status === 'empty')
+      ? current
+      : { customerId: idCliente, status: 'loading', error: '' });
     try {
       const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { signal: token.signal });
       if (!servicesRequestGate.current.isCurrent(token)) return;
@@ -821,7 +824,7 @@ export function CustomersPanel({
     <section className="customers-module">
       <section className="customers-list-panel">
         <div className="section-heading customers-list-heading">
-          <h2>Clientes activos</h2>
+          <h2>Clientes</h2>
         </div>
         <div className="customer-search-row">
           <div className="customer-search">
@@ -846,10 +849,10 @@ export function CustomersPanel({
           />
         </div>
         <div className="customer-list-filters">
-          <span>Clientes activos: {visibleCustomers.length}</span>
+          <span>Clientes: {visibleCustomers.length}</span>
           <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
-            {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
+            {customerStatusOptions.map((state) => <option key={state} value={state}>{customerStatusPresentation(formatWorkOrderValue(state)).label}</option>)}
           </select>
         </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
@@ -873,7 +876,7 @@ export function CustomersPanel({
                   <td>{customer.rut ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
                   <td>{customerCompanyLabel(customer)}</td>
-                  <td><span className="customer-current-status">{formatWorkOrderValue(customer.estado)}</span></td>
+                  <td><span className="customer-current-status"><CustomerStatusBadge value={formatWorkOrderValue(customer.estado)} compact/></span></td>
                   <td>{customer.origenContacto ?? '-'}</td>
                   <td>{customerMainPlan(customer)}</td>
                   <td>{customer.telefono ?? customer.email ?? '-'}</td>
@@ -895,19 +898,32 @@ export function CustomersPanel({
         )}
       </section>
 
-      <Modal title="Gestionar cliente" open={managementOpen} onClose={() => setManagementOpen(false)}>
+      <Modal title="Gestionar cliente" open={active && managementOpen} onClose={() => { if (!savingProfile) setManagementOpen(false); }}>
         {selectedCustomer ? (
           <div className="customer-management-modal">
-            <section className="customer-profile-overview">
+            {editingProfile ? <CustomerProfileForm key={`profile-editor-${selectedCustomer.idCliente}`} customer={selectedCustomer}
+              companyLabel={customerCompanyLabel(selectedCustomer)} addressLabel={customerAddressLabel(selectedCustomer)}
+              contractsLabel={`${contractOptions.length} contrato(s) · ${services.length} servicio(s)`}
+              onCancel={() => setEditingProfile(false)} onBusy={setSavingProfile}
+              onSaved={profile => {
+                setProfileOverrides(current => ({ ...current, [selectedCustomer.idCliente]: profile }));
+                setEditingProfile(false); setSavingProfile(false); setProfileSaved(true);
+                onProfileUpdated?.(profile); onChanged();
+              }}/> : <section key={`profile-summary-${selectedCustomer.idCliente}`} className="customer-profile-overview">
               <header className="customer-profile-header">
                 <span className="customer-profile-avatar" aria-hidden="true">
                   <Users size={22} strokeWidth={1.8} />
                 </span>
                 <div>
-                  <h3>{selectedCustomer.nombreCompleto}</h3>
+                  <h3 className="customer-profile-name">{selectedCustomer.nombreCompleto}
+                    {permissions.manageContracts && profileEditor && (profileEditor.admin || (profileEditor.idEmpresa !== null && profileEditor.idEmpresa === selectedCustomer.idEmpresa)) &&
+                      <button type="button" className="secondary compact customer-profile-edit-button" aria-label="Editar datos del cliente" aria-expanded={editingProfile} disabled={savingProfile} onClick={() => { setEditingProfile(value => !value); setProfileSaved(false); }}>
+                        <Pencil size={15} aria-hidden="true"/>
+                      </button>}
+                  </h3>
                   <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
                 </div>
-                <StatusBadge value={selectedCustomer.estado} />
+                <div className="customer-profile-status">{profileSaved && <span role="status">Datos guardados</span>}<CustomerStatusBadge value={selectedCustomer.estado} /></div>
               </header>
               <dl className="customer-profile-data">
                 <div>
@@ -941,10 +957,10 @@ export function CustomersPanel({
                   }</dd>
                 </div>
               </dl>
-            </section>
+            </section>}
 
             <CustomerContractWorkflow
-              key={selectedCustomer.idCliente}
+              key={`contract-workflow-${selectedCustomer.idCliente}`}
               customer={selectedCustomer}
               services={services}
               servicesLoad={servicesLoad.customerId === selectedCustomer.idCliente
@@ -956,24 +972,12 @@ export function CustomersPanel({
                 await loadServicesForCustomer(selectedCustomer.idCliente, true, preferredServiceId);
                 onChanged();
               }}
-              onOpenObservations={setObservationTarget}
             />
-            {permissions.manageCustomerRequests && <CustomerRequestsPanel key={`requests-${selectedCustomer.idCliente}`} customer={selectedCustomer} services={services} servicesStatus={servicesLoad.customerId === selectedCustomer.idCliente ? servicesLoad.status : 'loading'} onChanged={onChanged} />}
-            {permissions.manageObservations && <button type="button" className="secondary compact" onClick={() => setObservationTarget({ tipoEntidad: 'Cliente', idEntidad: selectedCustomer.idCliente, label: selectedCustomer.nombreCompleto })}>Observaciones del cliente</button>}
           </div>
         ) : (
           <p className="inline-status">Selecciona un cliente para gestionarlo.</p>
         )}
       </Modal>
-      <ObservationsModal
-        target={observationTarget}
-        onClose={() => setObservationTarget(null)}
-        onSaved={() => {
-          if (selectedCustomer) {
-            void loadHistory();
-          }
-        }}
-      />
     </section>
   );
 }

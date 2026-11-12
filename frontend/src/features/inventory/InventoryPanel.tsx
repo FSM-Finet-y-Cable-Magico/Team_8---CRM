@@ -132,7 +132,6 @@ export function InventoryPanel({ companyId, companyName }: { companyId: number; 
     <section className="inventory-consultation" aria-label="Consulta de inventario">
       <header className="inventory-consultation-heading">
         <h1>Inventario</h1>
-        <p>El catálogo de tipos de equipo no acredita asignaciones a servicios. Las asignaciones oficiales se consultan en Gestionar servicio.</p>
       </header>
 
       <div className="inventory-catalog-toolbar">

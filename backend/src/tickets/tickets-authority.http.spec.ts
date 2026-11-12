@@ -41,6 +41,7 @@ function persistence(customerStatus = 'Moroso') {
       if ('in' in condition) return condition.in.includes(row[key]);
       if ('notIn' in condition) return !condition.notIn.includes(row[key]);
       if ('not' in condition) return row[key] !== condition.not;
+      if ('some' in condition) return (row[key] ?? []).some((child: any) => matches(child, condition.some));
     }
     return row[key] === condition;
   });
@@ -398,5 +399,170 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
       'CLASIFICAR_TICKET', 'ASIGNAR_PRIORIDAD_TICKET', 'REGISTRAR_OBSERVACION_TECNICA_TICKET',
     ]);
     assertNoTechnicalWrites();
+  });
+
+  describe('P0-B: datos obligatorios, origen, atomicidad, catálogo global real y tickets de otros grupos', () => {
+    const attentionNames = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
+      'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
+    const attentionSla = [24, 48, 48, 48, 24, 24, 48];
+    const technicalNames = ['Sintonización de TV', 'Internet lento', 'Colector defectuoso', 'Falla de planta externa',
+      'IPTV pirata', 'Cliente ausente', 'Otro'];
+    // Forma observada del catálogo global (IDs 1-7 TECNICA, 8-14 ATENCION, 15-16 INTERNA). El código
+    // de producción no los conoce: aquí son solo datos y se desplazan para probar que no se fijan.
+    const globalCatalog = (offset = 0) => [
+      ...technicalNames.map((nombre, i) => ({ idCategoria: offset + 1 + i, nombre, tipo: 'TECNICA', slaHoras: 8 })),
+      ...attentionNames.map((nombre, i) => ({ idCategoria: offset + 8 + i, nombre, tipo: 'ATENCION', slaHoras: attentionSla[i] })),
+      { idCategoria: offset + 15, nombre: 'CAMBIO_CREDENCIALES_WIFI', tipo: 'INTERNA', slaHoras: null },
+      { idCategoria: offset + 16, nombre: 'Asistente virtual', tipo: 'INTERNA', slaHoras: null },
+    ];
+    const prepare = () => {
+      Object.assign(store.state.cliente[0], { rut: '11111111-1', contratos: [], servicios: [] });
+      store.state.categoriaFalla.push({ idCategoria: 914, nombre: 'CONSULTA GENERAL', slaHoras: 12 });
+    };
+    const attentionBody = () => ({ rut: '11111111-1', idCategoria: 914, prioridad: 'Media', descripcion: 'Cliente reporta intermitencia' });
+    const mutations = [
+      ['categoria', 'patch', 'tickets/1/category', { idCategoria: 2 }],
+      ['prioridad', 'patch', 'tickets/1/priority', { prioridad: 'Alta' }],
+      ['estado', 'patch', 'tickets/1/status', { estado: 'Escalado', comentario: 'Motivo QA' }],
+      ['nota', 'post', 'tickets/1/technical-notes', { observacion: 'Nota QA' }],
+    ] as const;
+
+    it.each([[''], ['   '], ['corta'], ['   corta   '], ['123456789']])
+    ('alta exige descripción suficiente en el servidor, no solo en el formulario: %j', async descripcion => {
+      await start();
+      prepare();
+      const { body } = await send('post', 'tickets', 1, { ...attentionBody(), descripcion }).expect(400);
+      expect(JSON.stringify(body.message)).toMatch(/descripci[oó]n/i);
+      expect(store.writes).toEqual([]);
+    });
+
+    it('alta guarda la descripción sin espacios sobrantes', async () => {
+      await start();
+      prepare();
+      const created = await send('post', 'tickets', 1, { ...attentionBody(), descripcion: '  Cliente reporta intermitencia  ' }).expect(201);
+      expect(created.body.descripcion).toBe('Cliente reporta intermitencia');
+    });
+
+    it.each(['PORTAL', 'ASISTENTE', 'BOT', 'WHATSAPP', 'crm', ''])
+    ('alta rechaza atribuirse el origen %j: el CRM solo puede declarar su propio canal', async origen => {
+      await start();
+      prepare();
+      await send('post', 'tickets', 1, { ...attentionBody(), origen }).expect(400);
+      expect(store.writes).toEqual([]);
+    });
+
+    it('alta registra origen CRM con o sin el campo', async () => {
+      await start();
+      prepare();
+      const implicit = await send('post', 'tickets', 1, attentionBody()).expect(201);
+      const explicit = await send('post', 'tickets', 1, { ...attentionBody(), origen: 'CRM' }).expect(201);
+      expect([implicit.body.origen, explicit.body.origen]).toEqual(['CRM', 'CRM']);
+    });
+
+    it.each([['alta', 'post', 'tickets', undefined] as const, ...mutations])
+    ('%s: si la auditoría no puede persistirse no queda escritura parcial ni respuesta de éxito', async (_name, method, path, payload) => {
+      await start();
+      prepare();
+      const before = clone(store.state);
+      store.failNextAudit();
+      await send(method, path, 1, payload ?? attentionBody()).expect(500);
+      expect(store.state).toEqual(before);
+      assertNoTechnicalWrites();
+    });
+
+    it.each(mutations)('%s: éxito registra exactamente un cambio y su auditoría en la misma operación', async (_name, method, path, payload) => {
+      await start();
+      prepare();
+      await send(method, path, 1, payload).expect(method === 'post' ? 201 : 200);
+      expect(store.writes).toEqual(['ticket.update', 'logAuditoria.create']);
+      expect(store.state.logAuditoria).toHaveLength(1);
+    });
+
+    it.each([0, 700])('catálogo global real (IDs desplazados +%i): siete altas comerciales por su ID real y ninguna técnica ni interna', async offset => {
+      await start();
+      prepare();
+      store.state.categoriaFalla = globalCatalog(offset);
+      const catalogBefore = clone(store.state.categoriaFalla);
+      const { body } = await send('get', 'tickets/categories', 1).expect(200);
+      expect(body.filter((row: any) => row.nombreAtencion).map((row: any) => [row.idCategoria, row.nombreAtencion]))
+        .toEqual(attentionNames.map((nombre, i) => [offset + 8 + i, nombre]));
+      expect(body).toHaveLength(16);
+      for (let i = 0; i < attentionNames.length; i++) {
+        const created = await send('post', 'tickets', 1, { ...attentionBody(), idCategoria: offset + 8 + i }).expect(201);
+        expect(created.body.idCategoria).toBe(offset + 8 + i);
+      }
+      const forbidden = [...Array(7).keys()].map(i => offset + 1 + i).concat([offset + 15, offset + 16]);
+      for (const idCategoria of forbidden) await send('post', 'tickets', 1, { ...attentionBody(), idCategoria }).expect(400);
+      expect(store.state.categoriaFalla).toEqual(catalogBefore);
+      expect(store.writes.filter(name => name === 'ticket.create')).toHaveLength(7);
+    });
+
+    it.each(['PORTAL', 'ASISTENTE'])('ticket creado desde G2 (origen %s): se lee legible y no se edita desde G8', async origen => {
+      await start();
+      Object.assign(store.state.ticket[0], { estado: 'ABIERTO', prioridad: 'MEDIA', origen, idUsuarioAsignado: null,
+        descripcion: 'Reporte creado desde el portal de clientes' });
+      const before = clone(store.state);
+      const { body } = await send('get', 'tickets', 1).expect(200);
+      expect(body[0]).toMatchObject({ estado: 'ABIERTO', estadoPresentacion: 'Abierto', vocabularioEstado: 'G3',
+        soloLecturaTecnica: true, prioridad: 'MEDIA', origen, idEmpresa: 1 });
+      for (const [, method, path, payload] of mutations) {
+        const response = await send(method, path, 1, payload).expect(409);
+        expect(response.body.code).toBe('G3_TICKET_READ_ONLY');
+      }
+      expect(store.state).toEqual(before);
+      expect(store.writes).toEqual([]);
+    });
+
+    it('registros históricos incompletos o con valores ajenos siguen consultables, sin escribir ni fallar', async () => {
+      await start();
+      const base = { idEmpresa: 1, idServicio: null, idUsuarioAsignado: null, fechaCierre: null, origen: null };
+      store.state.ticket = [
+        { ...base, idTicket: 21, idCliente: null, idCategoria: 999, prioridad: 'Media', estado: 'LEGADO',
+          descripcion: null, codigoSeguimiento: null, fechaCreacion: null },
+        { ...base, idTicket: 22, idCliente: 100, idCategoria: 1, prioridad: '', estado: 'Abierto',
+          descripcion: '', codigoSeguimiento: 'TK-HIST', fechaCreacion: '2026-01-01T00:00:00.000Z' },
+        { ...base, idEmpresa: null, idTicket: 23, idCliente: null, idCategoria: 1, prioridad: 'Alta', estado: 'Abierto',
+          descripcion: null, codigoSeguimiento: null, fechaCreacion: null },
+      ];
+      const before = clone(store.state);
+      const support = await send('get', 'tickets', 1).expect(200);
+      // 21 tiene prioridad Media; 22 trae una prioridad vacía (dato inyectado) y va al final.
+      expect(support.body.map((row: any) => row.idTicket)).toEqual([21, 22]);
+      expect(support.body.find((row: any) => row.idTicket === 21)).toMatchObject({ cliente: null, categoria: null,
+        estadoPresentacion: 'LEGADO', vocabularioEstado: 'DESCONOCIDO', soloLecturaTecnica: true, observacionesTecnicas: [] });
+      const admin = await send('get', 'tickets', 1, undefined, 'Administrador').expect(200);
+      expect(admin.body.map((row: any) => row.idTicket).sort()).toEqual([21, 22, 23]);
+      await send('patch', 'tickets/21/priority', 1, { prioridad: 'Alta' }).expect(409);
+      expect(store.state).toEqual(before);
+      expect(store.writes).toEqual([]);
+    });
+
+    it('la lista ordena por urgencia (Crítica, Alta, Media, Baja) sea cual sea el vocabulario y pone al final lo desconocido', async () => {
+      await start();
+      const base = { idEmpresa: 1, idCliente: 100, idServicio: null, idCategoria: 1, estado: 'Abierto', descripcion: 'QA', fechaCierre: null };
+      store.state.ticket = ['Baja', 'Media', 'Alta', 'CRITICA', 'MEDIA', 'ALTA', 'Rara', 'Baja'].map((prioridad, i) => ({
+        ...base, idTicket: 11 + i, prioridad, codigoSeguimiento: `TK-O${i}`, fechaCreacion: new Date(Date.UTC(2026, 0, 1 + i)) }));
+      const { body } = await send('get', 'tickets', 1).expect(200);
+      expect(body.map((row: any) => row.idTicket)).toEqual([14, 16, 13, 15, 12, 18, 11, 17]);
+    });
+
+    it('empresa 2 solo atribuye a su empresa: servicio ajeno rechazado, ticket general y de servicio propios, sin verse desde empresa 1', async () => {
+      await start();
+      prepare();
+      Object.assign(store.state.cliente[0], { contratos: [{ idEmpresa: 1 }, { idEmpresa: 2 }], servicios: [{ idEmpresa: 1 }, { idEmpresa: 2 }] });
+      // El arnés no resuelve `include`: cada servicio lleva su contrato como lo entregaría Prisma.
+      for (const row of store.state.servicioContratado) {
+        Object.assign(row, { idContrato: row.idEmpresa * 10, contrato: { idContrato: row.idEmpresa * 10, idCliente: 100, idEmpresa: row.idEmpresa } });
+      }
+      const foreign = await send('post', 'tickets', 2, { ...attentionBody(), idServicio: 1 }).expect(400);
+      expect(foreign.body.message).toMatch(/no pertenece a tu empresa/);
+      expect(store.writes).toEqual([]);
+      const own = await send('post', 'tickets', 2, { ...attentionBody(), idServicio: 2 }).expect(201);
+      const general = await send('post', 'tickets', 2, attentionBody()).expect(201);
+      expect([own.body, general.body]).toEqual([expect.objectContaining({ idEmpresa: 2, idServicio: 2 }), expect.objectContaining({ idEmpresa: 2 })]);
+      const company1 = await send('get', 'tickets', 1).expect(200);
+      expect(company1.body.every((row: any) => row.idEmpresa === 1)).toBe(true);
+      expect(company1.body).toHaveLength(1);
+    });
   });
 });

@@ -29,7 +29,7 @@ export class AuthService {
       },
     });
 
-    if (!user || user.activo === false) {
+    if (!user || user.activo === false || user.fechaEliminacion != null) {
       throw new UnauthorizedException('Credenciales invalidas');
     }
 

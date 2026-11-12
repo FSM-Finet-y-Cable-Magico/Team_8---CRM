@@ -80,11 +80,14 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
     cliente: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     servicioContratado: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([]) },
+    cuotaConvenioPago: { findUnique: jest.fn(), update: jest.fn() },
+    convenioPago: { findUnique: jest.fn() },
+    operacionImputacionCuota: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
   };
   const prisma = {
     $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const audit = { record: jest.fn().mockResolvedValue({ idLog: 1n }) };
   const service = new BillingService(
     prisma as unknown as PrismaService,
     audit as unknown as AuditService,
@@ -92,6 +95,70 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
   );
   return { service, prisma, tx, audit };
 }
+
+describe('Pago manual de cuotas', () => {
+  function setup() {
+    const ctx = harness(invoice());
+    ctx.tx.cuotaConvenioPago.findUnique.mockResolvedValue({idCuota:81,idConvenio:18,numero:1,monto:new Prisma.Decimal(10000),estado:'PENDIENTE',fechaPago:null,
+      convenio:{idFactura:80,idContrato:30,idCliente:10,idEmpresa:1,idServicio:null,estado:'APROBADO'}});
+    return ctx;
+  }
+  it('confirma pago, imputación y estado de cuota en una sola transacción', async () => {
+    const {service,tx,prisma}=setup();
+    await service.registerPayment({...paymentDto,idCuota:81,monto:10000},commercial);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.pago.create).toHaveBeenCalledTimes(1);
+    expect(tx.operacionImputacionCuota.create).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({idPago:101,idConvenio:18,idFactura:80,detalles:{create:{idCuota:81,monto:new Prisma.Decimal(10000)}}})}));
+    expect(tx.cuotaConvenioPago.update).toHaveBeenCalledWith({where:{idCuota:81},data:{estado:'PAGADA',fechaPago:expect.any(Date)}});
+    expect(tx.factura.update).not.toHaveBeenCalled();
+  });
+  it('un pago completo de convenio liquida dos cuotas sin duplicar dinero',async()=>{
+    const {service,tx}=setup();
+    const agreement={idConvenio:18,idFactura:80,idContrato:30,idCliente:10,idEmpresa:1,idServicio:null,estado:'APROBADO',cuotas:[{idCuota:81},{idCuota:82}]};
+    tx.convenioPago.findUnique.mockResolvedValue(agreement);
+    tx.cuotaConvenioPago.findUnique.mockImplementation(async({where})=>({idCuota:where.idCuota,idConvenio:18,numero:where.idCuota-80,monto:new Prisma.Decimal(10000),estado:'PENDIENTE',fechaPago:null,convenio:agreement}));
+    await service.registerPayment({...paymentDto,idConvenio:18},commercial);
+    expect(tx.pago.create).toHaveBeenCalledTimes(1);
+    expect(tx.operacionImputacionCuota.create).toHaveBeenCalledTimes(2);
+    const lines=tx.operacionImputacionCuota.create.mock.calls.map(([request])=>request.data);
+    expect(new Set(lines.map(line=>line.idPago))).toEqual(new Set([101]));
+    expect(new Set(lines.map(line=>line.clave)).size).toBe(2);
+    expect(lines.reduce((sum,line)=>sum.plus(line.detalles.create.monto),new Prisma.Decimal(0)).toString()).toBe('20000');
+    expect(tx.cuotaConvenioPago.update).toHaveBeenCalledTimes(2);
+    expect(tx.factura.update).toHaveBeenCalledWith(expect.objectContaining({data:{estado:'Pagada'}}));
+  });
+  it('una selección ambigua de cuota y convenio nunca registra dinero',async()=>{
+    const {service,tx}=setup();
+    await expect(service.registerPayment({...paymentDto,idConvenio:18,idCuota:81},commercial)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.pago.create).not.toHaveBeenCalled();
+  });
+  it('conserva el saldo parcial y reconoce las reversas previas de la cuota', async () => {
+    const {service,tx}=setup();
+    tx.operacionImputacionCuota.findMany.mockResolvedValue([
+      {tipo:'APLICAR',detalles:[{idCuota:81,monto:new Prisma.Decimal(6000)}]},
+      {tipo:'REVERSAR',detalles:[{idCuota:81,monto:new Prisma.Decimal(2000)}]},
+    ] as never);
+    await service.registerPayment({...paymentDto,idCuota:81,monto:6000},commercial);
+    expect(tx.cuotaConvenioPago.update).toHaveBeenCalledWith({where:{idCuota:81},data:{estado:'PAGADA',fechaPago:expect.any(Date)}});
+  });
+  it.each([{idEmpresa:2},{idCliente:99},{idFactura:99},{idContrato:99},{estado:'PENDIENTE'}])('rechaza una cuota ajena o no vigente antes de guardar', async changes => {
+    const {service,tx}=setup();
+    const quota=await tx.cuotaConvenioPago.findUnique();
+    tx.cuotaConvenioPago.findUnique.mockResolvedValue({...quota,convenio:{...quota.convenio,...changes}});
+    await expect(service.registerPayment({...paymentDto,idCuota:81,monto:10000},commercial)).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.pago.create).not.toHaveBeenCalled();
+  });
+  it('rechaza sobrepago de cuota aunque la factura tenga saldo suficiente', async () => {
+    const {service,tx}=setup();
+    await expect(service.registerPayment({...paymentDto,idCuota:81,monto:10001},commercial)).rejects.toThrow('saldo pendiente de la cuota');
+    expect(tx.pago.create).not.toHaveBeenCalled();
+  });
+  it('falla la transacción si no se confirma la auditoría de la cuota',async()=>{
+    const {service,tx,audit}=setup();audit.record.mockResolvedValue(undefined as never);
+    await expect(service.registerPayment({...paymentDto,idCuota:81,monto:10000},commercial)).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.operacionImputacionCuota.create).not.toHaveBeenCalled();
+  });
+});
 
 describe('P0-04 reactivacion por evidencia G3 persistida', () => {
   const closure = (overrides: Record<string, unknown> = {}) => ({

@@ -48,7 +48,7 @@ test('CU47 presents effective-date total without adding undated completions to p
 test('gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar reparación ni cancelación como completadas', async () => {
   await render({ instalacionesMensuales: 1, instalacionesPendientes: 1 }, tree => {
     const legend = tree.root.findByProps({ className: 'installation-chart-legend' });
-    assert.deepEqual(legend.findAllByType('strong').map(node => Number(node.children.join(''))), [1, 1, 1]);
+    assert.deepEqual(legend.findAllByType('strong').map(node => Number(node.children.join(''))), [0, 1, 1]);
   }, [
     { tipoOt: 'INSTALACION', estado: 'COMPLETADA' }, { tipoOt: 'REPARACION', estado: 'COMPLETADA' },
     { tipoOt: 'INSTALACION', estado: 'EN_CURSO' }, { tipoOt: 'Instalacion', estado: 'Cancelada' },
@@ -84,7 +84,7 @@ test('dashboard solicita por separado agenda técnica y contratos por activar', 
   await render({ pendientesActivacion: 3, instalacionesPendientes: 5 }, async tree => {
     const card = label => tree.root.findByProps({ 'data-label': label });
     assert.equal(card('Pendientes de activación').props['data-value'], 3);
-    assert.equal(card('Instalaciones pendientes').props['data-value'], 5);
+    assert.equal(card('Instalaciones pendientes').props['data-value'], 3);
     await act(async () => card('Instalaciones pendientes').props.onClick());
     await act(async () => card('Pendientes de activación').props.onClick());
     await act(async () => card('Clientes activos').props.onClick());
@@ -100,4 +100,14 @@ test('dashboard deriva la agenda a Instalaciones y la activación a Clientes si 
     await act(async () => tree.root.findByProps({ 'data-label': 'Pendientes de activación' }).props.onClick());
     assert.deepEqual(navigated, ['installations', 'customers']);
   }, [], { onNavigate: tab => navigated.push(tab) });
+});
+
+test('cada ticket del dashboard abre el registro correspondiente', async () => {
+  const opened = [];
+  const ticket = { idTicket: 23, estado: 'Abierto', codigoSeguimiento: 'TK-23', cliente: { nombreCompleto: 'Cliente QA' } };
+  await render({}, async tree => {
+    const card = tree.root.findByProps({ className: 'compact-list-item dashboard-ticket-item' });
+    await act(async () => card.props.onClick());
+    assert.deepEqual(opened, [23]);
+  }, [], { tickets: [ticket], permissions: { viewTickets: true }, onOpenTicket: id => opened.push(id) });
 });

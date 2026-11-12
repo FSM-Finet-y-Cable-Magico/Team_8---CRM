@@ -7,6 +7,7 @@
   --install-soft: #edf5f0;
   display: grid;
   gap: 30px;
+  width: 100%;
   padding: 4px 2px 24px;
   color: var(--install-ink);
 }
@@ -57,7 +58,7 @@
 .installations-redesign .installation-search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--install-muted); pointer-events: none; }
 .installations-redesign .installation-search > input { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--install-line); border-radius: 8px; padding: 8px 12px 8px 37px; color: var(--install-ink); background: var(--install-surface); box-shadow: none; font-size: .78rem; }
 .installations-redesign .installation-search > input::placeholder { color: var(--install-muted); opacity: 1; }
-.installations-redesign .installation-table-wrap { margin: 0; }
+.installations-redesign .installation-table-wrap { width: 100%; margin: 0; }
 .installations-redesign .installation-table { width: 100%; min-width: 740px; border-collapse: collapse; background: transparent; font-size: .79rem; }
 .installations-redesign .installation-coordination-table { min-width: 600px; }
 .installations-redesign .installation-table th { padding: 12px 14px; border-bottom: 1px solid var(--install-line); color: var(--install-muted); background: transparent; font-size: .67rem; font-weight: 600; text-align: left; letter-spacing: .025em; }

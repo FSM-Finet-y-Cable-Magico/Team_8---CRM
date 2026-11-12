@@ -3,14 +3,12 @@ import type { StatCardTone } from './DashboardStatCard';
 
 export function QuickActionCard<TTab extends string>({
   label,
-  description,
   icon: Icon,
   tone,
   tab,
   onNavigate,
 }: {
   label: string;
-  description: string;
   icon: LucideIcon;
   tone: StatCardTone;
   tab: TTab;
@@ -23,7 +21,6 @@ export function QuickActionCard<TTab extends string>({
       </span>
       <span className="quick-action-copy">
         <strong>{label}</strong>
-        <small>{description}</small>
       </span>
       <ArrowRight className="quick-action-arrow" size={17} strokeWidth={1.8} aria-hidden="true" />
     </button>
