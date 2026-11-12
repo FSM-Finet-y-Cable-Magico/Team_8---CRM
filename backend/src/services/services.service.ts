@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { APPROVED_EXTENSIONS } from '../billing/invoice-balance';
 import { AuthUser } from '../common/auth.types';
 import { companyResponse } from '../common/company-response';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
+import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt } from '../common/overdue-debt';
+import { ensureReturningProspect } from '../common/returning-customer';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -360,6 +363,21 @@ export class ServicesService {
         estado: { notIn: ['CANCELADA', 'CERRADA'] },
       } });
       if (withdrawal) throw new BadRequestException('El retiro por morosidad requiere cierre tecnico autorizado; la solicitud no confirma la baja');
+      // Esta ruta no puede ser el atajo de una baja por morosidad: un servicio suspendido con deuda exigible
+      // vencida (sin convenio activo) solo sale por la solicitud de retiro y su cierre técnico confirmado.
+      // Otros motivos legítimos de baja (servicio activo, suspensión sin deuda vencida) siguen igual.
+      if (fresh.estadoOperativo === 'Suspendido' && fresh.idContrato) {
+        const invoices = await tx.factura.findMany({
+          where: { idContrato: fresh.idContrato, contrato: { idEmpresa: fresh.idEmpresa, idCliente: fresh.idCliente } },
+          include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } } } },
+        });
+        if (hasOverdueCollectibleDebt(invoices)) {
+          throw new BadRequestException({
+            code: 'MOROSITY_WITHDRAWAL_REQUIRED',
+            message: 'Un servicio suspendido por morosidad no puede darse de baja directamente. Inicia la baja y el retiro desde el Libro de Control; el servicio pasa a Baja cuando el retiro técnico está confirmado.',
+          });
+        }
+      }
       const deactivatedService = await tx.servicioContratado.update({
         where: { idServicio },
         data: {
@@ -402,6 +420,9 @@ export class ServicesService {
         idContrato: deactivatedService.idContrato,
       },
     }, tx);
+      // Si era la última relación operativa del cliente en esta empresa, vuelve a la gestión comercial como
+      // excliente (mismo cliente, sin duplicar identidad). Un fallo revierte también la baja.
+      await ensureReturningProspect(tx, this.auditService, { idCliente: deactivatedService.idCliente, idEmpresa: fresh.idEmpresa, idUsuario: currentUser.idUsuario });
       return deactivatedService;
     });
 
