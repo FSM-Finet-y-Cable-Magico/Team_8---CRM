@@ -56,7 +56,7 @@ export function ControlBookTaxDocument({ invoice: focus, scope, onClose }: {
     {loading && <p role="status">Consultando documento…</p>}
     {error && <p role="alert" className="control-feedback error">{error}</p>}
     {invoice && <>
-      <div className="control-modal-customer"><strong>{invoice.contrato?.cliente?.nombreCompleto}</strong><span>{quota ? `Cuota ${quota.numero} — Convenio ${focus.idConvenio}` : `Pagada el ${dateLabel(payments.at(-1)?.fechaPago)}`} — {currency.format(Number(quota?.imputado ?? invoice.pagado))}</span></div>
+      <div className="control-modal-customer"><strong>{invoice.contrato?.cliente?.nombreCompleto}</strong><span>{quota ? `Cuota ${quota.numero} — Convenio ${focus.idConvenio}` : `Pagada el ${dateLabel(payments[payments.length - 1]?.fechaPago)}`} — {currency.format(Number(quota?.imputado ?? invoice.pagado))}</span></div>
       {payments.length ? payments.map(payment => <PaymentDocument key={payment.idPago} id={payment.idPago}/>) : <div className="control-tax-document-file"><FileClock size={24} aria-hidden="true"/><div><strong>Documento tributario pendiente</strong><p>Se mostrará aquí cuando esté disponible.</p></div></div>}
     </>}
     <footer className="control-form-footer"><button type="button" className="control-outline" onClick={onClose}>Cerrar</button></footer>
