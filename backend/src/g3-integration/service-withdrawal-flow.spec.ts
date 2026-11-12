@@ -14,7 +14,7 @@ const otherCompany = { ...comercial, idUsuario: 6, idEmpresa: 2 };
 type Row = Record<string, any>;
 type State = {
   services: Row[]; contracts: Row[]; customers: Row[]; requests: Row[]; tickets: Row[]; invoices: Row[]; notices: Row[];
-  links: WithdrawalTicketLink[]; receipts: WithdrawalG3Receipt[]; units: Row[]; prospects: Row[]; audits: Row[];
+  links: WithdrawalTicketLink[]; receipts: WithdrawalG3Receipt[]; receptions: Array<{ idSolicitudRetiro: number; numeroSerie: string; idOtG3: number; estadoG1: string }>; units: Row[]; prospects: Row[]; audits: Row[];
   catalog: Row[]; capabilities: WithdrawalCapabilities;
 };
 
@@ -31,7 +31,7 @@ function setup(over: { catalogOffset?: number } = {}) {
     services: [{ idServicio: 50, idCliente: 30, idEmpresa: 1, idContrato: 20, tipoServicio: 'Internet', estadoOperativo: 'Suspendido' }],
     contracts: [{ idContrato: 20, idCliente: 30, idEmpresa: 1, estado: 'Suspendido', plan: { nombreComercial: 'Fibra 300 Hogar' } }],
     customers: [{ idCliente: 30, idEmpresa: 1, rut: '12345678-5', nombreCompleto: 'Cliente Moroso', email: null, telefono: '+56900000000', estado: 'Suspendido' }],
-    requests: [], tickets: [], links: [], receipts: [], prospects: [], audits: [],
+    requests: [], tickets: [], links: [], receipts: [], receptions: [], prospects: [], audits: [],
     invoices: [{ idFactura: 70, idContrato: 20, monto: 19990, estado: 'Vencida', fechaLimitePago: new Date('2020-01-10'), pagos: [], prorrogasPago: [], conveniosPago: [] }],
     notices: [{ idEvento: 7, idEmpresa: 1, idCliente: 30, idServicio: 50, idContrato: 20, tipo: 'AVISO_PREVIO_RETIRO', fecha: new Date('2026-11-01T12:00:00Z') }],
     units: [{ numeroSerie: 'ONT-001', estado: 'Instalado en cliente', idServicio: 50 }],
@@ -105,6 +105,7 @@ function setup(over: { catalogOffset?: number } = {}) {
       const row = { ...link, createdAt: new Date() }; state.links.push(row); return structuredClone(row);
     }),
     findReceipt: jest.fn(async (_tx, id) => structuredClone(state.receipts.find(r => r.idSolicitudRetiro === id) ?? null)),
+    findReceptions: jest.fn(async (_tx, id) => structuredClone(state.receptions.filter(r => r.idSolicitudRetiro === id).map(({ idSolicitudRetiro: _id, ...rest }) => rest))),
     markReceiptApplied: jest.fn(async (_tx, id) => { const r = state.receipts.find(x => x.idSolicitudRetiro === id); if (r && !r.aplicadoEn) r.aplicadoEn = new Date(); }),
   };
   const tickets = new TicketsService(prisma as never, audit as never);
@@ -303,6 +304,7 @@ describe('Baja efectiva: solo con evidencia técnica, y nunca borra deuda', () =
     const started = await c.withdrawals.initiate(c.dto, comercial);
     const id = started.solicitud.idSolicitudRetiro;
     if (over) c.state.receipts.push(receipt({ idSolicitudRetiro: id, ...over }));
+    if (over) c.state.receptions.push({ idSolicitudRetiro: id, numeroSerie: 'ONT-001', idOtG3: 900, estadoG1: 'En revisión' });
     c.state.units[0].estado = 'En revisión';
     return { c, id };
   }
@@ -346,16 +348,39 @@ describe('Baja efectiva: solo con evidencia técnica, y nunca borra deuda', () =
     expect(c.state.services[0].estadoOperativo).toBe('Suspendido'); expect(c.state.requests[0].estado).toBe('REGISTRADA');
   });
 
-  it('sin recibo de evidencia (OT nunca aceptada) bloquea', async () => {
+  it('sin recibo de evidencia (OT nunca aceptada) y con deuda vigente bloquea', async () => {
     const { c, id } = await initiated(null);
     await expect(c.withdrawals.finalize(id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'SIN_EVIDENCIA_TECNICA' })] } });
   });
 
-  it('retiro parcial o inventario sin confirmar (error de conciliación con G1) bloquea', async () => {
+  it('retiro parcial, recepción de G1 pendiente o correlacionada con otra OT: bloquea', async () => {
     const partial = await initiated(); partial.c.state.units.push({ numeroSerie: 'STB-2', estado: 'Instalado en cliente', idServicio: 50 });
     await expect(partial.c.withdrawals.finalize(partial.id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'RETIRO_PARCIAL' })] } });
-    const pending = await initiated(); pending.c.state.units[0].estado = 'Instalado en cliente';
-    await expect(pending.c.withdrawals.finalize(pending.id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'INVENTARIO_SIN_CONFIRMAR' })] } });
+    const pending = await initiated(); pending.c.state.receptions = [];
+    await expect(pending.c.withdrawals.finalize(pending.id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'RECEPCION_G1_PENDIENTE' })] } });
+    const other = await initiated(); other.c.state.receptions[0].idOtG3 = 901;
+    await expect(other.c.withdrawals.finalize(other.id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'RECEPCION_G1_INCONSISTENTE' })] } });
+    expect(other.c.state.services[0].estadoOperativo).toBe('Suspendido');
+  });
+
+  it('equipo no recuperado con una decisión comercial: sigue bloqueado mientras la excepción no esté habilitada', async () => {
+    const { c, id } = await initiated({ equiposFaltantes: [{ numeroSerie: 'STB-9' }] });
+    await expect(c.withdrawals.finalize(id, admin)).rejects.toMatchObject({ response: { motivos: [expect.objectContaining({ code: 'EQUIPOS_FALTANTES' })] } });
+    expect(c.state.services[0].estadoOperativo).toBe('Suspendido');
+  });
+
+  it.each([
+    ['antes del despacho (sin OT)', null, 'ANTES_DEL_DESPACHO', 'CANCELAR_SOLICITUD'],
+    ['durante la ejecución', { estadoOt: 'EN_CURSO', cierreAprobado: false }, 'EN_EJECUCION', 'COORDINAR_CANCELACION_CON_G3'],
+    ['después del retiro aprobado', {}, 'DESPUES_DEL_RETIRO', 'DECISION_COMERCIAL_REQUERIDA'],
+  ])('pago completo %s: no aplica la baja ni reactiva; informa la acción y conserva la deuda histórica', async (_name, over, etapa, accion) => {
+    const { c, id } = await initiated(over as Partial<WithdrawalG3Receipt> | null);
+    c.state.invoices[0].pagos = [{ monto: 19990 }];
+    const invoices = structuredClone(c.state.invoices);
+    await expect(c.withdrawals.finalize(id, admin)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_DEBT_REGULARIZED', etapa, accion } });
+    expect(c.state.services[0].estadoOperativo).toBe('Suspendido');
+    expect(c.state.requests[0].estado).toBe('REGISTRADA');
+    expect(c.state.invoices).toEqual(invoices);
   });
 
   it('cambio concurrente: si el servicio fue reactivado tras el pago, no se da de baja', async () => {

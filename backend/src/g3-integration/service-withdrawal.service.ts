@@ -12,7 +12,7 @@ import { CreateServiceWithdrawalDto, InitiateServiceWithdrawalDto, UpdateService
 import { APPROVED_EXTENSIONS } from '../billing/invoice-balance';
 import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt, overdueDebtSummary } from '../common/overdue-debt';
 import { evaluateWithdrawalEligibility, WITHDRAWAL_MOTIVE_MOROSITY, WithdrawalFacts } from './withdrawal-eligibility';
-import { assessWithdrawalClosure, DEFAULT_CLOSURE_POLICY } from './withdrawal-closure';
+import { assessWithdrawalClosure, paymentDuringWithdrawal, UNRECOVERED_EQUIPMENT_EXCEPTION_ENABLED, WithdrawalStage } from './withdrawal-closure';
 import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalStorage } from './withdrawal.storage';
 
 const CLOSED_REQUEST_STATES = ['CANCELADA', 'CERRADA'];
@@ -282,12 +282,23 @@ export class ServiceWithdrawalService {
         // Cambio concurrente (p. ej. pago y reactivación): no se da de baja un servicio que ya no está suspendido.
         throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: `El servicio está ${service.estadoOperativo}; la baja por morosidad exige que siga suspendido. Revisa la solicitud.` });
       }
+      // Pago durante el retiro: se recalcula la deuda real. Si ya no es exigible y vencida, nunca se aplica la baja
+      // automáticamente: se informa la acción que corresponde según la etapa (no se tocan OT ajenas ni se reactiva).
+      const stage: WithdrawalStage = !receipt || receipt.idOtG3 == null ? 'ANTES_DEL_DESPACHO'
+        : receipt.estadoOt === 'COMPLETADA' && receipt.cierreAprobado ? 'DESPUES_DEL_RETIRO' : 'EN_EJECUCION';
+      const stillOverdue = service.idContrato ? hasOverdueCollectibleDebt(await this.overdueInvoices(tx, service.idEmpresa, service.idCliente, service.idContrato)) : false;
+      const paymentAction = paymentDuringWithdrawal(stage, stillOverdue);
+      if (paymentAction.accion !== 'CONTINUAR') {
+        throw new ConflictException({ code: 'WITHDRAWAL_DEBT_REGULARIZED', etapa: stage, accion: paymentAction.accion, message: paymentAction.message });
+      }
       const retired = receipt?.equiposRetirados.map(item => item.numeroSerie) ?? [];
       const inventory = await tx.unidadEquipo.findMany({
         where: { OR: [{ idServicio: service.idServicio }, ...(retired.length ? [{ numeroSerie: { in: retired } }] : [])] },
         select: { numeroSerie: true, estado: true },
       });
-      const assessment = assessWithdrawalClosure({ receipt, inventory, policy: DEFAULT_CLOSURE_POLICY });
+      const receptions = await this.storage.findReceptions(tx, idSolicitudRetiro);
+      // La excepción por equipos no recuperados está diseñada pero NO habilitada: no se entregan excepciones.
+      const assessment = assessWithdrawalClosure({ receipt, inventory, receptions, exceptions: [], exceptionsEnabled: UNRECOVERED_EQUIPMENT_EXCEPTION_ENABLED });
       if (assessment.outcome !== 'APLICAR_BAJA') {
         throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons });
       }

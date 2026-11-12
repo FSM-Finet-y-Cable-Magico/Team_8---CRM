@@ -14,7 +14,7 @@ export const WITHDRAWAL_STORAGE = Symbol('WITHDRAWAL_STORAGE');
 export type WithdrawalCapabilities = {
   /** solicitud ↔ aviso ↔ ticket como relación estructurada. */
   ticketLink: boolean;
-  /** Correlación y evidencia del retiro técnico recibido de G3. */
+  /** Correlación y evidencia del retiro técnico de G3 y recepciones confirmadas por G1. */
   g3Closure: boolean;
 };
 
@@ -40,6 +40,7 @@ export interface WithdrawalStorage {
   findLinkByTicket(tx: Prisma.TransactionClient, idTicket: number): Promise<WithdrawalTicketLink | null>;
   insertLink(tx: Prisma.TransactionClient, link: Omit<WithdrawalTicketLink, 'createdAt'>): Promise<WithdrawalTicketLink>;
   findReceipt(tx: Prisma.TransactionClient, idSolicitudRetiro: number): Promise<WithdrawalG3Receipt | null>;
+  findReceptions(tx: Prisma.TransactionClient, idSolicitudRetiro: number): Promise<Array<{ numeroSerie: string; idOtG3: number; estadoG1: string }>>;
   markReceiptApplied(tx: Prisma.TransactionClient, idSolicitudRetiro: number): Promise<void>;
 }
 
@@ -55,7 +56,7 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
   async capabilities(tx) {
     const rows = await tx.$queryRaw<Array<{ ticketLink: boolean; g3Closure: boolean }>>`
       SELECT to_regclass('g8_retiros.solicitud_ticket') IS NOT NULL AS "ticketLink",
-             to_regclass('g8_retiros.solicitud_g3') IS NOT NULL AS "g3Closure"`;
+             (to_regclass('g8_retiros.solicitud_g3') IS NOT NULL AND to_regclass('g8_retiros.recepcion_g1') IS NOT NULL) AS "g3Closure"`;
     return { ticketLink: rows[0]?.ticketLink === true, g3Closure: rows[0]?.g3Closure === true };
   },
   async findLinkByRequest(tx, idSolicitudRetiro) {
@@ -80,6 +81,11 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
     const rows = await tx.$queryRaw<WithdrawalG3Receipt[]>(Prisma.sql`
       SELECT ${RECEIPT_COLUMNS} FROM g8_retiros.solicitud_g3 WHERE id_solicitud_retiro = ${idSolicitudRetiro} FOR UPDATE`);
     return rows[0] ?? null;
+  },
+  async findReceptions(tx, idSolicitudRetiro) {
+    return tx.$queryRaw<Array<{ numeroSerie: string; idOtG3: number; estadoG1: string }>>(Prisma.sql`
+      SELECT numero_serie AS "numeroSerie", id_ot_g3 AS "idOtG3", estado_g1 AS "estadoG1"
+      FROM g8_retiros.recepcion_g1 WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
   },
   async markReceiptApplied(tx, idSolicitudRetiro) {
     await tx.$executeRaw(Prisma.sql`
