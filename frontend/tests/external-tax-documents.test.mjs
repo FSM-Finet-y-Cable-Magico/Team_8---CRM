@@ -46,16 +46,20 @@ async function render(t, options = {}) {
     '../../lib': { formatDateOnly: value => value?.slice(0, 10) },
     '../../shared/components': { StatusBadge: ({ value }) => value, TablePagination: () => null },
     './external-tax-document-form': formTools,
+    '../../shared/hooks/useAutoRefresh': { useAutoRefresh: () => {} },
+    './external-tax-documents.css': {},
   });
   let tree;
   const props = { customers, scope: '1', writeCompanyId: 1, canManage: true, ...options.props };
   await act(async () => { tree = create(React.createElement(ExternalTaxDocumentsPanel, props)); });
   t.after(async () => { await act(async () => tree.unmount()); });
+  const openForm = async () => { const button = tree.root.findAllByType('button').find(node => textOf(node) === 'Nuevo documento'); if (button) await act(async () => button.props.onClick()); };
+  if (props.canManage) await openForm();
   const field = label => tree.root.findAllByType('label').find(node => textOf(node).startsWith(label));
   const change = async (label, value, type = 'input') => act(async () => field(label).findByType(type).props.onChange({ target: { value } }));
   const fill = async () => { for (const [label, value] of [['Folio/', valid.folioONumero], ['Emisor/', valid.emisorProveedor], ['Fecha', valid.fechaEmision], ['Monto total', valid.montoTotal]]) await change(label, value); };
   const submit = () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} });
-  return { tree, calls, field, change, fill, submit, update: async changes => act(async () => tree.update(React.createElement(ExternalTaxDocumentsPanel, { ...props, ...changes }))) };
+  return { tree, calls, field, change, fill, submit, update: async changes => { await act(async () => tree.update(React.createElement(ExternalTaxDocumentsPanel, { ...props, ...changes }))); await openForm(); } };
 }
 
 test('valida importes, fecha fiscal y referencias CRM sin aceptar operación bancaria como ID', () => {
@@ -76,7 +80,7 @@ test('documento externo sin cliente omite vínculos y componentes; no crea pago 
   assert.equal(posts[0][2].idCliente, undefined);
   assert.equal(posts[0][2].montoNeto, undefined);
   assert.equal(posts[0][2].montoTotal, 1190);
-  assert.match(textOf(ctx.tree.toJSON()), /no emite documentos tributarios/);
+  assert.match(textOf(ctx.tree.toJSON()), /Documento registrado/);
   assert.ok(!ctx.calls.some(call => /payments|tax-documents\/payments/.test(call[1])));
 });
 

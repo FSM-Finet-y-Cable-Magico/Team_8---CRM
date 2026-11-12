@@ -6,9 +6,10 @@ import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { ControlBookDrawer } from './ControlBookDrawer';
 import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
-import { COLUMNS, ControlResponse, ControlRow, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
+import { COLUMNS, ControlResponse, ControlRow, type InvoiceFocus, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
 import { TablePagination } from '../../shared/components/TablePagination';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
+import { useAutoRefresh } from '../../shared/hooks/useAutoRefresh';
 import { ControlBookExternalDocuments } from './ControlBookExternalDocuments';
 import './commercial-control-book.css';
 
@@ -49,7 +50,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   active?: boolean;
   scope: string; writeCompanyId: number; permissions: DashboardPermissions; customers: Customer[]; companies: Company[]; onChanged: () => void;
 }) {
-  const [focusedInvoice, setFocusedInvoice] = useState<Pick<ControlRow, 'idCliente' | 'idFactura' | 'idEmpresa'> | null>(null);
+  const [focusedInvoice, setFocusedInvoice] = useState<InvoiceFocus | null>(null);
   const [data, setData] = useState<ControlResponse | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [search, setSearch] = useState('');
@@ -58,6 +59,8 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   const [error, setError] = useState('');
   const { message, showMessage: setMessage, clearMessage } = useTransientMessage(5000);
   const [refresh, setRefresh] = useState(0);
+  const backgroundRefresh = useRef(false);
+  const requestPending = useRef(false);
   const [updatedAt, setUpdatedAt] = useState('');
   const [visible, setVisible] = useState<string[]>(() => [...ESSENTIAL]);
   const [optionsPanel, setOptionsPanel] = useState<'filters' | 'columns' | null>(null);
@@ -76,10 +79,13 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   const sortReturn = useRef<{ column: string; scrollLeft: number } | null>(null);
   const workspace = useRef<HTMLElement>(null);
   const openerId = useRef<string | null>(null);
-  const synchronizing = useRef(false);
   const companyId = scope !== 'consolidado' ? scope : String(writeCompanyId);
   const previousCompany = useRef(companyId);
   const params = useMemo(() => ({ idEmpresa: companyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 20 }), [companyId, filters, page]);
+
+  useAutoRefresh(() => {
+    if (!loading && !requestPending.current) { backgroundRefresh.current = true; setRefresh(value => value + 1); }
+  }, active && !drawerBusy && !selected);
 
 
   useEffect(() => {
@@ -120,7 +126,11 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
-    setLoading(true); setError('');
+    requestPending.current = true;
+    const background = backgroundRefresh.current;
+    backgroundRefresh.current = false;
+    if (!background) setLoading(true);
+    setError('');
     void api.get<ControlResponse>('/commercial/control-book', { params, signal: controller.signal }).then(async ({ data: result }) => {
       if (controller.signal.aborted) return;
       if (page > result.pagination.totalPages) { setPage(result.pagination.totalPages); return; }
@@ -150,8 +160,8 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       } catch (err) {
         if (!controller.signal.aborted && tableRecord.current === record) setContractError(apiErrorMessage(err));
       }
-    }).catch((err) => { if (!controller.signal.aborted) { setError(apiErrorMessage(err)); setData(null); } })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }).catch((err) => { if (!controller.signal.aborted) { setError(apiErrorMessage(err)); if (!background) setData(null); } })
+      .finally(() => { if (!controller.signal.aborted) { requestPending.current = false; setLoading(false); } });
     return () => controller.abort();
   }, [params, refresh, page, active]);
 
@@ -189,15 +199,6 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
     tableRecord.current = row;
     openerId.current = row.rowId; setFocusedInvoice(null); setSelected(row); setOpenMenu(null);
   }
-  async function synchronizeDelinquency() {
-    if (synchronizing.current || loading || !permissions.manageBilling) return;
-    synchronizing.current = true; setDrawerBusy(true); setError('');
-    try {
-      await api.post('/billing/refresh-delinquency', undefined, { params: { scope: companyId } });
-      setMessage('Estados de morosidad actualizados.'); setRefresh(value => value + 1); onChanged();
-    } catch (err) { setError(apiErrorMessage(err)); }
-    finally { synchronizing.current = false; setDrawerBusy(false); }
-  }
   async function exportFile(format: 'csv' | 'xlsx') {
     if (!permissions.exportControlBook || exporting) return;
     setExporting(true); setOpenMenu(null); setError('');
@@ -221,15 +222,14 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       {updatedAt && <small className="control-workbook-updated">Actualizado {updatedAt}</small>}
     </header>
     <div className="control-ribbon-actions" role="group" aria-label="Herramientas de Cartera">
-      <button className="control-ribbon-command" disabled={loading || drawerBusy} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={21} aria-hidden="true" className={loading ? 'control-spinning' : ''}/>{loading ? 'Actualizando…' : 'Actualizar cartera'}</button>
       {permissions.exportControlBook && <div className="control-export" ref={exportRef}>
         <button className="control-ribbon-command" disabled={exporting || loading || !data?.items.length} aria-expanded={openMenu === 'export'} aria-controls="control-export-options" onClick={() => setOpenMenu(openMenu === 'export' ? null : 'export')}><Download size={21} aria-hidden="true"/><span>{exporting ? 'Exportando…' : 'Exportar'} <ChevronDown size={12} aria-hidden="true"/></span></button>
         {openMenu === 'export' && <div className="control-menu" id="control-export-options"><button onClick={() => void exportFile('xlsx')}>Excel (.xlsx)</button><button onClick={() => void exportFile('csv')}>CSV (.csv)</button><small>Con los filtros y columnas de esta vista.</small></div>}
       </div>}
       <button ref={filtersButton} className="control-ribbon-command" disabled={drawerBusy} aria-expanded={optionsPanel === 'filters'} aria-controls="control-filters" onClick={() => { setOptionsPanel(optionsPanel === 'filters' ? null : 'filters'); setOpenMenu(null); }}><Filter size={21} aria-hidden="true"/><span>Filtros {activeFilters.length > 0 && <span className="control-count">{activeFilters.length}</span>}</span></button>
       <button ref={columnsButton} className="control-ribbon-command" aria-expanded={optionsPanel === 'columns'} aria-controls="control-columns" onClick={() => { setOptionsPanel(optionsPanel === 'columns' ? null : 'columns'); setOpenMenu(null); }}><Columns3 size={21} aria-hidden="true"/>Campos</button>
-      {permissions.manageBilling && <button type="button" className="control-ribbon-command" disabled={loading || drawerBusy} onClick={() => void synchronizeDelinquency()}><TriangleAlert size={21} aria-hidden="true"/>Actualizar morosidad</button>}
       <ControlBookExternalDocuments active={active} scope={scope} writeCompanyId={writeCompanyId} customers={customers}
+        companyName={companies.find(company => company.idEmpresa === Number(companyId))?.nombre}
         canView={permissions.viewExternalTaxDocuments} canManage={permissions.manageExternalTaxDocuments} disabled={drawerBusy}/>
     </div>
 
@@ -321,6 +321,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       customer={customers.find(customer => customer.idCliente === selected.idCliente)}
       companyName={companies.find(company => company.idEmpresa === selected.idEmpresa)?.nombre}
       canManage={permissions.manageCommercialCollections}
+      canManagePayments={permissions.manageBilling}
       canViewBilling={permissions.viewBilling} canViewDocuments={permissions.viewBilling && permissions.viewExternalTaxDocuments}
       onClose={closeRecord} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh(value => value + 1); }}
       onOpenBilling={setFocusedInvoice} feedback={feedback}

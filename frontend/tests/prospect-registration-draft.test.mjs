@@ -46,6 +46,11 @@ async function harness(t, post = async () => ({ data: { idProspecto: 101 } })) {
   };
   const CoveragePicker = () => null;
   const mocks = new Map([
+    [resolve(sourceRoot, 'lib/session.ts'), {
+      restoreSession: () => storage.has('finet_user') ? JSON.parse(storage.get('finet_user')) : null,
+      monitorSession: () => () => {},
+      clearSession: () => { storage.delete('finet_token'); storage.delete('finet_user'); },
+    }],
     [resolve(sourceRoot, 'api.ts'), { api, apiErrorMessage: error => error.message }],
     [resolve(sourceRoot, 'shared/components/index.ts'), { Modal: () => null, TablePagination: () => null, ToastNotice: ({ message }) => message ? React.createElement('aside', { role: 'status', 'data-testid': 'toast' }, message) : null }],
     [resolve(sourceRoot, 'features/coverage/index.tsx'), { CoveragePicker, CoverageZonesPanel: () => null }],

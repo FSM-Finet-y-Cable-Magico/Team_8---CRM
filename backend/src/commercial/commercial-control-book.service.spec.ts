@@ -42,7 +42,7 @@ function harness(invoice = invoiceFixture()) {
     servicioContratado: { findUnique: jest.fn().mockResolvedValue({ idServicio: 40, idCliente: 10, idEmpresa: 1, idContrato: 20 }) },
     contrato: { findUnique: jest.fn().mockResolvedValue({ idContrato: 20, idCliente: 10, idEmpresa: 1, diaVencimiento: 10 }), update: jest.fn() },
     eventoGestionComercial: { create: jest.fn().mockResolvedValue({ idEvento: 1 }) },
-    convenioPago: { create: jest.fn().mockResolvedValue({ idConvenio: 1, estado: 'PENDIENTE', cuotas: [{ numero: 1 }] }), findUnique: jest.fn(), update: jest.fn() },
+    convenioPago: { create: jest.fn().mockResolvedValue({ idConvenio: 1, estado: 'APROBADO', cuotas: [{ numero: 1 }] }), findUnique: jest.fn(), update: jest.fn() },
     prorrogaPago: { create: jest.fn().mockResolvedValue({ idProrroga: 1 }) },
     cambioCondicionPago: { create: jest.fn().mockResolvedValue({ idCambio: 1 }) },
     cargoAdicional: { create: jest.fn().mockResolvedValue({ idCargo: 1, estado: 'PENDIENTE_FACTURACION' }) },
@@ -342,6 +342,8 @@ describe('CommercialControlBookService', () => {
     const { service, prisma, audit } = harness();
     const result = await service.createAgreement({ idCliente: 10, idFactura: 30, montoComprometido: 6000, cantidadCuotas: 2, condiciones: 'Dos cuotas mensuales', fechaInicio: '2026-09-25', cuotas: [{ numero: 1, monto: 3000, fechaVencimiento: '2026-09-25' }, { numero: 2, monto: 3000, fechaVencimiento: '2026-10-25' }] }, commercial);
     expect(result.cuotas).toHaveLength(1); expect(prisma.convenioPago.create).toHaveBeenCalled(); expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'CREAR_CONVENIO_PAGO' }));
+    expect(prisma.convenioPago.create).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({estado:'APROBADO',idUsuarioResponsable:commercial.idUsuario,idUsuarioAprobador:commercial.idUsuario,fechaAprobacion:expect.any(Date)})}));
+    expect(result.estado).toBe('APROBADO');
   });
 
   it.each([

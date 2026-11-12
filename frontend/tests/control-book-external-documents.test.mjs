@@ -34,7 +34,7 @@ test('entrada global no necesita cliente ni factura y mantiene permisos/empresa 
   assert.equal(h.panels.at(-1).fixedCustomerId, undefined);
   assert.equal(h.panels.at(-1).scope, '2'); assert.equal(h.panels.at(-1).writeCompanyId, 2);
   assert.equal(h.panels.at(-1).canManage, true);
-  assert.match(JSON.stringify(h.tree.toJSON()), /no registra pagos ni emite/);
+  assert.equal(h.tree.root.findAllByType('p').length, 0);
 });
 
 test('sin autorización no monta panel y cambio de empresa o módulo cierra el contexto anterior', async t => {

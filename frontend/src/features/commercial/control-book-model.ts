@@ -17,6 +17,8 @@ export type ControlResponse = {
   filterOptions: { plans: Array<{ id: number; label: string }>; zones: Array<{ id: number; label: string }>; commercialStatuses: string[]; serviceStatuses: string[] };
 };
 
+export type InvoiceFocus = Pick<ControlRow, 'idFactura' | 'idCliente' | 'idEmpresa'> & { idConvenio?: number; idCuota?: number };
+
 export type ActionName = 'event' | 'lastNotice' | 'agreement' | 'extension' | 'paymentDay' | 'charge' | 'withdrawal';
 export type Filters = {
   search: string; estadoComercial: string; estadoServicio: string; idPlan: string; idZona: string;

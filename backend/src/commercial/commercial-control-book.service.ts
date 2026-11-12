@@ -268,7 +268,8 @@ export class CommercialControlBookService {
         idEmpresa: companyId, idCliente: customer.idCliente, idFactura: invoice.idFactura,
         idContrato: invoice.idContrato, idServicio: dto.idServicio,
         montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas,
-        condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'PENDIENTE', idUsuarioResponsable: user.idUsuario,
+        condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'APROBADO', idUsuarioResponsable: user.idUsuario,
+        idUsuarioAprobador: user.idUsuario, fechaAprobacion: new Date(),
         cuotas: { create: dto.cuotas.map((item) => ({ numero: item.numero, monto: item.monto, fechaVencimiento: this.dateOnly(item.fechaVencimiento, 'fechaVencimiento') })) },
       }, include: { cuotas: true },
     });

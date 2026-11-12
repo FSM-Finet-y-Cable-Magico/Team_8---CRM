@@ -197,10 +197,17 @@ export function ProspectsPanel({
   }
 
   return (
-    <section className="workspace-grid">
+    <section className="prospects-workspace">
+      <div className="prospects-workspace-heading">
+        <h2>Gestión de prospectos</h2>
+        <div className="prospect-search" role="search" aria-label="Buscar prospectos">
+          <input type="search" className="prospect-search-input" aria-label="Buscar prospecto" placeholder="Buscar por nombre, RUT, correo o teléfono" maxLength={120}
+            value={filters.q} onChange={event => setFilters({ ...filters, q: event.target.value })} />
+        </div>
+      </div>
+      <div className="workspace-grid">
       {permissions.createProspects && (
         <form className="stack prospect-create-form" onSubmit={submit}>
-          <h2>Registro</h2>
           <label>
             RUT
             <input
@@ -309,11 +316,6 @@ export function ProspectsPanel({
       )}
 
       <section className="prospects-list-section">
-        <h2>Gestión de Prospectos</h2>
-        <div className="prospect-search" role="search" aria-label="Buscar prospectos">
-          <input type="search" className="prospect-search-input" aria-label="Buscar prospecto" placeholder="Buscar por nombre, RUT, correo o teléfono" maxLength={120}
-            value={filters.q} onChange={event => setFilters({ ...filters, q: event.target.value })} />
-        </div>
         {listError && (
           <div role="alert" className="inline-status">
             <p>{listError}</p>
@@ -377,6 +379,7 @@ export function ProspectsPanel({
           )}
         </Modal>
       </section>
+      </div>
     </section>
   );
 }

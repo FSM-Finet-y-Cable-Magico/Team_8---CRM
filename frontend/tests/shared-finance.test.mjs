@@ -28,7 +28,8 @@ async function render(t, company, fixedCustomerId) {
     calls.push([method, ...args]); return { data: args[0].includes('/history') ? { idCliente: 10, invoices: [] } : { items: [], pagination: { totalRows: 0 } } };
   }]));
   const mocks = { '../../api': { api, apiErrorMessage: () => 'QA error' }, '../../lib': { formatDateOnly: value => value },
-    '../../shared/components': { StatusBadge: () => null, TablePagination: () => null }, './external-tax-document-form': helperExports };
+    '../../shared/components': { StatusBadge: () => null, TablePagination: () => null }, './external-tax-document-form': helperExports,
+    '../../shared/hooks/useAutoRefresh': { useAutoRefresh: () => {} }, './external-tax-documents.css': {} };
   const exports = {};
   new Function('require', 'exports', outputText)(name => mocks[name] ?? require(name), exports);
   let tree;
@@ -36,6 +37,7 @@ async function render(t, company, fixedCustomerId) {
     customers, scope: String(company), writeCompanyId: company, canManage: true, fixedCustomerId,
   })); });
   t.after(async () => { await act(async () => tree.unmount()); });
+  await act(async () => tree.root.findAllByType('button').find(node => textOf(node) === 'Nuevo documento').props.onClick());
   const select = label => tree.root.findAllByType('label').find(node => textOf(node).startsWith(label)).findByType('select');
   return { tree, calls, select };
 }

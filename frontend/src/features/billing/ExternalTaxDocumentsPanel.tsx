@@ -3,6 +3,9 @@ import { api, apiErrorMessage, type BillingInvoiceDetail, type Customer, type Ex
 import { formatDateOnly } from '../../lib';
 import { StatusBadge, TablePagination } from '../../shared/components';
 import { validateExternalDocumentForm } from './external-tax-document-form';
+import { Ban, ChevronDown, FileText, Filter, Pencil, Plus, Search } from 'lucide-react';
+import { useAutoRefresh } from '../../shared/hooks/useAutoRefresh';
+import './external-tax-documents.css';
 
 type InvoiceOption = { idFactura: number; idContrato: number; fechaEmision: string | null; saldo: number | null; folio: string | null };
 type CustomerHistory = { idCliente: number; invoices: InvoiceOption[] };
@@ -18,12 +21,15 @@ const EMPTY_FILTERS = {
   estado: '', fechaDesde: '', fechaHasta: '',
 };
 
-export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, canManage, fixedCustomerId }: {
+export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, canManage, fixedCustomerId, companyName, active = true, showHeading = true }: {
   customers: Customer[];
   scope: string;
   writeCompanyId: number;
   canManage: boolean;
   fixedCustomerId?: number;
+  companyName?: string;
+  active?: boolean;
+  showHeading?: boolean;
 }) {
   const [documents, setDocuments] = useState<ExternalTaxDocument[]>([]);
   const [totalRows, setTotalRows] = useState(0);
@@ -31,6 +37,9 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -55,6 +64,10 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   const currentInvoiceMissing = currentDocument?.idFactura && form.idFactura === String(currentDocument.idFactura) && !invoiceOptions.some(invoice => invoice.idFactura === currentDocument.idFactura);
   const currentChargeMissing = currentDocument?.idCargoAdicional && form.idCargoAdicional === String(currentDocument.idCargoAdicional) && !charges.some(charge => charge.idCargo === currentDocument.idCargoAdicional);
 
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const companyLabel = companyName ?? companyCustomers.find(customer => customer.idEmpresa === idEmpresa)?.empresa?.nombre ?? 'Empresa ' + idEmpresa;
+  useAutoRefresh(() => { if (!loading) setRevision(value => value + 1); }, active && !formOpen && !busy);
+
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -70,10 +83,11 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
     }
   }, [idEmpresa, filters, page, fixedCustomerId, contextKey]);
 
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
+  useEffect(() => { if (!active) return; const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load, revision, active]);
   useEffect(() => {
     setPage(1);
     setEditingId(null);
+    setFormOpen(false);
     setForm(customerForm());
     setFilters(EMPTY_FILTERS);
     setDocuments([]);
@@ -150,10 +164,11 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
         if (context.current === submittedContext) setStatus('Documento tributario actualizado');
       } else {
         await api.post('/external-tax-documents', payload);
-        if (context.current === submittedContext) setStatus('Documento tributario externo registrado. No se generó un pago ni se emitió un DTE.');
+        if (context.current === submittedContext) setStatus('Documento registrado.');
       }
       if (context.current !== submittedContext) return;
       setEditingId(null);
+      setFormOpen(false);
       setForm(customerForm());
       await load();
     } catch (error) {
@@ -167,6 +182,7 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
     if (pending.current) return;
     setFieldErrors({}); setStatus('');
     setEditingId(document.idDocumento);
+    setFormOpen(true);
     setForm({
       tipoDocumento: document.tipoDocumento,
       folioONumero: document.folioONumero,
@@ -203,81 +219,84 @@ export function ExternalTaxDocumentsPanel({ customers, scope, writeCompanyId, ca
   }
 
   return (
-    <div className="tax-documents">
-      <section className="panel stack">
-        <p>Registra boletas y facturas que ya existen fuera del CRM. Esta referencia no registra pagos, no emite documentos tributarios y no modifica la deuda.</p>
-        {!fixedCustomerId && <p>Puede guardarse sin cliente para conservar una referencia de un emisor o proveedor. «Sin cliente» no clasifica el documento como compra: el modelo actual no distingue compras recibidas de ventas emitidas.</p>}
-        <p>El comprobante de transferencia corresponde al pago; su código bancario no es un folio fiscal ni el identificador de una factura CRM.</p>
-        {status && <p className="inline-status" role="status">{status}</p>}
-        {Object.entries(fieldErrors).length > 0 && <ul role="alert">{Object.entries(fieldErrors).map(([field, message]) => <li key={field}>{message}</li>)}</ul>}
-
-        {canManage && (
-          <details open={Boolean(editingId)}>
-            <summary>{editingId ? `Corregir documento ${editingId}` : 'Registrar documento tributario externo'}</summary>
-            <form className="tax-document-form" onSubmit={submit}>
-              <fieldset disabled={busy} style={{ display: 'contents' }}>
-              <label>Empresa<input value={`Empresa ${idEmpresa}`} readOnly /></label>
-              <label>Tipo<select value={form.tipoDocumento} onChange={(event) => setForm({ ...form, tipoDocumento: event.target.value })}><option value="BOLETA">Boleta</option><option value="FACTURA">Factura</option></select></label>
-              <label>Folio/Número<input required maxLength={80} value={form.folioONumero} onChange={(event) => setForm({ ...form, folioONumero: event.target.value })} /></label>
-              <label>Emisor/Proveedor<input required maxLength={160} value={form.emisorProveedor} onChange={(event) => setForm({ ...form, emisorProveedor: event.target.value })} /></label>
-              <label>Fecha<input required type="date" value={form.fechaEmision} onChange={(event) => setForm({ ...form, fechaEmision: event.target.value })} /></label>
-              <label>Monto total<input required type="number" min="0" step="0.01" value={form.montoTotal} onChange={(event) => setForm({ ...form, montoTotal: event.target.value })} /></label>
-              <label>Neto opcional<input type="number" min="0" step="0.01" value={form.montoNeto} onChange={(event) => setForm({ ...form, montoNeto: event.target.value })} /></label>
-              <label>Exento opcional<input type="number" min="0" step="0.01" value={form.montoExento} onChange={(event) => setForm({ ...form, montoExento: event.target.value })} /></label>
-              <label>IVA opcional<input type="number" min="0" step="0.01" value={form.iva} onChange={(event) => setForm({ ...form, iva: event.target.value })} /></label>
-              <label>Estado<select value={form.estado} onChange={(event) => setForm({ ...form, estado: event.target.value })}><option value="REGISTRADO">Registrado</option><option value="ANULADO">Anulado</option></select></label>
+    <section className="tax-documents" aria-busy={busy}>
+      <header className={'tax-document-heading' + (!formOpen && !showHeading ? ' tax-document-listing-heading' : '')}>
+        <div>{(showHeading || formOpen) && <h3>{formOpen ? editingId ? 'Corregir documento' : 'Registrar documento' : 'Documentos externos'}</h3>}
+          {formOpen && <p>Referencia de un documento existente. No registra pagos ni emite documentos fiscales.</p>}</div>
+        {canManage && !formOpen && <button type="button" onClick={() => { setEditingId(null); setForm(customerForm()); setFieldErrors({}); setStatus(''); setFormOpen(true); }}><Plus size={16} aria-hidden="true"/>Nuevo documento</button>}
+      </header>
+      {status && <p className="inline-status" role="status">{status}</p>}
+      {Object.entries(fieldErrors).length > 0 && <ul role="alert">{Object.entries(fieldErrors).map(([field, message]) => <li key={field}>{message}</li>)}</ul>}
+      {canManage && formOpen ? <form className="tax-document-form" onSubmit={submit}>
+        <fieldset disabled={busy} className="tax-document-fields">
+          <div className="tax-document-context"><FileText size={18} aria-hidden="true"/><span>{companyLabel}</span><small>Documento externo</small></div>
+          <h4 className="tax-document-full">Identificación del documento</h4>
+          <label>Tipo<select value={form.tipoDocumento} onChange={(event) => setForm({ ...form, tipoDocumento: event.target.value })}><option value="BOLETA">Boleta</option><option value="FACTURA">Factura</option></select></label>
+<label>Folio/Número<input required maxLength={80} value={form.folioONumero} onChange={(event) => setForm({ ...form, folioONumero: event.target.value })} /></label>
+<label>Fecha<input required type="date" value={form.fechaEmision} onChange={(event) => setForm({ ...form, fechaEmision: event.target.value })} /></label>
+<label>Estado<select value={form.estado} onChange={(event) => setForm({ ...form, estado: event.target.value })}><option value="REGISTRADO">Registrado</option><option value="ANULADO">Anulado</option></select></label>
+          <label className="tax-document-full">Emisor/Proveedor<input required maxLength={160} value={form.emisorProveedor} onChange={(event) => setForm({ ...form, emisorProveedor: event.target.value })} /></label>
+          <h4 className="tax-document-full">Montos <small>CLP</small></h4>
+          <label>Monto neto<input type="number" min="0" step="0.01" value={form.montoNeto} onChange={(event) => setForm({ ...form, montoNeto: event.target.value })} /></label>
+<label>Monto exento<input type="number" min="0" step="0.01" value={form.montoExento} onChange={(event) => setForm({ ...form, montoExento: event.target.value })} /></label>
+<label>IVA<input type="number" min="0" step="0.01" value={form.iva} onChange={(event) => setForm({ ...form, iva: event.target.value })} /></label>
+<label>Monto total<input required type="number" min="0" step="0.01" value={form.montoTotal} onChange={(event) => setForm({ ...form, montoTotal: event.target.value })} /></label>
+          <details className="tax-document-full tax-document-links">
+            <summary>Vínculos y referencias <span>Opcional</span><ChevronDown size={16} aria-hidden="true"/></summary>
+            <div className="tax-document-link-grid">
               {!fixedCustomerId && <label>Cliente opcional<select value={form.idCliente} onChange={(event) => setForm({ ...form, idCliente: event.target.value, idContrato: '', idFactura: '', idCargoAdicional: '' })}><option value="">Sin cliente</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto} · {customer.rut ?? 'sin RUT'}</option>)}</select></label>}
-              <label>Contrato opcional<select value={form.idContrato} onChange={(event) => setForm({ ...form, idContrato: event.target.value, idFactura: '', idCargoAdicional: '' })}><option value="">Sin contrato</option>{(selectedCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato} · {contract.estado ?? '-'}</option>)}</select></label>
-              <label>Factura CRM opcional<select value={form.idFactura} disabled={relationsLoading || (!form.idCliente && !currentInvoiceMissing)} onChange={(event) => { const invoice = invoiceOptions.find(item => item.idFactura === Number(event.target.value)); setForm({ ...form, idFactura: event.target.value, idContrato: invoice ? String(invoice.idContrato) : form.idContrato, idCargoAdicional: '' }); }}><option value="">Sin factura CRM</option>{currentInvoiceMissing && <option value={currentDocument.idFactura!}>Factura CRM #{currentDocument.idFactura} · vínculo actual</option>}{invoiceOptions.map(invoice => <option key={invoice.idFactura} value={invoice.idFactura}>Factura CRM #{invoice.idFactura} · {invoice.fechaEmision ? formatDateOnly(invoice.fechaEmision) : 'sin fecha'} · contrato {invoice.idContrato} · saldo {invoice.saldo == null ? 'no determinado' : `$${invoice.saldo.toLocaleString('es-CL')}`}</option>)}</select><small>Selecciona una factura del cliente y empresa; no ingreses la operación de transferencia.</small></label>
-              <label>Cargo opcional<select value={form.idCargoAdicional} disabled={!form.idFactura && !currentChargeMissing} onChange={(event) => setForm({ ...form, idCargoAdicional: event.target.value })}><option value="">Sin cargo</option>{currentChargeMissing && <option value={currentDocument.idCargoAdicional!}>Cargo #{currentDocument.idCargoAdicional} · vínculo actual</option>}{charges.map(charge => <option key={charge.idCargo} value={charge.idCargo}>Cargo #{charge.idCargo} · {charge.tipo} · ${Number(charge.monto).toLocaleString('es-CL')} · {charge.estado}</option>)}</select><small>Los cargos disponibles se consultan en la factura CRM seleccionada.</small></label>
-              {relationError && <p className="tax-document-wide" role="alert">No se pudieron consultar las referencias del CRM: {relationError}. Puedes registrar el documento sin esos vínculos.</p>}
-              <label className="tax-document-wide">URL opcional<input type="url" maxLength={2048} placeholder="https://..." value={form.urlDocumento} onChange={(event) => setForm({ ...form, urlDocumento: event.target.value })} /></label>
-              <label className="tax-document-wide">Referencia opcional<input maxLength={200} value={form.referenciaExterna} onChange={(event) => setForm({ ...form, referenciaExterna: event.target.value })} /></label>
-              <div className="button-row tax-document-wide">
-                <button type="submit" disabled={busy || relationsLoading}>{busy ? 'Guardando…' : editingId ? 'Guardar corrección' : 'Registrar documento'}</button>
-                {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm(customerForm()); }}>Cancelar</button>}
-              </div>
-              </fieldset>
-            </form>
+<label>Contrato opcional<select value={form.idContrato} onChange={(event) => setForm({ ...form, idContrato: event.target.value, idFactura: '', idCargoAdicional: '' })}><option value="">Sin contrato</option>{(selectedCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato} · {contract.estado ?? '-'}</option>)}</select></label>
+<label>Factura CRM opcional<select value={form.idFactura} disabled={relationsLoading || (!form.idCliente && !currentInvoiceMissing)} onChange={(event) => { const invoice = invoiceOptions.find(item => item.idFactura === Number(event.target.value)); setForm({ ...form, idFactura: event.target.value, idContrato: invoice ? String(invoice.idContrato) : form.idContrato, idCargoAdicional: '' }); }}><option value="">Sin factura CRM</option>{currentInvoiceMissing && <option value={currentDocument.idFactura!}>Factura CRM #{currentDocument.idFactura} · vínculo actual</option>}{invoiceOptions.map(invoice => <option key={invoice.idFactura} value={invoice.idFactura}>Factura CRM #{invoice.idFactura} · {invoice.fechaEmision ? formatDateOnly(invoice.fechaEmision) : 'sin fecha'} · contrato {invoice.idContrato} · saldo {invoice.saldo == null ? 'no determinado' : `$${invoice.saldo.toLocaleString('es-CL')}`}</option>)}</select></label>
+<label>Cargo opcional<select value={form.idCargoAdicional} disabled={!form.idFactura && !currentChargeMissing} onChange={(event) => setForm({ ...form, idCargoAdicional: event.target.value })}><option value="">Sin cargo</option>{currentChargeMissing && <option value={currentDocument.idCargoAdicional!}>Cargo #{currentDocument.idCargoAdicional} · vínculo actual</option>}{charges.map(charge => <option key={charge.idCargo} value={charge.idCargo}>Cargo #{charge.idCargo} · {charge.tipo} · ${Number(charge.monto).toLocaleString('es-CL')} · {charge.estado}</option>)}</select></label>
+<label className="tax-document-wide">Enlace al documento<input type="url" maxLength={2048} placeholder="https://..." value={form.urlDocumento} onChange={(event) => setForm({ ...form, urlDocumento: event.target.value })} /></label>
+<label className="tax-document-wide">Referencia<input maxLength={200} value={form.referenciaExterna} onChange={(event) => setForm({ ...form, referenciaExterna: event.target.value })} /></label>
+              {relationError && <p className="tax-document-full" role="alert">No se pudieron consultar las referencias del CRM: {relationError}</p>}
+            </div>
           </details>
-        )}
-
-        <div className="tax-document-filters">
-          <input aria-label="Buscar documentos" placeholder="Buscar folio, emisor, nombre o RUT" value={filters.search} onChange={(event) => { setPage(1); setFilters({ ...filters, search: event.target.value }); }} />
+          <footer className="tax-document-form-actions tax-document-full">
+            <button type="button" className="tax-document-text-button" onClick={() => { setFormOpen(false); setEditingId(null); setForm(customerForm()); setFieldErrors({}); setStatus(''); }}>Cancelar</button>
+            <button type="submit" disabled={busy || relationsLoading}>{busy ? 'Guardando…' : editingId ? 'Guardar corrección' : 'Guardar documento'}</button>
+          </footer>
+        </fieldset>
+      </form> : <>
+        <div className="tax-document-toolbar">
+          <label className="tax-document-search"><Search size={17} aria-hidden="true"/><input aria-label="Buscar documentos" placeholder="Buscar folio, emisor, nombre o RUT" value={filters.search} onChange={(event) => { setPage(1); setFilters({ ...filters, search: event.target.value }); }} /></label>
           <select aria-label="Filtrar tipo" value={filters.tipoDocumento} onChange={(event) => { setPage(1); setFilters({ ...filters, tipoDocumento: event.target.value }); }}><option value="">Todos los tipos</option><option value="BOLETA">Boleta</option><option value="FACTURA">Factura</option></select>
-          <input aria-label="Filtrar folio" placeholder="Folio" value={filters.folio} onChange={(event) => { setPage(1); setFilters({ ...filters, folio: event.target.value }); }} />
-          <input aria-label="Filtrar emisor" placeholder="Emisor/Proveedor" value={filters.emisorProveedor} onChange={(event) => { setPage(1); setFilters({ ...filters, emisorProveedor: event.target.value }); }} />
-          {!fixedCustomerId && <select aria-label="Filtrar cliente" value={filters.idCliente} onChange={(event) => { setPage(1); setFilters({ ...filters, idCliente: event.target.value, idContrato: '' }); }}><option value="">Todos los clientes</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto}</option>)}</select>}
-          <select aria-label="Filtrar contrato" value={filters.idContrato} onChange={(event) => { setPage(1); setFilters({ ...filters, idContrato: event.target.value }); }}><option value="">Todos los contratos</option>{(filterCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato}</option>)}</select>
-          <input aria-label="Filtrar factura" type="number" min="1" placeholder="ID factura" value={filters.idFactura} onChange={(event) => { setPage(1); setFilters({ ...filters, idFactura: event.target.value }); }} />
           <select aria-label="Filtrar estado" value={filters.estado} onChange={(event) => { setPage(1); setFilters({ ...filters, estado: event.target.value }); }}><option value="">Todos los estados</option><option value="REGISTRADO">Registrado</option><option value="ANULADO">Anulado</option></select>
-          <label>Desde<input type="date" value={filters.fechaDesde} onChange={(event) => { setPage(1); setFilters({ ...filters, fechaDesde: event.target.value }); }} /></label>
-          <label>Hasta<input type="date" value={filters.fechaHasta} onChange={(event) => { setPage(1); setFilters({ ...filters, fechaHasta: event.target.value }); }} /></label>
-          <button type="button" className="secondary compact" onClick={() => { setPage(1); setFilters(EMPTY_FILTERS); }}>Limpiar</button>
+          <button type="button" className="tax-document-filter-button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}><Filter size={16} aria-hidden="true"/>Filtros{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
         </div>
-
-        <div className="table-wrap">
+        {filtersOpen && <div className="tax-document-filters">
+          <input aria-label="Filtrar folio" placeholder="Folio" value={filters.folio} onChange={(event) => { setPage(1); setFilters({ ...filters, folio: event.target.value }); }} />
+<input aria-label="Filtrar emisor" placeholder="Emisor/Proveedor" value={filters.emisorProveedor} onChange={(event) => { setPage(1); setFilters({ ...filters, emisorProveedor: event.target.value }); }} />
+{!fixedCustomerId && <select aria-label="Filtrar cliente" value={filters.idCliente} onChange={(event) => { setPage(1); setFilters({ ...filters, idCliente: event.target.value, idContrato: '' }); }}><option value="">Todos los clientes</option>{companyCustomers.map((customer) => <option key={customer.idCliente} value={customer.idCliente}>{customer.nombreCompleto}</option>)}</select>}
+<select aria-label="Filtrar contrato" value={filters.idContrato} onChange={(event) => { setPage(1); setFilters({ ...filters, idContrato: event.target.value }); }}><option value="">Todos los contratos</option>{(filterCustomer?.contratos ?? []).map((contract) => <option key={contract.idContrato} value={contract.idContrato}>Contrato {contract.idContrato}</option>)}</select>
+<input aria-label="Filtrar factura" type="number" min="1" placeholder="ID factura" value={filters.idFactura} onChange={(event) => { setPage(1); setFilters({ ...filters, idFactura: event.target.value }); }} />
+<label>Desde<input type="date" value={filters.fechaDesde} onChange={(event) => { setPage(1); setFilters({ ...filters, fechaDesde: event.target.value }); }} /></label>
+<label>Hasta<input type="date" value={filters.fechaHasta} onChange={(event) => { setPage(1); setFilters({ ...filters, fechaHasta: event.target.value }); }} /></label>
+          <button type="button" className="tax-document-text-button" onClick={() => { setPage(1); setFilters(EMPTY_FILTERS); }}>Limpiar filtros</button>
+        </div>}
+        <div className="table-wrap tax-document-table">
           <table>
-            <thead><tr><th>Tipo / Folio</th><th>Emisor</th><th>Cliente / Contrato</th><th>Fecha</th><th>Monto</th><th>Estado</th><th>Referencia</th><th>Fuente</th><th></th></tr></thead>
+            <caption className="tax-document-sr-only">Documentos tributarios externos de {companyLabel}</caption>
+            <thead><tr><th>Documento / Folio</th><th>Emisor</th><th>Cliente / Contrato</th><th>Emisión</th><th className="tax-document-money">Monto</th><th>Estado</th><th>Referencia</th><th><span className="tax-document-sr-only">Acciones</span></th></tr></thead>
             <tbody>{documents.map((document) => (
               <tr key={document.idDocumento}>
-                <td><strong>{document.tipoDocumento}</strong><br />{document.folioONumero}</td>
+                <td><strong>{document.tipoDocumento === 'BOLETA' ? 'Boleta' : 'Factura'}</strong><small>{document.folioONumero}</small></td>
                 <td>{document.emisorProveedor}</td>
-                <td>{document.cliente?.nombreCompleto ?? '-'}<br />{document.idContrato ? `Contrato ${document.idContrato}` : '-'}</td>
+                <td>{document.cliente?.nombreCompleto ?? 'Sin cliente'}{document.idContrato && <small>Contrato {document.idContrato}</small>}</td>
                 <td>{formatDateOnly(document.fechaEmision)}</td>
-                <td>${Number(document.montoTotal).toLocaleString('es-CL')}</td>
+                <td className="tax-document-money">${Number(document.montoTotal).toLocaleString('es-CL')}</td>
                 <td><StatusBadge value={document.estado} /></td>
-                <td>{document.urlDocumento ? <a href={document.urlDocumento} target="_blank" rel="noreferrer">Abrir referencia</a> : document.referenciaExterna ?? '-'}</td>
-                <td><span className="source-badge">Registro manual</span></td>
-                <td>{canManage && <div className="table-actions"><button type="button" className="secondary compact" onClick={() => edit(document)}>Corregir</button>{document.estado !== 'ANULADO' && <button type="button" className="secondary compact" onClick={() => void deactivate(document)}>Anular</button>}</div>}</td>
+                <td>{document.urlDocumento ? <a href={document.urlDocumento} target="_blank" rel="noreferrer">Ver documento</a> : document.referenciaExterna ?? '—'}</td>
+                <td>{canManage && <div className="tax-document-row-actions"><button type="button" aria-label={'Corregir ' + document.folioONumero} title="Corregir documento" onClick={() => edit(document)}><Pencil size={16}/></button>{document.estado !== 'ANULADO' && <button type="button" aria-label={'Anular ' + document.folioONumero} title="Anular documento" onClick={() => void deactivate(document)}><Ban size={16}/></button>}</div>}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
-        {!loading && !documents.length && <p className="empty-state">No hay documentos tributarios para los filtros seleccionados.</p>}
-        {loading && <p className="empty-state">Cargando documentos…</p>}
+        {!loading && !documents.length && <div className="tax-document-empty"><FileText size={28} aria-hidden="true"/><strong>{activeFilterCount ? 'Sin resultados' : 'Sin documentos registrados'}</strong><p>{activeFilterCount ? 'Prueba con otra búsqueda o ajusta los filtros.' : 'Los documentos que registres aparecerán aquí.'}</p></div>}
+        {loading && !documents.length && <p role="status" className="tax-document-empty">Cargando documentos…</p>}
         <TablePagination currentPage={page} totalItems={totalRows} pageSize={20} onPageChange={setPage} />
-      </section>
-    </div>
+      </>}
+    </section>
   );
 }
