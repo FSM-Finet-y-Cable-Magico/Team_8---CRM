@@ -129,8 +129,9 @@ describe('CustomersService', () => {
 
     expect(result).toEqual(expect.objectContaining({
       idCliente: 5, telefono: customer.telefono, contratos: [{ idEmpresa: 2 }],
-      datosTecnicos: null, estado: 'Restringido por empresa', idEmpresa: null,
+      datosTecnicos: null, estado: null, estadoGlobalDisponible: false, idEmpresa: null,
     }));
+    expect(JSON.stringify(result)).not.toMatch(/Restringido por empresa/);
     expect(prisma.contrato.findUnique).not.toHaveBeenCalled();
   });
 
@@ -190,7 +191,9 @@ describe('CustomersService', () => {
     expect(result.idCliente).toBe(5);
     expect(result.contratos?.every((row) => row.idEmpresa === idEmpresa)).toBe(true);
     expect(result.datosTecnicos).toBeNull();
-    expect(result.estado).toBe('Restringido por empresa');
+    expect(result.estado).toBeNull();
+    expect(result.estadoGlobalDisponible).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(/Restringido por empresa|Moroso/);
     expect(result).not.toHaveProperty('passwordPortalHash');
     expect(result).not.toHaveProperty('obsConflictivo');
     expect(JSON.stringify(result)).not.toMatch(/GLOBAL_|FOREIGN_PLAN/);
@@ -209,11 +212,50 @@ describe('CustomersService', () => {
     const [consolidated] = await service.list(admin);
     expect(consolidated.contratos).toHaveLength(3);
     expect(consolidated.estado).toBe('Moroso');
+    expect(consolidated.estadoGlobalDisponible).toBe(true);
+    expect(consolidated).not.toHaveProperty('estadosServicioEmpresa');
     expect(consolidated.datosTecnicos).toEqual(shared.datosTecnicos);
     expect(consolidated).not.toHaveProperty('passwordPortalHash');
     const [scoped] = await service.list(admin, '2');
     expect(scoped.contratos).toHaveLength(2);
     expect(scoped.datosTecnicos).toBeNull();
+  });
+
+  it('vista por empresa expone solo estados reales de servicio de esa empresa, sin inventar ni filtrar los de otra', async () => {
+    const withServices = { ...shared, servicios: [
+      { idEmpresa: 1, estadoOperativo: 'Suspendido' },
+      { idEmpresa: 2, estadoOperativo: 'Activo' },
+      { idEmpresa: 2, estadoOperativo: ' Activo ' },
+    ] };
+    const snapshot = JSON.stringify(withServices);
+    const prisma = { cliente: { findMany: jest.fn(async ({ include }: any) => [{
+      ...withServices,
+      servicios: withServices.servicios.filter((service) => service.idEmpresa === include.servicios.where.idEmpresa),
+    }]) } };
+    const service = new CustomersService(prisma as unknown as PrismaService, {} as AuditService);
+    const [companyA] = await service.list({ ...supportUser, idEmpresa: 1 }, '1');
+    const [companyB] = await service.list({ ...supportUser, idEmpresa: 2 }, '2');
+    expect(companyA).toMatchObject({ idCliente: 5, rut: shared.rut, nombreCompleto: shared.nombreCompleto, estado: null, estadosServicioEmpresa: ['Suspendido'] });
+    expect(companyB).toMatchObject({ idCliente: 5, rut: shared.rut, nombreCompleto: shared.nombreCompleto, estado: null, estadosServicioEmpresa: ['Activo'] });
+    for (const view of [companyA, companyB]) {
+      expect(view).not.toHaveProperty('servicios');
+      expect(JSON.stringify(view)).not.toMatch(/Moroso|Restringido por empresa/);
+    }
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({
+      servicios: { where: { idEmpresa: 2 }, select: { idEmpresa: true, estadoOperativo: true } },
+    }) }));
+    // Without services in the company, the state is absent, never "Activo"/"Moroso".
+    prisma.cliente.findMany.mockResolvedValueOnce([{ ...shared, servicios: [] }]);
+    const [withoutService] = await service.list({ ...supportUser, idEmpresa: 2 }, '2');
+    expect(withoutService).toMatchObject({ estado: null, estadosServicioEmpresa: [] });
+    expect(JSON.stringify(withServices)).toBe(snapshot);
+  });
+
+  it('consolidado no consulta servicios para el listado y conserva el estado global real', async () => {
+    const prisma = { cliente: { findMany: jest.fn().mockResolvedValue([shared]) } };
+    const service = new CustomersService(prisma as unknown as PrismaService, {} as AuditService);
+    await service.list(admin);
+    expect(prisma.cliente.findMany.mock.calls[0][0].include).not.toHaveProperty('servicios');
   });
 
   it.each(['Comercial', 'Soporte', 'Terreno', 'Inventario'])('bloquea cambios globales del rol %s antes de consultar o escribir', async (role) => {

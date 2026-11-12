@@ -19,51 +19,51 @@ function loadComponent(path, mocks = {}) {
 }
 
 const { StatusBadge } = loadComponent('../src/shared/components/StatusBadge.tsx');
-const { customerStatusPresentation, CustomerStatusBadge } = loadComponent(
-  '../src/features/customers/CustomerStatusBadge.tsx', { '../../shared/components': { StatusBadge } },
-);
-const render = (value, compact = false) => renderToStaticMarkup(React.createElement(CustomerStatusBadge, { value, compact }));
+const status = loadComponent('../src/features/customers/CustomerStatusBadge.tsx', { '../../shared/components': { StatusBadge } });
+const { CustomerStatusBadge, CustomerStatusSummary, customerStatusDimension, customerStatusValues } = status;
+const summary = (customer, compact = false) => renderToStaticMarkup(React.createElement(CustomerStatusSummary, { customer, compact }));
+const FALSE_MARKERS = /Restringido por empresa|Estado global no compartido/;
 
-test('el marcador empresarial se presenta como privacidad de estado global, sin cambiar el valor API', () => {
-  const state = 'Restringido por empresa';
-  const presentation = customerStatusPresentation(state);
-  assert.equal(presentation.label, 'Estado global no compartido');
-  assert.match(presentation.explanation, /contratos y servicios de la empresa autorizada/);
-  assert.match(presentation.explanation, /consulta el estado de cada contrato o servicio/);
-  assert.equal(state, 'Restringido por empresa');
-  assert.equal(customerStatusPresentation('  RESTRINGIDO POR EMPRESA  ').label, presentation.label);
+test('consolidado presenta el estado global real sin alterar su texto', () => {
+  for (const estado of ['Activo', 'Moroso', 'Suspendido', 'Baja', 'Pendiente Instalacion']) {
+    const customer = { estado, estadoGlobalDisponible: true };
+    assert.equal(customerStatusDimension(customer), 'global');
+    assert.deepEqual(customerStatusValues(customer), [estado]);
+    assert.equal(summary(customer), renderToStaticMarkup(React.createElement(StatusBadge, { value: estado })));
+  }
 });
 
-test('la ficha explica el alcance sin presentar un bloqueo de acceso al cliente autorizado', () => {
-  const html = render('Restringido por empresa');
-  assert.match(html, /Estado global no compartido/);
-  assert.match(html, /<small[^>]*display:block[^>]*>Se muestran los contratos y servicios/);
-  assert.match(html, /aria-describedby=/);
-  assert.doesNotMatch(html, /Restringido por empresa|Sin acceso|Permiso denegado/);
+test('vista por empresa muestra solo estados reales del servicio de esa empresa, rotulados', () => {
+  const customer = { estado: null, estadoGlobalDisponible: false, estadosServicioEmpresa: ['Activo', 'Suspendido'] };
+  assert.equal(customerStatusDimension(customer), 'empresa');
+  assert.deepEqual(customerStatusValues(customer), ['Activo', 'Suspendido']);
+  const html = summary(customer);
+  assert.match(html, /Estado del servicio en esta empresa/);
+  assert.match(html, />Activo</);
+  assert.match(html, />Suspendido</);
+  assert.doesNotMatch(html, FALSE_MARKERS);
+  assert.doesNotMatch(html, /Moroso/);
 });
 
-test('la tabla compacta conserva explicación accesible y tooltip sin mostrar un estado inventado', () => {
-  const html = render('Restringido por empresa', true);
-  assert.match(html, /title="Se muestran los contratos y servicios/);
-  assert.match(html, /tabindex="0"/);
-  const descriptionId = /aria-describedby="([^"]+)"/.exec(html)?.[1];
-  assert.ok(descriptionId);
-  assert.ok(html.includes(`id="${descriptionId}"`));
+test('sin servicio en la empresa no se inventa Activo ni Moroso', () => {
+  for (const customer of [{ estado: null, estadoGlobalDisponible: false, estadosServicioEmpresa: [] }, { estado: null, estadoGlobalDisponible: false }]) {
+    assert.deepEqual(customerStatusValues(customer), []);
+    const html = summary(customer, true);
+    assert.match(html, /Sin servicio en esta empresa/);
+    assert.doesNotMatch(html, /Activo|Moroso|Suspendido|status-badge/);
+    assert.doesNotMatch(html, FALSE_MARKERS);
+  }
+});
+
+test('la tabla compacta conserva el rótulo accesible de la dimensión mostrada', () => {
+  const html = summary({ estado: null, estadoGlobalDisponible: false, estadosServicioEmpresa: ['Activo'] }, true);
+  assert.match(html, /title="Estado del servicio en esta empresa"/);
   assert.match(html, /clip-path:inset\(50%\)/);
-  assert.doesNotMatch(html, />Activo<|>Suspendido<|>Moroso</);
 });
 
-test('estados globales realmente disponibles conservan texto y presentación original', () => {
-  for (const state of ['Activo', 'Moroso', 'Suspendido', 'Baja', 'Pendiente Instalacion']) {
-    assert.deepEqual(customerStatusPresentation(state), { label: state, explanation: null });
-    assert.equal(render(state), renderToStaticMarkup(React.createElement(StatusBadge, { value: state })));
-  }
-});
-
-test('ausencia de dato sigue siendo ausencia, sin inferir estado ni permiso', () => {
-  for (const state of [null, undefined]) {
-    assert.deepEqual(customerStatusPresentation(state), { label: 'Sin dato', explanation: null });
-    assert.match(render(state), />Sin dato</);
-    assert.doesNotMatch(render(state), /empresa autorizada|Activo|Moroso|Suspendido/);
-  }
+test('ausencia de dato global sigue siendo ausencia y el marcador antiguo ya no se traduce', () => {
+  for (const estado of [null, undefined]) assert.match(summary({ estado }), />Sin dato</);
+  assert.match(renderToStaticMarkup(React.createElement(CustomerStatusBadge, { value: null })), />Sin dato</);
+  const source = readFileSync(new URL('../src/features/customers/CustomerStatusBadge.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, FALSE_MARKERS);
 });

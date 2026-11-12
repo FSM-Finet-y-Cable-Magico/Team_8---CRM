@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api, apiErrorMessage, type Customer } from '../../api';
 import { Users } from 'lucide-react';
-import { CustomerStatusBadge } from './CustomerStatusBadge';
+import { CustomerStatusSummary } from './CustomerStatusBadge';
 
 export type CustomerProfileFields = Pick<Customer, 'idCliente' | 'nombreCompleto' | 'email' | 'telefono'>;
 
@@ -46,7 +46,7 @@ export function CustomerProfileForm({ customer, onCancel, onSaved, onBusy, compa
     <header className="customer-profile-header">
       <span className="customer-profile-avatar" aria-hidden="true"><Users size={22}/></span>
       <div><label>Nombre completo<input autoFocus required minLength={2} maxLength={120} value={name} disabled={saving} onChange={event => setName(event.target.value)}/></label><p>{customer.rut ?? 'RUT no registrado'}</p></div>
-      <CustomerStatusBadge value={customer.estado}/>
+      <CustomerStatusSummary customer={customer}/>
     </header>
     <div className="customer-profile-data">
       <div><span>Empresa</span><strong>{companyLabel ?? customer.empresa?.nombre ?? '—'}</strong></div>

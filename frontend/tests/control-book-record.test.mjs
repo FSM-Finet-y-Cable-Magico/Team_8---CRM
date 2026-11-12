@@ -37,7 +37,7 @@ async function drawer(t, changes = {}, portfolioRows) {
   const posts = [], saved = [];
   const { ControlBookDrawer } = compile('ControlBookDrawer.tsx', {
     '../../api': { api: { get: async path => ({ data: path === '/commercial/control-book' ? { items: portfolioRows ?? [{ ...row, ...changes }], pagination: { totalPages: 1 } } : [] }), post: async (...args) => posts.push(args) }, apiErrorMessage: () => 'No se pudo guardar' },
-    '../customers/CustomerStatusBadge': { CustomerStatusBadge: () => null },
+    '../customers/CustomerStatusBadge': { CustomerStatusSummary: () => null },
     './ControlBookCustomerContracts': { ControlBookCustomerContracts: ({ onSelect }) => React.createElement('button', { onClick: () => onSelect(portfolioRows?.[0]?.idContrato ?? 31) }, 'Seleccionar plan') },
     './ControlBookHistory': { ControlBookHistory: () => null },
     './ControlBookManualPayment': { ControlBookManualPayment: () => null },

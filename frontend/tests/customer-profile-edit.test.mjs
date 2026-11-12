@@ -12,7 +12,7 @@ async function render(t,fail=false){
   const calls=[],events=[];
   const source=readFileSync(new URL('../src/features/customers/CustomerProfileForm.tsx',import.meta.url),'utf8');
   const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  const mocks={'../../api':{api:{patch:async(...args)=>{calls.push(args);if(fail)throw Error('falló');return {data:{...customer,nombreCompleto:'Nombre actualizado'}};}},apiErrorMessage:()=> 'No se pudo guardar'},'./CustomerStatusBadge':{CustomerStatusBadge:()=>null}};
+  const mocks={'../../api':{api:{patch:async(...args)=>{calls.push(args);if(fail)throw Error('falló');return {data:{...customer,nombreCompleto:'Nombre actualizado'}};}},apiErrorMessage:()=> 'No se pudo guardar'},'./CustomerStatusBadge':{CustomerStatusSummary:()=>null}};
   const exports={};new Function('require','exports',output)(name=>mocks[name]??require(name),exports);
   let tree;await act(async()=>{tree=create(React.createElement(exports.CustomerProfileForm,{customer,onCancel(){},onBusy:value=>events.push(value),onSaved:value=>events.push(value)}));});
   t.after(async()=>{await act(async()=>tree.unmount());});
@@ -44,7 +44,7 @@ test('modal completo alterna editar, cancelar y guardar sin duplicar la ficha ni
   const patches=[],warnings=[];
   t.mock.method(console,'error',(...args)=>warnings.push(args.join(' ')));
   const apiMock={'../../api':{api:{get:async()=>({data:[]}),patch:async(path,fields)=>{patches.push(fields);return {data:{...customer,...fields}};}},apiErrorMessage:()=> 'Error'}};
-  const status={'./CustomerStatusBadge':{CustomerStatusBadge:()=>null,customerStatusPresentation:value=>({label:value})}};
+  const status={'./CustomerStatusBadge':{CustomerStatusSummary:()=>null,CUSTOMER_STATUS_DIMENSION_LABELS:{global:'Estado del cliente',empresa:'Estado del servicio en esta empresa'},customerStatusValues:c=>c.estado?[c.estado]:[]}};
   const profile=compile('CustomerProfileForm.tsx',{...apiMock,...status});
   const {CustomersPanel}=compile('CustomersPanel.tsx',{
     ...apiMock,...status,

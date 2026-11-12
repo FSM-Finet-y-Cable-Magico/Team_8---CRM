@@ -46,6 +46,7 @@ export class CustomersService {
           orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }],
           take: 1,
         },
+        ...this.companyServiceStatesInclude(idEmpresa),
       },
     });
 
@@ -230,7 +231,7 @@ export class CustomersService {
     ]);
 
     return {
-      cliente: this.visibleCustomer(cliente, scopedCompanyId),
+      cliente: this.visibleCustomer({ ...cliente, servicios }, scopedCompanyId),
       contratos: this.scopedRecords(contratos, scopedCompanyId),
       servicios: this.scopedRecords(servicios, scopedCompanyId),
       tickets,
@@ -267,7 +268,7 @@ export class CustomersService {
           { rut: { in: rutVariants, mode: 'insensitive' } },
           this.companyScope(currentUser, 'consolidado'),
         ] },
-        include: { contratos: { where: companyFilter, select: { idEmpresa: true } } },
+        include: { contratos: { where: companyFilter, select: { idEmpresa: true } }, ...this.companyServiceStatesInclude(idEmpresa) },
         take: 2,
       });
       if (candidates.length > 1) {
@@ -282,7 +283,7 @@ export class CustomersService {
     const cliente = customerByContract?.idCliente
       ? await this.prisma.cliente.findUnique({
           where: { idCliente: customerByContract.idCliente },
-          include: { contratos: { where: companyFilter, select: { idEmpresa: true } } },
+          include: { contratos: { where: companyFilter, select: { idEmpresa: true } }, ...this.companyServiceStatesInclude(idEmpresa) },
         })
       : await this.prisma.cliente.findFirst({
           where: {
@@ -291,7 +292,7 @@ export class CustomersService {
               this.companyScope(currentUser, 'consolidado'),
             ],
           },
-          include: { contratos: { where: companyFilter, select: { idEmpresa: true } } },
+          include: { contratos: { where: companyFilter, select: { idEmpresa: true } }, ...this.companyServiceStatesInclude(idEmpresa) },
         });
 
     if (!cliente) {
@@ -387,16 +388,33 @@ export class CustomersService {
     }
   }
 
+  /** Service states are only loaded for a company view, and only that company's services. */
+  private companyServiceStatesInclude(idEmpresa?: number) {
+    return idEmpresa === undefined ? {} : {
+      servicios: { where: { idEmpresa }, select: { idEmpresa: true, estadoOperativo: true } },
+    };
+  }
+
   private visibleCustomer<T extends Cliente & {
     empresa?: Empresa | null;
     contratos?: Array<{ idEmpresa: number | null }>;
     direcciones?: unknown[];
+    servicios?: Array<{ idEmpresa: number | null; estadoOperativo: string | null }>;
   }>(customer: T, idEmpresa?: number) {
-    const { passwordPortalHash: password, ...safe } = customer;
+    const { passwordPortalHash: password, servicios, ...safe } = customer;
     void password;
-    if (idEmpresa === undefined) return safe;
+    if (idEmpresa === undefined) return { ...safe, estadoGlobalDisponible: true as const };
     // Only shared identity and attributed relationships may cross the customer's
-    // primary-company boundary. Never derive a company status from global estado.
+    // primary-company boundary. The global customer estado is not shared in a
+    // company view and no substitute status is invented: estado is null and the
+    // company's real service states (servicio_contratado.estado_operativo) are
+    // exposed separately, only when they were loaded for this company.
+    const companyStates = servicios
+      ? [...new Set(servicios
+        .filter((service) => service.idEmpresa === idEmpresa)
+        .map((service) => service.estadoOperativo?.trim())
+        .filter((state): state is string => Boolean(state)))].sort((a, b) => a.localeCompare(b, 'es'))
+      : undefined;
     return {
       idCliente: customer.idCliente,
       idEmpresa: customer.idEmpresa === idEmpresa ? idEmpresa : null,
@@ -404,7 +422,9 @@ export class CustomersService {
       nombreCompleto: customer.nombreCompleto,
       email: customer.email,
       telefono: customer.telefono,
-      estado: 'Restringido por empresa',
+      estado: null,
+      estadoGlobalDisponible: false as const,
+      ...(companyStates ? { estadosServicioEmpresa: companyStates } : {}),
       origenContacto: null,
       datosTecnicos: null,
       empresa: customer.empresa?.idEmpresa === idEmpresa ? customer.empresa : null,

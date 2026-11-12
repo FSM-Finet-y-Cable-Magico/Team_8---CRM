@@ -235,7 +235,12 @@ export type Customer = {
   nombreCompleto: string;
   email: string | null;
   telefono: string | null;
-  estado: string;
+  /** Global customer status; null in a company view, where it is not shared. */
+  estado: string | null;
+  /** false when the API returns a company view (estado is null there). */
+  estadoGlobalDisponible?: boolean;
+  /** Real servicio_contratado.estado_operativo values of the selected company only. */
+  estadosServicioEmpresa?: string[];
   origenContacto: string | null;
   datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;

@@ -1,7 +1,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarClock, CalendarDays, CreditCard, Handshake, IdCard, Phone, Wallet } from 'lucide-react';
 import { api, apiErrorMessage, type Customer, type CustomerService } from '../../api';
-import { CustomerStatusBadge } from '../customers/CustomerStatusBadge';
+import { CustomerStatusSummary } from '../customers/CustomerStatusBadge';
 import { ControlBookCustomerContracts } from './ControlBookCustomerContracts';
 import { ControlBookHistory } from './ControlBookHistory';
 import { ControlBookModal } from './ControlBookModal';
@@ -148,7 +148,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
     headerDetails={<>
       <div className="control-customer-meta">
         <span><IdCard size={15} aria-hidden="true"/>{row.rut ? 'RUT ' + row.rut : 'Sin RUT'}</span>
-        {customer?.estado && <CustomerStatusBadge value={customer.estado}/>}
+        {customer && <CustomerStatusSummary customer={customer}/>}
       </div>
       <DetailList values={[
         ['Empresa', scopedCompany], ['Origen', customer?.origenContacto], ['Teléfono', customer?.telefono ?? row.telefono],
