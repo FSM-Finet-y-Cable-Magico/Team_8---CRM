@@ -1,0 +1,70 @@
+{
+  "desktop": {
+    "suspendido": {
+      "fila": "ok",
+      "plan": "ok",
+      "acciones": [
+        "Registrar gestión",
+        "Crear convenio",
+        "Otorgar prórroga",
+        "Cambiar día de pago",
+        "Agregar cargo",
+        "Pago manual",
+        "Iniciar baja y retiro"
+      ]
+    },
+    "abrir": "ok",
+    "modal": "Iniciar baja y retiro\nQA LC 02 Bruno Salas (FiNet)\nFibra 300 Hogar\nServicio\nSeleccionar servicio\nInternet · Suspendido\nEmpresa\nFiNet\nCliente\nQA LC 02 Bruno Salas (FiNet) · 88901002-9\nContrato\n#48 · Fibra 300 Hogar\nServicio\nInternet\nEstado del servicio\nSuspendido\nDeuda vencida\n$59.970 · 103 días\nAviso previo de retiro\n11-11-2026\nMotivo\nMorosidad\nResponsable\nAdministrador FiNet\nServicio de la empresa\n✓ Cumple\nEmpresa y permisos\n✓ Cumple\nSin baja efectiva previa\n✓ Cumple\nSin solicitud de retiro activa\n✓ Cumple\nServicio suspendido\n✓ Cumple\nContrato del servicio\n✓ Cumple\nDeuda exigible vencida\n✓ Cumple\nAviso previo de retiro\n✓ Cumple\n\nLa baja guiada aún no está habilitada en este ambiente: falta aprobar el registro que vincula solicitud, aviso y ticket. No se registrará nada.\n\nCancelar\nIniciar baja y retiro",
+    "submitDeshabilitado": true,
+    "overflowX": 0,
+    "activo": {
+      "fila": "ok",
+      "plan": "ok",
+      "acciones": [
+        "Registrar gestión",
+        "Crear convenio",
+        "Otorgar prórroga",
+        "Cambiar día de pago",
+        "Agregar cargo",
+        "Pago manual"
+      ]
+    },
+    "erroresConsola": [],
+    "httpError": [],
+    "escrituras": []
+  },
+  "movil": {
+    "suspendido": {
+      "fila": "ok",
+      "plan": "ok",
+      "acciones": [
+        "Registrar gestión",
+        "Crear convenio",
+        "Otorgar prórroga",
+        "Cambiar día de pago",
+        "Agregar cargo",
+        "Pago manual",
+        "Iniciar baja y retiro"
+      ]
+    },
+    "abrir": "ok",
+    "modal": "Iniciar baja y retiro\nQA LC 02 Bruno Salas (FiNet)\nFibra 300 Hogar\nServicio\nSeleccionar servicio\nInternet · Suspendido\nEmpresa\nFiNet\nCliente\nQA LC 02 Bruno Salas (FiNet) · 88901002-9\nContrato\n#48 · Fibra 300 Hogar\nServicio\nInternet\nEstado del servicio\nSuspendido\nDeuda vencida\n$59.970 · 103 días\nAviso previo de retiro\n11-11-2026\nMotivo\nMorosidad\nResponsable\nAdministrador FiNet\nServicio de la empresa\n✓ Cumple\nEmpresa y permisos\n✓ Cumple\nSin baja efectiva previa\n✓ Cumple\nSin solicitud de retiro activa\n✓ Cumple\nServicio suspendido\n✓ Cumple\nContrato del servicio\n✓ Cumple\nDeuda exigible vencida\n✓ Cumple\nAviso previo de retiro\n✓ Cumple\n\nLa baja guiada aún no está habilitada en este ambiente: falta aprobar el registro que vincula solicitud, aviso y ticket. No se registrará nada.\n\nCancelar\nIniciar baja y retiro",
+    "submitDeshabilitado": true,
+    "overflowX": 0,
+    "activo": {
+      "fila": "ok",
+      "plan": "ok",
+      "acciones": [
+        "Registrar gestión",
+        "Crear convenio",
+        "Otorgar prórroga",
+        "Cambiar día de pago",
+        "Agregar cargo",
+        "Pago manual"
+      ]
+    },
+    "erroresConsola": [],
+    "httpError": [],
+    "escrituras": []
+  }
+}
