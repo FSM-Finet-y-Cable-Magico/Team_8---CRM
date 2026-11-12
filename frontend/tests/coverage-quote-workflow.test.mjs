@@ -268,3 +268,19 @@ for (const delivery of ['sent', 'failed', 'disabled']) test('React: aviso de cot
   else if (delivery === 'disabled') assert.deepEqual(h.notices, ['Cotización generada']);
   else { assert.deepEqual(h.notices, []); assert.ok(h.text().includes('No se pudo enviar la cotización.')); }
 });
+
+test('TK-07: el editor de prospecto usa el patrón del editor de clientes sin cambiar su guardado', async t => {
+  const h = await harness(t, { g2: true, requiresReview: false });
+  await act(async () => h.button('Editar prospecto').props.onClick());
+  const form = h.tree.root.findByProps({ className: 'prospect-edit-form' });
+  const text = node => typeof node === 'string' ? node : (node.children ?? []).map(text).join('');
+  const labels = form.findAllByType('label').map(node => text(node).split(/(?=Seleccionar|Selecciona)/)[0]);
+  assert.deepEqual(labels.map(label => label.replace(/Metropolitana.*$/, '')), ['Nombre completo', 'Origen de contacto', 'Teléfono', 'Correo', 'Dirección', 'Región', 'Comuna']);
+  assert.match(text(form), /Empresa/);
+  assert.equal(h.button('Cancelar').props.className, 'secondary compact');
+  assert.equal(h.button('Guardar datos').props.className, 'compact');
+  await h.changeField('Teléfono', '+56900000004');
+  await h.save();
+  assert.ok(h.calls.some(call => call.path === '/prospects/10' && call.body.telefono === '+56900000004'));
+  assert.equal(h.calls.some(call => call.path.startsWith('/customers/')), false);
+});
