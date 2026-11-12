@@ -406,6 +406,8 @@ export type G1Unit = {
   fecha_instalacion?: string | null;
   id_ot?: number | string | null;
   garantia?: { fecha_vencimiento?: string | null; vigente?: boolean | null } | null;
+  /** Active association reported by G1 (cliente/servicio/contrato/OT references); null when none. */
+  asignacion_actual?: Record<string, unknown> | null;
 };
 
 export type G1EquipmentResponse<T> = {
