@@ -12,12 +12,17 @@ const hookSource = readFileSync(new URL('../src/shared/hooks/useTransientMessage
 const hookCode = ts.transpileModule(hookSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 new Function('require', 'exports', 'window', hookCode)(require, transientMessage, { setTimeout, clearTimeout });
 const ToastNotice = ({ message }) => message ? React.createElement('p', { role: 'status' }, message) : null;
-function component(api) {
+function component(api, form = false) {
   const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   const exports = {};
   const mocks = { '../../api': { api, apiErrorMessage: e => e.message }, '../../lib': { formatDateTime: value => value ?? '-', ...require('./helpers/user-facing-messages.cjs') }, '../../shared/components': { StatusBadge: () => null, ToastNotice }, '../../shared/hooks/useTransientMessage': transientMessage };
   new Function('require', 'exports', out)(name => name in mocks ? mocks[name] : require(name), exports);
-  return exports.G3InstallationStatus;
+  if (!form) return exports.G3InstallationStatus;
+  const formExports = {};
+  const formSource = readFileSync(new URL('../src/features/installations/InstallOrderForm.tsx', import.meta.url), 'utf8');
+  const code = ts.transpileModule(formSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  new Function('require', 'exports', code)(name => name === './G3InstallationStatus' ? exports : require(name), formExports);
+  return formExports.InstallOrderForm;
 }
 async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false, installationSummary = false, service } = {}) {
   const calls = [];
@@ -136,4 +141,76 @@ test('el resumen muestra el cierre de la orden correlacionada y sus equipos decl
     assert.equal(h.button('Detalle'), undefined);
     assert.equal(h.calls.length, 1);
   } finally { await h.close(); }
+});
+
+async function workflow(t, { state = 'Firmado', canRequest = true, contractId = 17, preflight, tracking = null, pendingRequest = false } = {}) {
+  const calls = []; let finish;
+  const requestResult = { data: { idIntegracion: 7, idOtG3: 'QA-17', estadoIntegracion: 'ENVIADA', estadoPresentacion: 'PENDIENTE' } };
+  const api = {
+    get: async path => { calls.push(['GET', path]); return { data: tracking }; },
+    post: async (path, body) => {
+      calls.push(['POST', path, body]);
+      if (path.endsWith('installation-requirements')) {
+        if (preflight instanceof Error) throw preflight;
+        return { data: preflight ?? { idContrato: 17, comunaFaltante: false } };
+      }
+      return pendingRequest ? new Promise(resolve => { finish = () => resolve(requestResult); }) : requestResult;
+    },
+  };
+  const View = component(api, true);
+  const props = { prospect: { idProspecto: 2, contratos: [{ idContrato: 99, estado: 'Firmado' }, { idContrato: 17, estado: state }] }, contractId, canRequest, onChanged() {} };
+  let tree; await act(async () => { tree = create(React.createElement(View, props)); });
+  t.after(async () => { await act(async () => tree.unmount()); });
+  return { tree, calls, finish: () => finish?.(), request: () => tree.root.findAllByType('button').find(b => b.props.children === 'Solicitar instalación') };
+}
+
+test('postfirma consulta, valida y solicita el contrato mostrado, sin elegir el de mayor ID', async t => {
+  const h = await workflow(t, { pendingRequest: true });
+  assert.deepEqual(h.calls, [['GET', '/integrations/g3/contracts/17/installation'], ['POST', '/integrations/g3/installation-requirements', { idContrato: 17 }]]);
+  assert.equal(h.request().props.disabled, false);
+  const click = h.request().props.onClick;
+  await act(async () => { click(); click(); });
+  assert.equal(h.calls.filter(c => c[1] === '/integrations/g3/installations').length, 1);
+  assert.deepEqual(h.calls.at(-1), ['POST', '/integrations/g3/installations', { idContrato: 17 }]);
+  await act(async () => h.finish());
+  assert.equal(h.request(), undefined);
+  assert.match(JSON.stringify(h.tree.toJSON()), /QA-17/);
+});
+
+for (const state of ['Pendiente firma contrato', 'Suspendido', 'Moroso']) test(`contrato ${state} bloquea la solicitud sin invocar preflight`, async t => {
+  const h = await workflow(t, { state });
+  assert.equal(h.request().props.disabled, true);
+  assert.equal(h.calls.length, 1);
+  assert.match(JSON.stringify(h.tree.toJSON()), /no permite solicitar/);
+});
+
+test('sin permiso o sin contrato no crea solicitudes ni inventa un contrato válido', async t => {
+  const denied = await workflow(t, { canRequest: false });
+  assert.equal(denied.request().props.disabled, true);
+  assert.equal(denied.calls.length, 1);
+  assert.match(JSON.stringify(denied.tree.toJSON()), /No tienes permisos/);
+  const missing = await workflow(t, { contractId: 50 });
+  assert.equal(missing.calls.length, 0);
+  assert.match(JSON.stringify(missing.tree.toJSON()), /No existe un contrato asociado/);
+});
+
+test('fallo real de factibilidad y comuna ausente quedan visibles y bloquean la solicitud', async t => {
+  const failed = await workflow(t, { preflight: new Error('Factibilidad requerida') });
+  assert.match(JSON.stringify(failed.tree.toJSON()), /Factibilidad requerida/);
+  assert.equal(failed.request().props.disabled, true);
+  const missing = await workflow(t, { preflight: { idContrato: 17, comunaFaltante: true, puedeCompletarComuna: false } });
+  assert.equal(missing.request().props.disabled, true);
+  assert.match(JSON.stringify(missing.tree.toJSON()), /Falta la comuna/);
+});
+
+test('tracking existente muestra seguimiento y omite preflight y solicitud nueva', async t => {
+  const h = await workflow(t, { tracking: { idIntegracion: 7, idOtG3: 'QA-17', estadoIntegracion: 'ENVIADA', estadoPresentacion: 'PENDIENTE' } });
+  assert.equal(h.request(), undefined);
+  assert.equal(h.calls.length, 1);
+});
+
+test('una respuesta de requisitos de otro contrato nunca habilita enviar', async t => {
+  const h = await workflow(t, { preflight: { idContrato: 99, comunaFaltante: false } });
+  assert.equal(h.request().props.disabled, true);
+  assert.equal(h.calls.some(c => c[1] === '/integrations/g3/installations'), false);
 });

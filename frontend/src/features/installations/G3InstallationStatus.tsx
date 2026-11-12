@@ -44,8 +44,9 @@ function completedFields(tracking: G3InstallationTracking | null, service?: Cust
   </dl>;
 }
 
-export function G3InstallationStatus({ prospectId, contractId, canRequest, onChanged, compact = false, installationSummary = false, hideRequest = false, service }: {
-  prospectId?: number; contractId?: number; canRequest: boolean; onChanged?: () => void; compact?: boolean;
+type InstallationTarget = { contractId: number; prospectId?: never } | { prospectId: number; contractId?: never };
+export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, service }: InstallationTarget & {
+  canRequest: boolean; blockedReason?: string; onChanged?: () => void; compact?: boolean;
   installationSummary?: boolean; hideRequest?: boolean; service?: CustomerService;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
@@ -70,6 +71,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     showMessage(feedback);
   }, [compact, tracking, feedback, loading, busy, showMessage, clearMessage]);
   const loadRevision = useRef(0);
+  const mutationInFlight = useRef(false);
   const loadController = useRef<AbortController | null>(null);
   const savedInstallation = service?.instalacion;
   const savedCompletion = Boolean(savedInstallation && (savedInstallation.estado === 'COMPLETADA'
@@ -81,13 +83,17 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     loadController.current = controller;
     const revision = ++loadRevision.current;
     setLoading(true); setError(''); setRequirements(null);
+    setTracking(null);
     try {
-      const path = prospectId ? `/integrations/g3/prospects/${prospectId}/installation` : `/integrations/g3/contracts/${contractId}/installation`;
+      if ((prospectId == null) === (contractId == null)) { setError('No se pudo identificar el contrato de esta instalación.'); return; }
+      const path = contractId != null ? `/integrations/g3/contracts/${contractId}/installation` : `/integrations/g3/prospects/${prospectId}/installation`;
       const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
       if (revision !== loadRevision.current || controller.signal.aborted) return;
       setTracking(data);
       if (!data && canRequest && !savedCompletion) {
         const result = await api.post('/integrations/g3/installation-requirements', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
+        if (contractId != null && result.data.idContrato !== contractId) { setError('La validación no corresponde al contrato seleccionado. Vuelve a comprobar la instalación.'); return; }
+        if (typeof result.data.comunaFaltante !== 'boolean') { setError('No se pudieron comprobar los requisitos de instalación.'); return; }
         if (revision === loadRevision.current && !controller.signal.aborted) setRequirements(result.data);
       }
     } catch (cause) {
@@ -105,17 +111,22 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   }, [load]);
 
   async function completeData() {
-    if (!requirements || !sameAddress || !comuna.trim()) return;
+    if (mutationInFlight.current || !canRequest || !requirements || !sameAddress || !comuna.trim()) return;
+    mutationInFlight.current = true;
     setBusy(true); setError('');
     try {
       const { data } = await api.patch(`/integrations/g3/contracts/${requirements.idContrato}/installation-data`, { comuna: comuna.trim(), confirmarMismaDireccion: true });
       setRequirements(data); setComuna(''); setSameAddress(false);
       setNotice('Comuna guardada. El contrato firmado y su PDF conservan sus datos.');
       onChanged?.();
-    } catch (cause) { setError(apiErrorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(apiErrorMessage(cause)); } finally { mutationInFlight.current = false; setBusy(false); }
   }
 
   async function run(action: 'request' | 'retry' | 'detail' | 'reconcile') {
+    if (mutationInFlight.current || loading) return;
+    if ((action === 'request' || action === 'retry') && !canRequest) return;
+    if (action === 'request' && (hideRequest || tracking || error || !requirements || requirements.comunaFaltante)) return;
+    mutationInFlight.current = true;
     setBusy(true); setError(''); setNotice('');
     try {
       if (action === 'request') {
@@ -132,7 +143,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
         }
       }
       onChanged?.();
-    } catch (cause) { setError(apiErrorMessage(cause)); } finally { setBusy(false); }
+    } catch (cause) { setError(apiErrorMessage(cause)); } finally { mutationInFlight.current = false; setBusy(false); }
   }
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
@@ -143,8 +154,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
   if (installationSummary && !tracking && !canRequest) return <p className="customer-contract-note" role={error ? 'status' : undefined}>{error || 'Sin orden de instalación registrada.'}</p>;
   if (!tracking) return <div className="g3-installation-card">
     {installationSummary ? <p>Sin orden de instalación registrada.</p> : <>
-      {!hideRequest && <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>}
-      <p>Se requieren contrato firmado, factibilidad aprobada, identificación del cliente, teléfono móvil, dirección y comuna.</p>
+      {!hideRequest && canRequest && !error && !requirements?.comunaFaltante && <p>Solicita la instalación para coordinar la visita del equipo técnico.</p>}
     </>}
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
     {requirements?.comunaFaltante && requirements.puedeCompletarComuna && <fieldset disabled={busy}>
@@ -155,9 +165,9 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
       <p>Si la dirección contratada es incorrecta, solicita revisión y la aprobación o firma que corresponda antes de continuar.</p>
       <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna</button>
     </fieldset>}
-    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>}
-    {!canRequest && <p className="alert">Primero confirma el contrato firmado y la factibilidad.</p>}
-    {error && <p className="alert">{error}</p>}
+    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || Boolean(error) || busy} onClick={() => void run('request')}>{busy ? 'Enviando…' : 'Solicitar instalación'}</button>}
+    {!canRequest && <p className="alert" role="alert">{blockedReason ?? 'No tienes permisos para solicitar instalaciones desde esta vista.'}</p>}
+    {error && <><p className="alert" role="alert">{error}</p><button type="button" className="secondary compact" disabled={busy} onClick={() => void load()}>Volver a comprobar</button></>}
     {notice && <p role="status">{notice}</p>}
   </div>;
 
@@ -222,7 +232,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, onCha
     {(!compact || retryable) && <div className="button-row">
       {!compact && delivered && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Detalle</button>}
       {!compact && consultClosure}
-      {retryable && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
+      {retryable && canRequest && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
     </div>}
     {compact ? <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} /> : <>
       {error && <p className="alert">{error}</p>}

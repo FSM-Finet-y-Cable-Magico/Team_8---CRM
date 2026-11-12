@@ -198,6 +198,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [scope, setScope] = useState('consolidado');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusedInstallationProspectId, setFocusedInstallationProspectId] = useState<number | null>(null);
+  const [focusedInstallationContractId, setFocusedInstallationContractId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -465,7 +466,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               canComplete={permissions.installEquipment}
                canRequest={permissions.createInstallOrders}
               focusedProspectId={focusedInstallationProspectId}
-              onFocusConsumed={() => setFocusedInstallationProspectId(null)}
+              focusedContractId={focusedInstallationContractId}
+              onFocusConsumed={() => { setFocusedInstallationProspectId(null); setFocusedInstallationContractId(null); }}
               onChanged={() => void loadData()}
             />
           )}
@@ -481,8 +483,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               permissions={permissions}
               profileEditor={{ admin: isAdmin, idEmpresa: user.idEmpresa }}
               onProfileUpdated={(profile) => setCustomers(current => current.map(customer => customer.idCliente === profile.idCliente ? { ...customer, ...profile } : customer))}
-              onManageInstallation={(idProspecto) => {
+              onManageInstallation={(idProspecto, idContrato) => {
                 setFocusedInstallationProspectId(idProspecto);
+                setFocusedInstallationContractId(idContrato);
                 setActiveTab('installations');
               }}
               onChanged={() => void loadData()}

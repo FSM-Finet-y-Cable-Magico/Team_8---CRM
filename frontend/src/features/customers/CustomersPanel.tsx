@@ -132,7 +132,7 @@ export function CustomersPanel({
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
-  onManageInstallation: (idProspecto: number) => void;
+  onManageInstallation: (idProspecto: number, idContrato: number) => void;
   onChanged: () => void;
   profileEditor?: { admin: boolean; idEmpresa: number | null };
   onProfileUpdated?: (profile: CustomerProfileFields) => void;

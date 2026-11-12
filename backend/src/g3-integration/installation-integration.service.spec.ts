@@ -168,6 +168,44 @@ function assertNoRequestEffects(context: ReturnType<typeof setup>) {
   expect(context.audit.record).not.toHaveBeenCalled();
 }
 
+describe('Postfirma: contrato seleccionado y preflight sin efectos', () => {
+  it('un rechazo de credenciales del proveedor no se presenta como sesión expirada del operador', async () => {
+    const c = setup();
+    await c.service.requestInstallation({ idContrato: 20 }, user);
+    c.client.getWorkOrderClosure.mockRejectedValue(new G3IntegrationError('G3_NO_AUTORIZADO', 401, false, 'El servicio técnico rechazó la autenticación del servidor.'));
+    await expect(c.service.reconcile(1, user)).rejects.toMatchObject({ status: 502 });
+    expect(c.closure.process).not.toHaveBeenCalled();
+    expect(c.client.createInstallation).toHaveBeenCalledTimes(1);
+  });
+  it('valida y solicita el contrato explícito sin elegir otro contrato reciente del prospecto', async () => {
+    const c = setup();
+    c.contract.idContrato = 17;
+    c.prisma.contrato.findFirst.mockResolvedValue({ ...c.contract, idContrato: 99 });
+    await expect(c.service.installationRequirements({ idContrato: 17 }, user)).resolves.toMatchObject({ idContrato: 17, comunaFaltante: false });
+    assertNoRequestEffects(c);
+    expect(c.prisma.contrato.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { idContrato: 17 } }));
+    expect(c.prisma.cotizacion.findFirst).toHaveBeenCalledWith({ where: { idProspecto: 10, idPlan: 7, factibilidadVerificada: true } });
+    await c.service.requestInstallation({ idContrato: 17 }, user);
+    expect(c.prisma.contrato.findFirst).not.toHaveBeenCalled();
+    expect(c.prisma.integracionInstalacionG3.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ idContrato: 17, idPlan: 7, idProspecto: 10 }) }));
+    expect(c.client.createInstallation).toHaveBeenCalledTimes(1);
+    expect(c.closure.process).not.toHaveBeenCalled();
+  });
+
+  it.each(['cotizacion', 'rut', 'movil', 'direccion', 'firma', 'empresa'])('bloquea %s inválida sin tracking ni llamadas externas', async missing => {
+    const c = setup();
+    if (missing === 'cotizacion') c.prisma.cotizacion.findFirst.mockResolvedValue(null);
+    if (missing === 'rut') c.contract.prospecto.rut = '12345678-0';
+    if (missing === 'movil') c.contract.prospecto.telefono = '123';
+    if (missing === 'direccion') { c.contract.direccionInstalacion = ''; c.contract.prospecto.direccion = ''; }
+    if (missing === 'firma') c.contract.estado = 'Pendiente firma contrato';
+    if (missing === 'empresa') c.contract.plan.idEmpresa = 2;
+    await expect(c.service.installationRequirements({ idContrato: 20 }, user)).rejects.toThrow();
+    await expect(c.service.requestInstallation({ idContrato: 20 }, user)).rejects.toThrow();
+    assertNoRequestEffects(c);
+  });
+});
+
 describe('Validacion previa de servicios antes de solicitar G3', () => {
   it.each(['Suspendido', 'Moroso', 'Baja', 'Activo', 'Desconocido'])
     ('rechaza servicio explicito %s sin tracking, pipeline ni HTTP', async (estado) => {

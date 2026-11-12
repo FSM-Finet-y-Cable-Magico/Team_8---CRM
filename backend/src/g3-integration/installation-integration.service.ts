@@ -252,7 +252,8 @@ export class InstallationIntegrationService {
         data: { ultimoErrorSanitizado: failure.message, fechaUltimaSincronizacion: new Date() },
       });
       if (error instanceof G3IntegrationError) {
-        throw new HttpException({ code: failure.code, message: failure.message }, failure.status ?? 502);
+        // Provider credentials are independent of the operator's CRM session.
+        throw new HttpException({ code: failure.code, message: failure.message }, failure.status === 401 ? 502 : failure.status ?? 502);
       }
       throw error;
     }
