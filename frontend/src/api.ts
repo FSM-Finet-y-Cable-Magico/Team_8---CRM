@@ -66,6 +66,8 @@ export type Prospect = {
   cotizaciones?: Array<{ idCotizacion: number; codigo?: string | null; idPlan: number; fechaEnvio: string; vigente?: boolean }>;
   requiereRevisionComercial?: boolean;
   revisionOrigenG2Disponible?: boolean;
+  /** Solo en excliente: situación financiera calculada por el backend al listar (nunca guardada). */
+  excliente?: { situacionFinanciera: 'SIN_DEUDA' | 'CON_DEUDA' | 'INDETERMINADA'; etiqueta: string };
   idProspecto: number;
   idCliente: number | null;
   rut: string | null;
