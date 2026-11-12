@@ -80,6 +80,15 @@ export class CreateServiceWithdrawalDto {
   @IsOptional() @IsString() @MaxLength(1000) observaciones?: string;
 }
 
+/** «Iniciar baja y retiro» desde el Libro de Control. El motivo es siempre MOROSIDAD; el resto se lee del CRM. */
+export class InitiateServiceWithdrawalDto {
+  @Type(() => Number) @IsInt() @Min(1) idServicio!: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
+  @IsString() @Matches(/\S/) @MaxLength(1000) observaciones!: string;
+  @IsOptional() @IsDateString() fechaSolicitada?: string;
+  @Equals(true) confirmacion!: boolean;
+}
+
 export class UpdateServiceWithdrawalDto {
   @IsIn(['REGISTRADA', 'EN_GESTION', 'CANCELADA', 'CERRADA']) estado!: string;
   @IsOptional() @IsString() @MaxLength(1000) observaciones?: string;

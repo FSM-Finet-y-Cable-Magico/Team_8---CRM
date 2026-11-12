@@ -9,7 +9,7 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
 import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
-import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, InitiateServiceWithdrawalDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 import { independentRepairAcknowledgement, installationClosure } from './g3-closure-contract';
@@ -138,6 +138,33 @@ export class ServiceWithdrawalController {
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
   create(@Body() dto: CreateServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
     return this.withdrawals.create(dto, user);
+  }
+
+  /** Requisitos de la baja por morosidad de un servicio, en modo consulta (sin escrituras). */
+  @Get('eligibility/:idServicio')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  eligibility(@Param('idServicio', ParseIntPipe) idServicio: number, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.eligibility(idServicio, user);
+  }
+
+  /** Solicitud + ticket «Baja de servicio» + vínculo con el aviso, en una transacción. No da de baja. */
+  @Post('initiate')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  initiate(@Body() dto: InitiateServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.initiate(dto, user);
+  }
+
+  @Post(':id/ticket')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  openTicket(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.openTicket(id, user);
+  }
+
+  /** Baja efectiva: bloqueada hasta disponer de evidencia técnica ratificada. */
+  @Post(':id/finalize')
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
+  finalize(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.finalize(id, user);
   }
 
   @Patch(':id')

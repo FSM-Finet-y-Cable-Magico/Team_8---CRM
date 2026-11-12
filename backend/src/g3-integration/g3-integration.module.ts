@@ -11,9 +11,11 @@ import { ServiceWithdrawalService } from './service-withdrawal.service';
 import { G1IntegrationModule } from '../g1-integration/g1-integration.module';
 import { InstallationHistoryController } from './installation-history.controller';
 import { InstallationHistoryService } from './installation-history.service';
+import { TicketsModule } from '../tickets/tickets.module';
+import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE } from './withdrawal.storage';
 
 @Module({
-  imports: [AuditModule, G1IntegrationModule, IntegrationAuthModule],
+  imports: [AuditModule, G1IntegrationModule, IntegrationAuthModule, TicketsModule],
   controllers: [G3IntegrationController, G3CanonicalWebhookController, ServiceWithdrawalController, InstallationHistoryController],
   providers: [
     InstallationHistoryService,
@@ -23,6 +25,7 @@ import { InstallationHistoryService } from './installation-history.service';
     G3ClosureProcessor,
     InstallationIntegrationService,
     ServiceWithdrawalService,
+    { provide: WITHDRAWAL_STORAGE, useValue: postgresWithdrawalStorage },
   ],
   exports: [InstallationIntegrationService, G3ClosureProcessor],
 })
