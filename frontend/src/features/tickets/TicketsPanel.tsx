@@ -12,7 +12,6 @@ export function TicketsPanel({
   tickets,
   categories,
   permissions,
-  showCatalogDetails = false,
   onChanged,
   focusedTicketId,
   onFocusConsumed,
@@ -20,7 +19,6 @@ export function TicketsPanel({
   tickets: Ticket[];
   categories: TicketCategory[];
   permissions: DashboardPermissions;
-  showCatalogDetails?: boolean;
   users?: UserRow[];
   onChanged: () => void;
   focusedTicketId?: number | null;
@@ -41,8 +39,8 @@ export function TicketsPanel({
     setManagementOpen(true);
     onFocusConsumed?.();
   }, [focusedTicketId, tickets, onFocusConsumed]);
-  const catalog = ticketAttentionAvailability(categories);
-  const attentionCategories = catalog.options;
+  // Solo se ofrecen las categorías de atención que el servidor habilita; no se muestra aviso de catálogo.
+  const attentionCategories = ticketAttentionAvailability(categories).options;
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -174,13 +172,6 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
-        {!catalog.complete && <section className="inline-status" role="status" aria-label="Estado del catálogo de atención">
-          <p>Hay categorías oficiales no disponibles en el catálogo. Solicita su revisión al administrador; no se sustituirán por categorías técnicas.</p>
-          <p>Disponibles: {attentionCategories.length} de 7. Pendientes: {catalog.issues.map(issue => issue.name).join(', ')}.</p>
-          {showCatalogDetails && <details><summary>Revisar catálogo de atención</summary><ul>{catalog.issues.map(issue => <li key={issue.name}>
-            <strong>{issue.name}</strong>: {issue.reason}{issue.rows.length ? ` (${issue.rows.map(row => `${row.nombre}; ID ${row.idCategoria}; ${row.tipoDisponible === false ? 'sin clasificación de tipo' : row.tipo ?? 'tipo no informado'}`).join(' / ')})` : ''}
-          </li>)}</ul><p>La revisión del catálogo no modifica tickets, identificadores ni tiempos de atención.</p></details>}
-        </section>}
         <label>
           Prioridad
           <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>

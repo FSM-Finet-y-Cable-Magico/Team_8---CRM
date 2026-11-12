@@ -81,11 +81,15 @@ test('dashboard abre el ticket seleccionado sin perder la validación del catál
   const modal = ctx.tree.root.find(node => node.type.name === 'TicketManagementModal');
   assert.equal(modal.props.ticket.idTicket, 42);
   assert.equal(consumed, 1);
-  assert.match(ctx.text(), /Consulta general/);
+  // Sin categorías habilitadas no se ofrece ninguna opción ni se puede crear, y no hay aviso de catálogo.
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 1);
+  assert.equal(ctx.button('Crear ticket').props.disabled, true);
+  assert.doesNotMatch(ctx.text(), /categorías oficiales no disponibles|Pendientes:/);
   assert.deepEqual(ctx.calls, []);
 });
 
-test('C2: catálogo QA confirmado conserva Consulta y el aviso hasta agregar realmente las dos faltantes', async t => {
+test('C2: catálogo QA confirmado conserva Consulta y ofrece solo lo habilitado, sin aviso de catálogo', async t => {
   const base = [
     { idCategoria: 1, nombre: 'Falla de internet', nombreAtencion: 'Falla de Internet', slaHoras: 24 },
     { idCategoria: 2, nombre: 'Falla de TV', nombreAtencion: 'Falla de TV', slaHoras: 24 },
@@ -95,11 +99,12 @@ test('C2: catálogo QA confirmado conserva Consulta y el aviso hasta agregar rea
     { idCategoria: 6, nombre: 'CAMBIO_CREDENCIALES_WIFI', nombreAtencion: null, slaHoras: null },
   ].map(row => ({ ...row, tipo: null, tipoDisponible: false }));
   const before = structuredClone(base);
-  const partial = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: base, permissions, showCatalogDetails: true });
-  assert.match(partial.text(), /Disponibles:.*5/);
-  assert.match(partial.text(), /Facturación y cobro/); assert.match(partial.text(), /Baja de servicio/);
-  assert.match(partial.text(), /Revisar catálogo de atención/);
+  const partial = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: base, permissions });
+  // El aviso del catálogo se retiró de la pantalla: solo quedan las cinco opciones habilitadas.
+  assert.doesNotMatch(partial.text(), /categorías oficiales no disponibles|Disponibles:|Pendientes:|Revisar catálogo de atención/);
   const form = partial.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.deepEqual(form.findAllByType('select')[0].findAllByType('option').slice(1).map(textOf),
+    ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza', 'Consulta general']);
   const consultation = form.findAllByType('select')[0].findAllByType('option').find(node => textOf(node) === 'Consulta general');
   assert.equal(consultation.props.value, 3);
   const complete = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [...base,
@@ -110,13 +115,13 @@ test('C2: catálogo QA confirmado conserva Consulta y el aviso hasta agregar rea
   assert.deepEqual(base, before); assert.equal(complete.calls.length, 0); assert.equal(partial.calls.length, 0);
 });
 
-test('C2: siete u ocho filas ambiguas no ocultan el aviso ni habilitan selección manipulada', async t => {
+test('C2: siete u ocho filas ambiguas no habilitan selección manipulada', async t => {
   const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza', 'Facturación y cobro', 'Consulta general'];
   const categories = [...names.map((nombreAtencion, i) => ({ idCategoria: 100 + i, nombre: nombreAtencion, nombreAtencion, tipo: 'ATENCION', tipoDisponible: true })),
     { idCategoria: 300, nombre: 'Consulta', nombreAtencion: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true },
     { idCategoria: 400, nombre: 'Asistente virtual', nombreAtencion: 'Baja de servicio', tipo: 'INTERNA', tipoDisponible: true }];
-  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories, permissions, showCatalogDetails: true });
-  assert.match(ctx.text(), /categorías oficiales no disponibles/); assert.match(ctx.text(), /duplicado/);
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories, permissions });
+  assert.doesNotMatch(ctx.text(), /categorías oficiales no disponibles|duplicado/);
   const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
   const select = form.findAllByType('select')[0];
   assert.ok(select.findAllByType('option').every(node => ![105, 300, 400].includes(node.props.value)));
@@ -125,10 +130,11 @@ test('C2: siete u ocho filas ambiguas no ocultan el aviso ni habilitan selecció
   assert.equal(ctx.calls.length, 0);
 });
 
-test('C2: rol operativo ve faltantes sin diagnóstico administrativo de IDs o tipos', async t => {
+test('C2: rol operativo no ve diagnóstico administrativo de IDs o tipos ni ofrece una categoría no habilitada', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [
     { idCategoria: 999, nombre: 'Consulta', nombreAtencion: null, tipo: 'TECNICA', tipoDisponible: true }], permissions });
-  assert.match(ctx.text(), /Consulta general/);
+  const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
+  assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 1);
   assert.doesNotMatch(ctx.text(), /Revisar catálogo de atención|ID 999|Clasificación incompatible/);
   assert.equal(ctx.calls.length, 0);
 });
@@ -164,7 +170,7 @@ test('catálogo incompleto no inventa categorías y selección técnica manipula
     { idCategoria: 309, nombre: 'FIBRA_CORTADA', nombreAtencion: null },
   ], permissions });
   const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
-  assert.match(textOf(form), /categorías oficiales no disponibles/);
+  assert.doesNotMatch(textOf(form), /categorías oficiales no disponibles/);
   assert.equal(form.findAllByType('select')[0].findAllByType('option').length, 2);
   await ctx.change(form.findAllByType('input')[0], '11111111-1');
   await ctx.change(form.findAllByType('select')[0], '309');

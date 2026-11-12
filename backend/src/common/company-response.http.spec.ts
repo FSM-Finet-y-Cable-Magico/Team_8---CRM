@@ -94,6 +94,8 @@ function fixture(companies = [1, 2]) {
     }))),
     integracionInstalacionG3: model([]), integracionActivacionG1: model([]), usuario: model([]), logAuditoria: model([]),
   };
+  // Tickets confirma escritura y auditoría en una transacción; aquí se ejecuta sobre la misma base simulada.
+  Object.assign(db, { $transaction: jest.fn(async (callback: (tx: unknown) => unknown) => callback(db)) });
   return { db, customer, contracts, services, requests, tickets, units, measurements, history, orders };
 }
 
@@ -241,7 +243,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
 
   it.each([1, 2])('ticket de cliente compartido utiliza la empresa %s y valida servicio y cliente', async company => {
     await start();
-    const body = { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA' };
+    const body = { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento' };
     await post('tickets', company, { ...body, idServicio: 3 - company }).expect(400);
     expect(data.db.ticket.create).not.toHaveBeenCalled();
     const accepted = await post('tickets', company, { ...body, idServicio: company }).expect(201);
@@ -268,7 +270,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
     expect(body.cliente.datosTecnicos.direccion).toBe('GLOBAL_PRIVATE');
     const monitoring = await get('monitoring/customers/100/status', 0, 'Administrador').expect(200);
     expect(monitoring.body.servicios).toHaveLength(2);
-    await post('tickets', 0, { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA', idServicio: 2 }, 'Administrador').expect(201);
+    await post('tickets', 0, { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento', idServicio: 2 }, 'Administrador').expect(201);
   });
 
   it('rechaza usuarios sin empresa y conserva el guard de roles', async () => {
@@ -333,7 +335,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
 
   it('RUT coincidente sin relacion empresarial no autoriza crear ticket', async () => {
     await start([1]);
-    await post('tickets', 2, { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA' }).expect(400);
+    await post('tickets', 2, { rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento' }).expect(400);
     expect(data.db.ticket.create).not.toHaveBeenCalled();
   });
 
@@ -350,7 +352,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
     };
     // Another valid contract for this company cannot authorize a corrupt service.
     const { body } = await post('tickets', company, {
-      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA', idServicio: company,
+      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento', idServicio: company,
     }).expect(400);
     expect(body.message).toContain('contrato vinculado');
     expect(data.db.ticket.create).not.toHaveBeenCalled();
@@ -362,7 +364,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
     await start([company]);
     data.contracts.splice(0);
     const { body } = await post('tickets', company, {
-      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA',
+      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento',
     }).expect(400);
     expect(body.message).toContain('contrato vinculado');
     expect(data.db.ticket.create).not.toHaveBeenCalled();
@@ -375,7 +377,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
     data.customer.estado = estado;
     for (const idServicio of [2, undefined]) {
       const { body } = await post('tickets', 2, {
-        rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA', idServicio,
+        rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento', idServicio,
       }).expect(201);
       expect(body.idEmpresa).toBe(2);
       expect(body.idCliente).toBe(100);
@@ -391,7 +393,7 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
     await start();
     data.services[1].contrato = data.contracts[0];
     await post('tickets', 0, {
-      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA', idServicio: 2,
+      rut: '11111111-1', idCategoria: 1, prioridad: 'Media', descripcion: 'QA sintetico de aislamiento', idServicio: 2,
     }, 'Administrador').expect(400);
     expect(data.db.ticket.create).not.toHaveBeenCalled();
     expect(audit.record).not.toHaveBeenCalled();

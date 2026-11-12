@@ -519,7 +519,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             </div>
           )}
           {activeTab === 'tickets' && canViewTickets && (
-            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} showCatalogDetails={permissions.manageCompanyScope} focusedTicketId={focusedTicketId} onFocusConsumed={() => setFocusedTicketId(null)} onChanged={() => void loadData()} />
+            <TicketsPanel tickets={tickets} categories={ticketCategories} permissions={permissions} users={users} focusedTicketId={focusedTicketId} onFocusConsumed={() => setFocusedTicketId(null)} onChanged={() => void loadData()} />
           )}
           {activeTab === 'workOrders' && canViewWorkOrders && <WorkOrdersPanel workOrders={workOrders} onChanged={() => void loadData()} />}
           {activeTab === 'reports' && permissions.viewReports && <ReportsPanel companies={companies} initialScope={scope} />}
