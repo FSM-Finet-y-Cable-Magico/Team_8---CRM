@@ -126,3 +126,17 @@ Backend de la rama en un contenedor temporal dentro de la red Docker de QA (`db:
 3. Opcional: reescribir la autoría (`git rebase 1b5c09b9 --exec "git commit --amend --no-edit --reset-author"` con su identidad configurada).
 4. Cuando autorice: `git push -u origin integrate/p0b-jean-claude-20261112` y PR hacia `develop`, adjuntando este informe y `baja-morosidad-contrato-g3-g1.md`.
 5. No aplicar la migración 002 ni activar el despacho a G3 antes de las aprobaciones de los puntos 1 a 3.
+
+## Actualización tras las decisiones de FINET (12-11-2026)
+
+| Decisión | Implementación | Estado |
+|---|---|---|
+| Migración 002: revisión antes de ejecutar | `baja-morosidad-revision-migracion-002.md`; se añadieron `recepcion_g1`, permisos (`002…grants.sql`) y verificación pre/post de solo lectura (`002…verify.sql`) | No ejecutada |
+| Política de recepción: G3 aprueba, G1 confirma la recepción de cada equipo, G8 valida la relación | `assessWithdrawalClosure` exige la confirmación de G1 por serie y OT; «En revisión» cuenta como recibido | Implementada (bloqueada hasta los contratos) |
+| Equipos no recuperados: excepción autorizada y trazable | Lógica y pruebas listas, bandera `UNRECOVERED_EQUIPMENT_EXCEPTION_ENABLED = false`, tabla en `003` | Pendiente de aprobación |
+| Pago durante el retiro, por etapa | `finalize` recalcula la deuda y devuelve `WITHDRAWAL_DEBT_REGULARIZED` con la acción de la etapa; nunca reactiva ni toca OT ajenas | Implementada |
+| Baja administrativa por otro motivo y retorno a Prospectos | Confirmada; ya implementada (clasificación guardada y situación financiera calculada por separado) | Implementada |
+| Mensajes a G3 y G1 | Versiones definitivas en `baja-morosidad-contrato-g3-g1.md`, secciones 5 y 6 | Listos para enviar |
+| Credencial QA enviada al PostgreSQL local | `qa-entorno-pendientes-20261112.md`, sección 4: no requiere rotación; se recomienda cambiar la clave por defecto del PostgreSQL 18 local | Documentado |
+
+Pruebas tras la actualización: backend **2145 aprobadas, 0 fallidas, 52 omitidas** (113 suites). Frontend 258 de 258 y runtime 3 de 3. Herramientas globales 38 de 38. TypeScript, build y ESLint sin errores.
