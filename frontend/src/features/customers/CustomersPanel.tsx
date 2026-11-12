@@ -24,6 +24,7 @@ import {
   formatConnectionType,
   formatDateOnly,
   formatDateTime,
+  formatRutForDisplay,
   formatWorkOrderValue,
   normalizeWorkOrderValue,
   normalizeRutInput,
@@ -212,6 +213,7 @@ export function CustomersPanel({
 
     return [
       customer.rut,
+      formatRutForDisplay(customer.rut),
       customer.nombreCompleto,
       customer.telefono,
       customer.email,
@@ -877,7 +879,7 @@ export function CustomersPanel({
             <tbody>
               {paginatedCustomers.map((customer) => (
                 <tr key={customer.idCliente}>
-                  <td>{customer.rut ?? '-'}</td>
+                  <td>{formatRutForDisplay(customer.rut) ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
                   <td>{customerCompanyLabel(customer)}</td>
                   <td><span className="customer-current-status"><CustomerStatusSummary customer={customer} format={formatWorkOrderValue} compact/></span></td>
@@ -925,7 +927,7 @@ export function CustomersPanel({
                         <Pencil size={15} aria-hidden="true"/>
                       </button>}
                   </h3>
-                  <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
+                  <p>{formatRutForDisplay(selectedCustomer.rut) ?? 'RUT no registrado'}</p>
                 </div>
                 <div className="customer-profile-status">{profileSaved && <span role="status">Datos guardados</span>}<CustomerStatusSummary customer={selectedCustomer} /></div>
               </header>

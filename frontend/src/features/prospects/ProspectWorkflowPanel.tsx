@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, FileClock, MapPin, Pencil, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
-import { formatDateTime } from '../../lib';
+import { formatDateTime, formatRutForDisplay } from '../../lib';
 import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { Modal, StatusBadge } from '../../shared/components';
@@ -355,7 +355,7 @@ export function ProspectWorkflowPanel({
             <div className="prospect-name-row"><h3>{currentProspect.nombreCompleto}</h3>
               {canEditProspect && !editingProspect && <button type="button" className="prospect-edit-button" aria-label="Editar prospecto" title="Editar prospecto" onClick={openProspectEditor}><Pencil size={16} aria-hidden="true" /></button>}
             </div>
-            <p>{prospect.rut ?? 'RUT no registrado'}</p>
+            <p>{formatRutForDisplay(prospect.rut) ?? 'RUT no registrado'}</p>
           </div>
           <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
         </header>

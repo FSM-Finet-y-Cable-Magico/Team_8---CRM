@@ -8,7 +8,7 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const lib = {};
-for (const file of ['formatting', 'dates']) new Function('exports', ts.transpileModule(readFileSync(new URL(`../src/lib/${file}.ts`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(lib);
+for (const file of ['formatting', 'dates', 'rut']) new Function('exports', ts.transpileModule(readFileSync(new URL(`../src/lib/${file}.ts`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(lib);
 const mocks = {
   '../../lib': lib,
   '../../shared/components': {

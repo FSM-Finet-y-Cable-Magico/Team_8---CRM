@@ -8,6 +8,8 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 globalThis.window = globalThis; // the panel debounces with window.setTimeout
+const rut = {};
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/rut.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(rut);
 function loadPanel(api) {
   const source = readFileSync(new URL('../src/features/prospects/ProspectsPanel.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
@@ -16,7 +18,7 @@ function loadPanel(api) {
   const exports = {};
   const mocks = {
     '../../api': { api, apiErrorMessage: error => error.message },
-    '../../lib': { emptyProspectForm: { rut: '', nombreCompleto: '', email: '', telefono: '', direccion: '', comuna: '', region: '', origenContacto: 'Formulario web' }, formatChileanMobileInput: String, formatRutInput: String, normalizeRutInput: String, validateProspectForm: () => '' },
+    '../../lib': { emptyProspectForm: { rut: '', nombreCompleto: '', email: '', telefono: '', direccion: '', comuna: '', region: '', origenContacto: 'Formulario web' }, formatChileanMobileInput: String, formatRutForDisplay: rut.formatRutForDisplay, formatRutInput: String, normalizeRutInput: String, validateProspectForm: () => '' },
     '../../shared/components': {
       Modal: () => null,
       TablePagination: ({ totalItems, onPageChange }) => React.createElement('button', { 'aria-label': 'pagina', 'data-total': totalItems, onClick: () => onPageChange(2) }),
@@ -83,5 +85,22 @@ test('la búsqueda de texto se aplica con retardo y viaja al backend', async t =
   assert.ok(requests.length > before);
   assert.equal(requests.at(-1).q, '12.345.678-5');
   assert.equal(tree.root.findAll(node => node.props?.role === 'status').length, 0);
+  await act(async () => tree.unmount());
+});
+
+test('el listado presenta con guion el RUT válido recibido sin guion (G2/web) y conserva el inválido tal cual', async () => {
+  const api = { get: async () => ({ data: { items: [
+    row(1, 'Prospecto Nuevo', { rut: '123456785', origenContacto: 'Formulario web' }),
+    row(2, 'Prospecto Nuevo', { rut: '12.345.670-k' }),
+    row(3, 'Prospecto Nuevo', { rut: '123456789' }),
+  ], total: 3, page: 1, pageSize: 20, counts: {} } }) };
+  const Panel = loadPanel(api);
+  let tree;
+  await act(async () => { tree = create(React.createElement(Panel, { ...baseProps, scope: 'consolidado' })); });
+  const cells = tree.root.findAllByType('td').map(cell => cell.children.join(''));
+  assert.ok(cells.includes('12345678-5'));
+  assert.ok(cells.includes('12345670-K'));
+  assert.ok(cells.includes('123456789'), 'un DV inválido no se corrige ni se le agrega guion');
+  assert.ok(!cells.includes('123456785'));
   await act(async () => tree.unmount());
 });

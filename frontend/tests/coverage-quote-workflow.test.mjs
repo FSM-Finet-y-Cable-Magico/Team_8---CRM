@@ -62,7 +62,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
         ...(wasQuoted ? {cotizaciones:persisted.cotizaciones.map(quote=>({...quote,vigente:false}))} : {})};
       return {data:{...persisted,...(wasQuoted?{cobertura:{coberturaComercial:!coverageOutside,planes:coverageOutside?[]:[{idPlan:company,precioAplicable:19990}]}}:{})}};
     }};
-  const mocks={'../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String },'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
+  const mocks={'../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String, formatRutForDisplay: value => value ?? null },'../../api':{api,apiErrorMessage:()=> 'QA error'},leaflet,'../../lib/user-facing-messages':require('./helpers/user-facing-messages.cjs')};
   const {CoveragePicker}=load('features/coverage/CommercialCoveragePicker.tsx',mocks);
   const {ProspectWorkflowPanel:Workflow}=load('features/prospects/ProspectWorkflowPanel.tsx',{
     ...mocks,'../contracts/useSignatureStatus':{useSignatureStatus:()=>({status:null,refresh:async()=>null})},'../customers/ContractDocuments':{ContractDocuments:()=>null},'../coverage':{CoveragePicker},'../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),Modal:()=>null}});

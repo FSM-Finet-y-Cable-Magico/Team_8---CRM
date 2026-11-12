@@ -24,7 +24,7 @@ const { CustomersPanel } = compile('../src/features/customers/CustomersPanel.tsx
   '../../api': { api: { get: async () => ({ data: [] }), patch: async () => ({ data: {} }) }, apiErrorMessage: () => 'Error' },
   './CustomerStatusBadge': status,
   '../../constants': { captureOriginOptions: [], equipmentModeOptions: [], serviceStatusOptions: [], serviceTypeOptions: [] },
-  '../../lib': { emptyServiceForm: () => ({}), dateInputValue: () => '2026-11-12', addYearsToInputDate: v => v, normalizeWorkOrderValue: v => String(v ?? '').toLowerCase(), formatWorkOrderValue: v => v },
+  '../../lib': { emptyServiceForm: () => ({}), dateInputValue: () => '2026-11-12', addYearsToInputDate: v => v, normalizeWorkOrderValue: v => String(v ?? '').toLowerCase(), formatWorkOrderValue: v => v, formatRutForDisplay: v => v ?? null },
   '../../shared/components': { Modal: ({ open, children }) => open ? React.createElement('section', { role: 'dialog' }, children) : null, TablePagination: () => null, StatusBadge },
   './CustomerContractWorkflow': { CustomerContractWorkflow: () => null },
   './CustomerPendingInstallations': { CustomerPendingInstallations: () => null },

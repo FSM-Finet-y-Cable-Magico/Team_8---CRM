@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Search, UserRound } from 'lucide-react';
 import type { Prospect } from '../../api';
-import { formatDateOnly, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
+import { formatDateOnly, formatRutForDisplay, formatWorkOrderValue, normalizeWorkOrderValue } from '../../lib';
 import { Modal, StatusBadge, TablePagination } from '../../shared/components';
 import { InstallOrderForm } from '../installations/InstallOrderForm';
 import './customer-pending-installations.css';
@@ -29,7 +29,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
   }, [requestedView, onViewConsumed]);
   const search = normalizeWorkOrderValue(query);
   const activations = prospects.filter(prospect => !search || normalizeWorkOrderValue([
-    prospect.nombreCompleto, prospect.rut, prospect.empresa?.nombre, contractFor(prospect)?.idContrato,
+    prospect.nombreCompleto, prospect.rut, formatRutForDisplay(prospect.rut), prospect.empresa?.nombre, contractFor(prospect)?.idContrato,
     contractFor(prospect)?.plan?.nombreComercial, addressFor(prospect),
   ].filter(value => value != null).join(' ')).includes(search));
   const pageSize = 20;
@@ -47,7 +47,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
       <div className={`customer-pending-modal${selectedProspect ? ' customer-pending-modal-detail' : ''}`}>
         {selectedProspect ? <>
           <button autoFocus type="button" className="customer-pending-back" onClick={() => setSelectedProspect(null)}><ArrowLeft size={16} aria-hidden="true" />Volver a pendientes</button>
-          <header className="customer-pending-person"><span className="customer-pending-avatar"><UserRound size={22} aria-hidden="true" /></span><div><h3>{selectedProspect.nombreCompleto ?? 'Sin nombre registrado'}</h3><p>{selectedProspect.rut ?? 'RUT no registrado'}</p></div><StatusBadge value="Pendiente de activación" /></header>
+          <header className="customer-pending-person"><span className="customer-pending-avatar"><UserRound size={22} aria-hidden="true" /></span><div><h3>{selectedProspect.nombreCompleto ?? 'Sin nombre registrado'}</h3><p>{formatRutForDisplay(selectedProspect.rut) ?? 'RUT no registrado'}</p></div><StatusBadge value="Pendiente de activación" /></header>
           <dl className="customer-pending-data">
             <div><dt>Empresa</dt><dd>{selectedProspect.empresa?.nombre ?? 'Empresa no registrada'}</dd></div>
             <div><dt>Contacto</dt><dd>{selectedProspect.telefono ?? selectedProspect.email ?? 'No registrado'}</dd></div>
@@ -74,7 +74,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
             <div className="table-wrap customer-pending-table-wrap"><table className="customer-pending-table">
               <thead><tr><th>Cliente / empresa</th><th>Plan / contrato</th><th>Fecha de firma</th><th>Dirección prevista</th><th><span className="sr-only">Acción</span></th></tr></thead>
               <tbody>{activations.slice((page - 1) * pageSize, page * pageSize).map(prospect => { const signed = contractFor(prospect); return <tr key={prospect.idProspecto}>
-                <td><strong>{prospect.nombreCompleto ?? '-'}</strong><span>{prospect.rut ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? '-'}</span></td>
+                <td><strong>{prospect.nombreCompleto ?? '-'}</strong><span>{formatRutForDisplay(prospect.rut) ?? 'RUT no registrado'} · {prospect.empresa?.nombre ?? '-'}</span></td>
                 <td><strong>{signed?.plan?.nombreComercial ?? '-'}</strong><span>Contrato #{signed?.idContrato ?? '-'}</span></td>
                 <td>{formatDateOnly(signed?.fechaFirmaEfectiva ?? signed?.fechaFirmaManual)}</td>
                 <td>{addressFor(prospect)}</td>

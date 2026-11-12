@@ -49,7 +49,7 @@ test('modal completo alterna editar, cancelar y guardar sin duplicar la ficha ni
   const {CustomersPanel}=compile('CustomersPanel.tsx',{
     ...apiMock,...status,
     '../../constants':{captureOriginOptions:[],equipmentModeOptions:[],serviceStatusOptions:[],serviceTypeOptions:[]},
-    '../../lib':{emptyServiceForm:()=>({}),dateInputValue:()=> '2026-11-12',addYearsToInputDate:v=>v,normalizeWorkOrderValue:v=>String(v??'').toLowerCase(),formatWorkOrderValue:v=>v},
+    '../../lib':{emptyServiceForm:()=>({}),dateInputValue:()=> '2026-11-12',addYearsToInputDate:v=>v,normalizeWorkOrderValue:v=>String(v??'').toLowerCase(),formatWorkOrderValue:v=>v,formatRutForDisplay:v=>v??null},
     '../../shared/components':{Modal:({open,children})=>open?React.createElement('section',{role:'dialog'},children):null,TablePagination:()=>null},
     './CustomerContractWorkflow':{CustomerContractWorkflow:()=>React.createElement('div',{'data-contracts':true},'Contratos')},
     './CustomerPendingInstallations':{CustomerPendingInstallations:()=>null},

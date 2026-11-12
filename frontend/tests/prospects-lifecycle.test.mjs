@@ -17,7 +17,7 @@ function loadComponent(file, mocks) {
     if (name in mocks) return mocks[name];
     if (name === '../../shared/hooks/useTransientMessage') return { useTransientMessage: () => ({ message: '', showMessage() {} }) };
     if (name === '../../shared/data/chile-territories') return { findChileRegion: () => null };
-    if (name === '../../lib') return { formatDateTime: String };
+    if (name === '../../lib') return { formatDateTime: String, formatRutForDisplay: value => value ?? null };
     if (name.endsWith('.css')) return {};
     if (name.startsWith('.')) throw new Error(`Unmocked dependency: ${name}`);
     return require(name);
