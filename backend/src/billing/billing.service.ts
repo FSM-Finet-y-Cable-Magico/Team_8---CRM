@@ -5,6 +5,7 @@ import { MessagingService } from '../messaging/messaging.service';
 import { TemplateKey } from '../messaging/outbound-messaging.port';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { activeWithdrawalWhere } from '../common/active-withdrawal';
 import { AuthUser } from '../common/auth.types';
 import { throwZoneNameConflict } from '../common/zone-name-conflict';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
@@ -284,10 +285,8 @@ export class BillingService {
           const suspendedIds = contract.servicios
             .filter(service => service.idEmpresa === contract.idEmpresa && service.estadoOperativo === 'Suspendido')
             .map(service => service.idServicio);
-          const withdrawals = suspendedIds.length ? await tx.servicioRetiroSolicitud.findMany({ where: {
-            idEmpresa: contract.idEmpresa, idServicio: { in: suspendedIds },
-            motivo: { equals: 'MOROSIDAD', mode: 'insensitive' }, estado: { notIn: ['CANCELADA', 'CERRADA'] },
-          }, select: { idServicio: true } }) : [];
+          const withdrawals = suspendedIds.length ? await tx.servicioRetiroSolicitud.findMany({
+            where: activeWithdrawalWhere({ in: suspendedIds }, contract.idEmpresa), select: { idServicio: true } }) : [];
           withdrawalServiceIds = [...new Set(withdrawals.map(row => row.idServicio))];
           const g3CandidateIds = contract.servicios
             .filter(service => service.idEmpresa === contract.idEmpresa && service.estadoOperativo === 'Suspendido' && service.ordenes.length === 0)

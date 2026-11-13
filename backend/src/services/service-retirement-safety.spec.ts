@@ -199,3 +199,17 @@ describe('Baja directa y excliente en Prospectos (misma regla que la baja por re
     expect(c.db.$transaction).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Reactivación manual con retiro por morosidad activo (FINET 13-11-2026)', () => {
+  it('PATCH a Activo se rechaza y audita mientras la solicitud no se cancele ni se resuelva', async () => {
+    const c = setup(); c.state.service.estadoOperativo = 'Suspendido';
+    c.tx.servicioRetiroSolicitud.findFirst.mockResolvedValue({ idSolicitudRetiro: 15 } as never);
+    await expect(c.service.update(40, { estadoOperativo: 'Activo' }, actor)).rejects.toMatchObject({ response: { code: 'SERVICE_WITHDRAWAL_ACTIVE', idSolicitudRetiro: 15 } });
+    expect(c.tx.servicioRetiroSolicitud.findFirst).toHaveBeenCalledWith({ where: {
+      idServicio: 40, idEmpresa: 1, motivo: { equals: 'MOROSIDAD', mode: 'insensitive' }, estado: { notIn: ['CANCELADA', 'CERRADA'] },
+    }, select: { idSolicitudRetiro: true } });
+    expect(c.tx.servicioContratado.update).not.toHaveBeenCalled();
+    expect(c.state.service.estadoOperativo).toBe('Suspendido');
+    expect(c.state.audits).toEqual([expect.objectContaining({ accion: 'RECHAZAR_ACTIVACION_MANUAL_SERVICIO' })]);
+  });
+});
