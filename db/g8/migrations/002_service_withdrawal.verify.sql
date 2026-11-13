@@ -38,11 +38,13 @@ UNION ALL SELECT 'cliente', count(*), md5(COALESCE(string_agg(x::text, '|' ORDER
 UNION ALL SELECT 'prospecto', count(*), md5(COALESCE(string_agg(x::text, '|' ORDER BY x::text), '')) FROM public.prospecto x
 UNION ALL SELECT 'unidad_equipo', count(*), md5(COALESCE(string_agg(x::text, '|' ORDER BY x::text), '')) FROM public.unidad_equipo x;
 
--- V7. Dependencies of objects outside g8_retiros on it (must be 0).
+-- V7. Dependencies of objects outside g8_retiros on it (must be 0). PostgreSQL's own TOAST tables
+-- (namespace pg_toast, storage of large/JSONB columns) are internal and excluded.
 SELECT count(*) AS dependencias_externas FROM pg_depend d
 JOIN pg_class c ON c.oid = d.refobjid
+JOIN pg_class o ON o.oid = d.objid
 WHERE c.relnamespace = to_regnamespace('g8_retiros') AND d.classid = 'pg_class'::regclass
-  AND d.objid NOT IN (SELECT oid FROM pg_class WHERE relnamespace = to_regnamespace('g8_retiros'));
+  AND o.relnamespace <> to_regnamespace('g8_retiros') AND o.relnamespace <> 'pg_toast'::regnamespace;
 
 -- V8. G3's own table, informative only (it belongs to G3; G8 never creates or alters it).
 SELECT to_regclass('public.solicitud_baja_integracion') IS NOT NULL AS tabla_g3_solicitud_baja_existe;

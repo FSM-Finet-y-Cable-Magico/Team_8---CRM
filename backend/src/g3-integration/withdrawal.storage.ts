@@ -148,9 +148,11 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
       WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
   },
   async findReceptions(tx, idSolicitudRetiro) {
-    return tx.$queryRaw<StoredReception[]>(Prisma.sql`SELECT ${RECEPTION_COLUMNS} FROM g8_retiros.recepcion_g1 r
-      JOIN g8_retiros.solicitud_g3 s ON s.id_solicitud_retiro = r.id_solicitud_retiro AND s.recepcion_clave_evento = r.clave_evento
-      WHERE r.id_solicitud_retiro = ${idSolicitudRetiro} ORDER BY r.numero_serie`);
+    // Subquery (not a JOIN): both tables have id_ot_g3, an unqualified projection would be ambiguous.
+    return tx.$queryRaw<StoredReception[]>(Prisma.sql`SELECT ${RECEPTION_COLUMNS} FROM g8_retiros.recepcion_g1
+      WHERE id_solicitud_retiro = ${idSolicitudRetiro}
+        AND clave_evento = (SELECT recepcion_clave_evento FROM g8_retiros.solicitud_g3 WHERE id_solicitud_retiro = ${idSolicitudRetiro})
+      ORDER BY numero_serie`);
   },
   async storeReceptionVersion(tx, idSolicitudRetiro, idEmpresa, claveEvento, rows) {
     const existing = await tx.$queryRaw<StoredReception[]>(Prisma.sql`SELECT ${RECEPTION_COLUMNS} FROM g8_retiros.recepcion_g1
