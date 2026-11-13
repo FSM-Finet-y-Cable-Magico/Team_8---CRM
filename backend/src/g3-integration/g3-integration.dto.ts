@@ -20,7 +20,19 @@ export class G3ClosureEquipmentDto {
   @ValidateIf((_object, value) => value !== undefined) @IsString() @MaxLength(1000) motivo?: string;
   @ValidateIf((_object, value) => value !== undefined) @IsString() @MaxLength(2000) observacion_estado_fisico?: string;
   @ValidateIf((_object, value) => value !== undefined) @IsString() @MaxLength(200) diagnostico?: string;
+  // Shared G3 field (con_dano on retired devices); informational for G8.
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean() con_dano?: boolean;
 }
+
+/** Devices that had to be retired and were not recovered (G1<->G3 agreement, 12-11-2026). */
+export class G3ClosureMissingEquipmentDto {
+  @IsString() @Matches(/\S/) @MaxLength(100) numero_serie!: string;
+  @IsString() @Matches(/\S/) @MaxLength(1000) motivo!: string;
+}
+
+/** Repair outcome catalogue published by G3 (RESULTADO_REPARACION). */
+export const G3_REPAIR_RESULTS = ['RESUELTO', 'PARCIAL', 'SIN_SOLUCION'] as const;
+const presentValue = (_object: unknown, value: unknown) => value !== undefined && value !== null;
 
 export class G3ClosureMaterialDto {
   @IsInt() @Min(1) @Max(2147483647) id_tipo_equipo!: number;
@@ -70,6 +82,18 @@ export class G3ClosureDto {
   @IsOptional() @IsObject() @ValidateNested() @Type(() => G3ClosureAddressDto) direccion?: G3ClosureAddressDto | null;
   @IsOptional() @IsObject() @ValidateNested() @Type(() => G3ClosureCategoryDto) categoria_falla?: G3ClosureCategoryDto | null;
   @IsOptional() @IsString() @MaxLength(2000) categoria_falla_otro?: string | null;
+  // Shared closure fields added by G3 on 08-11-2026 (repair data for G1) and 12-11-2026
+  // (missing devices and BAJA correlation). They are null/empty for the OT types that do
+  // not use them; the contract layer enforces which type may carry each one.
+  @ValidateIf((_object, value) => value !== undefined) @IsArray() @ArrayMaxSize(1000)
+  @ValidateNested({ each: true }) @Type(() => G3ClosureMissingEquipmentDto) equipos_faltantes?: G3ClosureMissingEquipmentDto[];
+  @ValidateIf(presentValue) @IsString() @Matches(/\S/) @MaxLength(1000) falla_reportada?: string | null;
+  @ValidateIf(presentValue) @IsString() @Matches(/\S/) @MaxLength(1000) solucion_aplicada?: string | null;
+  @ValidateIf(presentValue) @IsIn(G3_REPAIR_RESULTS) resultado?: string | null;
+  @ValidateIf(presentValue) @IsInt() @Min(1) @Max(2147483647) id_cliente_externo?: number | null;
+  @ValidateIf(presentValue) @IsInt() @Min(1) @Max(2147483647) id_servicio?: number | null;
+  @ValidateIf(presentValue) @IsInt() @Min(1) @Max(2147483647) id_solicitud_retiro?: number | null;
+  @ValidateIf(presentValue) @IsInt() @Min(1) @Max(2147483647) id_ticket_externo?: number | null;
 }
 
 export class CreateServiceWithdrawalDto {
