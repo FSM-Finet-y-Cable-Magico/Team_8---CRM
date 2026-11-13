@@ -1,7 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import { ESignatureService } from './e-signature.service';
+import { DEMO_SIGNATURE_CONSENT_VERSION, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 import * as repository from './signature.repository';
 import * as snapshots from './contract-snapshot';
 
@@ -20,10 +22,10 @@ function harness(config: Record<string, string> = {}) {
   const contract = { idContrato: 20, idEmpresa: 1, idCliente: 10, idProspecto: null,
     estado: 'Pendiente firma contrato', cliente: { rut: null, email: 'qa@example.invalid' }, prospecto: null };
   const db = { $transaction: jest.fn(), $queryRaw: jest.fn().mockResolvedValue([]),
-    contrato: { findUnique: jest.fn().mockResolvedValue(contract) },
+    contrato: { findUnique: jest.fn().mockResolvedValue(contract), findUniqueOrThrow: jest.fn().mockResolvedValue(contract) },
     contratoDigital: { findFirst: jest.fn().mockResolvedValue({ idContratoDigital: 30, idEmpresa: 1,
       version: 1, hashDocumento: row.hashOriginal, estadoFirma: 'Generado', fechaFirma: null }),
-    findUnique: jest.fn().mockResolvedValue({ idContrato: 20, idEmpresa: 1, version: 1 }) },
+    findUnique: jest.fn().mockResolvedValue({ idContrato: 20, idEmpresa: 1, version: 1 }), update: jest.fn() },
     factura: { findMany: jest.fn().mockResolvedValue([]) },
     logAuditoria: { findFirst: jest.fn().mockResolvedValue({ idLog: 1 }) } };
   db.$transaction.mockImplementation(async fn => fn(db));
@@ -33,17 +35,64 @@ function harness(config: Record<string, string> = {}) {
   jest.spyOn(repository, 'signatureStorageAvailable').mockResolvedValue(true);
   jest.spyOn(repository, 'signatureRepository').mockReturnValue(store as never);
   jest.spyOn(snapshots, 'buildContractSnapshot').mockResolvedValue({} as never);
-  const mail = { isConfigured: jest.fn().mockReturnValue(true), sendSignatureInvitation: jest.fn().mockResolvedValue({ status: 'sent' }) };
+  const mail = { isConfigured: jest.fn().mockReturnValue(true), sendSignatureInvitation: jest.fn().mockResolvedValue({ status: 'sent' }),
+    sendSignatureCode: jest.fn(), sendSignedContract: jest.fn() };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  const contracts = { markContractSigned: jest.fn() };
   const service = new ESignatureService(db as never, new ConfigService({ ...settings(), ...config }),
-    mail as never, audit as never, {} as never);
+    mail as never, audit as never, contracts as never);
   const debt = () => db.factura.findMany.mockResolvedValue([{ monto: new Prisma.Decimal(7000), estado: 'Vencida',
     pagos: [], prorrogasPago: [], fechaLimitePago: new Date('2026-01-01T00:00:00Z') }]);
-  return { service, db, contract, row, store, mail, audit, debt };
+  return { service, db, contract, row, store, mail, audit, debt, contracts };
 }
 
 describe('Readiness específico de firma sin habilitar proveedores', () => {
   afterEach(() => jest.restoreAllMocks());
+
+  it('en demo envía una invitación, exige revisar el PDF y registra una sola aceptación sin otros correos', async () => {
+    const h = harness({ CONTRACT_SIGNATURE_DEMO_WITHOUT_CODE: 'true', MAIL_PROVIDER: 'mock',
+      DATABASE_URL: 'postgresql://qa@localhost/finet_firma_qa' });
+    const pdf = await PDFDocument.create();
+    pdf.addPage();
+    h.row.pdfOriginal = Buffer.from(await pdf.save());
+    h.row.hashOriginal = createHash('sha256').update(h.row.pdfOriginal).digest('hex');
+    h.db.contratoDigital.findFirst.mockResolvedValue({ idContratoDigital: 30, idEmpresa: 1,
+      version: 1, hashDocumento: h.row.hashOriginal, estadoFirma: 'Generado', fechaFirma: null });
+    const snapshot = { idEmpresa: 1, cliente: { email: 'qa@example.invalid' } };
+    h.row.datosSnapshot = snapshot;
+    jest.mocked(snapshots.buildContractSnapshot).mockResolvedValue(snapshot as never);
+
+    await h.service.create(20, actor as never);
+    const token = h.mail.sendSignatureInvitation.mock.calls[0][0].link.split('#')[1] as string;
+    expect(h.mail.sendSignatureInvitation).toHaveBeenCalledTimes(1);
+    expect(h.mail.sendSignatureInvitation).toHaveBeenCalledWith(expect.objectContaining({ demo: true }));
+    expect(await h.service.view(token)).toMatchObject({ demo: true, estado: 'PENDIENTE' });
+    expect(h.contracts.markContractSigned).not.toHaveBeenCalled();
+    await expect(h.service.requestCode(token)).rejects.toThrow('Función no disponible');
+    const accept = () => h.service.sign(token, undefined, h.row.hashOriginal, true, DEMO_SIGNATURE_CONSENT_VERSION, '', '');
+    await expect(accept()).rejects.toThrow('Revisa el PDF');
+    await h.service.pdf(token);
+    await expect(accept()).resolves.toEqual({ estado: 'FIRMADA' });
+    await expect(accept()).resolves.toEqual({ estado: 'FIRMADA' });
+    expect(h.contracts.markContractSigned).toHaveBeenCalledTimes(1);
+    expect(h.store.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ consentimientoVersion: DEMO_SIGNATURE_CONSENT_VERSION, firmaCorreoEstado: 'SIMULADO' }),
+    }));
+    expect(h.mail.sendSignatureCode).not.toHaveBeenCalled();
+    expect(h.mail.sendSignedContract).not.toHaveBeenCalled();
+    expect((await PDFDocument.load(await h.service.pdf(token))).getPageCount()).toBe(2);
+  });
+
+  it('el flujo normal rechaza firmas sin código, incluso con el consentimiento demo', async () => {
+    const h = harness();
+    const token = randomBytes(32).toString('base64url');
+    for (const consentVersion of [SIGNATURE_CONSENT_VERSION, DEMO_SIGNATURE_CONSENT_VERSION]) {
+      await expect(h.service.sign(token, undefined, h.row.hashOriginal, true, consentVersion, '', ''))
+        .rejects.toThrow('introduce el código');
+    }
+    expect(h.store.findUnique).not.toHaveBeenCalled();
+    expect(h.contracts.markContractSigned).not.toHaveBeenCalled();
+  });
 
   it('modalidad desconocida explica asignación pendiente sin inventar una habilitación', async () => {
     const h = harness(); h.db.logAuditoria.findFirst.mockResolvedValue(null);
