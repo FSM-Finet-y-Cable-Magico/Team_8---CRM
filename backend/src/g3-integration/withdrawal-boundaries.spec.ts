@@ -86,10 +86,48 @@ describe('Migración privada 002 (revisada; sin ejecutar en ambientes compartido
     expect(grants).not.toMatch(/DELETE|PUBLIC|PASSWORD|OWNER/i);
   });
 
+  it('sin el rol de aplicación, los permisos abortan con error (no terminan en éxito silencioso)', () => {
+    const grants = executable(migration('002_service_withdrawal.grants.sql'));
+    const missingRole = grants.slice(grants.indexOf('\\else'), grants.indexOf('\\endif'));
+    expect(missingRole).toMatch(/ON_ERROR_STOP/);
+    expect(missingRole).toMatch(/RAISE EXCEPTION 'G8_RUNTIME_ROLE_REQUIRED'/);
+    expect(missingRole).not.toMatch(/\\quit\s+\d/);
+  });
+
   it('las tablas que consulta la aplicación existen en la migración', () => {
     const storage = readFileSync(join(__dirname, 'withdrawal.storage.ts'), 'utf8');
     const tables = new Set([...storage.matchAll(/g8_retiros\.(\w+)/g)].map(match => match[1]));
     expect(tables.size).toBe(3);
     for (const table of tables) expect(sql).toContain(`CREATE TABLE IF NOT EXISTS g8_retiros.${table} (`);
+  });
+});
+
+// Found in the consolidation (13-11-2026): the morosidad branch wrote PENDIENTE_ENVIO_G3, ENVIADA_G3, ... into
+// public.solicitud_retiro_servicio.estado_despacho_tecnico, whose CHECK in the global contract only admits
+// BLOQUEADO_CONTRATO_G3: every initiate would fail in finet_global_validacion. The dispatch state lives in g8_retiros.
+describe('Las escrituras sobre solicitud_retiro_servicio respetan el contrato global', () => {
+  const contract = readFileSync(join(__dirname, '..', '..', '..', 'db', 'global', 'init-global.sql'), 'utf8');
+  const allowed = (constraint: string) => {
+    const definition = contract.slice(contract.indexOf(`CONSTRAINT ${constraint} CHECK`)).split('\n')[0];
+    return [...definition.matchAll(/'([A-Z0-9_]+)'/g)].map(match => match[1]);
+  };
+  const sources = ['withdrawal-workflow.service.ts', 'service-withdrawal.service.ts']
+    .map(file => readFileSync(join(__dirname, file), 'utf8'));
+
+  it('estado_despacho_tecnico solo recibe el valor que admite el CHECK global', () => {
+    expect(allowed('solicitud_retiro_servicio_despacho_check')).toEqual(['BLOQUEADO_CONTRATO_G3']);
+    const written = sources.flatMap(source => [...source.matchAll(/estadoDespachoTecnico:\s*([^,}\n]+)/g)].map(match => match[1].trim()))
+      .filter(value => !value.startsWith('created.') && !value.startsWith('updated.'));
+    expect(written.length).toBeGreaterThan(0);
+    for (const value of written) expect(["'BLOQUEADO_CONTRATO_G3'", 'PUBLIC_DISPATCH_COLUMN_VALUE']).toContain(value);
+  });
+
+  it('estado solo recibe valores del CHECK global', () => {
+    const states = allowed('solicitud_retiro_servicio_estado_check');
+    expect(states).toEqual(['REGISTRADA', 'EN_GESTION', 'CANCELADA', 'CERRADA']);
+    const workflow = sources[0];
+    const written = [...workflow.matchAll(/servicioRetiroSolicitud\.(?:create|update)\([\s\S]*?estado:\s*'([A-Z_]+)'/g)].map(match => match[1]);
+    expect(written.length).toBeGreaterThan(0);
+    for (const value of written) expect(states).toContain(value);
   });
 });

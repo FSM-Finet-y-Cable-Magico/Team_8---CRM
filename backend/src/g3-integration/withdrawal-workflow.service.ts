@@ -27,6 +27,13 @@ import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalDispatch, With
 
 type Db = Prisma.TransactionClient;
 const CLOSED_REQUEST_STATES = ['CANCELADA', 'CERRADA'];
+/**
+ * public.solicitud_retiro_servicio.estado_despacho_tecnico only admits this value in the global contract
+ * (db/global/init-global.sql, CHECK solicitud_retiro_servicio_despacho_check). G8 never changes it: the technical
+ * dispatch state lives in its private schema (g8_retiros.solicitud_g3.estado_despacho). Writing any other value
+ * fails in finet_global_validacion with a CHECK violation (found in the consolidation, 13-11-2026).
+ */
+export const PUBLIC_DISPATCH_COLUMN_VALUE = 'BLOQUEADO_CONTRATO_G3';
 const SERVICE_INCLUDE = { contrato: true, cliente: true, empresa: true, direccion: true } satisfies Prisma.ServicioContratadoInclude;
 type ServiceRow = Prisma.ServicioContratadoGetPayload<{ include: typeof SERVICE_INCLUDE }>;
 
@@ -131,11 +138,11 @@ export class WithdrawalWorkflowService {
       const notice = facts.notice!;
       const request = await tx.servicioRetiroSolicitud.create({ data: {
         idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato, motivo: WITHDRAWAL_MOTIVE_MOROSITY,
-        fechaSolicitada, estado: 'REGISTRADA', estadoDespachoTecnico: 'PENDIENTE_ENVIO_G3', idUsuarioResponsable: currentUser.idUsuario, observaciones,
+        fechaSolicitada, estado: 'REGISTRADA', estadoDespachoTecnico: PUBLIC_DISPATCH_COLUMN_VALUE, idUsuarioResponsable: currentUser.idUsuario, observaciones,
       } });
       await this.audit(tx, currentUser, 'CREAR_SOLICITUD_RETIRO_SERVICIO', 'solicitud_retiro_servicio', request.idSolicitudRetiro, {
         idEmpresa: request.idEmpresa, idCliente: request.idCliente, idServicio: request.idServicio, idContrato, idAviso: notice.idEvento,
-        motivo: WITHDRAWAL_MOTIVE_MOROSITY, estado: request.estado, estadoDespachoTecnico: request.estadoDespachoTecnico,
+        motivo: WITHDRAWAL_MOTIVE_MOROSITY, estado: request.estado, estadoDespacho: 'PENDIENTE',
       });
       const ticket = await this.tickets.createWithdrawalTicket(tx, {
         idEmpresa: request.idEmpresa, idCliente: request.idCliente, idServicio: request.idServicio, idContrato,
@@ -223,11 +230,10 @@ export class WithdrawalWorkflowService {
         await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'ACEPTADA', idOtG3: outcome.idOt,
           estadoOt: outcome.estado && ['PENDIENTE', 'ASIGNADA', 'EN_CURSO'].includes(outcome.estado) ? outcome.estado : claimed.dispatch.estadoOt,
           ultimoErrorCodigo: null, ultimoErrorStatus: null });
-        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'EN_GESTION', estadoDespachoTecnico: 'ENVIADA_G3' } });
+        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'EN_GESTION' } });
       } else {
         const state = outcome.kind === 'REINTENTABLE' ? 'REINTENTABLE' : outcome.kind === 'RECHAZADA' ? 'RECHAZADA' : 'INCONSISTENTE';
         await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: state, ultimoErrorCodigo: outcome.code, ultimoErrorStatus: outcome.status });
-        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estadoDespachoTecnico: state === 'REINTENTABLE' ? 'ENVIO_G3_PENDIENTE' : 'REVISION_G3' } });
       }
       await this.audit(tx, currentUser, 'DESPACHAR_RETIRO_G3', 'solicitud_retiro_servicio', idSolicitudRetiro, {
         requestId: claimed.dispatch.requestId, intento: claimed.dispatch.intentos, resultado: outcome.kind,
@@ -535,7 +541,7 @@ export class WithdrawalWorkflowService {
       // FINET 13-11-2026: if this was the last operational relationship in the company, the person becomes visible as
       // excliente in that company's Prospects (derived view; identity, history, debt and other companies untouched).
       const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa, idUsuario: currentUser.idUsuario });
-      const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA', estadoDespachoTecnico: 'COMPLETADA_G3' } });
+      const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA' } });
       await this.storage.markApplied(tx, idSolicitudRetiro);
       // FINET 13-11-2026: the «Baja de servicio» ticket is closed only here, inside this successful transaction.
       const ticketBaja = await this.tickets.closeWithdrawalTicket(tx, { idTicket: link.idTicket, idEmpresa: service.idEmpresa,
@@ -556,7 +562,7 @@ export class WithdrawalWorkflowService {
   private async closeAsCancelled(tx: Db, idSolicitudRetiro: number, reason: string, currentUser: AuthUser, detail: Record<string, unknown>) {
     const before = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
     await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'CANCELADA', ...(detail.remoto ? { estadoOt: 'CANCELADA' } : {}) });
-    await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CANCELADA', estadoDespachoTecnico: 'CANCELADA',
+    await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CANCELADA',
       observaciones: `${before?.observaciones ?? ''}\nCancelación: ${reason}`.trim() } });
     await this.audit(tx, currentUser, 'CANCELAR_SOLICITUD_RETIRO', 'solicitud_retiro_servicio', idSolicitudRetiro,
       { estadoAnterior: before?.estado ?? null, motivo: reason, ...detail });

@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { postgresWithdrawalStorage as storage } from './withdrawal.storage';
+import { PUBLIC_DISPATCH_COLUMN_VALUE } from './withdrawal-workflow.service';
 
 /**
  * Real SQL of the private g8_retiros storage against an EPHEMERAL PostgreSQL with
@@ -85,20 +86,59 @@ class Rollback extends Error {}
     })).rejects.toThrow(/recepcion_g1_clave_check/);
   });
 
-  it('listTrackable: solo OT aceptadas, no aplicadas, OT no cancelada y solicitud CRM activa (tabla pública mínima de prueba)', async () => {
+  /** True when the ephemeral DB carries the full global contract (db/global/init-global.sql), not a minimal fixture table. */
+  async function fullContract(tx: Prisma.TransactionClient) {
+    const rows = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT to_regclass('public.usuario') IS NOT NULL AS ok`;
+    return Boolean(rows[0]?.ok);
+  }
+  /** Parent rows a real public.solicitud_retiro_servicio needs (FKs of the global contract); rolled back with the test. */
+  async function parents(tx: Prisma.TransactionClient) {
+    await tx.$executeRaw`INSERT INTO public.empresa (id_empresa, nombre) VALUES (9001, 'Empresa efimera') ON CONFLICT DO NOTHING`;
+    await tx.$executeRaw`INSERT INTO public.usuario (id_usuario, nombre_completo, password_hash) VALUES (9001, 'Usuario efimero', 'x') ON CONFLICT DO NOTHING`;
+    await tx.$executeRaw`INSERT INTO public.cliente (id_cliente, id_empresa, nombre_completo, estado) VALUES (9001, 9001, 'Cliente efimero', 'Suspendido') ON CONFLICT DO NOTHING`;
+    await tx.$executeRaw`INSERT INTO public.servicio_contratado (id_servicio, id_cliente, id_empresa, tipo_servicio, estado_operativo) VALUES (9001, 9001, 9001, 'Internet', 'Suspendido') ON CONFLICT DO NOTHING`;
+  }
+
+  it('la fila pública que crea el inicio cumple el contrato global; el valor de despacho anterior se rechaza (regresión)', async () => {
+    await inTx(async tx => {
+      if (!(await fullContract(tx))) return; // minimal fixture DB: the static contract test covers it
+      await parents(tx);
+      const created = await tx.servicioRetiroSolicitud.create({ data: {
+        idSolicitudRetiro: 9001, idEmpresa: 9001, idCliente: 9001, idServicio: 9001, motivo: 'MOROSIDAD', fechaSolicitada: new Date('2026-11-13'),
+        estado: 'REGISTRADA', estadoDespachoTecnico: PUBLIC_DISPATCH_COLUMN_VALUE, idUsuarioResponsable: 9001, observaciones: 'Prueba efimera',
+      } });
+      expect(created.estadoDespachoTecnico).toBe('BLOQUEADO_CONTRATO_G3');
+      for (const estado of ['EN_GESTION', 'CERRADA', 'CANCELADA']) {
+        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro: 9001 }, data: { estado } });
+      }
+      await tx.$executeRaw`SAVEPOINT despacho_anterior`;
+      await expect(tx.$executeRaw`UPDATE public.solicitud_retiro_servicio SET estado_despacho_tecnico = 'PENDIENTE_ENVIO_G3' WHERE id_solicitud_retiro = 9001`)
+        .rejects.toThrow(/solicitud_retiro_servicio_despacho_check/);
+      await tx.$executeRaw`ROLLBACK TO SAVEPOINT despacho_anterior`;
+    });
+  });
+
+  it('listTrackable: solo OT aceptadas, no aplicadas, OT no cancelada y solicitud CRM activa', async () => {
     await inTx(async tx => {
       const has = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT to_regclass('public.solicitud_retiro_servicio') IS NOT NULL AS ok`;
       if (!has[0]?.ok) return; // ephemeral DB without the public fixture table: covered by the in-memory harness
+      const full = await fullContract(tx);
+      if (full) await parents(tx);
       const make = async (id: number, estado: string, patch: Record<string, unknown>) => {
-        await tx.$executeRaw`INSERT INTO public.solicitud_retiro_servicio (id_solicitud_retiro, estado) VALUES (${id}, ${estado})`;
+        if (full) {
+          await tx.$executeRaw`INSERT INTO public.solicitud_retiro_servicio (id_solicitud_retiro, id_empresa, id_cliente, id_servicio, motivo, fecha_solicitada, id_usuario_responsable, estado)
+            VALUES (${id}, 9001, 9001, 9001, 'MOROSIDAD', DATE '2026-11-13', 9001, ${estado})`;
+        } else {
+          await tx.$executeRaw`INSERT INTO public.solicitud_retiro_servicio (id_solicitud_retiro, estado) VALUES (${id}, ${estado})`;
+        }
         await storage.insertDispatch(tx, { ...dispatchRow, idSolicitudRetiro: id, requestId: `g8-retiro-1-${id}` });
         await storage.updateDispatch(tx, id, patch as never);
       };
-      await make(601, 'EN_PROCESO', { estadoDespacho: 'ACEPTADA', idOtG3: 941 });
-      await make(602, 'EN_PROCESO', { estadoDespacho: 'CANCELACION_NO_APLICABLE', idOtG3: 942 });
+      await make(601, 'EN_GESTION', { estadoDespacho: 'ACEPTADA', idOtG3: 941 });
+      await make(602, 'EN_GESTION', { estadoDespacho: 'CANCELACION_NO_APLICABLE', idOtG3: 942 });
       await make(603, 'CANCELADA', { estadoDespacho: 'ACEPTADA', idOtG3: 943 });
-      await make(604, 'EN_PROCESO', { estadoDespacho: 'ACEPTADA', idOtG3: 944, estadoOt: 'CANCELADA' });
-      await make(605, 'EN_PROCESO', { estadoDespacho: 'PENDIENTE' });
+      await make(604, 'EN_GESTION', { estadoDespacho: 'ACEPTADA', idOtG3: 944, estadoOt: 'CANCELADA' });
+      await make(605, 'EN_GESTION', { estadoDespacho: 'PENDIENTE' });
       await make(606, 'CERRADA', { estadoDespacho: 'ACEPTADA', idOtG3: 946 });
       expect((await storage.listTrackable(tx, 50)).sort()).toEqual([601, 602]);
       expect(await storage.listTrackable(tx, 1)).toHaveLength(1);

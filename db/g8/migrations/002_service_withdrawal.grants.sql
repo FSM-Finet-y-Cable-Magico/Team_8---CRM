@@ -9,5 +9,7 @@ SELECT format('GRANT SELECT, INSERT, UPDATE ON g8_retiros.solicitud_g3 TO %I', :
 SELECT format('GRANT SELECT, INSERT ON g8_retiros.recepcion_g1 TO %I', :'g8_runtime_role') \gexec
 \else
 \echo 'G8_RUNTIME_ROLE_REQUIRED'
-\quit 1
+-- psql's \quit takes no exit code: fail explicitly so `psql ... && next-step` stops (found 13-11-2026).
+\set ON_ERROR_STOP on
+DO $$ BEGIN RAISE EXCEPTION 'G8_RUNTIME_ROLE_REQUIRED'; END $$;
 \endif

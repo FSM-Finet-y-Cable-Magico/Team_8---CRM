@@ -51,7 +51,8 @@ describe('Baja por morosidad: inicio atómico', () => {
     const result = await h.start();
     expect(result.repetido).toBe(false);
     expect(h.state.requests).toHaveLength(1);
-    expect(h.state.requests[0]).toMatchObject({ estado: 'REGISTRADA', motivo: 'MOROSIDAD', idServicio: 61, idEmpresa: 1, estadoDespachoTecnico: 'PENDIENTE_ENVIO_G3' });
+    expect(h.state.requests[0]).toMatchObject({ estado: 'REGISTRADA', motivo: 'MOROSIDAD', idServicio: 61, idEmpresa: 1, estadoDespachoTecnico: 'BLOQUEADO_CONTRATO_G3' });
+    expect(h.state.dispatches[0].estadoDespacho).toBe('PENDIENTE');
     expect(h.state.tickets).toHaveLength(1);
     expect(h.state.links[0]).toMatchObject({ idSolicitudRetiro: 15, idTicket: 77, idAviso: 9 });
     const dispatch = h.state.dispatches[0];
@@ -133,7 +134,7 @@ describe('Baja por morosidad: despacho a G3 después del commit', () => {
     const result: any = await h.start();
     expect(h.g3Calls).toEqual([{ op: 'create', args: [h.state.dispatches[0].payloadSnapshot] }]);
     expect(result.despacho).toMatchObject({ estadoDespacho: 'ACEPTADA', idOtG3: 930, intentos: 1 });
-    expect(h.state.requests[0]).toMatchObject({ estado: 'EN_GESTION', estadoDespachoTecnico: 'ENVIADA_G3' });
+    expect(h.state.requests[0]).toMatchObject({ estado: 'EN_GESTION', estadoDespachoTecnico: 'BLOQUEADO_CONTRATO_G3' });
   });
 
   it('si G3 falla (503) la solicitud queda creada y el reintento reenvía exactamente el mismo snapshot (200 duplicado)', async () => {
@@ -182,7 +183,7 @@ describe('Baja por morosidad: despacho a G3 después del commit', () => {
     h.g3Replies.push({ status, body: { codigo } });
     await h.start();
     expect(h.state.dispatches[0]).toMatchObject({ estadoDespacho: 'RECHAZADA', ultimoErrorCodigo: codigo });
-    expect(h.state.requests[0].estadoDespachoTecnico).toBe('REVISION_G3');
+    expect(h.state.requests[0].estadoDespachoTecnico).toBe('BLOQUEADO_CONTRATO_G3');
     const again = await h.service.dispatch(15, comercial());
     expect(again.enviado).toBe(false);
     expect(h.g3Calls).toHaveLength(1);

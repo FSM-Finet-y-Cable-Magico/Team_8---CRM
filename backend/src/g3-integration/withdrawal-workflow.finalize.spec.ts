@@ -32,7 +32,7 @@ describe('Baja efectiva por morosidad', () => {
     expect(h.state.services.find((s: any) => s.idServicio === 61).estadoOperativo).toBe('Baja');
     expect(h.state.services.find((s: any) => s.idServicio === 62).estadoOperativo).toBe('Activo');
     expect(h.state.contracts[0].estado).toBe('Suspendido');
-    expect(h.state.requests[0]).toMatchObject({ estado: 'CERRADA', estadoDespachoTecnico: 'COMPLETADA_G3' });
+    expect(h.state.requests[0]).toMatchObject({ estado: 'CERRADA', estadoDespachoTecnico: 'BLOQUEADO_CONTRATO_G3' });
     expect(h.state.dispatches[0].aplicadoEn).toBeInstanceOf(Date);
     expect(h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toMatchObject({ idUsuario: 7, idEntidadAfectada: 61 });
     expect(h.state.forbiddenWrites).toEqual([]);
