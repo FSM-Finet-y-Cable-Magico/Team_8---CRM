@@ -28,6 +28,18 @@ export function ticketAttentionAvailability(categories: TicketCategory[]) {
   return { options, issues, complete: issues.length === 0 };
 }
 
+/** FINET 13-11-2026: «Baja de servicio» is only created by the guided withdrawal of the Libro de Control. It stays in the
+ * catalogue (history, filters, existing tickets) but is never offered for manual creation or reclassification. */
+export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
+export function isWithdrawalTicketCategory(category: Pick<TicketCategory, 'nombre'>) {
+  return officialName(category.nombre) === WITHDRAWAL_TICKET_CATEGORY;
+}
+
+/** Categories offered in the manual «Nuevo ticket» form: server-enabled attention categories except the reserved one. */
+export function manualTicketCategories(categories: TicketCategory[]) {
+  return ticketAttentionAvailability(categories).options.filter(category => !isWithdrawalTicketCategory(category));
+}
+
 export function isGeneralTicketCategory(category: TicketCategory) {
   if (['cambio_credenciales_wifi', 'asistente virtual'].includes(categoryKey(category.nombre))) return false;
   if (category.tipoDisponible === true || category.tipo != null) return ['ATENCION', 'TECNICA'].includes(category.tipo ?? '');

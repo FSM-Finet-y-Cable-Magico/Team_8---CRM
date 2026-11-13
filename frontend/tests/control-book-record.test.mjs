@@ -42,6 +42,7 @@ async function drawer(t, changes = {}, portfolioRows) {
     './ControlBookHistory': { ControlBookHistory: () => null },
     './ControlBookManualPayment': { ControlBookManualPayment: () => null },
     './ControlBookWithdrawal': { ControlBookWithdrawal: () => null },
+    './ControlBookSuspension': { ControlBookSuspension: () => null },
     './ControlBookModal': { ControlBookModal: Modal },
     './control-book-model': model, './control-book-contact-time': times,
   });

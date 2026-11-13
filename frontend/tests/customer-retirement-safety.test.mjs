@@ -45,41 +45,22 @@ async function harness(t, options = {}) {
   return { tree, button, submit, note, calls, service };
 }
 
-test('servicio suspendido solicita retiro con contexto exacto sin confirmar una baja', async t => {
-  const h = await harness(t);
-  assert.equal(h.button('Dar de baja'), undefined);
-  await act(async () => h.button('Solicitar retiro por morosidad').props.onClick());
-  await h.submit(); assert.equal(h.calls.length, 0);
-  await h.note('  Solicita retiro tras aviso  '); await h.submit();
-  assert.deepEqual(h.calls, [['post', '/service-withdrawals', { idServicio: 40, idContrato: 20, motivo: 'MOROSIDAD',
-    fechaSolicitada: '2026-11-11', observaciones: 'Solicita retiro tras aviso' }]]);
-  assert.equal(h.service.estadoOperativo, 'Suspendido');
-  assert.match(JSON.stringify(h.tree.toJSON()), /sigue suspendido/);
-});
+// FINET 13-11-2026: Clientes no longer offers any baja. A baja for non-payment starts only from the Libro de Control
+// (suspension, then guided withdrawal); the administrative baja is an Administrador-only API exception.
+for (const state of ['Suspendido', 'Activo', 'Moroso']) {
+  test(`servicio ${state}: Clientes no ofrece «Dar de baja» ni «Solicitar retiro por morosidad»`, async t => {
+    for (const permissions of [{}, { manageServices: true, manageCustomerRequests: true, changeCustomerPlan: true }]) {
+      const h = await harness(t, { state, permissions });
+      assert.equal(h.button('Dar de baja'), undefined);
+      assert.equal(h.button('Solicitar retiro por morosidad'), undefined);
+      assert.equal(h.tree.root.findAllByType('form').length, 0);
+      assert.equal(h.calls.length, 0);
+    }
+  });
+}
 
-test('rechazo del aviso preserva observaciones y no anuncia baja', async t => {
-  const h = await harness(t, { fail: true });
-  await act(async () => h.button('Solicitar retiro por morosidad').props.onClick());
-  await h.note('Conservar evidencia'); await h.submit();
-  assert.equal(h.tree.root.findByType('textarea').props.value, 'Conservar evidencia');
-  assert.match(JSON.stringify(h.tree.toJSON()), /Registra el aviso previo/);
-  assert.ok(h.calls.every(call => call[0] === 'post'));
-});
-
-test('permiso de solicitudes permite retiro sin habilitar baja administrativa', async t => {
-  const h = await harness(t, { permissions: { manageServices: false, manageCustomerRequests: true } });
-  assert.equal(h.button('Dar de baja'), undefined);
-  await act(async () => h.button('Solicitar retiro por morosidad').props.onClick());
-  await h.note('Retiro autorizado'); await h.submit();
-  assert.equal(h.calls.length, 1);
-  assert.equal(h.calls[0][1], '/service-withdrawals');
-});
-
-test('no ofrece retiro sin permiso y conserva baja administrativa ajena a morosidad', async t => {
-  const denied = await harness(t, { authorized: false });
-  assert.equal(denied.button('Solicitar retiro por morosidad'), undefined);
-  const h = await harness(t, { state: 'Activo' });
-  await act(async () => h.button('Dar de baja').props.onClick());
-  await h.note('Motivo administrativo'); await h.submit();
-  assert.deepEqual(h.calls, [['patch', '/services/40/deactivate', { observacion: 'Motivo administrativo' }]]);
+test('el componente no conserva rutas de baja directa ni de retiro', () => {
+  const source = readFileSync(new URL('../src/features/customers/CustomerServiceActions.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /api\.(post|patch)\([^)]*(service-withdrawals|deactivate)/);
+  assert.doesNotMatch(source, /motivo: 'MOROSIDAD'/);
 });

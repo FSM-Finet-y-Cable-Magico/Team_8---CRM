@@ -111,7 +111,10 @@ test('C2: catálogo QA confirmado conserva Consulta y ofrece solo lo habilitado,
     { idCategoria: 144, nombre: 'Facturación y cobro', nombreAtencion: 'Facturación y cobro', tipo: null, tipoDisponible: false },
     { idCategoria: 251, nombre: 'Baja de servicio', nombreAtencion: 'Baja de servicio', tipo: null, tipoDisponible: false }], permissions });
   assert.doesNotMatch(complete.text(), /categorías oficiales no disponibles/);
-  assert.equal(complete.tree.root.findByProps({ className: 'ticket-create-form stack' }).findAllByType('select')[0].findAllByType('option').length, 8);
+  // FINET 13-11-2026: «Baja de servicio» stays in the catalogue but is reserved to the Libro de Control (6 options + placeholder).
+  const completeOptions = complete.tree.root.findByProps({ className: 'ticket-create-form stack' }).findAllByType('select')[0].findAllByType('option');
+  assert.equal(completeOptions.length, 7);
+  assert.ok(!completeOptions.some(node => node.props.value === 251));
   assert.deepEqual(base, before); assert.equal(complete.calls.length, 0); assert.equal(partial.calls.length, 0);
 });
 
@@ -139,7 +142,7 @@ test('C2: rol operativo no ve diagnóstico administrativo de IDs o tipos ni ofre
   assert.equal(ctx.calls.length, 0);
 });
 
-test('alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del catálogo', async t => {
+test('alta comercial ofrece las seis categorías manuales G8/G2 con IDs del catálogo (Baja de servicio reservada al Libro de Control)', async t => {
   const names = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
     'Facturación y cobro', 'Consulta general', 'Baja de servicio'];
   const categories = [...names.map((nombreAtencion, i) => ({ idCategoria: 410 + i * 19,
@@ -152,8 +155,9 @@ test('alta comercial ofrece exactamente las siete categorías G8/G2 con IDs del 
   const form = ctx.tree.root.findByProps({ className: 'ticket-create-form stack' });
   const select = form.findAllByType('select')[0];
   const options = select.findAllByType('option').slice(1);
-  assert.deepEqual(options.map(textOf), names);
-  assert.deepEqual(options.map(node => node.props.value), categories.slice(0, 7).map(row => row.idCategoria));
+  assert.deepEqual(options.map(textOf), names.slice(0, 6));
+  assert.deepEqual(options.map(node => node.props.value), categories.slice(0, 6).map(row => row.idCategoria));
+  assert.ok(!options.some(node => node.props.value === categories[6].idCategoria), '«Baja de servicio» no se ofrece en el alta manual');
   assert.match(ctx.text(), /FIBRA_CORTADA/); // Listado y modal históricos, no opción de alta.
   assert.equal(ctx.calls.length, 0);
   await ctx.change(form.findAllByType('input')[0], '11111111-1');

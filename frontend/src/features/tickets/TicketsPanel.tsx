@@ -6,7 +6,7 @@ import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { StatusBadge } from '../../shared/components';
 import { TicketManagementModal } from './TicketManagementModal';
-import { ticketAttentionAvailability } from './ticket-presentation';
+import { manualTicketCategories } from './ticket-presentation';
 
 export function TicketsPanel({
   tickets,
@@ -40,7 +40,8 @@ export function TicketsPanel({
     onFocusConsumed?.();
   }, [focusedTicketId, tickets, onFocusConsumed]);
   // Solo se ofrecen las categorías de atención que el servidor habilita; no se muestra aviso de catálogo.
-  const attentionCategories = ticketAttentionAvailability(categories).options;
+  // «Baja de servicio» no se ofrece: se genera solo al iniciar la baja desde el Libro de Control.
+  const attentionCategories = manualTicketCategories(categories);
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
