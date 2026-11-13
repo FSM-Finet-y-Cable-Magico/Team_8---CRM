@@ -64,6 +64,27 @@ class Rollback extends Error {}
     });
   });
 
+  it('recepción real de G1: NO_RECIBIDO sin estado_g1 se guarda; RECIBIDO sin estado_g1 o clave no numérica se rechazan', async () => {
+    await inTx(async tx => {
+      await storage.insertDispatch(tx, dispatchRow);
+      await storage.updateDispatch(tx, 501, { estadoDespacho: 'ACEPTADA', idOtG3: 930 });
+      expect(await storage.storeReceptionVersion(tx, 501, 1, 'g1-recepcion-1-930-13', [
+        reception({ claveEvento: 'g1-recepcion-1-930-13', resultado: 'RECIBIDO_CON_DANO', estadoRecepcion: 'PARCIAL' }),
+        reception({ claveEvento: 'g1-recepcion-1-930-13', numeroSerie: 'RTR-999', resultado: 'NO_RECIBIDO', estadoG1: null, fechaRecepcion: null,
+          idServicioExterno: null, detalle: 'Equipo no recuperado: Cliente no lo entregó', estadoRecepcion: 'PARCIAL' }),
+      ])).toBe('NUEVA');
+      expect(await storage.findReceptions(tx, 501)).toEqual(expect.arrayContaining([expect.objectContaining({ numeroSerie: 'RTR-999', estadoG1: null })]));
+    });
+    await expect(db.$transaction(async tx => {
+      await storage.insertDispatch(tx, dispatchRow);
+      await storage.storeReceptionVersion(tx, 501, 1, 'g1-recepcion-1-930-2', [reception({ claveEvento: 'g1-recepcion-1-930-2', estadoG1: null })]);
+    })).rejects.toThrow(/recepcion_g1_estado_g1_check/);
+    await expect(db.$transaction(async tx => {
+      await storage.insertDispatch(tx, dispatchRow);
+      await storage.storeReceptionVersion(tx, 501, 1, 'g1-recepcion-1-930-x', [reception({ claveEvento: 'g1-recepcion-1-930-x' })]);
+    })).rejects.toThrow(/recepcion_g1_clave_check/);
+  });
+
   it('las restricciones protegen la evidencia', async () => {
     await expect(db.$transaction(tx => storage.insertDispatch(tx, { ...dispatchRow, requestId: 'g8-retiro-2-501' }))).rejects.toThrow(/solicitud_g3_request_check/);
     await expect(db.$transaction(async tx => {

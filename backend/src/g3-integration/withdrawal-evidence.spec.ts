@@ -4,7 +4,7 @@ import { parseG1Reception } from './g1-reception-contract';
 import { withdrawalClosure } from './g3-withdrawal-closure-contract';
 import { assessWithdrawalClosure, paymentDuringWithdrawal } from './withdrawal-closure';
 import { g3WithdrawalClosure } from './__fixtures__/g3-closure-8a8e5dd0';
-import { g1Reception } from './__fixtures__/g1-reception';
+import { g1RealReceptionComplete, g1RealReceptionDiscrepancy, g1RealReceptionPartial, g1Reception } from './__fixtures__/g1-reception';
 
 const expected = { idEmpresa: 1, idOtG3: 930, requestId: 'g8-retiro-1-15' };
 
@@ -14,6 +14,43 @@ describe('contrato G1 de recepción', () => {
       fecha_recepcion: '2026-11-13T15:00:00Z', id_servicio_externo: 61, detalle: 'Carcasa rota' }]), expected);
     expect(parsed).toMatchObject({ ok: true, reception: { claveEvento: 'g1-recepcion-1-930-501', estadoRecepcion: 'COMPLETA',
       equipos: [{ numeroSerie: 'QA-ONT-RET-1', resultado: 'RECIBIDO_CON_DANO', idServicioExterno: 61, detalle: 'Carcasa rota' }] } });
+  });
+  describe('respuestas reales de G1 2131b7f5 (consultarRecepciones)', () => {
+    const real = { idEmpresa: 1, idOtG3: 990, requestId: 'g8-retiro-1-15' };
+    it('COMPLETA por request_id: RECIBIDO con estado_g1 y servicio externo', () => {
+      expect(parseG1Reception(g1RealReceptionComplete, real)).toMatchObject({ ok: true, reception: { claveEvento: 'g1-recepcion-1-990-12', estadoRecepcion: 'COMPLETA',
+        equipos: [{ numeroSerie: 'ONT-123456', resultado: 'RECIBIDO', estadoG1: 'En revisión', idServicioExterno: 245, fechaRecepcion: new Date('2026-11-12T15:00:03.512Z') }] } });
+    });
+    it('PARCIAL: dañado + faltante desconocido para G1 (estado_g1 null) se acepta como evidencia y bloquea la baja', () => {
+      const parsed = parseG1Reception(g1RealReceptionPartial, real);
+      expect(parsed).toMatchObject({ ok: true, reception: { estadoRecepcion: 'PARCIAL', equipos: [
+        { numeroSerie: 'ONT-123456', resultado: 'RECIBIDO_CON_DANO', estadoG1: 'En revisión' },
+        { numeroSerie: 'RTR-999', resultado: 'NO_RECIBIDO', estadoG1: null, idServicioExterno: null, detalle: 'Equipo no recuperado: Cliente no lo entregó' }] } });
+      if (!parsed.ok) throw new Error('unreachable');
+      const assessment = assessWithdrawalClosure({
+        evidence: { idOtG3: 990, estadoOt: 'COMPLETADA', cierreClave: 'baja:990', equiposRetirados: [{ numeroSerie: 'ONT-123456' }, { numeroSerie: 'RTR-999' }], equiposFaltantes: [] },
+        idServicio: 245, activeEquipment: [],
+        receptions: parsed.reception.equipos.map(item => ({ ...item, idOtG3: 990, claveEvento: parsed.reception.claveEvento, estadoRecepcion: parsed.reception.estadoRecepcion })),
+      });
+      expect(assessment.outcome).not.toBe('APLICAR_BAJA');
+      expect(assessment.reasons.map(reason => reason.code)).toContain('EQUIPO_NO_RECIBIDO');
+    });
+    it('discrepancia de G1: NO_RECIBIDO con estado conocido y detalle "codigo: detalle"', () => {
+      expect(parseG1Reception(g1RealReceptionDiscrepancy, real)).toMatchObject({ ok: true, reception: { estadoRecepcion: 'NO_RECIBIDA',
+        equipos: [{ resultado: 'NO_RECIBIDO', estadoG1: 'Instalado en cliente', detalle: expect.stringMatching(/^TRANSICION_INVALIDA: /) }] } });
+    });
+    it.each([
+      ['RECIBIDO sin estado_g1', { ...g1RealReceptionComplete, equipos: [{ ...g1RealReceptionComplete.equipos[0], estado_g1: null }] }, 'G1_EQUIPOS_INVALIDOS'],
+      ['RECIBIDO_CON_DANO sin estado_g1', { ...g1RealReceptionPartial, equipos: [{ ...g1RealReceptionPartial.equipos[0], estado_g1: null }] }, 'G1_EQUIPOS_INVALIDOS'],
+      ['NO_RECIBIDO con estado_g1 vacío', { ...g1RealReceptionPartial, equipos: [{ ...g1RealReceptionPartial.equipos[1], estado_g1: ' ' }] }, 'G1_EQUIPOS_INVALIDOS'],
+      ['clave_evento con sufijo no numérico', { ...g1RealReceptionComplete, clave_evento: 'g1-recepcion-1-990-abc' }, 'G1_CLAVE_EVENTO_INVALIDA'],
+      ['clave_evento con sufijo 0', { ...g1RealReceptionComplete, clave_evento: 'g1-recepcion-1-990-0' }, 'G1_CLAVE_EVENTO_INVALIDA'],
+      ['request_id null (G1 sin request en el cierre)', { ...g1RealReceptionComplete, request_id: null }, 'G1_SOLICITUD_AJENA'],
+      ['tipo_ot null', { ...g1RealReceptionComplete, tipo_ot: null }, 'G1_TIPO_OT_INVALIDO'],
+      ['SIN_EQUIPOS_RETIRADOS con campo extra', { ...g1RealReceptionComplete, estado_recepcion: 'SIN_EQUIPOS_RETIRADOS', equipos: [], success: true }, 'G1_CAMPOS_FUERA_DE_CONTRATO'],
+    ])('sigue rechazando: %s', (_name, data, code) => {
+      expect(parseG1Reception(data, real)).toMatchObject({ ok: false, code });
+    });
   });
   it.each([
     ['otra empresa', g1Reception({ id_empresa: 2 }), 'G1_EMPRESA_AJENA'],

@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS g8_retiros.recepcion_g1 (
   clave_evento VARCHAR(150) NOT NULL,
   numero_serie VARCHAR(100) NOT NULL,
   resultado VARCHAR(30) NOT NULL,
-  estado_g1 VARCHAR(60) NOT NULL,
+  -- NULL only when G1 does not know the serial for the company (G1 2131b7f5): it can then only be NO_RECIBIDO.
+  estado_g1 VARCHAR(60),
   fecha_recepcion TIMESTAMPTZ(3),
   id_servicio_externo INTEGER,
   detalle VARCHAR(1000),
@@ -101,6 +102,8 @@ CREATE TABLE IF NOT EXISTS g8_retiros.recepcion_g1 (
   CONSTRAINT recepcion_g1_ot_serie_key UNIQUE (id_empresa, id_ot_g3, clave_evento, numero_serie),
   CONSTRAINT recepcion_g1_serie_check CHECK (numero_serie = upper(btrim(numero_serie)) AND numero_serie <> ''),
   CONSTRAINT recepcion_g1_resultado_check CHECK (resultado IN ('RECIBIDO', 'RECIBIDO_CON_DANO', 'NO_RECIBIDO')),
+  CONSTRAINT recepcion_g1_estado_g1_check CHECK (estado_g1 IS NOT NULL OR resultado = 'NO_RECIBIDO'),
+  CONSTRAINT recepcion_g1_clave_check CHECK (clave_evento ~ '^g1-recepcion-[1-9][0-9]*-[1-9][0-9]*-[1-9][0-9]*$'),
   CONSTRAINT recepcion_g1_estado_check CHECK (estado_recepcion IN ('COMPLETA', 'PARCIAL', 'NO_RECIBIDA', 'SIN_EQUIPOS_RETIRADOS'))
 );
 CREATE INDEX IF NOT EXISTS recepcion_g1_ot_idx ON g8_retiros.recepcion_g1 (id_empresa, id_ot_g3);

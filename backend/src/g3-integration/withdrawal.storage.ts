@@ -37,7 +37,7 @@ export type WithdrawalDispatch = {
 };
 
 export type StoredReception = {
-  numeroSerie: string; idOtG3: number; resultado: string; estadoG1: string; fechaRecepcion: Date | null;
+  numeroSerie: string; idOtG3: number; resultado: string; estadoG1: string | null; fechaRecepcion: Date | null;
   idServicioExterno: number | null; detalle: string | null; claveEvento: string; estadoRecepcion: string;
 };
 

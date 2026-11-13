@@ -5,6 +5,9 @@
  *   data = { clave_evento, id_empresa, id_ot_g3, request_id, tipo_ot, estado_recepcion, equipos[] }
  *   equipo = { numero_serie, resultado, estado_g1, fecha_recepcion, id_servicio_externo, detalle }
  * clave_evento = g1-recepcion-{id_empresa}-{id_ot}-{id_cierre}; it changes when G3 corrects the closure.
+ * Verified against G1 main 2131b7f5 (IntegracionesService.consultarRecepciones): id_cierre is an integer
+ * serial, and estado_g1 is null when the serial is not registered in G1 for the company (a device declared in
+ * equipos_faltantes that was never in inventory) -- G1 can only report that as NO_RECIBIDO.
  * FINET ratified that this G1 transition after G3's approved closure is sufficient evidence (no second
  * warehouse scan); it does NOT remove the reconciliation of serials, company, OT and service.
  * Fail closed: unknown fields, other company/OT/request, malformed values -> invalid, never success.
@@ -14,7 +17,7 @@ export const G1_DEVICE_RESULTS = ['RECIBIDO', 'RECIBIDO_CON_DANO', 'NO_RECIBIDO'
 export const G1_ACCEPTED_RESULTS = ['RECIBIDO', 'RECIBIDO_CON_DANO'];
 
 export type G1ReceptionDevice = {
-  numeroSerie: string; resultado: (typeof G1_DEVICE_RESULTS)[number]; estadoG1: string; fechaRecepcion: Date | null;
+  numeroSerie: string; resultado: (typeof G1_DEVICE_RESULTS)[number]; estadoG1: string | null; fechaRecepcion: Date | null;
   idServicioExterno: number | null; detalle: string | null;
 };
 export type G1Reception = {
@@ -40,7 +43,7 @@ export function parseG1Reception(data: unknown, expected: { idEmpresa: number; i
   if (root.tipo_ot !== 'BAJA') return fail('G1_TIPO_OT_INVALIDO', 'La recepción no corresponde a una OT de BAJA');
   const claveEvento = root.clave_evento;
   const keyPrefix = `g1-recepcion-${expected.idEmpresa}-${expected.idOtG3}-`;
-  if (typeof claveEvento !== 'string' || claveEvento.length > 150 || !claveEvento.startsWith(keyPrefix) || !/^[A-Za-z0-9_-]+$/.test(claveEvento.slice(keyPrefix.length))) {
+  if (typeof claveEvento !== 'string' || claveEvento.length > 150 || !claveEvento.startsWith(keyPrefix) || !/^[1-9]\d{0,18}$/.test(claveEvento.slice(keyPrefix.length))) {
     return fail('G1_CLAVE_EVENTO_INVALIDA', 'La clave_evento no corresponde a la empresa y OT');
   }
   if (!G1_RECEPTION_STATES.includes(root.estado_recepcion as never)) return fail('G1_ESTADO_RECEPCION_INVALIDO', 'Estado de recepción desconocido');
@@ -57,7 +60,11 @@ export function parseG1Reception(data: unknown, expected: { idEmpresa: number; i
     if (seen.has(serie)) return fail('G1_SERIE_DUPLICADA', `Serie duplicada en la recepción: ${serie}`);
     seen.add(serie);
     if (!G1_DEVICE_RESULTS.includes(item.resultado as never)) return fail('G1_RESULTADO_INVALIDO', `Resultado desconocido para ${serie}`);
-    if (typeof item.estado_g1 !== 'string' || !item.estado_g1.trim() || item.estado_g1.length > 60) return fail('G1_EQUIPOS_INVALIDOS', `estado_g1 inválido para ${serie}`);
+    // Only a NOT received device may lack a G1 state (serial unknown to inventory); a received one must have it.
+    const unknownToInventory = item.estado_g1 === null && item.resultado === 'NO_RECIBIDO';
+    if (!unknownToInventory && (typeof item.estado_g1 !== 'string' || !item.estado_g1.trim() || item.estado_g1.length > 60)) {
+      return fail('G1_EQUIPOS_INVALIDOS', `estado_g1 inválido para ${serie}`);
+    }
     if (item.fecha_recepcion !== null && item.fecha_recepcion !== undefined && (typeof item.fecha_recepcion !== 'string' || !ISO.test(item.fecha_recepcion) || Number.isNaN(Date.parse(item.fecha_recepcion)))) {
       return fail('G1_EQUIPOS_INVALIDOS', `fecha_recepcion inválida para ${serie}`);
     }
@@ -68,7 +75,7 @@ export function parseG1Reception(data: unknown, expected: { idEmpresa: number; i
       return fail('G1_EQUIPOS_INVALIDOS', `detalle inválido para ${serie}`);
     }
     equipos.push({
-      numeroSerie: serie, resultado: item.resultado as G1ReceptionDevice['resultado'], estadoG1: item.estado_g1,
+      numeroSerie: serie, resultado: item.resultado as G1ReceptionDevice['resultado'], estadoG1: unknownToInventory ? null : item.estado_g1 as string,
       fechaRecepcion: typeof item.fecha_recepcion === 'string' ? new Date(item.fecha_recepcion) : null,
       idServicioExterno: positiveId(item.id_servicio_externo) ? item.id_servicio_externo : null,
       detalle: typeof item.detalle === 'string' ? item.detalle : null,
