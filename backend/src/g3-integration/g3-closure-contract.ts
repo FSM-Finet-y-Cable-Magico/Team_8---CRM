@@ -31,6 +31,7 @@ function withoutEmptySharedFields(dto: G3ClosureDto): G3ClosureDto {
 
 function validatedClosure(input: object): G3ClosureDto {
   const dto = plainToInstance(G3ClosureDto, input);
+  if (dto.tipo_ot === 'BAJA') throw new BadRequestException('Un cierre de BAJA tiene su propio contrato; no es instalacion ni reparacion');
   if (validateSync(dto, { whitelist: true, forbidNonWhitelisted: true }).length) {
     throw new BadRequestException('El cierre G3 contiene campos invalidos o fuera de contrato');
   }

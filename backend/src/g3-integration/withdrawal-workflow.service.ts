@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,9 @@ import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt, overdueDebtSummary 
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { TicketsService } from '../tickets/tickets.service';
+import { G1_RECEPTION_CLIENT, G1IntegrationError, G1ReceptionClient } from '../g1-integration/g1-integration.types';
+import { parseG1Reception } from './g1-reception-contract';
+import { G3WithdrawalClosure } from './g3-withdrawal-closure-contract';
 import {
   buildWithdrawalOrderPayload, G3_CANCELLABLE_STATES, interpretWithdrawalCancelReply, interpretWithdrawalOrderRead,
   interpretWithdrawalOrderReply, WithdrawalPayloadError,
@@ -49,6 +52,7 @@ export class WithdrawalWorkflowService {
     private readonly config: ConfigService,
     @Inject(G3_WITHDRAWAL_CLIENT) private readonly g3: G3WithdrawalClient,
     @Optional() @Inject(WITHDRAWAL_STORAGE) storage?: WithdrawalStorage,
+    @Optional() @Inject(G1_RECEPTION_CLIENT) private readonly g1?: G1ReceptionClient,
   ) {
     this.storage = storage ?? postgresWithdrawalStorage;
   }
@@ -218,7 +222,7 @@ export class WithdrawalWorkflowService {
   }
 
   /** Authenticated GET of the OT (on demand, rate limited). COMPLETADA only means approved on G3's side. */
-  async refreshOrder(idSolicitudRetiro: number, currentUser: AuthUser) {
+  async refreshOrder(idSolicitudRetiro: number, currentUser: AuthUser | null) {
     const dispatch = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
       await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
@@ -295,6 +299,110 @@ export class WithdrawalWorkflowService {
     throw new ConflictException({ code: outcome.code, message: outcome.message });
   }
 
+  /**
+   * BAJA closure notification from G3 (S2S, already authenticated and company-scoped by the guard).
+   * Correlates it strictly with the persisted dispatch, snapshot and link, stores the evidence idempotently
+   * and tries to corroborate approval by GET. It NEVER applies the withdrawal.
+   */
+  async receiveWithdrawalClosure(closure: G3WithdrawalClosure) {
+    const stored = await this.prisma.$transaction(async tx => {
+      const capabilities = await this.storage.capabilities(tx);
+      if (!capabilities.g3Dispatch || !capabilities.ticketLink) {
+        throw new ServiceUnavailableException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE', message: 'G8 aún no puede registrar cierres de BAJA; reintentar más tarde.' });
+      }
+      const found = await this.storage.findDispatchByRequestId(tx, closure.requestId);
+      if (!found) throw new NotFoundException({ code: 'WITHDRAWAL_REQUEST_UNKNOWN', message: 'G8 no reconoce la solicitud de retiro del cierre' });
+      await this.requestForUpdate(tx, found.idSolicitudRetiro, null);
+      const dispatch = (await this.storage.findDispatch(tx, found.idSolicitudRetiro, true))!;
+      const link = await this.storage.findLinkByRequest(tx, dispatch.idSolicitudRetiro);
+      const snapshot = dispatch.payloadSnapshot as Record<string, unknown>;
+      const mismatch = [
+        dispatch.idEmpresa !== closure.idEmpresa, dispatch.idSolicitudRetiro !== closure.idSolicitudRetiro,
+        dispatch.traceId.toLowerCase() !== closure.traceId, dispatch.idOtG3 !== null && dispatch.idOtG3 !== closure.idOt,
+        !link, link?.idServicio !== closure.idServicio, link?.idContrato !== closure.idContrato, link?.idCliente !== closure.idCliente,
+        closure.idTicket !== null && link?.idTicket !== closure.idTicket,
+        snapshot.id_servicio_externo !== closure.idServicio, snapshot.id_contrato_externo !== closure.idContrato,
+        ['RECHAZADA', 'CANCELADA', 'PENDIENTE'].includes(dispatch.estadoDespacho),
+      ].some(Boolean);
+      if (mismatch) {
+        throw new ConflictException({ code: 'G3_CIERRE_BAJA_NO_CORRESPONDE', message: 'El cierre de BAJA no corresponde a la solicitud, OT o servicio registrados; no se guardó.' });
+      }
+      if (dispatch.cierreHash) {
+        if (dispatch.cierreHash !== closure.hash) {
+          throw new ConflictException({ code: 'G3_CIERRE_BAJA_DISTINTO', message: 'G8 ya registró este cierre con un contenido distinto; se conserva la evidencia original.' });
+        }
+        return { duplicate: true, idSolicitudRetiro: dispatch.idSolicitudRetiro };
+      }
+      const learnedOt = dispatch.idOtG3 === null;
+      const clave = 'baja:' + closure.idOt;
+      await this.storage.updateDispatch(tx, dispatch.idSolicitudRetiro, {
+        ...(learnedOt ? { idOtG3: closure.idOt, estadoDespacho: 'ACEPTADA' as const, ultimoErrorCodigo: null, ultimoErrorStatus: null } : {}),
+        cierreClave: clave, cierreHash: closure.hash, cierreRecibidoEn: new Date(),
+        equiposRetirados: closure.equiposRetirados, equiposFaltantes: closure.equiposFaltantes,
+      });
+      await this.audit(tx, null, 'RECIBIR_CIERRE_BAJA_G3', 'solicitud_retiro_servicio', dispatch.idSolicitudRetiro, {
+        idOtG3: closure.idOt, requestId: closure.requestId, clave, retirados: closure.equiposRetirados.length,
+        faltantes: closure.equiposFaltantes.length, otConocidaPorCierre: learnedOt, cierreHash: closure.hash,
+      });
+      return { duplicate: false, idSolicitudRetiro: dispatch.idSolicitudRetiro };
+    });
+    let estadoOt: string | null = null;
+    try {
+      estadoOt = (await this.refreshOrder(stored.idSolicitudRetiro, null)).despacho.estadoOt;
+    } catch {
+      // Best effort: approval is checked again before applying; G3 is not asked to retry for this.
+    }
+    return { received: true, processed: true, duplicate: stored.duplicate, aplicado: false, idSolicitudRetiro: stored.idSolicitudRetiro, estadoOt };
+  }
+
+  /** Reads the G1 reception for the request (after the BAJA closure) and stores it as an immutable version. */
+  async syncReception(idSolicitudRetiro: number, currentUser: AuthUser) {
+    const dispatch = await this.prisma.$transaction(async tx => {
+      const capabilities = await this.storage.capabilities(tx);
+      if (!capabilities.g1Reception) throw new ConflictException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE', message: 'El almacenamiento de recepciones aún no está aplicado.' });
+      await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      return this.storage.findDispatch(tx, idSolicitudRetiro);
+    });
+    if (!dispatch?.idOtG3 || !dispatch.cierreClave) {
+      throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_NOT_RECEIVED', message: 'Aún no se recibe el cierre de BAJA de G3; inventario no puede informar la recepción.' });
+    }
+    if (!this.g1?.configured()) throw new ConflictException({ code: 'INTEGRACION_G1_NO_CONFIGURADA', message: 'La integración con inventario (G1) no está configurada.' });
+    let data: unknown;
+    try {
+      data = (await this.g1.getReceptions(dispatch.idEmpresa, { requestId: dispatch.requestId, idOt: dispatch.idOtG3 })).data;
+    } catch (error) {
+      if (error instanceof G1IntegrationError && error.status === 404) {
+        return { estado: 'PENDIENTE' as const, message: 'Inventario aún no registra la recepción; vuelve a consultar más tarde.' };
+      }
+      if (error instanceof G1IntegrationError && (error.status === 401 || error.status === 403)) {
+        throw new ConflictException({ code: 'G1_ACCESO_RECHAZADO', message: 'Inventario rechazó la credencial o el alcance de empresa; requiere revisión de configuración.' });
+      }
+      throw new ServiceUnavailableException({ code: error instanceof G1IntegrationError ? error.code : 'G1_UNAVAILABLE', message: 'No fue posible consultar la recepción en inventario.' });
+    }
+    const parsed = parseG1Reception(data, { idEmpresa: dispatch.idEmpresa, idOtG3: dispatch.idOtG3, requestId: dispatch.requestId });
+    if (!parsed.ok) throw new ConflictException({ code: parsed.code, message: parsed.message });
+    const reception = parsed.reception;
+    const version = await this.prisma.$transaction(async tx => {
+      await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const outcome = await this.storage.storeReceptionVersion(tx, idSolicitudRetiro, dispatch.idEmpresa, reception.claveEvento, reception.equipos.map(item => ({
+        numeroSerie: item.numeroSerie, idOtG3: reception.idOtG3, resultado: item.resultado, estadoG1: item.estadoG1, fechaRecepcion: item.fechaRecepcion,
+        idServicioExterno: item.idServicioExterno, detalle: item.detalle, claveEvento: reception.claveEvento, estadoRecepcion: reception.estadoRecepcion,
+      })));
+      if (outcome === 'NUEVA') {
+        await this.audit(tx, currentUser, 'REGISTRAR_RECEPCION_G1_RETIRO', 'solicitud_retiro_servicio', idSolicitudRetiro, {
+          idOtG3: reception.idOtG3, claveEvento: reception.claveEvento, estadoRecepcion: reception.estadoRecepcion,
+          equipos: reception.equipos.map(item => ({ numeroSerie: item.numeroSerie, resultado: item.resultado })),
+          claveAnterior: dispatch.recepcionClaveEvento,
+        });
+      }
+      return outcome;
+    });
+    if (version === 'CONFLICTO') {
+      throw new ConflictException({ code: 'G1_RECEPCION_DISTINTA', message: 'Inventario devolvió otro contenido para la misma clave de evento; se conserva la versión registrada.' });
+    }
+    return { estado: 'SINCRONIZADA' as const, version, claveEvento: reception.claveEvento, estadoRecepcion: reception.estadoRecepcion, equipos: reception.equipos.length };
+  }
+
   // ----- helpers -----
 
   private async closeAsCancelled(tx: Db, idSolicitudRetiro: number, reason: string, currentUser: AuthUser, detail: Record<string, unknown>) {
@@ -315,10 +423,11 @@ export class WithdrawalWorkflowService {
     return solicitud && ticket ? { solicitud, ticket, despacho: this.publicDispatch(dispatch), repetido: true } : null;
   }
 
-  private async requestForUpdate(tx: Db, idSolicitudRetiro: number, currentUser: AuthUser) {
+  /** currentUser=null: S2S/system actor (G3 notification); company scope was already proven by correlation. */
+  private async requestForUpdate(tx: Db, idSolicitudRetiro: number, currentUser: AuthUser | null) {
     const request = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
     if (!request) throw new NotFoundException('Solicitud de retiro no encontrada');
-    this.assertCompany(request.idEmpresa, currentUser);
+    if (currentUser) this.assertCompany(request.idEmpresa, currentUser);
     if (request.motivo.toUpperCase() !== WITHDRAWAL_MOTIVE_MOROSITY) throw new BadRequestException('Esta operación aplica solo a retiros por morosidad');
     await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${request.idServicio} FOR UPDATE`;
     return (await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } }))!;
@@ -371,8 +480,8 @@ export class WithdrawalWorkflowService {
     };
   }
 
-  private audit(tx: Db, user: AuthUser, accion: string, entidadAfectada: string, idEntidadAfectada: number, valorNuevo: Record<string, unknown>) {
-    return this.auditService.record({ idUsuario: user.idUsuario, accion, entidadAfectada, idEntidadAfectada, valorNuevo: valorNuevo as Prisma.InputJsonValue }, tx);
+  private audit(tx: Db, user: AuthUser | null, accion: string, entidadAfectada: string, idEntidadAfectada: number, valorNuevo: Record<string, unknown>) {
+    return this.auditService.record({ idUsuario: user?.idUsuario ?? null, accion, entidadAfectada, idEntidadAfectada, valorNuevo: valorNuevo as Prisma.InputJsonValue }, tx);
   }
 
   private assertCompany(idEmpresa: number, currentUser: AuthUser) {

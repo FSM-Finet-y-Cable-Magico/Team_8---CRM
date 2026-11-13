@@ -15,6 +15,7 @@ import { sha256Payload } from './g3-integration.utils';
 import { InstallationActivationService } from './installation-activation.service';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { g3InstallationClosure, g3RepairClosure, g3WithdrawalClosure } from './__fixtures__/g3-closure-8a8e5dd0';
+import { WithdrawalWorkflowService } from './withdrawal-workflow.service';
 
 // Real HTTP controllers, validation, S2S guard, tracking service and closure processor.
 // Only storage, commercial activation and the G3 transport are simulated.
@@ -65,7 +66,7 @@ function fixture(idEmpresa: number) {
 describe('HTTP G3: approval-only, correlacion e idempotencia', () => {
   let app: INestApplication;
   let store: ReturnType<typeof fixture>;
-  async function start(company = 1) {
+  async function start(company = 1, extraProviders: any[] = []) {
     store = fixture(company);
     const keys = [1, 2].map(idEmpresa => ({ keyId: `qa-g3-${idEmpresa}`, group: 'G3', companies: [idEmpresa], active: true,
       sha256: createHash('sha256').update(`synthetic-g3-${idEmpresa}`).digest('hex') }));
@@ -74,7 +75,7 @@ describe('HTTP G3: approval-only, correlacion e idempotencia', () => {
       providers: [G3ClosureProcessor, InstallationIntegrationService, IntegrationApiKeyGuard, RolesGuard,
         { provide: PrismaService, useValue: store.prisma }, { provide: InstallationActivationService, useValue: store.activation },
         { provide: AuditService, useValue: store.audit }, { provide: G3_INTEGRATION_CLIENT, useValue: store.client },
-        { provide: ConfigService, useValue: new ConfigService({ G8_INTEGRATION_API_KEYS: JSON.stringify(keys) }) }],
+        { provide: ConfigService, useValue: new ConfigService({ G8_INTEGRATION_API_KEYS: JSON.stringify(keys) }) }, ...extraProviders],
     }).overrideGuard(JwtAuthGuard).useValue({ canActivate(context: ExecutionContext) {
       context.switchToHttp().getRequest().user = { idUsuario: 7, idEmpresa: company, roles: ['Comercial'] }; return true;
     } }).compile();
@@ -358,6 +359,33 @@ describe('HTTP G3: approval-only, correlacion e idempotencia', () => {
       await post().send(withMissing).expect(201);
       expect(store.activation.activate).toHaveBeenCalledTimes(1);
       await post().send(store.payload).expect(409);
+    });
+
+    it.each(['/api/integraciones/fsm/ordenes/930/cierre', '/api/integrations/g3/events/work-order-closed'])(
+      'BAJA real se enruta a su propio validador y handler (%s), sin activar instalaciones', async url => {
+        const workflow = { receiveWithdrawalClosure: jest.fn(async () => ({ received: true, processed: true, duplicate: false, aplicado: false })) };
+        await start(1, [{ provide: WithdrawalWorkflowService, useValue: workflow }]);
+        const result = await post(url).send(g3WithdrawalClosure()).expect(200);
+        expect(result.body).toMatchObject({ received: true, aplicado: false });
+        expect(workflow.receiveWithdrawalClosure).toHaveBeenCalledWith(expect.objectContaining({ idOt: 930, requestId: 'g8-retiro-1-15', idSolicitudRetiro: 15 }));
+        expect(store.activation.activate).not.toHaveBeenCalled();
+        expect(store.events.create).not.toHaveBeenCalled();
+      });
+
+    it('BAJA de otra empresa es rechazada por el guard S2S antes del handler', async () => {
+      const workflow = { receiveWithdrawalClosure: jest.fn() };
+      await start(1, [{ provide: WithdrawalWorkflowService, useValue: workflow }]);
+      await post('/api/integraciones/fsm/ordenes/930/cierre').send(g3WithdrawalClosure(2, { request_id: 'g8-retiro-2-15' })).expect(res => {
+        expect(res.status).toBeGreaterThanOrEqual(400);
+      });
+      expect(workflow.receiveWithdrawalClosure).not.toHaveBeenCalled();
+    });
+
+    it('BAJA con clave id_ot:fecha es 400 y no llega al handler', async () => {
+      const workflow = { receiveWithdrawalClosure: jest.fn() };
+      await start(1, [{ provide: WithdrawalWorkflowService, useValue: workflow }]);
+      await post('/api/integraciones/fsm/ordenes/930/cierre').send(g3WithdrawalClosure(1, { clave_idempotencia: '930:2026-11-13T14:00:00.000Z' })).expect(400);
+      expect(workflow.receiveWithdrawalClosure).not.toHaveBeenCalled();
     });
 
     it('BAJA no entra al flujo de instalacion ni de reparacion', async () => {

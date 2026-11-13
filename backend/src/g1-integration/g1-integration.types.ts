@@ -1,4 +1,11 @@
 export const G1_INVENTORY_CLIENT = Symbol('G1_INVENTORY_CLIENT');
+/** Read-only G1 receptions of devices retired by a G3 BAJA OT (contract respuesta-g1-a-g8-recepcion-equipos, 12-11-2026). */
+export const G1_RECEPTION_CLIENT = Symbol('G1_RECEPTION_CLIENT');
+export interface G1ReceptionClient {
+  configured(): boolean;
+  /** Envelope already unwrapped ({ success: true, data }); non-2xx raise G1IntegrationError with its status. */
+  getReceptions(idEmpresa: number, query: { requestId: string; idOt?: number }): Promise<G1ClientResult<unknown>>;
+}
 
 export const G1_PHYSICAL_STATES = [
   'En bodega',

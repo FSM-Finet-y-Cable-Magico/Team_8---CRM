@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, Optional, Param, ParseIntPipe, Patch, Post, Query, Res, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -14,8 +14,16 @@ import { InstallationIntegrationService } from './installation-integration.servi
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 import { WithdrawalWorkflowService } from './withdrawal-workflow.service';
 import { independentRepairAcknowledgement, installationClosure } from './g3-closure-contract';
+import { isWithdrawalClosure, withdrawalClosure } from './g3-withdrawal-closure-contract';
 
-function receiveApprovedClosure(processor: G3ClosureProcessor, dto: G3ClosureDto, response?: Response) {
+async function receiveApprovedClosure(processor: G3ClosureProcessor, workflow: WithdrawalWorkflowService | undefined, dto: G3ClosureDto, response?: Response) {
+  // BAJA has its own validator and handler: it never enters the installation or repair paths.
+  if (isWithdrawalClosure(dto)) {
+    if (!workflow) throw new ServiceUnavailableException({ code: 'WITHDRAWAL_FLOW_NOT_AVAILABLE', message: 'G8 no tiene habilitado el registro de cierres de BAJA' });
+    const result = await workflow.receiveWithdrawalClosure(withdrawalClosure(dto));
+    response?.status(200);
+    return result;
+  }
   const acknowledgement = independentRepairAcknowledgement(dto);
   if (acknowledgement) {
     response?.status(200);
@@ -29,6 +37,7 @@ export class G3IntegrationController {
   constructor(
     private readonly installations: InstallationIntegrationService,
     private readonly closureProcessor: G3ClosureProcessor,
+    @Optional() private readonly workflow?: WithdrawalWorkflowService,
   ) {}
 
   @Post('installations')
@@ -100,13 +109,13 @@ export class G3IntegrationController {
   @IntegrationGroups('G3')
   @IntegrationCompanyScope('body')
   receiveClosure(@Body() dto: G3ClosureDto, @Res({ passthrough: true }) response?: Response) {
-    return receiveApprovedClosure(this.closureProcessor, dto, response);
+    return receiveApprovedClosure(this.closureProcessor, this.workflow, dto, response);
   }
 }
 
 @Controller('integraciones/fsm')
 export class G3CanonicalWebhookController {
-  constructor(private readonly closureProcessor: G3ClosureProcessor) {}
+  constructor(private readonly closureProcessor: G3ClosureProcessor, @Optional() private readonly workflow?: WithdrawalWorkflowService) {}
 
   @Post('ordenes/:idOt/cierre')
   @UseGuards(IntegrationApiKeyGuard)
@@ -120,7 +129,7 @@ export class G3CanonicalWebhookController {
     if (dto.id_ot !== undefined && dto.id_ot !== idOt) {
       throw new BadRequestException('El id_ot de la ruta no coincide con el payload');
     }
-    return receiveApprovedClosure(this.closureProcessor, { ...dto, id_ot: idOt }, response);
+    return receiveApprovedClosure(this.closureProcessor, this.workflow, { ...dto, id_ot: idOt }, response);
   }
 }
 
@@ -151,6 +160,12 @@ export class ServiceWithdrawalController {
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
   refreshOrder(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.workflow.refreshOrder(id, user);
+  }
+
+  @Post(':id/reception-sync')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  syncReception(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.syncReception(id, user);
   }
 
   @Post(':id/cancel')
