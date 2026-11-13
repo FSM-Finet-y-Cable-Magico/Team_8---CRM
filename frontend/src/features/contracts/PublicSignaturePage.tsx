@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api';
 
 type View = { estado: string; hashOriginal: string; hashFirmado: string | null; vence: string;
-  firmado: string | null; correo: string; consentimiento: string; consentimientoVersion: string };
+  firmado: string | null; correo: string; consentimiento: string; consentimientoVersion: string; demo?: boolean };
 const root = String(api.defaults.baseURL || '/api').replace(/\/$/, '');
 export function PublicSignaturePage() {
   const [token] = useState(() => window.location.hash.slice(1));
@@ -59,25 +59,26 @@ export function PublicSignaturePage() {
     <h1>Firma de contrato</h1>
     {message && <p role="status" className="inline-status">{message}</p>}
     {!view ? <p>Abre el enlace personal recibido por correo para revisar tu documento.</p> : <>
-      <p>Correo de verificación: {view.correo}</p>
+      <p>{view.demo ? 'Firma de demostración' : 'Correo de verificación: ' + view.correo}</p>
       <p>{view.estado === 'FIRMADA' ? 'Tu aceptación quedó registrada. Puedes descargar el PDF con su constancia.'
-        : 'Descarga y revisa el contrato. Después solicita el código que enviaremos a tu correo.'}</p>
+        : view.demo ? 'Descarga y revisa el contrato. Luego marca la aceptación y firma en esta página.'
+          : 'Descarga y revisa el contrato. Después solicita el código que enviaremos a tu correo.'}</p>
       <button disabled={busy} onClick={download}>Descargar {view.estado === 'FIRMADA' ? 'contrato firmado' : 'PDF para revisar'}</button>
       <details><summary>Huella del documento original</summary><p className="signature-hash">{view.hashOriginal}</p></details>
       {view.estado !== 'FIRMADA' && <>
         <p>El enlace vence el {new Date(view.vence).toLocaleString('es-CL')}.</p>
-        <button className="secondary" disabled={busy || !reviewed} onClick={() => operation(async () => {
+        {!view.demo && <button className="secondary" disabled={busy || !reviewed} onClick={() => operation(async () => {
           await call('code'); setMessage('Código enviado. Vence en 10 minutos. Espera 60 segundos para solicitar otro.');
-        })}>Enviar código a mi correo</button>
+        })}>Enviar código a mi correo</button>}
         <form onSubmit={e => { e.preventDefault(); return operation(async () => {
-          await call('sign', { code, hashOriginal: reviewed, consent, consentVersion: view.consentimientoVersion });
+          await call('sign', { ...(view.demo ? {} : { code }), hashOriginal: reviewed, consent, consentVersion: view.consentimientoVersion });
           setView(await (await call('view')).json()); setCode(''); setConsent(false);
           setMessage('Firma registrada. El documento con su constancia está disponible para descargar.');
         }); }}>
-          <label>Código de seis dígitos<input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required maxLength={6} /></label>
+          {!view.demo && <label>Código de seis dígitos<input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required maxLength={6} /></label>}
           <label><input type="checkbox" checked={consent} required onChange={e => setConsent(e.target.checked)} /> {view.consentimiento}</label>
-          <button disabled={busy || !reviewed || !consent || code.length !== 6} type="submit">Aceptar y firmar el contrato</button>
+          <button disabled={busy || !reviewed || !consent || (!view.demo && code.length !== 6)} type="submit">Aceptar y firmar el contrato</button>
         </form>
       </>}
     </>}

@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const output = ts.transpileModule(readFileSync(new URL('../src/features/contracts/PublicSignaturePage.tsx', import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const text = n => typeof n === 'string' ? n : (n.children ?? []).map(text).join('');
-async function harness(t, { invalid = false, tampered = false } = {}) {
+async function harness(t, { invalid = false, tampered = false, demo = false } = {}) {
   const token = randomBytes(32).toString('base64url'), pdf = Buffer.from('%PDF-fixture-only');
   const hash = createHash('sha256').update(pdf).digest('hex');
   let signed = false; const calls = [], downloads = [], historyCalls = [];
@@ -25,7 +25,8 @@ async function harness(t, { invalid = false, tampered = false } = {}) {
     if (url.endsWith('/sign')) signed = true;
     return new Response(JSON.stringify(url.endsWith('/view') ? { estado: signed ? 'FIRMADA' : 'PENDIENTE',
       hashOriginal: hash, hashFirmado: signed ? hash : null, vence: '2099-01-01T00:00:00Z',
-      correo: 'q***@example.invalid', consentimiento: 'Acepto el documento revisado', consentimientoVersion: 'fes-correo-v1' } : { enviado: true }),
+      correo: 'q***@example.invalid', consentimiento: 'Acepto el documento revisado',
+      consentimientoVersion: demo ? 'demo-enlace-v1' : 'fes-correo-v1', demo } : { enviado: true }),
       { headers: { 'Content-Type': 'application/json' } });
   };
   const exports = {};
@@ -66,4 +67,20 @@ test('PDF alterado no habilita código ni firma', async t => {
   const h = await harness(t, { tampered: true }); await h.click('Descargar');
   assert.equal(h.downloads.length, 0); assert.equal(h.button('Enviar código').props.disabled, true);
   assert.match(JSON.stringify(h.tree.toJSON()), /huella del PDF no coincide/);
+});
+test('la demostración solo firma al aceptar el PDF y omite el código', async t => {
+  const h = await harness(t, { demo: true });
+  assert.equal(h.button('Enviar código'), undefined);
+  assert.equal(h.button('Aceptar y firmar').props.disabled, true);
+  assert.deepEqual(h.calls.map(c => c.url.split('/').at(-1)), ['view']);
+  await h.click('Descargar PDF');
+  assert.equal(h.button('Aceptar y firmar').props.disabled, true);
+  await act(async () => h.tree.root.findByType('input').props.onChange({ target: { checked: true } }));
+  assert.equal(h.button('Aceptar y firmar').props.disabled, false);
+  await act(async () => { await h.tree.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
+  assert.ok(h.button('Descargar contrato firmado'));
+  const sign = h.calls.find(c => c.url.endsWith('/sign'));
+  assert.equal('code' in sign.body, false);
+  assert.equal(sign.body.consentVersion, 'demo-enlace-v1');
+  assert.ok(h.calls.every(c => !c.url.endsWith('/code')));
 });
