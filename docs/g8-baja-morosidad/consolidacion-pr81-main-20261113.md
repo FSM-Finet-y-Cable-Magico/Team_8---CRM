@@ -73,8 +73,16 @@
 - ya está en `origin` (forma parte de `632afae0`);
 - es ancestro de esta rama, así que si se integra primero, este PR se reduce solo, sin duplicar cambios.
 
-## 4. Riesgos residuales
+## 4. Criterios FINET del 13-11-2026 (segunda instrucción) aplicados
 
-- **Reactivación por reparación:** cerrar una OT local de reparación con «Activo» la elige el técnico explícitamente. No se cambió para no afectar reparaciones, pero conviene que FINET decida si debe bloquearse con un retiro activo.
-- **Datos históricos:** la vista de excliente también muestra a quien terminó sus relaciones antes de esta rama. Conviene contarlos con una consulta de solo lectura antes de activar (informe §8).
+| Criterio | Implementación | Pruebas |
+|---|---|---|
+| Bloquear la reactivación manual de un servicio con retiro activo hasta que la solicitud se cancele o se resuelva, sin alterar reparaciones de otros servicios. | `common/active-withdrawal.ts`. `PATCH /services/:id` a Activo responde 409 `SERVICE_WITHDRAWAL_ACTIVE` con auditoría de rechazo. El cierre de reparación con estado final Activo responde 409 dentro de la transacción, sin escrituras; puede cerrarse con otro estado final. La misma condición rige el pago y la baja directa. | `work-orders.service.spec.ts` (+3), `service-retirement-safety.spec.ts` (+1), billing (+3). |
+| Excliente a quien terminó sus relaciones operativas en esa empresa, incluso con baja directa legítima; nunca a quien conserva otro servicio o contrato operativo. | Vista derivada `formerCustomerInCompanyWhere` + `ensureFormerCustomerProspect` en `finalize` y en `deactivate`. | prospects spec, `service-retirement-safety.spec.ts`, finalize spec. |
+| Clasificación derivada, sin estados nuevos ni clientes duplicados. | No hay columnas ni estados nuevos. El prospecto vinculado se reutiliza sin escribirlo; solo se crea uno (estado existente «Fuera pipeline») si falta. Nunca se crea ni modifica un cliente. | Ídem. |
+| Consulta de solo lectura que cuente los exclientes históricos por empresa. | `db/g8/queries/exclientes-historicos.readonly.sql`: READ ONLY + ROLLBACK, solo conteos por empresa. | Control estático en `withdrawal-boundaries.spec.ts` y comparación con la condición de la aplicación en PostgreSQL efímera (6 escenarios). |
+
+## 5. Riesgos residuales
+
+- **Datos históricos:** la vista de excliente también muestra a quien terminó sus relaciones antes de esta rama. Hay que ejecutar la consulta de §4 sobre la base efectiva (solo lectura, por quien tenga acceso) antes de activar.
 - La QA E2E real con G3/G1 sigue pendiente (gates del informe §8).
