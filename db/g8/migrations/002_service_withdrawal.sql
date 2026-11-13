@@ -1,6 +1,7 @@
 BEGIN;
 -- G8 additive proposal: withdrawal for morosity (BAJA) integrated with G3 and G1. PENDING APPROVAL.
--- DO NOT RUN on finet_global_validacion or on the VPS without explicit authorization of the schema owner.
+-- DO NOT RUN on finet_global_validacion (G8's effective database on the VPS, finet-postgres-global, confirmed
+-- 13-11-2026; shared with G1/G2/G3) or on any VPS database without explicit authorization of the schema owner.
 -- First application: isolated QA with a prior backup and 002_service_withdrawal.verify.sql before and after.
 -- No data and no backfill: historical requests stay unlinked; nothing is inferred from texts or audit rows.
 --

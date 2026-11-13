@@ -202,7 +202,7 @@ Prueba en una **PostgreSQL 16 efímera** (contenedor desechable `g8moro-ephemera
 
 ### 6.2 Plan SQL seguro (requiere aprobación separada del propietario del esquema y un respaldo)
 
-1. **Identificar la base efectiva de G8.** El compose de G3 indica que desde el 05-11-2026 cada grupo usa su propia base en la VPS (la de G8 en el 15432). Confirmarlo con la fase A del kit de tickets, que imprime host, puerto y base de `DATABASE_URL` sin credenciales. **No asumir `finet_global_validacion`.**
+1. **Base efectiva de G8 (actualizado 13-11-2026, consolidación):** en la VPS es `finet-postgres-global` / `finet_global_validacion`. Se confirmó con la conexión real de Prisma del backend y `psql` en ese contenedor (identidad verificada por el kit de despliegue). **No** es `crm_g8_prueba`, ni una base propia en el 15432 como sugería el compose de G3. Esa base es compartida con G1/G2/G3, así que cualquier SQL sobre ella exige la aprobación del propietario del esquema. Antes de aplicar, reconfirmar la identidad con la fase A del kit.
 2. Hacer un respaldo verificado de esa base.
 3. Ejecutar `002_service_withdrawal.verify.sql` y guardar la salida.
 4. Como propietario del esquema, aplicar `002_service_withdrawal.sql` y luego `002_service_withdrawal.grants.sql` con `-v g8_runtime_role=<rol de la app>`.
@@ -246,7 +246,7 @@ Si G3 apuntara `DATABASE_URL` a una base administrada por otro (con `MIGRAR_AL_A
 
 ## 8. Gates pendientes antes de una QA E2E real y de activar
 
-1. Integrar primero el PR de los 7 tickets; luego actualizar esta rama sobre la base resultante y repetir todas las pruebas.
+1. ~~Integrar primero el PR de los 7 tickets~~: hecho (PR #86/#87, `main` `d5fb0714`). La consolidación con `main` y con el PR #81 está en `feat/g8-baja-morosidad-consolidada-20261113`; ver `consolidacion-pr81-main-20261113.md`.
 2. **G3:**
    - confirmar el SHA desplegado en la VPS (la API pública en 8343 no lo demuestra), su base efectiva y la existencia de su tabla (§6.3);
    - entregar un payload real anonimizado del cierre REPARACION que dio 400 y del cierre BAJA;
@@ -258,7 +258,7 @@ Si G3 apuntara `DATABASE_URL` a una base administrada por otro (con `MIGRAR_AL_A
    - 404 sin cierre.
 
    Falta confirmar que el **despliegue** de G1 incluye ese código y que el endpoint es accesible desde la red de G8.
-4. **Administrador de BD G8:** aprobar y aplicar la 002 en la base efectiva de G8 según §6.2, con respaldo.
+4. **Propietario del esquema de `finet_global_validacion`** (base efectiva de G8, compartida): aprobar y aplicar la 002 según §6.2, con respaldo.
 5. **FINET:** criterios decididos el 13-11 e implementados (§5.1). Antes de activar, contar en la base efectiva (solo lectura) los clientes que ya cumplen la condición de excliente.
 6. **QA E2E coordinada** con datos ficticios: activar `G3_WITHDRAWAL_DISPATCH_ENABLED` solo en esa QA, recorrer el camino feliz y los casos bloqueados, y recién después evaluar `WITHDRAWAL_FINALIZE_ENABLED` con autorización humana explícita.
 
