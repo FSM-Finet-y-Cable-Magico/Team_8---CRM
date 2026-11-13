@@ -168,8 +168,9 @@ export class ServiceWithdrawalController {
     return this.workflow.syncReception(id, user);
   }
 
+  /** Effective baja: Administrador only (PR #81 policy), on top of WITHDRAWAL_FINALIZE_ENABLED and the G3/G1 evidence. */
   @Post(':id/finalize')
-  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
   finalize(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
     return this.workflow.finalize(id, user);
   }
