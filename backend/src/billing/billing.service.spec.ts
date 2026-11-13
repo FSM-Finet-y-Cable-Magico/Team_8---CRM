@@ -612,7 +612,8 @@ describe('BillingService avisos y suspensión', () => {
     jest.useFakeTimers({ now: new Date(now) });
     const extensionDue = new Date(Date.now() + 9 * 86_400_000);
     const current = invoice({ prorrogasPago: [{ nuevaFecha: extensionDue, estado: 'APROBADA' }] });
-    const contract = { ...current.contrato, facturas: [current] };
+    // Active contract and service: only the approved extension (effective due date) keeps it from being suspended.
+    const contract = { ...current.contrato, estado: 'Activo', servicios: current.contrato.servicios.map(item => ({ ...item, estadoOperativo: 'Activo' })), facturas: [current] };
     const tx = { contrato: { findUnique: jest.fn().mockResolvedValue(contract), update: jest.fn() }, cliente: { updateMany: jest.fn() },
       servicioContratado: { updateMany: jest.fn() } };
     const prisma = { $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)) };
