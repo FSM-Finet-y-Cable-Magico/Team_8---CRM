@@ -1,4 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { formerCustomerInCompanyWhere } from '../common/returning-customer';
 import { postgresWithdrawalStorage as storage } from './withdrawal.storage';
 import { PUBLIC_DISPATCH_COLUMN_VALUE } from './withdrawal-workflow.service';
 
@@ -161,5 +164,40 @@ class Rollback extends Error {}
     await expect(db.$executeRawUnsafe('DELETE FROM g8_retiros.recepcion_g1')).rejects.toThrow(/permission denied/);
     await expect(db.$executeRawUnsafe('DELETE FROM g8_retiros.solicitud_g3')).rejects.toThrow(/permission denied/);
     await expect(db.$executeRawUnsafe('UPDATE g8_retiros.recepcion_g1 SET detalle = NULL')).rejects.toThrow(/permission denied/);
+  });
+
+  it('consulta de exclientes históricos (solo lectura): por empresa, igual que la condición de la aplicación', async () => {
+    await inTx(async tx => {
+      if (!(await fullContract(tx))) return;
+      const sql = readFileSync(join(__dirname, '..', '..', '..', 'db', 'g8', 'queries', 'exclientes-historicos.readonly.sql'), 'utf8');
+      const q1 = sql.slice(sql.indexOf('WITH con_baja'), sql.indexOf('ROLLBACK;')).trim().replace(/;$/, '');
+      await tx.$executeRaw`INSERT INTO public.empresa (id_empresa, nombre) VALUES (9101, 'E1 efimera'), (9102, 'E2 efimera')`;
+      const customer = (id: number, rut: string) => tx.$executeRaw`INSERT INTO public.cliente (id_cliente, id_empresa, nombre_completo, rut, estado) VALUES (${id}, 9101, 'QA', ${rut}, 'Baja')`;
+      const service = (id: number, idCliente: number, idEmpresa: number, estado: string) =>
+        tx.$executeRaw`INSERT INTO public.servicio_contratado (id_servicio, id_cliente, id_empresa, tipo_servicio, estado_operativo) VALUES (${id}, ${idCliente}, ${idEmpresa}, 'Internet', ${estado})`;
+      const contract = (id: number, idCliente: number, idEmpresa: number, estado: string) =>
+        tx.$executeRaw`INSERT INTO public.contrato (id_contrato, id_cliente, id_empresa, fecha_inicio, dia_vencimiento, estado) VALUES (${id}, ${idCliente}, ${idEmpresa}, DATE '2026-01-01', 10, ${estado})`;
+      const prospect = (id: number, idCliente: number | null, idEmpresa: number, rut: string) =>
+        tx.$executeRaw`INSERT INTO public.prospecto (id_prospecto, id_empresa, id_cliente, rut, nombre_completo) VALUES (${id}, ${idEmpresa}, ${idCliente}, ${rut}, 'QA')`;
+      for (const [id, rut] of [[9201, '91000001-1'], [9202, '91000002-2'], [9203, '91000003-3'], [9204, '91000004-4'], [9205, '91000005-5'], [9206, '91000006-6']] as const) await customer(id, rut);
+      await service(9301, 9201, 9101, 'Baja'); await prospect(9401, 9201, 9101, '91000001-1');           // excliente E1, visible
+      await service(9302, 9202, 9101, 'Baja'); await service(9303, 9202, 9101, 'Activo');               // keeps another service: no
+      await contract(9501, 9203, 9101, 'Baja'); await contract(9502, 9203, 9101, 'Activo');             // keeps another contract: no
+      await service(9304, 9204, 9101, 'Baja'); await service(9305, 9204, 9102, 'Activo');               // excliente only in E1
+      await prospect(9402, null, 9101, '91.000.004-4');                                                  // same RUT, unlinked: review
+      await contract(9503, 9205, 9101, 'Anulado');                                                       // no Baja at all: no
+      await service(9306, 9206, 9102, 'Baja'); await prospect(9403, 9206, 9102, '91000006-6'); await prospect(9404, 9206, 9102, '91000006-6');
+      const rows = (await tx.$queryRawUnsafe<Array<Record<string, unknown>>>(q1))
+        .filter(row => [9101, 9102].includes(Number(row.id_empresa)))
+        .map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'bigint' ? Number(value) : value])));
+      expect(rows).toEqual([
+        { id_empresa: 9101, empresa: 'E1 efimera', exclientes_total: 2, visibles_hoy_en_prospectos: 1, filas_de_prospecto_visibles: 1, sin_prospecto_vinculado: 1, revision_mismo_rut_sin_vinculo: 1 },
+        { id_empresa: 9102, empresa: 'E2 efimera', exclientes_total: 1, visibles_hoy_en_prospectos: 1, filas_de_prospecto_visibles: 2, sin_prospecto_vinculado: 0, revision_mismo_rut_sin_vinculo: 0 },
+      ]);
+      // Same answer as the application's derived condition, company by company.
+      for (const [idEmpresa, total] of [[9101, 2], [9102, 1]]) {
+        expect(await tx.cliente.count({ where: { AND: [{ idCliente: { gte: 9201, lte: 9206 } }, formerCustomerInCompanyWhere(idEmpresa)] } })).toBe(total);
+      }
+    });
   });
 });

@@ -131,3 +131,20 @@ describe('Las escrituras sobre solicitud_retiro_servicio respetan el contrato gl
     for (const value of written) expect(states).toContain(value);
   });
 });
+
+describe('Consulta de exclientes históricos (FINET 13-11-2026)', () => {
+  const sql = readFileSync(join(__dirname, '..', '..', '..', 'db', 'g8', 'queries', 'exclientes-historicos.readonly.sql'), 'utf8');
+  const code = executable(sql);
+
+  it('es exclusivamente de lectura: transacción READ ONLY que termina en ROLLBACK, sin DML ni DDL', () => {
+    expect(code.trim().startsWith('BEGIN TRANSACTION READ ONLY;')).toBe(true);
+    expect(code.trim().endsWith('ROLLBACK;')).toBe(true);
+    expect(code).not.toMatch(/\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER|CREATE|GRANT|REVOKE|COMMIT)\b/i);
+  });
+
+  it('devuelve solo conteos por empresa (sin RUT, nombres de cliente ni montos)', () => {
+    const select = code.slice(code.lastIndexOf('SELECT e.id_empresa'));
+    expect(select).toMatch(/GROUP BY e\.id_empresa/);
+    expect(select).not.toMatch(/\brut\b|nombre_completo|monto/i);
+  });
+});
