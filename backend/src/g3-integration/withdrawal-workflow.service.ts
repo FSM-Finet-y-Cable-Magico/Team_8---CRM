@@ -492,14 +492,17 @@ export class WithdrawalWorkflowService {
       }
       const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA', estadoDespachoTecnico: 'COMPLETADA_G3' } });
       await this.storage.markApplied(tx, idSolicitudRetiro);
+      // FINET 13-11-2026: the «Baja de servicio» ticket is closed only here, inside this successful transaction.
+      const ticketBaja = await this.tickets.closeWithdrawalTicket(tx, { idTicket: link.idTicket, idEmpresa: service.idEmpresa,
+        idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario: currentUser.idUsuario });
       await this.audit(tx, currentUser, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
         idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, recepcionClaveEvento: dispatch.recepcionClaveEvento,
         estadoAnterior: service.estadoOperativo, estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente,
-        equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie),
+        equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie), ticketBaja: ticketBaja.action,
         // main has no return-to-prospect rule; PR #81's EXCLIENTE proposal awaits a separate decision.
         retornoProspectos: 'SIN_REGLA_VIGENTE',
       });
-      return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, retornoProspectos: 'SIN_REGLA_VIGENTE' };
+      return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, ticketBaja: ticketBaja.action, retornoProspectos: 'SIN_REGLA_VIGENTE' };
     });
   }
 

@@ -20,7 +20,7 @@ async function readyToFinalize(options: Parameters<typeof withdrawalHarness>[0] 
   await service.syncReception(15, comercial());
   return { ...h, service, g1, g1Inventory, finalize: (user = comercial()) => service.finalize(15, user) };
 }
-const snapshot = (h: { state: any }) => JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, r: h.state.requests, d: h.state.dispatches.map((d: any) => d.aplicadoEn) });
+const snapshot = (h: { state: any }) => JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, r: h.state.requests, d: h.state.dispatches.map((d: any) => d.aplicadoEn), t: h.state.tickets });
 
 describe('Baja efectiva por morosidad', () => {
   it('camino feliz: servicio Baja, contrato conservado (otro servicio operativo), cliente recalculado, solicitud CERRADA', async () => {
@@ -36,6 +36,50 @@ describe('Baja efectiva por morosidad', () => {
     expect(h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toMatchObject({ idUsuario: 7, idEntidadAfectada: 61 });
     expect(h.state.forbiddenWrites).toEqual([]);
     expect(h.g1Inventory.getEquipmentByService).toHaveBeenCalledWith(61, 1);
+    // FINET 13-11-2026: the linked «Baja de servicio» ticket closes inside the same successful transaction.
+    expect(result).toMatchObject({ ticketBaja: 'CERRADO' });
+    expect(h.state.tickets[0]).toMatchObject({ idTicket: 77, estado: 'Cerrado', fechaCierre: expect.any(Date) });
+    expect(h.state.audits.find(a => a.accion === 'CERRAR_TICKET_BAJA_SERVICIO')).toMatchObject({ idEntidadAfectada: 77, valorNuevo: { automatico: true, idSolicitudRetiro: 15, idOtG3: 930 } });
+    expect(h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD').valorNuevo).toMatchObject({ ticketBaja: 'CERRADO' });
+  });
+
+  it('el ticket solo se cierra con la baja aplicada: bloqueada, deshabilitada o con falla queda Abierto', async () => {
+    const blocked = await readyToFinalize();
+    blocked.g3Replies.push(orderRead('PENDIENTE_APROBACION'));
+    await expect(blocked.finalize()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_CLOSURE_BLOCKED' } });
+    expect(blocked.state.tickets[0].estado).toBe('Abierto');
+    expect(blocked.tickets.closeWithdrawalTicket).not.toHaveBeenCalled();
+    const disabled = await readyToFinalize({ finalize: false });
+    await expect(disabled.finalize()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_FINALIZE_DISABLED' } });
+    expect(disabled.state.tickets[0].estado).toBe('Abierto');
+  });
+
+  it('una falla al cerrar el ticket revierte toda la baja (servicio, contrato, cliente, solicitud y evidencia)', async () => {
+    const h = await readyToFinalize({ finalize: true }, x => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 62); });
+    h.state.failAuditOn = 'CERRAR_TICKET_BAJA_SERVICIO';
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    const before = snapshot(h);
+    await expect(h.finalize()).rejects.toThrow('AUDIT_FAILED');
+    expect(snapshot(h)).toBe(before);
+    expect(h.state.tickets[0].estado).toBe('Abierto');
+  });
+
+  it('un ticket vinculado inconsistente (otro servicio) impide aplicar la baja sin escribir', async () => {
+    const h = await readyToFinalize();
+    h.state.tickets[0].idServicio = 62;
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    const before = snapshot(h);
+    await expect(h.finalize()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_TICKET_INCONSISTENT' } });
+    expect(snapshot(h)).toBe(before);
+  });
+
+  it('un ticket ya cerrado a mano no se reescribe ni se audita de nuevo', async () => {
+    const h = await readyToFinalize();
+    Object.assign(h.state.tickets[0], { estado: 'Cerrado', fechaCierre: new Date('2026-11-12T10:00:00Z') });
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    await expect(h.finalize()).resolves.toMatchObject({ aplicado: true, ticketBaja: 'YA_CERRADO' });
+    expect(h.state.tickets[0].fechaCierre).toEqual(new Date('2026-11-12T10:00:00Z'));
+    expect(h.state.audits.filter(a => a.accion === 'CERRAR_TICKET_BAJA_SERVICIO')).toHaveLength(0);
   });
 
   it('último servicio del contrato: contrato Baja y cliente Baja; repetir es idempotente', async () => {
@@ -47,6 +91,7 @@ describe('Baja efectiva por morosidad', () => {
     const again = await h.finalize();
     expect(again).toMatchObject({ aplicado: false, yaAplicado: true });
     expect(h.state.audits.filter(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toHaveLength(1);
+    expect(h.state.audits.filter(a => a.accion === 'CERRAR_TICKET_BAJA_SERVICIO')).toHaveLength(1);
   });
 
   it('cliente con servicio en otra empresa: el estado se recalcula con ambas y no se toca lo ajeno', async () => {

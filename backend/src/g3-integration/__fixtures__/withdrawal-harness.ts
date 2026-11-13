@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuditService } from '../../audit/audit.service';
 import { AuthUser } from '../../common/auth.types';
@@ -169,8 +170,23 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
   const tickets = {
     createWithdrawalTicket: jest.fn(async (_tx: unknown, input: any) => {
       if (state.failTicket) throw new Error('TICKET_FAILED');
-      const ticket = { idTicket: nextTicket++, idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, estado: 'Abierto', descripcion: input.descripcion };
+      const ticket = { idTicket: nextTicket++, idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idCategoria: 900,
+        estado: 'Abierto', descripcion: input.descripcion, fechaCierre: null as Date | null };
       state.tickets.push(ticket); return clone(ticket);
+    }),
+    // Mirrors TicketsService.closeWithdrawalTicket (its rules are unit-tested against the real service).
+    closeWithdrawalTicket: jest.fn(async (_tx: unknown, input: any) => {
+      const ticket = state.tickets.find(t => t.idTicket === input.idTicket);
+      if (!ticket || ticket.idEmpresa !== input.idEmpresa || ticket.idCliente !== input.idCliente || ticket.idServicio !== input.idServicio) {
+        throw new ConflictException({ code: 'WITHDRAWAL_TICKET_INCONSISTENT', message: 'ticket inconsistente' });
+      }
+      if (ticket.estado === 'Cerrado') return { action: 'YA_CERRADO', estadoAnterior: 'Cerrado' };
+      if (state.failAuditOn === 'CERRAR_TICKET_BAJA_SERVICIO') throw new Error('AUDIT_FAILED');
+      const estadoAnterior = ticket.estado;
+      Object.assign(ticket, { estado: 'Cerrado', fechaCierre: new Date() });
+      state.audits.push({ accion: 'CERRAR_TICKET_BAJA_SERVICIO', idEntidadAfectada: ticket.idTicket, idUsuario: input.idUsuario,
+        valorNuevo: { estado: 'Cerrado', automatico: true, idSolicitudRetiro: input.idSolicitudRetiro, idOtG3: input.idOtG3 } });
+      return { action: 'CERRADO', estadoAnterior };
     }),
   };
 
