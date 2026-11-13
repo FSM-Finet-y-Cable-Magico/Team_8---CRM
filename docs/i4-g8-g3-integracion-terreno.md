@@ -18,6 +18,8 @@ Verificar con G3 la revisión efectivamente desplegada: el código público insp
 
 El contexto menciona G3 en `finet_global_validacion` y G8 en `crm_g8_prueba`, además del modelo compartido `public.ticket`. Una coincidencia de IDs entre bases diferentes no identifica el mismo registro. Antes de una sincronización deben ratificarse identidad del entorno y estrategia compartida/federada. No se consultó ninguna de esas bases.
 
+> **Actualización 13-11-2026:** la base efectiva de G8 en la VPS quedó identificada como `finet-postgres-global` / `finet_global_validacion`. Se confirmó con la conexión real de Prisma del backend y con PostgreSQL. G8 **no** usa `crm_g8_prueba`.
+
 ## Matriz de flujos
 
 | Operación | Autoridad | Endpoint vigente o propuesto | Datos y respuesta | Estado / responsable |

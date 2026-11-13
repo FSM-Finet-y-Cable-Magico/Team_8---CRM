@@ -80,6 +80,7 @@ function harness(currentInvoice: ReturnType<typeof invoice> | null, otherInvoice
     cliente: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     servicioContratado: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     integracionInstalacionG3: { findMany: jest.fn().mockResolvedValue([]) },
+    servicioRetiroSolicitud: { findMany: jest.fn().mockResolvedValue([]) },
     cuotaConvenioPago: { findUnique: jest.fn(), update: jest.fn() },
     convenioPago: { findUnique: jest.fn() },
     operacionImputacionCuota: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
@@ -193,6 +194,44 @@ describe('P0-04 reactivacion por evidencia G3 persistida', () => {
       where: { idServicio: { in: [55] }, idContrato: 30, idEmpresa: 1, estadoOperativo: 'Suspendido' }, data: { estadoOperativo: 'Activo' },
     });
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'REACTIVAR_SERVICIO_POR_PAGO' }), tx);
+  });
+
+  describe('pago durante un retiro por morosidad (consolidación 13-11-2026)', () => {
+    it('registra el pago y la factura, pero no reactiva el servicio con retiro activo ni cambia contrato o cliente', async () => {
+      const { service, tx, audit, current } = setup();
+      current.contrato.estado = 'Moroso';
+      tx.servicioRetiroSolicitud.findMany.mockResolvedValue([{ idServicio: 55 }] as never);
+      const result = await service.registerPayment(paymentDto, commercial);
+      expect(tx.pago.create).toHaveBeenCalledTimes(1);
+      expect(tx.factura.update).toHaveBeenCalledWith(expect.objectContaining({ data: { estado: 'Pagada' } }));
+      expect(result.reactivatedServiceIds).toEqual([]);
+      expect(tx.servicioContratado.updateMany).not.toHaveBeenCalled();
+      expect(tx.contrato.update).not.toHaveBeenCalled();
+      expect(tx.cliente.updateMany).not.toHaveBeenCalled();
+      expect(tx.servicioRetiroSolicitud.findMany).toHaveBeenCalledWith({ where: {
+        idEmpresa: 1, idServicio: { in: [55] }, motivo: { equals: 'MOROSIDAD', mode: 'insensitive' }, estado: { notIn: ['CANCELADA', 'CERRADA'] },
+      }, select: { idServicio: true } });
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'REGISTRAR_PAGO',
+        valorNuevo: expect.objectContaining({ serviciosReactivados: [], serviciosSinReactivarPorRetiro: [55] }) }), tx);
+      expect(audit.record).not.toHaveBeenCalledWith(expect.objectContaining({ accion: 'REACTIVAR_SERVICIO_POR_PAGO' }), tx);
+    });
+
+    it('solo excluye el servicio en retiro: otro servicio suspendido del contrato se reactiva como antes', async () => {
+      const { service, tx, current } = setup([closure(), closure({ idServicio: 56 })]);
+      current.contrato.servicios.push({ ...current.contrato.servicios[0], idServicio: 56 });
+      tx.servicioRetiroSolicitud.findMany.mockResolvedValue([{ idServicio: 55 }] as never);
+      const result = await service.registerPayment(paymentDto, commercial);
+      expect(result.reactivatedServiceIds).toEqual([56]);
+      expect(tx.servicioContratado.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ idServicio: { in: [56] } }) }));
+    });
+
+    it('sin retiro activo (cancelado o cerrado) la reactivación por pago no cambia', async () => {
+      const { service, tx, audit } = setup();
+      const result = await service.registerPayment(paymentDto, commercial);
+      expect(result.reactivatedServiceIds).toEqual([55]);
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'REGISTRAR_PAGO',
+        valorNuevo: expect.not.objectContaining({ serviciosSinReactivarPorRetiro: expect.anything() }) }), tx);
+    });
   });
 
   it('metadata G3 sin tracking no demuestra instalacion', async () => {

@@ -88,7 +88,7 @@ async function setup(primary = 1, shared = true) {
     cliente: { updateMany: jest.fn(async ({ where, data }) => update([state.customer], where, data)) },
     servicioContratado: { updateMany: jest.fn(async ({ where, data }) => update(state.services, where, data)) },
     convenioPago: empty(), prorrogaPago: empty(), cargoAdicional: empty(), cambioCondicionPago: empty(), eventoGestionComercial: empty(),
-    logNotificacion: empty(),
+    logNotificacion: empty(), servicioRetiroSolicitud: empty(),
   };
   let tail = Promise.resolve();
   let failCommit = 0;

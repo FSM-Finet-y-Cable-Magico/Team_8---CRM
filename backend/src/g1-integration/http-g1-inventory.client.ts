@@ -7,12 +7,13 @@ import {
   G1EquipmentType,
   G1IntegrationError,
   G1InventoryClient,
+  G1ReceptionClient,
   G1ServiceEquipment,
   G1Unit,
 } from './g1-integration.types';
 
 @Injectable()
-export class HttpG1InventoryClient implements G1InventoryClient {
+export class HttpG1InventoryClient implements G1InventoryClient, G1ReceptionClient {
   constructor(private readonly config: ConfigService) {}
 
   configured() {
@@ -47,6 +48,14 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     const query = new URLSearchParams({ id_empresa: String(company) });
     return this.request<G1Unit>(`/api/integraciones/unidades/${encodeURIComponent(normalizedSerial)}?${query}`)
       .then(result => this.validateCompanyObject(result, company));
+  }
+
+  /** GET /api/integraciones/recepciones?id_empresa=N&request_id=... [&id_ot=N]. Read only; G8 never writes G1 inventory. */
+  getReceptions(idEmpresa: number, query: { requestId: string; idOt?: number }) {
+    const company = this.positiveId(idEmpresa, 'id_empresa');
+    const params = new URLSearchParams({ id_empresa: String(company), request_id: query.requestId });
+    if (query.idOt !== undefined) params.set('id_ot', String(this.positiveId(query.idOt, 'id_ot', 'G1_ID_OT_REQUIRED')));
+    return this.request<unknown>(`/api/integraciones/recepciones?${params}`);
   }
 
   sendActivation(payload: G1ActivationPayload) {

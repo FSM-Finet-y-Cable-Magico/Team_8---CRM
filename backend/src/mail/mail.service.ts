@@ -60,7 +60,9 @@ export class MailService implements OnModuleInit {
       text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.` });
   }
 
-  sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string }) {
+  sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string; demo?: boolean }) {
+    if (message.demo) return this.sendMessage({ ...message, subject: 'Demostración de firma de contrato',
+      text: 'Abre este enlace personal para revisar el contrato, registrar tu aceptación de demostración y descargar la copia:\n' + message.link });
     return this.sendMessage({ ...message, subject: 'Revisa y firma tu contrato',
       text: 'Tu contrato está disponible para revisar y firmar mediante un código enviado a tu correo. Abre este enlace personal; no lo compartas:\n' + message.link });
   }

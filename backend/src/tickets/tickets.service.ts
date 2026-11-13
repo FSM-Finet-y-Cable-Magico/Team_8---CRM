@@ -20,6 +20,8 @@ import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 
 const TICKET_STATUSES = ['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'];
+/** Official attention category (Documento 0, table 11.9). The ID is resolved in each connection's catalogue. */
+export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
 type AuditEntry = Parameters<AuditService['record']>[0];
 
 @Injectable()
@@ -142,6 +144,78 @@ export class TicketsService {
       accion: 'CREAR_TICKET',
       origen: dto.origen ?? 'CRM',
     });
+  }
+
+  /**
+   * CRM ticket "Baja de servicio" of a withdrawal request (ported from PR #81). Created INSIDE the caller's
+   * transaction: request, link and audit commit or roll back together. The caller already validated, under the
+   * service lock, that company, customer, contract, service and notice match. The category is resolved by its
+   * official name in THIS connection's catalogue: never a fixed ID, never a technical/internal category and never
+   * an arbitrary choice among duplicates. It does not derive to G3, create an OT or change the service state.
+   */
+  async createWithdrawalTicket(tx: Prisma.TransactionClient, input: {
+    idEmpresa: number; idCliente: number; idServicio: number; idContrato: number;
+    idSolicitudRetiro: number; idAviso: number; descripcion: string; idUsuario: number;
+  }) {
+    const official = (await readTicketCategoryCatalog(tx)).filter(category => category.nombreAtencion === WITHDRAWAL_TICKET_CATEGORY);
+    if (official.length !== 1) {
+      throw new ConflictException({
+        code: 'WITHDRAWAL_TICKET_CATEGORY_UNAVAILABLE',
+        message: 'La categoría oficial «Baja de servicio» no está disponible de forma inequívoca en el catálogo de atención; no se creó el ticket.',
+      });
+    }
+    const category = official[0];
+    const ticket = await tx.ticket.create({
+      data: {
+        idCliente: input.idCliente, idEmpresa: input.idEmpresa, idServicio: input.idServicio, idUsuarioAsignado: input.idUsuario,
+        idCategoria: category.idCategoria, codigoSeguimiento: this.trackingCode(), prioridad: 'Media', estado: 'Abierto',
+        descripcion: input.descripcion, fechaCreacion: new Date(), origen: 'CRM',
+      },
+    });
+    await this.auditService.record({
+      idUsuario: input.idUsuario, accion: 'CREAR_TICKET_BAJA_SERVICIO', entidadAfectada: 'ticket', idEntidadAfectada: ticket.idTicket,
+      valorNuevo: {
+        idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idContrato: input.idContrato,
+        idSolicitudRetiro: input.idSolicitudRetiro, idAviso: input.idAviso, categoria: category.nombre, idCategoria: category.idCategoria, origen: 'CRM',
+      },
+    }, tx);
+    return ticket;
+  }
+
+  /**
+   * Closes the «Baja de servicio» ticket of a withdrawal ONLY from inside the caller's successful finalization
+   * transaction (FINET criterion 13-11-2026): if anything later in that transaction fails, the ticket stays as it was.
+   * Same rules as a manual close: forward-only transition to the official 'Cerrado', never a technical/unknown state,
+   * never with a pending local OT, optimistic write on the state read. Idempotent: an already closed ticket is left
+   * untouched. Any inconsistency (company, customer, service, category) aborts, so the whole finalization rolls back.
+   */
+  async closeWithdrawalTicket(tx: Prisma.TransactionClient, input: {
+    idTicket: number; idEmpresa: number; idCliente: number; idServicio: number; idSolicitudRetiro: number; idOtG3: number | null; idUsuario: number | null;
+  }): Promise<{ action: 'CERRADO' | 'YA_CERRADO'; estadoAnterior: string }> {
+    await tx.$queryRaw`SELECT id_ticket FROM ticket WHERE id_ticket = ${input.idTicket} FOR UPDATE`;
+    const ticket = await tx.ticket.findUnique({ where: { idTicket: input.idTicket } });
+    const inconsistent = (message: string) => new ConflictException({ code: 'WITHDRAWAL_TICKET_INCONSISTENT', message });
+    if (!ticket) throw inconsistent('El ticket «Baja de servicio» vinculado no existe; no se aplicó la baja.');
+    if (ticket.idEmpresa !== input.idEmpresa || ticket.idCliente !== input.idCliente || (ticket.idServicio !== null && ticket.idServicio !== input.idServicio)) {
+      throw inconsistent('El ticket vinculado no corresponde a la empresa, cliente o servicio de la solicitud; no se aplicó la baja.');
+    }
+    const official = (await readTicketCategoryCatalog(tx)).filter(category => category.nombreAtencion === WITHDRAWAL_TICKET_CATEGORY);
+    if (official.length !== 1 || ticket.idCategoria !== official[0].idCategoria) {
+      throw inconsistent('El ticket vinculado no tiene la categoría oficial «Baja de servicio»; no se aplicó la baja.');
+    }
+    if (ticket.estado === 'Cerrado') return { action: 'YA_CERRADO', estadoAnterior: ticket.estado };
+    this.assertCrmWrite(ticket.estado);
+    if (TICKET_STATUSES.indexOf(ticket.estado) < 0) throw inconsistent('El ticket vinculado tiene un estado no reconocido; no se aplicó la baja.');
+    const pendingOrder = await tx.ordenTrabajo.findFirst({ where: { idTicket: ticket.idTicket, estado: { notIn: [...COMPLETED_TICKET_WORK_ORDER_STATES] } } });
+    if (pendingOrder) throw inconsistent('El ticket vinculado tiene una OT local sin completar; no se aplicó la baja.');
+    const note = `Cerrado automáticamente al aplicar la baja por morosidad (solicitud ${input.idSolicitudRetiro}${input.idOtG3 ? `, OT de retiro ${input.idOtG3}` : ''}).`;
+    await this.updateCrmTicket(ticket, { estado: 'Cerrado', fechaCierre: new Date(), descripcion: `${ticket.descripcion ?? ''}\n${note}`.trim() }, tx);
+    await this.auditService.record({
+      idUsuario: input.idUsuario, accion: 'CERRAR_TICKET_BAJA_SERVICIO', entidadAfectada: 'ticket', idEntidadAfectada: ticket.idTicket,
+      valorAnterior: { estado: ticket.estado },
+      valorNuevo: { estado: 'Cerrado', automatico: true, idSolicitudRetiro: input.idSolicitudRetiro, idOtG3: input.idOtG3 },
+    }, tx);
+    return { action: 'CERRADO', estadoAnterior: ticket.estado };
   }
 
   async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser): Promise<never> {

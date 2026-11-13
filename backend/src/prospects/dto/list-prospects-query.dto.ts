@@ -5,6 +5,8 @@ export const PROSPECT_LIST_STATES = [
   'Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible',
   'Cotizacion Enviada', 'Contrato externo registrado', 'Pendiente firma', 'Pendiente firma contrato',
   'Aceptado', 'Instalacion Programada', 'Servicio Activo', 'Perdido',
+  // View filter (derived, never stored): customers whose last operational relationship in the company ended.
+  'Excliente',
 ] as const;
 
 const trimmed = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() || undefined : value;
