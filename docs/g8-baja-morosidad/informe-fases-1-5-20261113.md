@@ -137,6 +137,8 @@ Sin el esquema `g8_retiros` aplicado, el flujo responde bloqueado y no escribe n
 
 ## 5. Finalización (Fase 4)
 
+> **Sustituido (13-11-2026, Documento 2 de FINET):** la recepción en G1, los faltantes y los equipos aún asociados ya **no bloquean** la baja; G3 aprobada (`COMPLETADA`) más el cierre BAJA correlacionado bastan, y G8 la aplica automáticamente con actor de sistema. Ver `flujo-suspension-baja-20261113.md`. El texto siguiente describe la política anterior.
+
 **Antes de la transacción:**
 - GET forzado de la OT: G3 debe informar `COMPLETADA`.
 - Lectura en G1 de los equipos aún asociados al servicio. Si G1 no responde, no se aplica.
