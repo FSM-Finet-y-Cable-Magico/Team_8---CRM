@@ -1,3 +1,7 @@
 # SQL checksums are byte based; keep the reviewed files stable on Windows/Linux.
 db/global/init-global.sql text eol=lf
 backend/prisma/migrations/**/migration.sql text eol=lf
+
+# Kit scripts run on Linux: never CRLF, whatever the checkout platform.
+scripts/vps-g8-prueba/*.sh text eol=lf
+scripts/vps-g8-prueba/*.py text eol=lf

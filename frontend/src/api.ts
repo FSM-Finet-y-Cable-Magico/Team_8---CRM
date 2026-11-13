@@ -235,7 +235,12 @@ export type Customer = {
   nombreCompleto: string;
   email: string | null;
   telefono: string | null;
-  estado: string;
+  /** Global customer status; null in a company view, where it is not shared. */
+  estado: string | null;
+  /** false when the API returns a company view (estado is null there). */
+  estadoGlobalDisponible?: boolean;
+  /** Real servicio_contratado.estado_operativo values of the selected company only. */
+  estadosServicioEmpresa?: string[];
   origenContacto: string | null;
   datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;
@@ -401,6 +406,8 @@ export type G1Unit = {
   fecha_instalacion?: string | null;
   id_ot?: number | string | null;
   garantia?: { fecha_vencimiento?: string | null; vigente?: boolean | null } | null;
+  /** Active association reported by G1 (cliente/servicio/contrato/OT references); null when none. */
+  asignacion_actual?: Record<string, unknown> | null;
 };
 
 export type G1EquipmentResponse<T> = {

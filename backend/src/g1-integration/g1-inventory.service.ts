@@ -7,8 +7,8 @@ import {
   G1_INVENTORY_CLIENT,
   G1IntegrationError,
   G1InventoryClient,
-  isOfficialG1PhysicalState,
 } from './g1-integration.types';
+import { projectEquipmentType, projectUnit } from './g1-projection';
 
 @Injectable()
 export class G1InventoryService {
@@ -36,7 +36,9 @@ export class G1InventoryService {
         entidadAfectada: 'integracion_g1',
         valorNuevo: { idEmpresa, statusHttp: result.status, duracionMs: result.durationMs, cantidad: result.data.length },
       });
-      return { fuente: 'G1', estadoContrato: 'G1_REAL_SMOKE_PASS', data: result.data };
+      // Explicit projection: extra G1 fields never reach the browser.
+      const data = result.data.map(row => projectEquipmentType(row, idEmpresa)).filter(row => row !== null);
+      return { fuente: 'G1', estadoContrato: 'G1_REAL_SMOKE_PASS', data };
     } catch (error) {
       throw this.httpError(error);
     }
@@ -60,7 +62,7 @@ export class G1InventoryService {
       return {
         fuente: 'G1',
         estadoContrato: 'G1_REAL_SMOKE_PASS',
-        data: { ...result.data, estadoFisicoOficial: isOfficialG1PhysicalState(result.data.estado) },
+        data: projectUnit(result.data, idEmpresa),
       };
     } catch (error) {
       throw this.httpError(error);
@@ -74,7 +76,8 @@ export class G1InventoryService {
     if (service.idEmpresa !== idEmpresa) throw new NotFoundException('Servicio no encontrado.');
     try {
       const result = await this.client.getEquipmentByService(idServicio, idEmpresa);
-      if (result.data.some((unit) => unit.id_empresa !== idEmpresa)) {
+      // G1 scopes this query by id_empresa and its items do not carry it (G1 2131b7f5); a DIFFERENT company is rejected.
+      if (result.data.some((unit) => unit.id_empresa !== undefined && unit.id_empresa !== null && unit.id_empresa !== idEmpresa)) {
         throw new G1IntegrationError('G1_COMPANY_MISMATCH', 403, false, 'G1 devolvió equipos fuera del alcance de empresa.');
       }
       await this.audit.record({
@@ -87,7 +90,7 @@ export class G1InventoryService {
       return {
         fuente: 'G1',
         estadoContrato: 'G1_REAL_SMOKE_PASS',
-        data: result.data.map((unit) => ({ ...unit, estadoFisicoOficial: isOfficialG1PhysicalState(unit.estado) })),
+        data: result.data.map((unit) => projectUnit(unit, idEmpresa)),
       };
     } catch (error) {
       throw this.httpError(error, 'PENDIENTE_INTEGRACION_G1');

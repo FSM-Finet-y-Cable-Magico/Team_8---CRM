@@ -1,6 +1,6 @@
 import { type ChangeEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect, type ProspectSearchResult } from '../../api';
-import { emptyProspectForm, formatChileanMobileInput, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
+import { emptyProspectForm, formatChileanMobileInput, formatRutForDisplay, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
@@ -342,7 +342,7 @@ export function ProspectsPanel({
               )}
               {!listLoading && !listError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
-                  <td>{prospect.rut}</td>
+                  <td>{formatRutForDisplay(prospect.rut)}</td>
                   <td>{prospect.nombreCompleto}</td>
                   <td>{prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline ?? 'Prospecto Nuevo'}</td>
                   <td>{prospect.origenContacto ?? '-'}</td>

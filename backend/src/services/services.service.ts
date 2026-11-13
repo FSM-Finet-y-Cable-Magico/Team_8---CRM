@@ -68,11 +68,11 @@ export class ServicesService {
     private readonly auditService: AuditService,
   ) {}
 
-  async listByCustomer(idCliente: number, currentUser: AuthUser) {
+  async listByCustomer(idCliente: number, currentUser: AuthUser, scope?: string) {
     await this.getCustomerOrThrow(idCliente, currentUser);
 
     const services = await this.prisma.servicioContratado.findMany({
-      where: { idCliente, ...this.serviceCompanyScope(currentUser) },
+      where: { idCliente, ...this.serviceCompanyScope(currentUser), ...this.administratorViewScope(currentUser, scope) },
       orderBy: { fechaCreacion: 'desc' },
       include: SERVICE_INCLUDE,
     });
@@ -741,6 +741,15 @@ export class ServicesService {
     if (!address || address.idCliente !== idCliente) {
       throw new BadRequestException('La direccion no corresponde al cliente seleccionado');
     }
+  }
+
+  // An administrator viewing one company sees only that company's services, consistent with
+  // the scoped customer contracts. Other roles are already limited by serviceCompanyScope.
+  private administratorViewScope(currentUser: AuthUser, scope?: string): Prisma.ServicioContratadoWhereInput {
+    if (!isAdministrator(currentUser.roles) || scope === undefined || scope === '' || scope === 'consolidado') return {};
+    const idEmpresa = Number(scope);
+    if (!Number.isSafeInteger(idEmpresa) || idEmpresa < 1) throw new BadRequestException('La vista de empresa no es valida');
+    return { idEmpresa };
   }
 
   private serviceCompanyScope(currentUser: AuthUser): Prisma.ServicioContratadoWhereInput {

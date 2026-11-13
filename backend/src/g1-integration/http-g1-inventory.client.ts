@@ -65,8 +65,9 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     const company = this.positiveId(idEmpresa, 'id_empresa');
     const service = this.positiveId(idServicio, 'id_servicio');
     const query = new URLSearchParams({ id_empresa: String(company), id_servicio: String(service) });
+    // Items of this response carry no id_empresa (the query is company-scoped in G1): only a different one is rejected.
     return this.request<G1ServiceEquipment[]>(`/api/integraciones/equipos?${query}`)
-      .then(result => this.validateCompanyArray(result, company));
+      .then(result => this.validateCompanyArray(result, company, true));
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<G1ClientResult<T>> {
@@ -198,11 +199,14 @@ export class HttpG1InventoryClient implements G1InventoryClient {
     return value;
   }
 
-  private validateCompanyArray<T extends { id_empresa: number }>(result: G1ClientResult<T[]>, idEmpresa: number) {
+  private validateCompanyArray<T extends { id_empresa?: number | null }>(result: G1ClientResult<T[]>, idEmpresa: number, scopedByQuery = false) {
     if (!Array.isArray(result.data)) {
       throw new G1IntegrationError('G1_INVALID_RESPONSE', result.status, true, 'G1 devolvió una respuesta inválida.');
     }
-    if (result.data.some(row => !row || row.id_empresa !== idEmpresa)) {
+    const foreign = (row: T) => scopedByQuery
+      ? row.id_empresa !== undefined && row.id_empresa !== null && row.id_empresa !== idEmpresa
+      : row.id_empresa !== idEmpresa;
+    if (result.data.some(row => !row || typeof row !== 'object' || foreign(row))) {
       throw new G1IntegrationError('G1_COMPANY_MISMATCH', 403, false, 'G1 devolvió datos fuera del alcance de empresa.');
     }
     return result;

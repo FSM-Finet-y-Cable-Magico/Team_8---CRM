@@ -45,7 +45,7 @@ async function mount({ missing = true, error = false, tracking = null, mayComple
 test('missing comuna blocks installation and requires explicit same-address confirmation', async () => {
   const h = await mount();
   try {
-    assert.equal(h.button('Solicitar instalación').props.disabled, true);
+    assert.equal(h.button('Generar instalación').props.disabled, true);
     assert.equal(h.button('Guardar comuna').props.disabled, true);
     const inputs = h.tree.root.findAllByType('input'); assert.equal(inputs[0].props.value, '');
     await act(async () => inputs[0].props.onChange({ target: { value: 'Santiago' } }));
@@ -53,29 +53,29 @@ test('missing comuna blocks installation and requires explicit same-address conf
     await act(async () => inputs[1].props.onChange({ target: { checked: true } }));
     await act(async () => h.button('Guardar comuna').props.onClick());
     assert.deepEqual(h.calls.find(c => c[0] === 'PATCH'), ['PATCH', '/integrations/g3/contracts/4/installation-data', { comuna: 'Santiago', confirmarMismaDireccion: true }]);
-    assert.equal(h.button('Solicitar instalación').props.disabled, false);
+    assert.equal(h.button('Generar instalación').props.disabled, false);
     assert.equal(h.calls.filter(c => c[1] === '/integrations/g3/installations').length, 0);
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('El contrato firmado y su PDF conservan sus datos'));
   } finally { await h.close(); }
 });
 test('failed preflight does not enable installation', async () => {
   const h = await mount({ error: true });
-  try { assert.equal(h.button('Solicitar instalación').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
+  try { assert.equal(h.button('Generar instalación').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
   finally { await h.close(); }
 });
 test('support must ask an authorized commercial role to complete missing data', async () => {
   const h = await mount({ mayComplete: false });
   try {
     assert.equal(h.button('Guardar comuna'), undefined);
-    assert.equal(h.button('Solicitar instalación').props.disabled, true);
+    assert.equal(h.button('Generar instalación').props.disabled, true);
     assert.ok(JSON.stringify(h.tree.toJSON()).includes('Comercial o Administración'));
   } finally { await h.close(); }
 });
 test('validated installation still needs an explicit request', async () => {
   const h = await mount({ missing: false });
   try {
-    assert.equal(h.button('Solicitar instalación').props.disabled, false);
-    await act(async () => h.button('Solicitar instalación').props.onClick());
+    assert.equal(h.button('Generar instalación').props.disabled, false);
+    await act(async () => h.button('Generar instalación').props.onClick());
     assert.deepEqual(h.calls.find(c => c[1] === '/integrations/g3/installations'), ['POST', '/integrations/g3/installations', { idProspecto: 2 }]);
   } finally { await h.close(); }
 });
@@ -118,10 +118,11 @@ test('el refresco compacto consulta el estado y el cierre sigue siendo una acci�
     assert.deepEqual(h.calls.slice(1), [['GET', '/integrations/g3/installations/2']]);
     assert.equal(h.button('Detalle'), undefined);
 
-    const options = h.tree.root.findByType('details');
-    assert.equal(options.props.open, undefined);
-    const closure = options.findByType('button');
-    assert.equal(closure.props.children, 'Consultar cierre');
+    assert.equal(h.tree.root.findAllByType('details').length, 0);
+    assert.doesNotMatch(JSON.stringify(h.tree.toJSON()), /Opciones de instalación/);
+    assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path.endsWith('/reconcile')).length, 0);
+    const closure = h.button('Consultar cierre');
+    assert.ok(closure, 'la conciliación de cierre sigue disponible como acción explícita');
     await act(async () => closure.props.onClick());
     assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path === '/integrations/g3/installations/2/reconcile').length, 1);
     assert.match(toast().props.message, /cierre técnico aún no está confirmado/);
@@ -161,7 +162,7 @@ async function workflow(t, { state = 'Firmado', canRequest = true, contractId = 
   const props = { prospect: { idProspecto: 2, contratos: [{ idContrato: 99, estado: 'Firmado' }, { idContrato: 17, estado: state }] }, contractId, canRequest, onChanged() {} };
   let tree; await act(async () => { tree = create(React.createElement(View, props)); });
   t.after(async () => { await act(async () => tree.unmount()); });
-  return { tree, calls, finish: () => finish?.(), request: () => tree.root.findAllByType('button').find(b => b.props.children === 'Solicitar instalación') };
+  return { tree, calls, finish: () => finish?.(), request: () => tree.root.findAllByType('button').find(b => b.props.children === 'Generar instalación') };
 }
 
 test('postfirma consulta, valida y solicita el contrato mostrado, sin elegir el de mayor ID', async t => {
@@ -213,4 +214,25 @@ test('una respuesta de requisitos de otro contrato nunca habilita enviar', async
   const h = await workflow(t, { preflight: { idContrato: 99, comunaFaltante: false } });
   assert.equal(h.request().props.disabled, true);
   assert.equal(h.calls.some(c => c[1] === '/integrations/g3/installations'), false);
+});
+
+test('el resumen del contrato no ofrece conciliar cierre y su refresco es solo consulta', async () => {
+  const h = await mount({ compact: true, installationSummary: true, tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'ASIGNADA', estadoIntegracion: 'ENVIADA' } });
+  try {
+    assert.equal(h.tree.root.findAllByType('details').length, 0);
+    assert.equal(h.button('Consultar cierre'), undefined);
+    await act(async () => h.tree.root.findByProps({ 'aria-label': 'Actualizar estado de instalación' }).props.onClick());
+    assert.deepEqual(h.calls.map(([method]) => method), ['GET', 'GET']);
+  } finally { await h.close(); }
+});
+
+test('sin permiso de gestionar instalaciones no se ofrece conciliar el cierre', async t => {
+  const h = await workflow(t, { canRequest: false, tracking: { idIntegracion: 7, idOtG3: 'QA-17', estadoIntegracion: 'ENVIADA', estadoPresentacion: 'ASIGNADA' } });
+  assert.equal(h.tree.root.findAllByType('button').some(b => b.props.children === 'Consultar cierre'), false);
+  assert.equal(h.calls.some(([method]) => method === 'POST'), false);
+});
+
+test('la solicitud indica que genera la orden y que no activa el servicio', async t => {
+  const h = await workflow(t);
+  assert.match(JSON.stringify(h.tree.toJSON()), /No activa el servicio/);
 });

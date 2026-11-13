@@ -166,6 +166,10 @@ export class ProspectsService {
         // Stored RUTs are normalized as body-verifier; a full RUT typed without the dash.
         if (compact.length >= 2) or.push({ rut: { contains: `${compact.slice(0, -1)}-${compact.slice(-1)}`, mode: 'insensitive' } });
       }
+      // A complete valid RUT also matches records stored by other systems (e.g. the G2 web
+      // form) with dots or lowercase k. Lookup only: stored identities are never rewritten.
+      const variants = rutLookupVariants(q);
+      if (variants.length) or.push({ rut: { in: variants, mode: 'insensitive' } });
       filters.push({ OR: or });
     }
     if (query.origen) filters.push({ origenContacto: query.origen });

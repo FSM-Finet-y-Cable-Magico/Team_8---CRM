@@ -84,6 +84,20 @@ describe('Etapa 4 - HttpG1InventoryClient', () => {
     await expect(client.getEquipmentByService(10, 1)).rejects.toMatchObject({ code: 'G1_COMPANY_MISMATCH' });
   });
 
+  it('equipos por servicio: acepta la forma real de G1 sin id_empresa y rechaza filas inválidas', async () => {
+    const client = setup();
+    global.fetch = jest.fn()
+      .mockImplementationOnce(() => response({ success: true, data: [{ id_unidad: 5, numero_serie: 'ONT-1', estado: 'Instalado en cliente', tipo_equipo: { id_tipo_equipo: 3 } }] }))
+      .mockImplementationOnce(() => response({ success: true, data: [{ id_unidad: 5, numero_serie: 'ONT-1', id_empresa: null, estado: 'Instalado en cliente' }] }))
+      .mockImplementationOnce(() => response({ success: true, data: [null] }))
+      .mockImplementationOnce(() => response({ success: true, data: [{ id_tipo_equipo: 3, nombre: 'ONT' }] })) as never;
+    await expect(client.getEquipmentByService(10, 1)).resolves.toMatchObject({ data: [{ numero_serie: 'ONT-1' }] });
+    await expect(client.getEquipmentByService(10, 1)).resolves.toMatchObject({ data: [{ numero_serie: 'ONT-1' }] });
+    await expect(client.getEquipmentByService(10, 1)).rejects.toMatchObject({ code: 'G1_COMPANY_MISMATCH' });
+    // The catalogue keeps the strict company check: a missing id_empresa is rejected there.
+    await expect(client.getEquipmentTypes({ idEmpresa: 1 })).rejects.toMatchObject({ code: 'G1_COMPANY_MISMATCH' });
+  });
+
   it('valida todos los IDs de activación antes de ejecutar el POST', async () => {
     global.fetch = jest.fn() as never;
     const payload = {

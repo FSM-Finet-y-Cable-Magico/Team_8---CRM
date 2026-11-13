@@ -47,7 +47,9 @@ export type G1Unit = {
   [key: string]: unknown;
 };
 
-export type G1ServiceEquipment = G1Unit & {
+/** G1 2131b7f5 does not include id_empresa in these items (the query is company-scoped). */
+export type G1ServiceEquipment = Omit<G1Unit, 'id_empresa'> & {
+  id_empresa?: number | null;
   fecha_instalacion?: string | null;
   id_ot?: number | string | null;
 };
