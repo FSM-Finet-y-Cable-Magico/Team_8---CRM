@@ -70,6 +70,22 @@ describe('ServicesService', () => {
     };
   }
 
+  it('TK-02: el administrador en vista de empresa solo recibe servicios de esa empresa; los demás roles no cambian', async () => {
+    const admin = { ...comercial, idEmpresa: 1, roles: ['Administrador'] };
+    const ctx = serviceContextSetup();
+    const where = () => ctx.prisma.servicioContratado.findMany.mock.calls.at(-1)[0].where;
+    await ctx.service.listByCustomer(34, admin, '2');
+    expect(where()).toEqual({ idCliente: 34, idEmpresa: 2 });
+    await ctx.service.listByCustomer(34, admin, 'consolidado');
+    expect(where()).toEqual({ idCliente: 34 });
+    await ctx.service.listByCustomer(34, admin);
+    expect(where()).toEqual({ idCliente: 34 });
+    await expect(ctx.service.listByCustomer(34, admin, 'abc')).rejects.toThrow('vista de empresa');
+    // A non-administrator cannot widen or switch company through the parameter.
+    await ctx.service.listByCustomer(34, comercial, '2');
+    expect(where()).toEqual({ idCliente: 34, idEmpresa: 1 });
+  });
+
   it('expone una instalacion G3 completada por servicio, contrato y empresa sin inventar una OT local', async () => {
     const closedAt = new Date('2026-10-07T13:00:00.000Z');
     const context = serviceContextSetup({

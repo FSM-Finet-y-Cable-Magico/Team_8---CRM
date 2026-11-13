@@ -533,7 +533,7 @@ export function CustomersPanel({
       ? current
       : { customerId: idCliente, status: 'loading', error: '' });
     try {
-      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { signal: token.signal });
+      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { params: { scope }, signal: token.signal });
       if (!servicesRequestGate.current.isCurrent(token)) return;
       setServices(data);
       setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);

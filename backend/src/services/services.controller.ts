@@ -30,8 +30,9 @@ export class ServicesController {
   listByCustomer(
     @Param('idCliente', ParseIntPipe) idCliente: number,
     @CurrentUser() user: AuthUser,
+    @Query('scope') scope?: string,
   ) {
-    return this.servicesService.listByCustomer(idCliente, user);
+    return this.servicesService.listByCustomer(idCliente, user, scope);
   }
 
   @Get(':id')
