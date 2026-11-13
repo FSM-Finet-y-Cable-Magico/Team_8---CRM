@@ -34,6 +34,11 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
+// Reasons from /coverage/geocode meaning automatic geocoding cannot work in this environment (GEOCODING_PROVIDER=MANUAL
+// or invalid configuration). Remembered for the page load: retrying or re-asking would never succeed.
+const PROVIDER_OFF_REASONS = new Set(['PROVEEDOR_DESHABILITADO', 'CONFIGURACION_INVALIDA']);
+let automaticGeocodingOff = false;
+
 export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false }: {
   idEmpresa: number;
   direccion: string;
@@ -61,6 +66,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+  const [providerOff, setProviderOff] = useState(automaticGeocodingOff);
   const { message: geocodeMessage, showMessage: setGeocodeMessage } = useTransientMessage();
   const [retry, setRetry] = useState(0);
   const [backgroundRetry, setBackgroundRetry] = useState(0);
@@ -98,7 +104,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   selection.current = { onChange: selectLocation, disabled, manual: manualLocation };
   resultListener.current = onResult;
   busyListener.current = onBusyChange;
-  const waitingForAddress = autoGeocode && !disabled && !value && !attempted.current.has(version);
+  const waitingForAddress = autoGeocode && !disabled && !value && !providerOff && !attempted.current.has(version);
   const checking = busy || geocoding || waitingForAddress;
 
   useEffect(() => { busyListener.current?.(checking); }, [checking]);
@@ -259,12 +265,15 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     setGeocoding(true);
     setGeocodeMessage('');
     try {
-      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; mensaje: string | null }>('/coverage/geocode', { direccion }, { signal: controller.signal });
+      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; motivo?: string; mensaje: string | null }>('/coverage/geocode', { direccion }, { signal: controller.signal });
       if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
+      const off = Boolean(data.motivo && PROVIDER_OFF_REASONS.has(data.motivo));
+      if (off) { automaticGeocodingOff = true; setProviderOff(true); }
       const first = data.candidatos[0];
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
       else setGeocodeMessage(presentation === 'editor' || manualLocation
         ? userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.')
+        : off ? 'La ubicación automática no está habilitada. Registra el prospecto y marca el punto en su ficha.'
         : 'No pudimos ubicar esta dirección. Revisa la calle, el número y la comuna.');
     } catch {
       if (!controller.signal.aborted && current.current.version === version) {
@@ -284,13 +293,13 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   }, [version, disabled, setGeocodeMessage]);
 
   useEffect(() => {
-    if (!autoGeocode || disabled || value || attempted.current.has(version)) return;
+    if (!autoGeocode || disabled || value || providerOff || attempted.current.has(version)) return;
     // Defer past mount/cleanup so React StrictMode does not issue duplicate requests.
     const timer = window.setTimeout(() => {
       if (current.current.version === version && !current.current.value && !attempted.current.has(version)) void geocodeAddress();
     }, presentation === 'editor' ? 0 : 700);
     return () => window.clearTimeout(timer);
-  }, [autoGeocode, disabled, value, version, geocodeAddress, presentation]);
+  }, [autoGeocode, disabled, value, providerOff, version, geocodeAddress, presentation]);
 
   if (minimal) return <section className="coverage-minimal" aria-label="Consulta de cobertura comercial" aria-busy={checking}>
     <div className="coverage-heading"><strong>Cobertura comercial</strong>
@@ -323,7 +332,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       : value ? 'Cobertura pendiente' : 'Ubicación pendiente';
     return <section className={`coverage-simple coverage-simple-${presentation}`} aria-label="Consulta de cobertura comercial">
       {presentation === 'summary' && <div className="coverage-heading"><strong>Cobertura comercial</strong>
-        {showAddressRetry && !disabled && autoGeocode && !checking && !value &&
+        {showAddressRetry && !disabled && autoGeocode && !providerOff && !checking && !value &&
           <button type="button" className="secondary compact" onClick={() => void geocodeAddress()}>Reintentar dirección</button>}
       </div>}
       {showStatus && <div className={`coverage-summary coverage-summary-${tone}`} role="status" aria-live="polite" aria-busy={checking}>

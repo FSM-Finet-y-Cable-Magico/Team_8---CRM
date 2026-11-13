@@ -228,6 +228,23 @@ test('Cotizacion Enviada sin coordenadas no escribe ubicación desde el resumen:
   assert.ok(h.tree.root.findAllByProps({placeholder:'-33.57'}).length>0,'al editar sí puede marcar el punto');
 });
 
+test('candidato automático guardado: la cobertura se verifica por coordenadas y el punto se corrige desde Editar',async t=>{
+  const h=await harness(t,{canEdit:true,noLocation:true});
+  const location=h.calls.filter(c=>c.path.endsWith('/location'));
+  assert.equal(location.length,1);assert.deepEqual(location[0].body,{ubicacion:{latitud:-33.475,longitud:-70.675}});
+  assert.ok(h.calls.some(c=>c.path==='/coverage/check'&&c.body.latitud===-33.475),'la factibilidad viene de /coverage/check, no del geocodificador');
+  await act(async()=>h.button('Editar prospecto').props.onClick());
+  const coordinate=placeholder=>h.tree.root.findAllByProps({placeholder})[0];
+  assert.ok(coordinate('-33.57'),'al editar se puede corregir el punto');
+  await act(async()=>coordinate('-33.57').props.onChange({target:{value:'-33.48'}}));
+  await act(async()=>coordinate('-70.61').props.onChange({target:{value:'-70.68'}}));
+  await act(async()=>h.button('Ubicar punto').props.onClick());await h.tick();
+  await h.save();await h.tick();
+  const saved=h.calls.filter(c=>/^\/prospects\/\d+$/.test(c.path)).at(-1);
+  assert.deepEqual(saved.body.ubicacion,{latitud:-33.48,longitud:-70.68});
+  assert.equal(h.persisted().latitud,-33.48);
+});
+
 test('React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nueva sesión recupera cotización persistida',async t=>{
   const h=await harness(t);assert.deepEqual(h.optionIds(0),[1,4]);assert.deepEqual(h.optionIds(1),[]);
   await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());

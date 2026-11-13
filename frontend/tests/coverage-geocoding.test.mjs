@@ -236,6 +236,36 @@ test('resumen sin permiso de ubicación manual sigue de solo lectura', async t =
   assert.equal(h.location(), null); assert.ok(!h.text().includes('Ingresar coordenadas'));
 });
 
+test('proveedor MANUAL: sin "Reintentar dirección" y sin volver a consultar al cambiar la dirección; alternativa manual visible', async t => {
+  const mensaje = 'La ubicación automática no está habilitada. Marca el punto en el mapa o ingresa las coordenadas.';
+  const h = await harness(t, { picker: { presentation: 'summary', allowManualLocation: true, showAddressRetry: true },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje } }) });
+  await h.tick(700); await h.tick(0);
+  assert.equal(h.requests('/coverage/geocode').length, 1);
+  assert.equal(h.button('Reintentar dirección'), undefined, 'reintentar nunca funcionaría con el proveedor apagado');
+  assert.ok(h.text().includes('Ingresar coordenadas'));
+  await h.update({ direccion: 'Otra Calle QA 9, La Florida, Metropolitana, Chile' }); await h.tick(700); await h.tick(0);
+  assert.equal(h.requests('/coverage/geocode').length, 1, 'no repite consultas que no pueden resolverse');
+  assert.ok(!h.text().includes('Ubicando dirección'), 'no queda esperando una ubicación automática');
+});
+
+test('proveedor caído (PROVEEDOR_NO_DISPONIBLE): el reintento sigue disponible', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', allowManualLocation: true, showAddressRetry: true },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE', mensaje: 'El servicio de ubicación automática no respondió. Reintenta o marca el punto en el mapa.' } }) });
+  await h.tick(700); await h.tick(0);
+  assert.ok(h.button('Reintentar dirección'));
+  await h.click('Reintentar dirección'); await h.tick(0);
+  assert.equal(h.requests('/coverage/geocode').length, 2);
+});
+
+test('alta con proveedor MANUAL explica que el punto se marca en la ficha', async t => {
+  const h = await harness(t, { picker: { presentation: 'status' },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje: 'x' } }) });
+  await h.tick(700); await h.tick(0);
+  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.equal(h.requests('/coverage/check').length, 0);
+});
+
 test('editor completo conserva corrección manual, coordenadas y atribución en los otros módulos', async t => {
   const pending = deferred();
   const h = await harness(t, { picker: {}, geocode: () => pending.promise });
