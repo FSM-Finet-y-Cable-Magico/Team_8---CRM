@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GeocodingService } from './geocoding.service';
 
@@ -11,6 +12,7 @@ describe('GeocodingService', () => {
     jest.useFakeTimers({ now: new Date('2026-10-07T00:00:00Z') });
     // Every fetch is mocked, including unexpected calls: these tests never use the network.
     jest.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify([candidate])));
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
   afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
 
@@ -186,5 +188,90 @@ describe('GeocodingService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const failing = new GeocodingService(new ConfigService({ GEOCODING_PROVIDER: 'HTTP', GEOCODING_API_URL: 'https://geo.example.test' }));
     expect(await failing.geocode('Calle')).toEqual([]);
+  });
+
+  describe('lookup: motivo explícito sin ocultar fallas como "dirección no encontrada"', () => {
+    const address = 'Avenida Ficticia QA 1234, Comuna QA';
+    let warn: jest.SpyInstance;
+    beforeEach(() => { warn = jest.spyOn(Logger.prototype, 'warn'); });
+    const logged = () => warn.mock.calls.map(call => String(call[0])).join('\n');
+
+    it.each([[undefined], [''], ['MANUAL'], [' manual ']])('proveedor %p => PROVEEDOR_DESHABILITADO sin red ni advertencias', async provider => {
+      const service = new GeocodingService(new ConfigService({ GEOCODING_PROVIDER: provider, GEOCODING_API_URL: 'https://nominatim.openstreetmap.org' }));
+      await expect(service.lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO' });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ GEOCODING_PROVIDER: 'GOOGLE' }],
+      [{ GEOCODING_API_URL: '' }],
+      [{ GEOCODING_API_URL: 'http://127.0.0.1:8080' }],
+      [{ GEOCODING_API_URL: 'https://user:secret@geo.example.test' }],
+      [{ GEOCODING_API_URL: 'no es url' }],
+    ])('configuración %p => CONFIGURACION_INVALIDA, sin red y una sola advertencia sin secretos', async settings => {
+      const service = createService(settings);
+      await expect(service.lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'CONFIGURACION_INVALIDA' });
+      await service.lookup(address);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(logged()).not.toMatch(/secret|127\.0\.0\.1|Ficticia/);
+    });
+
+    it('dirección vacía => DIRECCION_VACIA sin red', async () => {
+      await expect(createService().lookup('   ')).resolves.toEqual({ candidatos: [], motivo: 'DIRECCION_VACIA' });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('sin conexión => PROVEEDOR_NO_DISPONIBLE, se registra la clase de falla y no la dirección', async () => {
+      jest.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'));
+      await expect(createService().lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE' });
+      expect(logged()).toMatch(/SIN_CONEXION/);
+      expect(logged()).not.toMatch(/Ficticia|1234/);
+    });
+
+    it.each([429, 500, 503])('HTTP %i => PROVEEDOR_NO_DISPONIBLE (no "sin resultados")', async status => {
+      jest.mocked(fetch).mockResolvedValue(new Response('busy', { status }));
+      await expect(createService().lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE' });
+      expect(logged()).toContain(`HTTP ${status}`);
+    });
+
+    it('tiempo agotado => PROVEEDOR_NO_DISPONIBLE con clase TIEMPO_AGOTADO', async () => {
+      jest.mocked(fetch).mockRejectedValue(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }));
+      await expect(createService().lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE' });
+      expect(logged()).toMatch(/TIEMPO_AGOTADO/);
+    });
+
+    it('JSON inválido => PROVEEDOR_NO_DISPONIBLE con clase RESPUESTA_INVALIDA', async () => {
+      jest.mocked(fetch).mockResolvedValue(new Response('<html>', { status: 200 }));
+      await expect(createService().lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE' });
+      expect(logged()).toMatch(/RESPUESTA_INVALIDA/);
+    });
+
+    it('respuesta válida vacía => SIN_RESULTADOS y se cachea como éxito', async () => {
+      jest.mocked(fetch).mockResolvedValue(new Response('[]', { status: 200 }));
+      const service = createService();
+      await expect(service.lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'SIN_RESULTADOS' });
+      await expect(service.lookup(address)).resolves.toEqual({ candidatos: [], motivo: 'SIN_RESULTADOS' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('candidato válido => OK; geocode() conserva su contrato de lista', async () => {
+      const service = createService();
+      await expect(service.lookup(address)).resolves.toEqual({ candidatos: [{ etiqueta: 'Direccion aproximada', latitud: -33.58, longitud: -70.63 }], motivo: 'OK' });
+      await expect(service.geocode(address)).resolves.toEqual([{ etiqueta: 'Direccion aproximada', latitud: -33.58, longitud: -70.63 }]);
+    });
+
+    it('la falla se cachea solo 10 s: después se reintenta y puede recuperarse', async () => {
+      jest.mocked(fetch).mockRejectedValueOnce(new TypeError('fetch failed'));
+      const service = createService();
+      expect((await service.lookup(address)).motivo).toBe('PROVEEDOR_NO_DISPONIBLE');
+      expect((await service.lookup(address)).motivo).toBe('PROVEEDOR_NO_DISPONIBLE');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(10_001);
+      expect((await service.lookup(address)).motivo).toBe('OK');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
   });
 });

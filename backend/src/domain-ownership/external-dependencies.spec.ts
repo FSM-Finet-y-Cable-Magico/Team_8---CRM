@@ -25,7 +25,9 @@ describe('Etapa 4 - dependencias externas explícitas', () => {
   });
 
   it('el catálogo y la garantía física se presentan sin acciones de escritura', () => {
-    expect(inventoryUi).toContain('currentUnit.item.garantia');
+    // The unit record renders G1's physical warranty (vigencia and vencimiento) read-only.
+    expect(inventoryUi).toMatch(/unit\.garantia\?\.vigente/);
+    expect(inventoryUi).toMatch(/unit\.garantia\?\.fecha_vencimiento/);
     expect(inventoryUi).not.toMatch(/api\.(?:post|patch|put|delete)\s*\(/);
   });
 

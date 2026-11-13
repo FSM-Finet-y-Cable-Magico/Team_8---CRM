@@ -35,7 +35,7 @@ describe('CoverageDomainService', () => {
     const commercialProvider = { resolvePlanAvailabilityForLocation: jest.fn() };
     const g3 = { configured: jest.fn().mockReturnValue(false), check: jest.fn() };
     const legacy = { configuredFor: jest.fn().mockReturnValue(false), check: jest.fn() };
-    const geocoding = { geocode: jest.fn().mockResolvedValue([]) };
+    const geocoding = { geocode: jest.fn().mockResolvedValue([]), lookup: jest.fn().mockResolvedValue({ candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO' }) };
     const service = new CoverageDomainService(
       prisma as unknown as PrismaService,
       new ConfigService(config),
@@ -45,7 +45,7 @@ describe('CoverageDomainService', () => {
       legacy as unknown as LegacyTomodatCoverageProvider,
       geocoding as unknown as GeocodingService,
     );
-    return { service, prisma, audit, commercialProvider, g3, legacy };
+    return { service, prisma, audit, commercialProvider, g3, legacy, geocoding };
   }
 
   it('crea una cobertura general valida y registra auditoria', async () => {
@@ -215,5 +215,27 @@ describe('CoverageDomainService', () => {
       .resolves.toMatchObject({ estado: 'FACTIBLE', tecnica: { proveedor: 'NINGUNO' } });
     expect(current.g3.check).not.toHaveBeenCalled();
     expect(current.legacy.check).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['PROVEEDOR_DESHABILITADO', /no está habilitada.*mapa/],
+    ['CONFIGURACION_INVALIDA', /no está disponible.*mapa/],
+    ['PROVEEDOR_NO_DISPONIBLE', /no respondió.*mapa/],
+    ['SIN_RESULTADOS', /No encontramos esta dirección/],
+    ['DIRECCION_VACIA', /Ingresa una dirección/],
+  ] as const)('geocode explica el motivo %s y mantiene la alternativa manual sin inventar factibilidad', async (motivo, message) => {
+    const { service, geocoding } = setup();
+    geocoding.lookup.mockResolvedValue({ candidatos: [], motivo });
+    const result = await service.geocode('Calle QA 1, Comuna QA');
+    expect(result).toEqual({ candidatos: [], motivo, mensaje: expect.stringMatching(message) });
+    expect(JSON.stringify(result)).not.toMatch(/factible|cobertura/i);
+  });
+
+  it('geocode con candidato no agrega mensaje y no decide cobertura', async () => {
+    const { service, geocoding, commercialProvider } = setup();
+    const candidato = { etiqueta: 'Calle QA 1', latitud: -33.45, longitud: -70.63 };
+    geocoding.lookup.mockResolvedValue({ candidatos: [candidato], motivo: 'OK' });
+    await expect(service.geocode('Calle QA 1')).resolves.toEqual({ candidatos: [candidato], motivo: 'OK', mensaje: null });
+    expect(commercialProvider.resolvePlanAvailabilityForLocation).not.toHaveBeenCalled();
   });
 });

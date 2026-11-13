@@ -24,6 +24,7 @@ import {
   formatConnectionType,
   formatDateOnly,
   formatDateTime,
+  formatRutForDisplay,
   formatWorkOrderValue,
   normalizeWorkOrderValue,
   normalizeRutInput,
@@ -35,7 +36,7 @@ import { HistoryBox, Modal, MonitoringStatusView, TablePagination } from '../../
 import { CustomerContractWorkflow } from './CustomerContractWorkflow';
 import { CustomerPendingInstallations } from './CustomerPendingInstallations';
 import { CustomerProfileForm, type CustomerProfileFields } from './CustomerProfileForm';
-import { CustomerStatusBadge, customerStatusPresentation } from './CustomerStatusBadge';
+import { CUSTOMER_STATUS_DIMENSION_LABELS, CustomerStatusSummary, customerStatusValues } from './CustomerStatusBadge';
 import {
   CustomerServicesRequestGate,
   type CustomerServicesLoadState,
@@ -120,7 +121,6 @@ export function CustomersPanel({
   plans,
   scope,
   permissions,
-  onManageInstallation,
   onChanged,
   profileEditor,
   onProfileUpdated,
@@ -132,7 +132,6 @@ export function CustomersPanel({
   plans: Plan[];
   scope: string;
   permissions: DashboardPermissions;
-  onManageInstallation: (idProspecto: number, idContrato: number) => void;
   onChanged: () => void;
   profileEditor?: { admin: boolean; idEmpresa: number | null };
   onProfileUpdated?: (profile: CustomerProfileFields) => void;
@@ -214,15 +213,21 @@ export function CustomersPanel({
 
     return [
       customer.rut,
+      formatRutForDisplay(customer.rut),
       customer.nombreCompleto,
       customer.telefono,
       customer.email,
       ...((customer.contratos ?? []).map((contract) => String(contract.idContrato))),
     ].some((value) => normalizeWorkOrderValue(value).includes(normalizedSearchTerm));
   });
-  const customerStatusOptions = [...new Set(customerList.map((customer) => normalizeWorkOrderValue(customer.estado)).filter(Boolean))].sort();
+  // Only the dimension actually shown is filterable: global status (consolidated) or the real
+  // service states of the selected company. A company view never carries the global status.
+  const companyStatusView = customers.length ? customers.some((customer) => customer.estadoGlobalDisponible === false) : scope !== 'consolidado';
+  const statusDimensionLabel = CUSTOMER_STATUS_DIMENSION_LABELS[companyStatusView ? 'empresa' : 'global'];
+  const customerStatusKeys = (customer: Customer) => customerStatusValues(customer).map((value) => normalizeWorkOrderValue(value)).filter(Boolean);
+  const customerStatusOptions = [...new Set(customerList.flatMap(customerStatusKeys))].sort();
   const visibleCustomers = customerStatusFilter
-    ? customerList.filter((customer) => normalizeWorkOrderValue(customer.estado) === customerStatusFilter)
+    ? customerList.filter((customer) => customerStatusKeys(customer).includes(customerStatusFilter))
     : customerList;
   const pageSize = 20;
   const paginatedCustomers = visibleCustomers.slice((page - 1) * pageSize, page * pageSize);
@@ -250,7 +255,7 @@ export function CustomersPanel({
 
   useEffect(() => {
     if (selectedCustomer) {
-      setStatusValue(selectedCustomer.estado);
+      setStatusValue(selectedCustomer.estado ?? '');
       setHistory(null);
       setServices([]);
       setSelectedServiceId(null);
@@ -325,6 +330,7 @@ export function CustomersPanel({
 
   useEffect(() => {
     setSearchTerm('');
+    setCustomerStatusFilter('');
     void loadPaymentZones(true);
   }, [scope]);
   useEffect(() => {
@@ -374,13 +380,13 @@ export function CustomersPanel({
   }
 
   async function updateCustomerStatus() {
-    if (!selectedCustomer) {
+    if (!selectedCustomer || !statusValue.trim()) {
       return;
     }
 
     try {
       const { data } = await api.patch<Customer>(`/customers/${selectedCustomer.idCliente}/status`, { estado: statusValue });
-      setStatusValue(data.estado);
+      setStatusValue(data.estado ?? '');
       setStatus('Estado del cliente actualizado');
       onChanged();
     } catch (err) {
@@ -527,7 +533,7 @@ export function CustomersPanel({
       ? current
       : { customerId: idCliente, status: 'loading', error: '' });
     try {
-      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { signal: token.signal });
+      const { data } = await api.get<CustomerService[]>(`/services/customer/${idCliente}`, { params: { scope }, signal: token.signal });
       if (!servicesRequestGate.current.isCurrent(token)) return;
       setServices(data);
       setSelectedServiceId(preferredServiceId ?? data[0]?.idServicio ?? null);
@@ -845,14 +851,14 @@ export function CustomersPanel({
             requestedView={pendingInstallationsView}
             onViewConsumed={onPendingInstallationsViewConsumed}
             canManage={permissions.createInstallOrders}
-            onManageInstallation={onManageInstallation}
+            onChanged={onChanged}
           />
         </div>
         <div className="customer-list-filters">
           <span>Clientes: {visibleCustomers.length}</span>
-          <select aria-label="Filtrar clientes por estado" value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
+          <select aria-label={`Filtrar clientes por ${statusDimensionLabel.toLocaleLowerCase('es-CL')}`} title={statusDimensionLabel} value={customerStatusFilter} onChange={(event) => setCustomerStatusFilter(event.target.value)}>
             <option value="">Todos los estados</option>
-            {customerStatusOptions.map((state) => <option key={state} value={state}>{customerStatusPresentation(formatWorkOrderValue(state)).label}</option>)}
+            {customerStatusOptions.map((state) => <option key={state} value={state}>{formatWorkOrderValue(state)}</option>)}
           </select>
         </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
@@ -863,7 +869,7 @@ export function CustomersPanel({
                 <th>RUT</th>
                 <th>Nombre</th>
                 <th>Empresa</th>
-                <th>Estado actual</th>
+                <th>{statusDimensionLabel}</th>
                 <th>Origen</th>
                 <th>Servicio / Plan</th>
                 <th>Contacto</th>
@@ -873,10 +879,10 @@ export function CustomersPanel({
             <tbody>
               {paginatedCustomers.map((customer) => (
                 <tr key={customer.idCliente}>
-                  <td>{customer.rut ?? '-'}</td>
+                  <td>{formatRutForDisplay(customer.rut) ?? '-'}</td>
                   <td>{customer.nombreCompleto}</td>
                   <td>{customerCompanyLabel(customer)}</td>
-                  <td><span className="customer-current-status"><CustomerStatusBadge value={formatWorkOrderValue(customer.estado)} compact/></span></td>
+                  <td><span className="customer-current-status"><CustomerStatusSummary customer={customer} format={formatWorkOrderValue} compact/></span></td>
                   <td>{customer.origenContacto ?? '-'}</td>
                   <td>{customerMainPlan(customer)}</td>
                   <td>{customer.telefono ?? customer.email ?? '-'}</td>
@@ -921,9 +927,9 @@ export function CustomersPanel({
                         <Pencil size={15} aria-hidden="true"/>
                       </button>}
                   </h3>
-                  <p>{selectedCustomer.rut ?? 'RUT no registrado'}</p>
+                  <p>{formatRutForDisplay(selectedCustomer.rut) ?? 'RUT no registrado'}</p>
                 </div>
-                <div className="customer-profile-status">{profileSaved && <span role="status">Datos guardados</span>}<CustomerStatusBadge value={selectedCustomer.estado} /></div>
+                <div className="customer-profile-status">{profileSaved && <span role="status">Datos guardados</span>}<CustomerStatusSummary customer={selectedCustomer} /></div>
               </header>
               <dl className="customer-profile-data">
                 <div>

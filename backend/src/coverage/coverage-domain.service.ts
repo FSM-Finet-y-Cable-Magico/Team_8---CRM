@@ -19,7 +19,16 @@ import { CommercialCoverageProvider } from './commercial-coverage.provider';
 import { G3CoverageProvider } from './g3-coverage.provider';
 import { GeocodingService } from './geocoding.service';
 import { LegacyTomodatCoverageProvider } from './legacy-tomodat-coverage.provider';
-import { CoverageResult, TechnicalCoverageResult } from './coverage.types';
+import { CoverageResult, GeocodingOutcome, TechnicalCoverageResult } from './coverage.types';
+
+// Every message keeps the manual alternative visible; none of them states or implies feasibility.
+const GEOCODING_MESSAGES: Record<Exclude<GeocodingOutcome, 'OK'>, string> = {
+  DIRECCION_VACIA: 'Ingresa una dirección antes de intentar ubicarla.',
+  PROVEEDOR_DESHABILITADO: 'La ubicación automática no está habilitada. Marca el punto en el mapa o ingresa las coordenadas.',
+  CONFIGURACION_INVALIDA: 'La ubicación automática no está disponible. Marca el punto en el mapa o ingresa las coordenadas.',
+  PROVEEDOR_NO_DISPONIBLE: 'El servicio de ubicación automática no respondió. Reintenta o marca el punto en el mapa.',
+  SIN_RESULTADOS: 'No encontramos esta dirección. Revisa calle, número y comuna, o marca el punto en el mapa.',
+};
 
 @Injectable()
 export class CoverageDomainService {
@@ -258,11 +267,8 @@ export class CoverageDomainService {
   }
 
   async geocode(address: string) {
-    const candidates = await this.geocoding.geocode(address);
-    return {
-      candidatos: candidates,
-      mensaje: candidates.length ? null : 'No fue posible ubicar automaticamente la direccion. Selecciona el punto manualmente.',
-    };
+    const { candidatos, motivo } = await this.geocoding.lookup(address);
+    return { candidatos, motivo, mensaje: motivo === 'OK' ? null : GEOCODING_MESSAGES[motivo] };
   }
 
   private technicalProvider() {

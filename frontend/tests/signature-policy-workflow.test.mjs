@@ -33,7 +33,7 @@ function harness(initial) {
   return {api,hook,mutations,set:next=>{response=next;},
     tick:async()=>{await act(async()=>{for(const fn of [...timers])fn();});},
     restore:()=>{globalThis.setInterval=oldSet;globalThis.clearInterval=oldClear;},
-    common:{'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String },'../../api':{api,apiErrorMessage:()=> 'No disponible'},
+    common:{'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String, formatRutForDisplay: value => value ?? null },'../../api':{api,apiErrorMessage:()=> 'No disponible'},
       '../../shared/components':{StatusBadge:({value})=>React.createElement('span',null,value),
         Modal:({open,children})=>open===false?null:React.createElement('div',null,children)},
       '../contracts/useSignatureStatus':hook,
@@ -100,7 +100,7 @@ test('Prospectos: el mismo ícono descarga el contrato nuevo y recupera un PDF a
       const { ContractDocuments } = load('features/customers/ContractDocuments.tsx', {
         '../contracts/ContractSignatureActions': { ContractSignatureActions: () => null },
         '../../api': { api, apiErrorMessage: String },
-        '../../lib': { formatDateTime: String },
+        '../../lib': { formatDateTime: String, formatRutForDisplay: value => value ?? null },
         '../../shared/components': {},
       });
       let tree;
@@ -123,7 +123,7 @@ test('Prospectos: el mismo ícono descarga el contrato nuevo y recupera un PDF a
 test('Clientes: cierra y limpia el formulario manual al cambiar a automático',async()=>{
   const h=harness(state('manual'));let tree;
   try{
-    const mocks={...h.common,'../../lib':{formatDateOnly:()=> 'Fecha QA',formatWorkOrderValue:String},
+    const mocks={...h.common,'../../lib':{formatDateOnly:()=> 'Fecha QA',formatWorkOrderValue:String,formatRutForDisplay:value=>value??null},
       '../../shared/hooks/useTransientMessage':{useTransientMessage:()=>({message:'',showMessage(){},clearMessage(){}})},
       '../installations/G3InstallationStatus':{G3InstallationStatus:()=>null},
       './CustomerServiceActions':{CustomerServiceActions:()=>null},

@@ -483,11 +483,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               permissions={permissions}
               profileEditor={{ admin: isAdmin, idEmpresa: user.idEmpresa }}
               onProfileUpdated={(profile) => setCustomers(current => current.map(customer => customer.idCliente === profile.idCliente ? { ...customer, ...profile } : customer))}
-              onManageInstallation={(idProspecto, idContrato) => {
-                setFocusedInstallationProspectId(idProspecto);
-                setFocusedInstallationContractId(idContrato);
-                setActiveTab('installations');
-              }}
               onChanged={() => void loadData()}
             />
             </div>

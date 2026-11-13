@@ -62,7 +62,14 @@ export type GeocodingCandidate = {
   longitud: number;
 };
 
+/** Why an address lookup returned what it did; lets users and operators tell configuration, outage and no-match apart. */
+export type GeocodingOutcome = 'OK' | 'DIRECCION_VACIA' | 'PROVEEDOR_DESHABILITADO' | 'CONFIGURACION_INVALIDA'
+  | 'PROVEEDOR_NO_DISPONIBLE' | 'SIN_RESULTADOS';
+
+export type GeocodingLookup = { candidatos: GeocodingCandidate[]; motivo: GeocodingOutcome };
+
 export interface GeocodingProvider {
   geocode(address: string): Promise<GeocodingCandidate[]>;
+  lookup(address: string): Promise<GeocodingLookup>;
   reverseGeocode(latitud: number, longitud: number): Promise<string | null>;
 }

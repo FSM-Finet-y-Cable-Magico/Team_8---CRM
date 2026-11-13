@@ -284,7 +284,7 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
   it('conserva consultas autorizadas de RUT compacto, detecta ambiguedad y oculta datos globales', async () => {
     const { customers, prisma, customer } = setup();
     await expect(customers.findByRutOrContract('11.111.111-1', operator)).resolves.toMatchObject({
-      idCliente: 5, idEmpresa: null, estado: 'Restringido por empresa', datosTecnicos: null,
+      idCliente: 5, idEmpresa: null, estado: null, estadoGlobalDisponible: false, datosTecnicos: null,
     });
     expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [
       { rut: { in: rutLookupVariants(request.rut), mode: 'insensitive' } },

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, FileClock, MapPin, Pencil, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
-import { formatDateTime } from '../../lib';
+import { formatDateTime, formatRutForDisplay } from '../../lib';
 import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { Modal, StatusBadge } from '../../shared/components';
@@ -113,6 +113,9 @@ export function ProspectWorkflowPanel({
   const canEditProspect = permissions.createProspects && !isWorkflowLocked
     && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada');
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
+  // A stored status (even 'Factible') without coordinates is not a confirmed location: the user must be able to mark it
+  // manually, since automatic geocoding may be disabled or unavailable. A saved point is only changed through "Editar".
+  const manualLocation = canEditProspect && (editingProspect || (!isQuoted && (currentProspect.latitud == null || currentProspect.longitud == null)));
   const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage
     && !locatingAddress && !coverageSyncError && !isWorkflowLocked && !editingProspect && !savingProspect);
   const planOptions = plans.filter((plan) =>
@@ -355,7 +358,7 @@ export function ProspectWorkflowPanel({
             <div className="prospect-name-row"><h3>{currentProspect.nombreCompleto}</h3>
               {canEditProspect && !editingProspect && <button type="button" className="prospect-edit-button" aria-label="Editar prospecto" title="Editar prospecto" onClick={openProspectEditor}><Pencil size={16} aria-hidden="true" /></button>}
             </div>
-            <p>{prospect.rut ?? 'RUT no registrado'}</p>
+            <p>{formatRutForDisplay(prospect.rut) ?? 'RUT no registrado'}</p>
           </div>
           <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
         </header>
@@ -386,10 +389,12 @@ export function ProspectWorkflowPanel({
         </dl>}
         {editingProspect && <form className="prospect-edit-form" onSubmit={event => { event.preventDefault(); void saveProspect(); }}>
           <fieldset disabled={savingProspect}>
-            <label className="prospect-field-wide">Nombre completo<input required minLength={5} maxLength={120} value={prospectForm.nombreCompleto} onChange={event => setProspectForm({ ...prospectForm, nombreCompleto: event.target.value })} /></label>
+            {/* Same layout as the customer profile editor; validation and save logic stay prospect-specific. */}
+            <label className="prospect-field-name">Nombre completo<input autoFocus required minLength={5} maxLength={120} value={prospectForm.nombreCompleto} onChange={event => setProspectForm({ ...prospectForm, nombreCompleto: event.target.value })} /></label>
+            <label>Origen de contacto<input maxLength={40} value={prospectForm.origenContacto} onChange={event => setProspectForm({ ...prospectForm, origenContacto: event.target.value })} /></label>
             <label>Teléfono<input required type="tel" pattern="\+569[0-9]{8}" placeholder="+56912345678" value={prospectForm.telefono} onChange={event => setProspectForm({ ...prospectForm, telefono: event.target.value })} /></label>
             <label>Correo<input type="email" maxLength={120} value={prospectForm.email} onChange={event => setProspectForm({ ...prospectForm, email: event.target.value })} /></label>
-            <label>Origen de contacto<input maxLength={40} value={prospectForm.origenContacto} onChange={event => setProspectForm({ ...prospectForm, origenContacto: event.target.value })} /></label>
+            <div className="prospect-edit-readonly"><span>Empresa</span><strong>{prospect.empresa?.nombre ?? 'No registrada'}</strong></div>
             <label className="prospect-field-wide">Dirección<input required minLength={8} maxLength={200} value={prospectForm.direccion} onChange={event => { setConfirmedAddress(''); setLocated(null); setProspectForm({ ...prospectForm, direccion: event.target.value }); }} onBlur={() => setConfirmedAddress(addressKey)} /></label>
             <label>Región<select value={region?.nombre ?? prospectForm.region} onChange={event => {
               const nextRegion = findChileRegion(event.target.value);
@@ -414,7 +419,7 @@ export function ProspectWorkflowPanel({
               {region?.comunas.map(item => <option key={item} value={item}>{item}</option>)}
             </select></label>
           </fieldset>
-          <div className="prospect-edit-actions"><button type="button" className="secondary" disabled={savingProspect} onClick={cancelEditing}>Cancelar</button><button type="submit" disabled={savingProspect || locatingAddress}>{savingProspect ? 'Guardando…' : locatingAddress ? 'Verificando dirección…' : 'Guardar cambios'}</button></div>
+          <div className="prospect-edit-actions"><button type="button" className="secondary compact" disabled={savingProspect} onClick={cancelEditing}>Cancelar</button><button type="submit" className="compact" disabled={savingProspect || locatingAddress}>{savingProspect ? 'Guardando…' : locatingAddress ? 'Verificando dirección…' : 'Guardar datos'}</button></div>
         </form>}
       </section>
 
@@ -447,6 +452,7 @@ export function ProspectWorkflowPanel({
               key={prospect.idProspecto}
               presentation="summary"
               showAddressRetry={canEditProspect}
+              allowManualLocation={manualLocation}
               idEmpresa={prospect.empresa.idEmpresa}
               direccion={address}
               value={location}

@@ -353,6 +353,22 @@ describe('ProspectsService', () => {
       expect(prisma.prospecto.findMany.mock.calls[0][0]).not.toHaveProperty('take', 100);
     });
 
+    it.each(['123456785', '12345678-5', '12.345.678-5'])('RUT válido %s busca todas sus variantes almacenadas sin escribir', async (q) => {
+      const { prisma, service } = searchFixture();
+      await service.search(admin, { q });
+      const where = JSON.stringify(prisma.prospecto.findMany.mock.calls[0][0].where);
+      expect(where).toContain(JSON.stringify({ rut: { in: ['12345678-5', '123456785', '12.345.678-5', '12.345.6785'], mode: 'insensitive' } }));
+      expect(prisma.prospecto).not.toHaveProperty('update');
+    });
+
+    it('RUT con K busca también la k minúscula histórica, y un DV inválido no se normaliza como válido', async () => {
+      const { prisma, service } = searchFixture();
+      await service.search(admin, { q: '12345670-k' });
+      expect(JSON.stringify(prisma.prospecto.findMany.mock.calls[0][0].where)).toContain('"12345670-k"');
+      await service.search(admin, { q: '12345678-9' });
+      expect(JSON.stringify(prisma.prospecto.findMany.mock.calls[1][0].where)).not.toContain('"rut":{"in"');
+    });
+
     it('filtra por estado Perdido solo en listado y total, no en los contadores', async () => {
       const { prisma, service } = searchFixture();
       await service.search(admin, { estado: 'Perdido', origen: 'Referido', motivoPerdida: 'Precio elevado' });

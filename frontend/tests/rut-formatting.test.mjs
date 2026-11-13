@@ -31,3 +31,16 @@ test('permite vaciar y escribir parcialmente sin truncar los valores inválidos'
 test('mantiene la normalización utilizada para enviar el RUT al backend', () => {
   assert.equal(normalizeRutInput(formatRutInput('12.345.678k')), '12345678-K');
 });
+
+test('presentación de RUT externo: agrega guion solo con DV válido y nunca infiere el DV', () => {
+  const { formatRutForDisplay, canonicalRut } = exports;
+  for (const value of ['123456785', '12345678-5', '12.345.678-5', ' 12.345.678-5 ']) assert.equal(formatRutForDisplay(value), '12345678-5');
+  assert.equal(formatRutForDisplay('12345670k'), '12345670-K');
+  assert.equal(formatRutForDisplay('1234567-4'), '1234567-4');
+  // Invalid DV, incomplete body or foreign formats are preserved exactly as stored.
+  for (const value of ['123456789', '12345678-9', '12345678', '1234567', 'QA-1', '']) assert.equal(formatRutForDisplay(value), value);
+  assert.equal(formatRutForDisplay(null), null);
+  assert.equal(formatRutForDisplay(undefined), null);
+  assert.equal(canonicalRut('12345678-9'), null);
+  assert.equal(canonicalRut('123456785'), canonicalRut('12.345.678-5'));
+});
