@@ -20,6 +20,8 @@ import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 
 const TICKET_STATUSES = ['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'];
+/** Official attention category (Documento 0, table 11.9). The ID is resolved in each connection's catalogue. */
+export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
 type AuditEntry = Parameters<AuditService['record']>[0];
 
 @Injectable()
@@ -142,6 +144,42 @@ export class TicketsService {
       accion: 'CREAR_TICKET',
       origen: dto.origen ?? 'CRM',
     });
+  }
+
+  /**
+   * CRM ticket "Baja de servicio" of a withdrawal request (ported from PR #81). Created INSIDE the caller's
+   * transaction: request, link and audit commit or roll back together. The caller already validated, under the
+   * service lock, that company, customer, contract, service and notice match. The category is resolved by its
+   * official name in THIS connection's catalogue: never a fixed ID, never a technical/internal category and never
+   * an arbitrary choice among duplicates. It does not derive to G3, create an OT or change the service state.
+   */
+  async createWithdrawalTicket(tx: Prisma.TransactionClient, input: {
+    idEmpresa: number; idCliente: number; idServicio: number; idContrato: number;
+    idSolicitudRetiro: number; idAviso: number; descripcion: string; idUsuario: number;
+  }) {
+    const official = (await readTicketCategoryCatalog(tx)).filter(category => category.nombreAtencion === WITHDRAWAL_TICKET_CATEGORY);
+    if (official.length !== 1) {
+      throw new ConflictException({
+        code: 'WITHDRAWAL_TICKET_CATEGORY_UNAVAILABLE',
+        message: 'La categoría oficial «Baja de servicio» no está disponible de forma inequívoca en el catálogo de atención; no se creó el ticket.',
+      });
+    }
+    const category = official[0];
+    const ticket = await tx.ticket.create({
+      data: {
+        idCliente: input.idCliente, idEmpresa: input.idEmpresa, idServicio: input.idServicio, idUsuarioAsignado: input.idUsuario,
+        idCategoria: category.idCategoria, codigoSeguimiento: this.trackingCode(), prioridad: 'Media', estado: 'Abierto',
+        descripcion: input.descripcion, fechaCreacion: new Date(), origen: 'CRM',
+      },
+    });
+    await this.auditService.record({
+      idUsuario: input.idUsuario, accion: 'CREAR_TICKET_BAJA_SERVICIO', entidadAfectada: 'ticket', idEntidadAfectada: ticket.idTicket,
+      valorNuevo: {
+        idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idContrato: input.idContrato,
+        idSolicitudRetiro: input.idSolicitudRetiro, idAviso: input.idAviso, categoria: category.nombre, idCategoria: category.idCategoria, origen: 'CRM',
+      },
+    }, tx);
+    return ticket;
   }
 
   async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser): Promise<never> {

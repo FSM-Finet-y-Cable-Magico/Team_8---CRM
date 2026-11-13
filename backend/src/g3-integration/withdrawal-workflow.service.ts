@@ -1,0 +1,382 @@
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { AuditService } from '../audit/audit.service';
+import { APPROVED_EXTENSIONS } from '../billing/invoice-balance';
+import { AuthUser } from '../common/auth.types';
+import { parseDateOnly, todayDateOnly } from '../common/date-rules';
+import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt, overdueDebtSummary } from '../common/overdue-debt';
+import { isAdministrator } from '../common/roles';
+import { PrismaService } from '../prisma/prisma.service';
+import { TicketsService } from '../tickets/tickets.service';
+import {
+  buildWithdrawalOrderPayload, G3_CANCELLABLE_STATES, interpretWithdrawalCancelReply, interpretWithdrawalOrderRead,
+  interpretWithdrawalOrderReply, WithdrawalPayloadError,
+} from './g3-withdrawal-contract';
+import { sha256Payload } from './g3-integration.utils';
+import { G3_WITHDRAWAL_CLIENT, G3WithdrawalClient } from './http-g3-withdrawal.client';
+import { evaluateWithdrawalEligibility, WITHDRAWAL_MOTIVE_MOROSITY, WithdrawalFacts } from './withdrawal-eligibility';
+import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalDispatch, WithdrawalStorage } from './withdrawal.storage';
+
+type Db = Prisma.TransactionClient;
+const CLOSED_REQUEST_STATES = ['CANCELADA', 'CERRADA'];
+const SERVICE_INCLUDE = { contrato: true, cliente: true, empresa: true, direccion: true } satisfies Prisma.ServicioContratadoInclude;
+type ServiceRow = Prisma.ServicioContratadoGetPayload<{ include: typeof SERVICE_INCLUDE }>;
+
+/** Max automatic send attempts and backoff between them (minutes); afterwards it needs human review. */
+export const WITHDRAWAL_DISPATCH_MAX_ATTEMPTS = 6;
+const BACKOFF_MINUTES = [0, 1, 5, 15, 60, 180];
+/** An ENVIANDO claim older than this is considered abandoned (process crash) and can be re-sent idempotently. */
+const STALE_SENDING_MS = 5 * 60_000;
+/** Minimum interval between GETs of the same OT (rate limit for on-demand tracking). */
+const ORDER_READ_MIN_INTERVAL_MS = 60_000;
+
+/**
+ * Withdrawal for morosity integrated with G3 (OT de BAJA) and G1 (recepción de equipos).
+ * Phase 2: eligibility, atomic initiation (request + ticket + link + audit + dispatch snapshot), dispatch to G3
+ * AFTER commit, tracking by GET and authorized cancellation. Remote dispatch is OFF by default
+ * (G3_WITHDRAWAL_DISPATCH_ENABLED=true is required) and every remote call happens outside any transaction.
+ */
+@Injectable()
+export class WithdrawalWorkflowService {
+  private readonly storage: WithdrawalStorage;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+    private readonly tickets: TicketsService,
+    private readonly config: ConfigService,
+    @Inject(G3_WITHDRAWAL_CLIENT) private readonly g3: G3WithdrawalClient,
+    @Optional() @Inject(WITHDRAWAL_STORAGE) storage?: WithdrawalStorage,
+  ) {
+    this.storage = storage ?? postgresWithdrawalStorage;
+  }
+
+  dispatchEnabled() {
+    return (this.config.get<string>('G3_WITHDRAWAL_DISPATCH_ENABLED') ?? '').trim().toLowerCase() === 'true';
+  }
+
+  /** Read-only eligibility; the UI only shows it, initiate() decides again under lock. */
+  async eligibility(idServicio: number, currentUser: AuthUser) {
+    const db = this.prisma as unknown as Db;
+    const service = await db.servicioContratado.findUnique({ where: { idServicio }, include: SERVICE_INCLUDE });
+    if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+    this.assertCompany(service.idEmpresa, currentUser);
+    const facts = await this.loadFacts(db, service, currentUser);
+    const result = evaluateWithdrawalEligibility(facts);
+    const capabilities = await this.storage.capabilities(db);
+    return {
+      idServicio, motivo: WITHDRAWAL_MOTIVE_MOROSITY, eligible: result.eligible, checks: result.checks, firstFailure: result.firstFailure,
+      habilitado: capabilities.ticketLink && capabilities.g3Dispatch, despachoG3Habilitado: this.dispatchEnabled(), capabilities,
+      deuda: facts.debt, solicitudActiva: facts.activeRequest,
+    };
+  }
+
+  /**
+   * One transaction serialized on the service: re-validates, creates the request (MOROSIDAD), the CRM ticket
+   * "Baja de servicio", its structured link with the previous notice, the audit trail and the exact G3 request
+   * snapshot. Any failure rolls back everything. Never sets the service to Baja and never calls G3 inside.
+   * Double click / retry: returns the same linked operation without a second ticket or snapshot.
+   */
+  async initiate(dto: { idServicio: number; idContrato?: number; observaciones: string; fechaSolicitada?: string }, currentUser: AuthUser) {
+    const observaciones = dto.observaciones?.trim() ?? '';
+    if (observaciones.length < 10) throw new BadRequestException('Describe la gestión de cobranza y el motivo del retiro (mínimo 10 caracteres)');
+    const fechaSolicitada = parseDateOnly(dto.fechaSolicitada ?? todayDateOnly());
+    if (!fechaSolicitada) throw new BadRequestException('La fecha solicitada no es valida');
+    const authorized = await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } });
+    if (!authorized?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+    this.assertCompany(authorized.idEmpresa, currentUser);
+
+    const result = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${dto.idServicio} FOR UPDATE`;
+      const service = await tx.servicioContratado.findUnique({ where: { idServicio: dto.idServicio }, include: SERVICE_INCLUDE });
+      if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+      this.assertCompany(service.idEmpresa, currentUser);
+      if (dto.idContrato !== undefined && dto.idContrato !== service.idContrato) throw new BadRequestException('El contrato no corresponde al servicio y empresa');
+      const facts = await this.loadFacts(tx, service, currentUser);
+      if (facts.activeRequest) {
+        const replay = await this.replay(tx, facts.activeRequest.idSolicitudRetiro, service);
+        if (replay) return replay;
+        throw new ConflictException({ code: 'WITHDRAWAL_REQUEST_ACTIVE', idSolicitudRetiro: facts.activeRequest.idSolicitudRetiro,
+          message: 'Ya existe una solicitud de retiro activa para este servicio; revísala antes de continuar' });
+      }
+      const eligibility = evaluateWithdrawalEligibility(facts);
+      if (!eligibility.eligible) {
+        throw new BadRequestException({ code: 'WITHDRAWAL_NOT_ELIGIBLE', requisito: eligibility.firstFailure!.code, message: eligibility.firstFailure!.message });
+      }
+      const idContrato = service.idContrato!;
+      const notice = facts.notice!;
+      const request = await tx.servicioRetiroSolicitud.create({ data: {
+        idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato, motivo: WITHDRAWAL_MOTIVE_MOROSITY,
+        fechaSolicitada, estado: 'REGISTRADA', estadoDespachoTecnico: 'PENDIENTE_ENVIO_G3', idUsuarioResponsable: currentUser.idUsuario, observaciones,
+      } });
+      await this.audit(tx, currentUser, 'CREAR_SOLICITUD_RETIRO_SERVICIO', 'solicitud_retiro_servicio', request.idSolicitudRetiro, {
+        idEmpresa: request.idEmpresa, idCliente: request.idCliente, idServicio: request.idServicio, idContrato, idAviso: notice.idEvento,
+        motivo: WITHDRAWAL_MOTIVE_MOROSITY, estado: request.estado, estadoDespachoTecnico: request.estadoDespachoTecnico,
+      });
+      const ticket = await this.tickets.createWithdrawalTicket(tx, {
+        idEmpresa: request.idEmpresa, idCliente: request.idCliente, idServicio: request.idServicio, idContrato,
+        idSolicitudRetiro: request.idSolicitudRetiro, idAviso: notice.idEvento, idUsuario: currentUser.idUsuario,
+        descripcion: `Baja de servicio por morosidad: solicitud de retiro N° ${request.idSolicitudRetiro}. Retiro técnico pendiente; el servicio sigue suspendido.`,
+      });
+      if (await this.storage.findLinkByTicket(tx, ticket.idTicket)) throw new ConflictException('El ticket ya está vinculado a otra solicitud');
+      await this.storage.insertLink(tx, {
+        idSolicitudRetiro: request.idSolicitudRetiro, idTicket: ticket.idTicket, idAviso: notice.idEvento, idEmpresa: request.idEmpresa,
+        idCliente: request.idCliente, idServicio: request.idServicio, idContrato, idUsuarioResponsable: currentUser.idUsuario,
+      });
+      let snapshot;
+      try {
+        snapshot = buildWithdrawalOrderPayload({
+          idEmpresa: request.idEmpresa, idSolicitudRetiro: request.idSolicitudRetiro, idCliente: request.idCliente, idContrato,
+          idServicio: request.idServicio, idTicket: ticket.idTicket, traceId: randomUUID(), rut: service.cliente?.rut ?? null,
+          direccion: facts.address?.direccion ?? null, comuna: facts.address?.comuna ?? null, observaciones,
+        });
+      } catch (error) {
+        if (error instanceof WithdrawalPayloadError) throw new BadRequestException({ code: 'WITHDRAWAL_G3_DATA_INVALID', requisito: error.code, message: error.message });
+        throw error;
+      }
+      const dispatch = await this.storage.insertDispatch(tx, {
+        idSolicitudRetiro: request.idSolicitudRetiro, idEmpresa: request.idEmpresa, requestId: snapshot.request_id, traceId: snapshot.trace_id,
+        payloadSnapshot: snapshot, payloadHash: sha256Payload(snapshot),
+      });
+      await this.audit(tx, currentUser, 'VINCULAR_TICKET_SOLICITUD_RETIRO', 'solicitud_retiro_servicio', request.idSolicitudRetiro, {
+        idTicket: ticket.idTicket, idAviso: notice.idEvento, requestId: snapshot.request_id, traceId: snapshot.trace_id, payloadHash: dispatch.payloadHash,
+      });
+      return { solicitud: request, ticket, despacho: this.publicDispatch(dispatch), repetido: false };
+    });
+
+    // After commit: the request exists even if G3 is down; dispatch is retried with the same snapshot.
+    if (!result.repetido && this.dispatchEnabled()) {
+      try {
+        return { ...result, despacho: (await this.dispatch(result.solicitud.idSolicitudRetiro, currentUser)).despacho };
+      } catch (error) {
+        return { ...result, despachoPendiente: error instanceof Error ? error.message : 'Despacho pendiente' };
+      }
+    }
+    return result;
+  }
+
+  /** Sends (or re-sends, idempotently) the persisted snapshot to G3. Only one process can hold the send. */
+  async dispatch(idSolicitudRetiro: number, currentUser: AuthUser) {
+    if (!this.dispatchEnabled()) {
+      throw new ConflictException({ code: 'WITHDRAWAL_DISPATCH_DISABLED', message: 'El envío de retiros a G3 está deshabilitado en este ambiente; la solicitud queda registrada sin OT.' });
+    }
+    if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
+    const claimed = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      if (CLOSED_REQUEST_STATES.includes(request.estado)) throw new BadRequestException('La solicitud de retiro ya esta cerrada o cancelada');
+      const dispatch = await this.storage.findDispatch(tx, idSolicitudRetiro, true);
+      if (!dispatch) throw new ConflictException('La solicitud no tiene un despacho técnico preparado');
+      if (sha256Payload(dispatch.payloadSnapshot) !== dispatch.payloadHash) {
+        await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'INCONSISTENTE', ultimoErrorCodigo: 'SNAPSHOT_ALTERADO', ultimoErrorStatus: null });
+        return { send: false as const, dispatch: { ...dispatch, estadoDespacho: 'INCONSISTENTE' as const } };
+      }
+      if (dispatch.estadoDespacho === 'REINTENTABLE') {
+        if (dispatch.intentos >= WITHDRAWAL_DISPATCH_MAX_ATTEMPTS) {
+          throw new ConflictException({ code: 'WITHDRAWAL_DISPATCH_ATTEMPTS_EXHAUSTED', message: 'Se agotaron los reintentos automáticos; requiere revisión antes de volver a enviar.' });
+        }
+        const waitMs = BACKOFF_MINUTES[Math.min(dispatch.intentos, BACKOFF_MINUTES.length - 1)] * 60_000;
+        if (dispatch.ultimoIntentoEn && Date.now() - new Date(dispatch.ultimoIntentoEn).getTime() < waitMs) {
+          throw new ConflictException({ code: 'WITHDRAWAL_DISPATCH_RETRY_TOO_SOON', message: 'Espera antes de reintentar el envío a G3.' });
+        }
+      }
+      // Payment before dispatch: no OT is requested for a debt that is no longer collectible.
+      const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio } });
+      const invoices = await this.overdueInvoices(tx, request.idEmpresa, request.idCliente, request.idContrato!);
+      if (!hasOverdueCollectibleDebt(invoices) || service?.estadoOperativo !== 'Suspendido') {
+        throw new ConflictException({ code: 'WITHDRAWAL_DEBT_REGULARIZED', accion: 'CANCELAR_SOLICITUD',
+          message: 'La deuda ya no es exigible o el servicio no está suspendido: no se envió la orden de retiro. Cancela la solicitud.' });
+      }
+      const taken = await this.storage.claimDispatch(tx, idSolicitudRetiro, new Date(Date.now() - STALE_SENDING_MS));
+      return taken ? { send: true as const, dispatch: taken } : { send: false as const, dispatch };
+    });
+    if (!claimed.send) return { despacho: this.publicDispatch(claimed.dispatch), enviado: false };
+
+    const reply = await this.g3.createOrder(claimed.dispatch.payloadSnapshot as never);
+    const outcome = interpretWithdrawalOrderReply(reply, { requestId: claimed.dispatch.requestId, traceId: claimed.dispatch.traceId });
+    const stored = await this.prisma.$transaction(async tx => {
+      if (outcome.kind === 'ACEPTADA') {
+        await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'ACEPTADA', idOtG3: outcome.idOt,
+          estadoOt: outcome.estado && ['PENDIENTE', 'ASIGNADA', 'EN_CURSO'].includes(outcome.estado) ? outcome.estado : claimed.dispatch.estadoOt,
+          ultimoErrorCodigo: null, ultimoErrorStatus: null });
+        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'EN_GESTION', estadoDespachoTecnico: 'ENVIADA_G3' } });
+      } else {
+        const state = outcome.kind === 'REINTENTABLE' ? 'REINTENTABLE' : outcome.kind === 'RECHAZADA' ? 'RECHAZADA' : 'INCONSISTENTE';
+        await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: state, ultimoErrorCodigo: outcome.code, ultimoErrorStatus: outcome.status });
+        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estadoDespachoTecnico: state === 'REINTENTABLE' ? 'ENVIO_G3_PENDIENTE' : 'REVISION_G3' } });
+      }
+      await this.audit(tx, currentUser, 'DESPACHAR_RETIRO_G3', 'solicitud_retiro_servicio', idSolicitudRetiro, {
+        requestId: claimed.dispatch.requestId, intento: claimed.dispatch.intentos, resultado: outcome.kind,
+        ...(outcome.kind === 'ACEPTADA' ? { idOtG3: outcome.idOt, duplicado: outcome.duplicado } : { codigo: outcome.code, status: outcome.status }),
+      });
+      return this.storage.findDispatch(tx, idSolicitudRetiro);
+    });
+    return { despacho: this.publicDispatch(stored!), enviado: true, resultado: outcome };
+  }
+
+  /** Authenticated GET of the OT (on demand, rate limited). COMPLETADA only means approved on G3's side. */
+  async refreshOrder(idSolicitudRetiro: number, currentUser: AuthUser) {
+    const dispatch = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      return this.storage.findDispatch(tx, idSolicitudRetiro);
+    });
+    if (!dispatch?.idOtG3 || !['ACEPTADA', 'CANCELACION_NO_APLICABLE', 'CANCELADA'].includes(dispatch.estadoDespacho)) {
+      throw new ConflictException({ code: 'WITHDRAWAL_OT_NOT_AVAILABLE', message: 'La solicitud aún no tiene una OT aceptada por G3.' });
+    }
+    if (dispatch.estadoOtLeidoEn && Date.now() - new Date(dispatch.estadoOtLeidoEn).getTime() < ORDER_READ_MIN_INTERVAL_MS) {
+      return { despacho: this.publicDispatch(dispatch), consultado: false };
+    }
+    if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
+    const outcome = interpretWithdrawalOrderRead(await this.g3.readOrder(dispatch.idOtG3, dispatch.idEmpresa), { idOt: dispatch.idOtG3, idEmpresa: dispatch.idEmpresa });
+    if (outcome.kind !== 'LEIDA') throw new ConflictException({ code: outcome.code, message: outcome.message });
+    const stored = await this.prisma.$transaction(async tx => {
+      const fresh = await this.storage.findDispatch(tx, idSolicitudRetiro, true);
+      await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoOt: outcome.estado, estadoOtLeidoEn: new Date(),
+        fechaCompletadaG3: outcome.fechaCompletada ? new Date(outcome.fechaCompletada) : null });
+      if (fresh?.estadoOt !== outcome.estado) {
+        await this.audit(tx, currentUser, 'ACTUALIZAR_ESTADO_OT_RETIRO_G3', 'solicitud_retiro_servicio', idSolicitudRetiro,
+          { idOtG3: dispatch.idOtG3, estadoAnterior: fresh?.estadoOt ?? null, estadoNuevo: outcome.estado });
+      }
+      return this.storage.findDispatch(tx, idSolicitudRetiro);
+    });
+    return { despacho: this.publicDispatch(stored!), consultado: true };
+  }
+
+  /**
+   * Cancels the withdrawal. If anything was ever sent, G3 is asked first (a timed-out attempt may have created
+   * the OT there). G3 only cancels before PENDIENTE_APROBACION; a late 409 is reported, never hidden.
+   * G8 never touches the NAP port: G3 manages it.
+   */
+  async cancel(idSolicitudRetiro: number, motivo: string, currentUser: AuthUser) {
+    const reason = motivo?.trim() ?? '';
+    if (reason.length < 5 || reason.length > 300) throw new BadRequestException('Indica el motivo de la cancelación (5 a 300 caracteres)');
+    const current = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const dispatch = await this.storage.findDispatch(tx, idSolicitudRetiro, true);
+      if (request.estado === 'CANCELADA') return { request, dispatch, done: true as const };
+      if (request.estado === 'CERRADA') throw new BadRequestException('La solicitud ya está cerrada');
+      if (!dispatch) throw new ConflictException('La solicitud no tiene un despacho técnico preparado');
+      if (dispatch.estadoDespacho === 'ENVIANDO') {
+        throw new ConflictException({ code: 'WITHDRAWAL_DISPATCH_IN_FLIGHT', message: 'Hay un envío a G3 en curso; vuelve a intentar la cancelación en unos minutos.' });
+      }
+      if (dispatch.intentos === 0) {
+        // Never sent: nothing exists in G3, cancel locally.
+        await this.closeAsCancelled(tx, idSolicitudRetiro, reason, currentUser, { remoto: false });
+        return { request, dispatch, done: true as const };
+      }
+      return { request, dispatch, done: false as const };
+    });
+    if (current.done) return { solicitud: await this.prisma.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } }), cancelada: true };
+    if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
+    const dispatch = current.dispatch!;
+    const outcome = interpretWithdrawalCancelReply(await this.g3.cancelOrder(dispatch.requestId, { motivo: reason }), dispatch.requestId);
+    const neverCreated = outcome.kind === 'RECHAZADA' && outcome.status === 404 && dispatch.estadoDespacho !== 'ACEPTADA';
+    if (outcome.kind === 'CANCELADA' || neverCreated) {
+      return this.prisma.$transaction(async tx => {
+        await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+        await this.closeAsCancelled(tx, idSolicitudRetiro, reason, currentUser, { remoto: true, idOtG3: dispatch.idOtG3, codigo: outcome.kind === 'CANCELADA' ? 'CANCELADA' : 'SOLICITUD_NO_ENCONTRADA' });
+        return { solicitud: await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } }), cancelada: true };
+      });
+    }
+    if (outcome.kind === 'NO_APLICABLE') {
+      // Persist the late answer FIRST (committed), then report it: throwing inside the transaction would roll it back.
+      await this.prisma.$transaction(async tx => {
+        await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+        await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'CANCELACION_NO_APLICABLE', ultimoErrorCodigo: outcome.code, ultimoErrorStatus: outcome.status });
+        await this.audit(tx, currentUser, 'CANCELACION_RETIRO_NO_APLICABLE', 'solicitud_retiro_servicio', idSolicitudRetiro, { idOtG3: dispatch.idOtG3, codigo: outcome.code });
+      });
+      throw new ConflictException({ code: 'WITHDRAWAL_CANCEL_TOO_LATE', message: outcome.message });
+    }
+    throw new ConflictException({ code: outcome.code, message: outcome.message });
+  }
+
+  // ----- helpers -----
+
+  private async closeAsCancelled(tx: Db, idSolicitudRetiro: number, reason: string, currentUser: AuthUser, detail: Record<string, unknown>) {
+    const before = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
+    await this.storage.updateDispatch(tx, idSolicitudRetiro, { estadoDespacho: 'CANCELADA', ...(detail.remoto ? { estadoOt: 'CANCELADA' } : {}) });
+    await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CANCELADA', estadoDespachoTecnico: 'CANCELADA',
+      observaciones: `${before?.observaciones ?? ''}\nCancelación: ${reason}`.trim() } });
+    await this.audit(tx, currentUser, 'CANCELAR_SOLICITUD_RETIRO', 'solicitud_retiro_servicio', idSolicitudRetiro,
+      { estadoAnterior: before?.estado ?? null, motivo: reason, ...detail });
+  }
+
+  private async replay(tx: Db, idSolicitudRetiro: number, service: ServiceRow) {
+    const link = await this.storage.findLinkByRequest(tx, idSolicitudRetiro);
+    const dispatch = await this.storage.findDispatch(tx, idSolicitudRetiro);
+    if (!link || !dispatch || link.idServicio !== service.idServicio || link.idEmpresa !== service.idEmpresa) return null;
+    const solicitud = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
+    const ticket = await tx.ticket.findUnique({ where: { idTicket: link.idTicket } });
+    return solicitud && ticket ? { solicitud, ticket, despacho: this.publicDispatch(dispatch), repetido: true } : null;
+  }
+
+  private async requestForUpdate(tx: Db, idSolicitudRetiro: number, currentUser: AuthUser) {
+    const request = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
+    if (!request) throw new NotFoundException('Solicitud de retiro no encontrada');
+    this.assertCompany(request.idEmpresa, currentUser);
+    if (request.motivo.toUpperCase() !== WITHDRAWAL_MOTIVE_MOROSITY) throw new BadRequestException('Esta operación aplica solo a retiros por morosidad');
+    await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${request.idServicio} FOR UPDATE`;
+    return (await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } }))!;
+  }
+
+  private async loadFacts(db: Db, service: ServiceRow, currentUser: AuthUser): Promise<WithdrawalFacts> {
+    const idEmpresa = service.idEmpresa!;
+    const [activeRequest, invoices, notice] = await Promise.all([
+      db.servicioRetiroSolicitud.findFirst({ where: { idEmpresa, idServicio: service.idServicio, estado: { notIn: CLOSED_REQUEST_STATES } } }),
+      service.idContrato ? this.overdueInvoices(db, idEmpresa, service.idCliente, service.idContrato) : Promise.resolve([]),
+      service.idContrato ? db.eventoGestionComercial.findFirst({ where: { idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio,
+        idContrato: service.idContrato, tipo: 'AVISO_PREVIO_RETIRO' }, orderBy: { idEvento: 'desc' } }) : Promise.resolve(null),
+    ]);
+    const address = service.direccion
+      ? { direccion: service.direccion.direccionCompleta, comuna: service.direccion.comuna }
+      : service.contrato ? { direccion: service.contrato.direccionInstalacion, comuna: service.contrato.comunaInstalacion } : null;
+    return {
+      service: { idServicio: service.idServicio, idCliente: service.idCliente, idEmpresa: service.idEmpresa, idContrato: service.idContrato,
+        estadoOperativo: service.estadoOperativo,
+        contrato: service.contrato ? { idContrato: service.contrato.idContrato, idCliente: service.contrato.idCliente, idEmpresa: service.contrato.idEmpresa } : null },
+      companyAllowed: isAdministrator(currentUser.roles) || currentUser.idEmpresa === service.idEmpresa,
+      activeRequest: activeRequest ? { idSolicitudRetiro: activeRequest.idSolicitudRetiro, estado: activeRequest.estado } : null,
+      debt: overdueDebtSummary(invoices),
+      notice: notice ? { idEvento: notice.idEvento, fecha: notice.fecha } : null,
+      rut: service.cliente?.rut ?? null,
+      address,
+    };
+  }
+
+  overdueInvoices(db: Db, idEmpresa: number, idCliente: number, idContrato: number) {
+    return db.factura.findMany({ where: { idContrato, contrato: { idEmpresa, idCliente } },
+      include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } } } } });
+  }
+
+  private async assertStorage(tx: Db) {
+    const capabilities = await this.storage.capabilities(tx);
+    if (!capabilities.ticketLink || !capabilities.g3Dispatch) {
+      throw new ConflictException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE',
+        message: 'La baja por morosidad integrada requiere el almacenamiento privado g8_retiros aprobado y aplicado; no se modificó nada.' });
+    }
+    return capabilities;
+  }
+
+  publicDispatch(dispatch: WithdrawalDispatch) {
+    return {
+      requestId: dispatch.requestId, estadoDespacho: dispatch.estadoDespacho, intentos: dispatch.intentos, idOtG3: dispatch.idOtG3,
+      estadoOt: dispatch.estadoOt, estadoOtLeidoEn: dispatch.estadoOtLeidoEn, ultimoErrorCodigo: dispatch.ultimoErrorCodigo,
+      cancelable: dispatch.estadoOt === null || G3_CANCELLABLE_STATES.includes(dispatch.estadoOt as never),
+      cierreRecibido: Boolean(dispatch.cierreClave), recepcionSincronizada: Boolean(dispatch.recepcionClaveEvento), aplicado: Boolean(dispatch.aplicadoEn),
+    };
+  }
+
+  private audit(tx: Db, user: AuthUser, accion: string, entidadAfectada: string, idEntidadAfectada: number, valorNuevo: Record<string, unknown>) {
+    return this.auditService.record({ idUsuario: user.idUsuario, accion, entidadAfectada, idEntidadAfectada, valorNuevo: valorNuevo as Prisma.InputJsonValue }, tx);
+  }
+
+  private assertCompany(idEmpresa: number, currentUser: AuthUser) {
+    if (!isAdministrator(currentUser.roles) && currentUser.idEmpresa !== idEmpresa) throw new ForbiddenException('El registro no pertenece a tu empresa');
+  }
+}
+

@@ -104,6 +104,17 @@ export class CreateServiceWithdrawalDto {
   @IsOptional() @IsString() @MaxLength(1000) observaciones?: string;
 }
 
+export class InitiateServiceWithdrawalDto {
+  @Type(() => Number) @IsInt() @Min(1) idServicio!: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
+  @IsString() @Matches(/\S/) @MaxLength(1000) observaciones!: string;
+  @IsOptional() @IsDateString() fechaSolicitada?: string;
+}
+
+export class CancelServiceWithdrawalDto {
+  @IsString() @Matches(/\S/) @MaxLength(300) motivo!: string;
+}
+
 export class UpdateServiceWithdrawalDto {
   @IsIn(['REGISTRADA', 'EN_GESTION', 'CANCELADA', 'CERRADA']) estado!: string;
   @IsOptional() @IsString() @MaxLength(1000) observaciones?: string;

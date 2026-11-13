@@ -9,9 +9,10 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
 import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
-import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto, InitiateServiceWithdrawalDto, CancelServiceWithdrawalDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
+import { WithdrawalWorkflowService } from './withdrawal-workflow.service';
 import { independentRepairAcknowledgement, installationClosure } from './g3-closure-contract';
 
 function receiveApprovedClosure(processor: G3ClosureProcessor, dto: G3ClosureDto, response?: Response) {
@@ -126,7 +127,37 @@ export class G3CanonicalWebhookController {
 @Controller('service-withdrawals')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ServiceWithdrawalController {
-  constructor(private readonly withdrawals: ServiceWithdrawalService) {}
+  constructor(private readonly withdrawals: ServiceWithdrawalService, private readonly workflow: WithdrawalWorkflowService) {}
+
+  @Get('eligibility/:idServicio')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  eligibility(@Param('idServicio', ParseIntPipe) idServicio: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.eligibility(idServicio, user);
+  }
+
+  @Post('initiate')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  initiate(@Body() dto: InitiateServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.initiate(dto, user);
+  }
+
+  @Post(':id/dispatch')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  dispatch(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.dispatch(id, user);
+  }
+
+  @Post(':id/order-status')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  refreshOrder(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.refreshOrder(id, user);
+  }
+
+  @Post(':id/cancel')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.cancel(id, dto.motivo, user);
+  }
 
   @Get()
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
