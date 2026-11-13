@@ -9,7 +9,7 @@ import request from 'supertest';
 import { randomBytes } from 'node:crypto';
 import { ContractSignatureController, PublicSignatureController, SignaturePublicGuard } from './e-signature.controller';
 import { ESignatureService } from './e-signature.service';
-import { SIGNATURE_CONSENT_VERSION } from './e-signature.config';
+import { DEMO_SIGNATURE_CONSENT_VERSION, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 
 describe('Barrera y DTO públicos de firma', () => {
   let app: INestApplication;
@@ -56,6 +56,17 @@ describe('Barrera y DTO públicos de firma', () => {
       await request(app.getHttpServer()).post('/contract-signatures/sign').send({ ...body, ...extra }).expect(400);
     }
     expect(service.sign).not.toHaveBeenCalled();
+  });
+  it('el DTO conserva la validación del código normal y delega el consentimiento demo al servicio', async () => {
+    await start();
+    const body = { token, hashOriginal: 'a'.repeat(64), consent: true };
+    await request(app.getHttpServer()).post('/contract-signatures/sign')
+      .send({ ...body, consentVersion: SIGNATURE_CONSENT_VERSION }).expect(400);
+    expect(service.sign).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).post('/contract-signatures/sign')
+      .send({ ...body, consentVersion: DEMO_SIGNATURE_CONSENT_VERSION }).expect(201);
+    expect(service.sign.mock.calls[0].slice(0, 5))
+      .toEqual([token, undefined, body.hashOriginal, true, DEMO_SIGNATURE_CONSENT_VERSION]);
   });
 });
 

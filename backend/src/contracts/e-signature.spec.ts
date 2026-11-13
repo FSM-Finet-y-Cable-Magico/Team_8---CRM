@@ -36,6 +36,29 @@ describe('Configuración de firma y compatibilidad apagada', () => {
     expect(() => signatureSettings(new ConfigService({ ...settings(), NODE_ENV: 'production',
       CONTRACT_SIGNATURE_PUBLIC_URL: 'https://crm.example.invalid/' }))).toThrow('ACTIVATION_NOT_APPROVED');
   });
+  it('la firma sin código se habilita explícitamente solo con servicios de demostración', () => {
+    const demo = { ...settings(), CONTRACT_SIGNATURE_DEMO_WITHOUT_CODE: 'true', MAIL_PROVIDER: 'mock',
+      DATABASE_URL: 'postgresql://qa@finet-firma-qa-db/finet_firma_qa' };
+    expect(signatureSettings(new ConfigService(settings()))?.demo).toBe(false);
+    expect(signatureSettings(new ConfigService(demo))?.demo).toBe(true);
+    for (const override of [
+      { NODE_ENV: 'production', MAIL_PROVIDER: 'smtp', CONTRACT_SIGNATURE_PUBLIC_URL: 'https://localhost/',
+        CONTRACT_SIGNATURE_LEGAL_APPROVED: 'true', CONTRACT_SIGNATURE_EVIDENCE_BACKUP_CONFIRMED: 'true' },
+      { CONTRACT_SIGNATURE_PUBLIC_URL: 'https://crm.example.invalid/' },
+      { DATABASE_URL: 'postgresql://qa@localhost/finet_global_validacion' },
+      { DATABASE_URL: 'postgresql://qa@remote.example.invalid/finet_firma_qa' },
+    ]) {
+      expect(() => signatureSettings(new ConfigService({ ...demo, ...override }))).toThrow('DEMO_ISOLATION_REQUIRED');
+    }
+    expect(() => signatureSettings(new ConfigService({ ...demo, MAIL_PROVIDER: 'smtp', SMTP_COMPANIES: '[]' })))
+      .toThrow('DEMO_MAIL_REQUIRED');
+    const mailpit = { ...demo, MAIL_PROVIDER: 'smtp', CONTRACT_SIGNATURE_COMPANIES: '[1]',
+      SMTP_COMPANIES: '[{"idEmpresa":1,"alias":"QA"}]', SMTP_QA_HOST: 'mailpit', SMTP_QA_PORT: '1025',
+      SMTP_QA_STARTTLS: 'false', SMTP_QA_ALLOW_INSECURE_LOCAL: 'true', SMTP_QA_FROM: 'qa@example.invalid' };
+    expect(signatureSettings(new ConfigService(mailpit))?.demo).toBe(true);
+    expect(() => signatureSettings(new ConfigService({ ...mailpit, SMTP_QA_HOST: 'smtp.example.invalid',
+      SMTP_QA_STARTTLS: 'true' }))).toThrow('DEMO_MAIL_REQUIRED');
+  });
   it('el presupuesto por IP devuelve 429 y las ventanas se reinician', () => {
     const guard = new SignaturePublicGuard(new ConfigService(settings()));
     const context = { switchToHttp: () => ({ getRequest: () => ({ ip: '127.0.0.1', socket: {} }),
