@@ -7,8 +7,27 @@ import { G3ClosurePayload } from './g3-integration.types';
 const fields = ['id_ot', 'id_empresa', 'request_id', 'trace_id', 'id_prospecto', 'id_contrato', 'id_plan',
   'equipos_instalados', 'equipos_retirados', 'tipo_ot', 'clave_idempotencia', 'fecha_completada', 'id_tecnico',
   'usuario_tecnico', 'potencia_optica_dbm', 'resultado_llamada', 'resuelto_remotamente', 'materiales',
-  'cliente', 'direccion', 'categoria_falla', 'categoria_falla_otro'] as const;
+  'cliente', 'direccion', 'categoria_falla', 'categoria_falla_otro',
+  'equipos_faltantes', 'falla_reportada', 'solucion_aplicada', 'resultado',
+  'id_cliente_externo', 'id_servicio', 'id_solicitud_retiro', 'id_ticket_externo'] as const;
 const references = ['request_id', 'trace_id', 'id_prospecto', 'id_contrato', 'id_plan'] as const;
+// Correlation of a BAJA (withdrawal) OT: never valid on an installation or repair closure.
+const withdrawalReferences = ['id_cliente_externo', 'id_servicio', 'id_solicitud_retiro', 'id_ticket_externo'] as const;
+// Repair data G3 sends for G1: only a REPARACION may carry it.
+const repairData = ['falla_reportada', 'solucion_aplicada', 'resultado'] as const;
+const present = (value: unknown) => value !== undefined && value !== null;
+
+/**
+ * G3 always sends the shared fields, in null/[] when the OT type does not use them. Dropping
+ * those empty values keeps the closure fingerprint identical to the one stored for closures
+ * received before 08-11-2026, so a re-delivered historical closure is not a false 409.
+ */
+function withoutEmptySharedFields(dto: G3ClosureDto): G3ClosureDto {
+  const copy = { ...dto } as Record<string, unknown>;
+  for (const field of [...repairData, ...withdrawalReferences]) if (copy[field] === null) delete copy[field];
+  if (Array.isArray(copy.equipos_faltantes) && copy.equipos_faltantes.length === 0) delete copy.equipos_faltantes;
+  return copy as unknown as G3ClosureDto;
+}
 
 function validatedClosure(input: object): G3ClosureDto {
   const dto = plainToInstance(G3ClosureDto, input);
@@ -18,7 +37,10 @@ function validatedClosure(input: object): G3ClosureDto {
   if (dto.clave_idempotencia !== undefined && dto.clave_idempotencia !== `${dto.id_ot}:${dto.fecha_completada}`) {
     throw new BadRequestException('La clave_idempotencia no corresponde a la OT y fecha del cierre');
   }
-  return dto;
+  if (withdrawalReferences.some(field => present(dto[field]))) {
+    throw new BadRequestException('Un cierre de instalacion o reparacion no puede declarar referencias de baja');
+  }
+  return withoutEmptySharedFields(dto);
 }
 
 export function independentRepairAcknowledgement(input: G3ClosureDto) {
@@ -35,6 +57,9 @@ export function independentRepairAcknowledgement(input: G3ClosureDto) {
 export function installationClosure(input: object): G3ClosurePayload {
   const dto = validatedClosure(input);
   if (dto.tipo_ot === 'REPARACION') throw new BadRequestException('Una reparacion no es un cierre de instalacion G8');
+  if (repairData.some(field => present(dto[field]))) {
+    throw new BadRequestException('Un cierre de instalacion no puede declarar datos de reparacion');
+  }
   return { ...dto } as G3ClosurePayload;
 }
 

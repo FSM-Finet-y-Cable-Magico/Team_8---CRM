@@ -14,6 +14,7 @@ import { G3_INTEGRATION_CLIENT } from './g3-integration.types';
 import { sha256Payload } from './g3-integration.utils';
 import { InstallationActivationService } from './installation-activation.service';
 import { InstallationIntegrationService } from './installation-integration.service';
+import { g3InstallationClosure, g3RepairClosure, g3WithdrawalClosure } from './__fixtures__/g3-closure-8a8e5dd0';
 
 // Real HTTP controllers, validation, S2S guard, tracking service and closure processor.
 // Only storage, commercial activation and the G3 transport are simulated.
@@ -299,5 +300,73 @@ describe('HTTP G3: approval-only, correlacion e idempotencia', () => {
     expect(store.events.create).not.toHaveBeenCalled();
     expect(store.tracking.fechaCierreProcesado).toBeNull();
     expect(store.tracking.estadoIntegracion).not.toBe('COMPLETADA');
+  });
+
+  describe('compatibilidad con el payload real de G3 8a8e5dd0 (400 en REPARACION desde 08-11-2026)', () => {
+    it.each(['/api/integraciones/fsm/ordenes/912/cierre', '/api/integrations/g3/events/work-order-closed'])(
+      'REPARACION real (datos de reparacion, con_dano, campos BAJA en null) recibe acuse 200 sin escrituras: %s', async url => {
+        await start();
+        const result = await post(url).send(g3RepairClosure()).expect(200);
+        expect(result.body).toMatchObject({ received: true, processed: false, activated: false, code: 'G3_REPAIR_OUT_OF_INSTALLATION_SCOPE', id_ot: 912 });
+        expect(store.activation.activate).not.toHaveBeenCalled();
+        expect(store.events.create).not.toHaveBeenCalled();
+        expect(store.prisma.integracionInstalacionG3.update).not.toHaveBeenCalled();
+        expect(store.audit.record).not.toHaveBeenCalled();
+      });
+
+    it('INSTALACION real de G8 con los campos compartidos nuevos activa una sola vez', async () => {
+      await start();
+      const result = await post().send(g3InstallationClosure()).expect(201);
+      expect(result.body.duplicate).toBe(false);
+      expect(store.activation.activate).toHaveBeenCalledTimes(1);
+      await post().send(g3InstallationClosure()).expect(201);
+      expect(store.activation.activate).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['INSTALACION con correlacion de BAJA', () => ({ ...g3InstallationClosure(), id_servicio: 61, id_solicitud_retiro: 15 })],
+      ['INSTALACION con datos de reparacion', () => ({ ...g3InstallationClosure(), falla_reportada: 'X', resultado: 'RESUELTO' })],
+      ['faltante sin motivo', () => ({ ...g3RepairClosure(), equipos_faltantes: [{ numero_serie: 'QA-X' }] })],
+      ['REPARACION con referencias de instalacion', () => ({ ...g3RepairClosure(), request_id: 'qa-request-1' })],
+      ['REPARACION con correlacion de BAJA', () => ({ ...g3RepairClosure(), id_solicitud_retiro: 15 })],
+      ['campo desconocido', () => ({ ...g3RepairClosure(), campo_inventado: true })],
+      ['equipo con campo desconocido', () => ({ ...g3RepairClosure(), equipos_retirados: [{ numero_serie: 'QA-1', extra: 1 }] })],
+      ['resultado de reparacion fuera de catalogo', () => ({ ...g3RepairClosure(), resultado: 'INVENTADO' })],
+      ['con_dano no booleano', () => ({ ...g3RepairClosure(), equipos_retirados: [{ numero_serie: 'QA-1', con_dano: 'si' }] })],
+    ])('sigue rechazando con 400: %s', async (_name, build) => {
+      await start();
+      await post().send(build()).expect(400);
+      expect(store.activation.activate).not.toHaveBeenCalled();
+      expect(store.events.create).not.toHaveBeenCalled();
+    });
+
+    it('un cierre historico (sin campos nuevos) y su reenvio actual con esos campos en null son el mismo evento', async () => {
+      await start();
+      await post().send(store.payload).expect(201);
+      const hash = store.getEvent().payloadHash;
+      const resent = { ...store.payload, equipos_faltantes: [], falla_reportada: null, solucion_aplicada: null, resultado: null,
+        id_cliente_externo: null, id_servicio: null, id_solicitud_retiro: null, id_ticket_externo: null };
+      const result = await post().send(resent).expect(201);
+      expect(result.body.duplicate).toBe(true);
+      expect(store.getEvent().payloadHash).toBe(hash);
+      expect(store.activation.activate).toHaveBeenCalledTimes(1);
+    });
+
+    it('INSTALACION con faltantes declarados se acepta y la evidencia forma parte de la huella', async () => {
+      await start();
+      const withMissing = { ...store.payload, equipos_faltantes: [{ numero_serie: 'QA-X', motivo: 'No entregado' }] };
+      await post().send(withMissing).expect(201);
+      expect(store.activation.activate).toHaveBeenCalledTimes(1);
+      await post().send(store.payload).expect(409);
+    });
+
+    it('BAJA no entra al flujo de instalacion ni de reparacion', async () => {
+      await start();
+      await post('/api/integraciones/fsm/ordenes/930/cierre').send(g3WithdrawalClosure()).expect(res => {
+        expect(res.status).not.toBe(201);
+      });
+      expect(store.activation.activate).not.toHaveBeenCalled();
+      expect(store.prisma.integracionInstalacionG3.update).not.toHaveBeenCalled();
+    });
   });
 });
