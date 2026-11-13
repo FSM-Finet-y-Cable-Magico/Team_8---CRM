@@ -10,7 +10,9 @@ import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt, overdueDebtSummary 
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { TicketsService } from '../tickets/tickets.service';
-import { G1_RECEPTION_CLIENT, G1IntegrationError, G1ReceptionClient } from '../g1-integration/g1-integration.types';
+import { G1_INVENTORY_CLIENT, G1_RECEPTION_CLIENT, G1IntegrationError, G1InventoryClient, G1ReceptionClient } from '../g1-integration/g1-integration.types';
+import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
+import { assessWithdrawalClosure, paymentDuringWithdrawal } from './withdrawal-closure';
 import { parseG1Reception } from './g1-reception-contract';
 import { G3WithdrawalClosure } from './g3-withdrawal-closure-contract';
 import {
@@ -53,6 +55,7 @@ export class WithdrawalWorkflowService {
     @Inject(G3_WITHDRAWAL_CLIENT) private readonly g3: G3WithdrawalClient,
     @Optional() @Inject(WITHDRAWAL_STORAGE) storage?: WithdrawalStorage,
     @Optional() @Inject(G1_RECEPTION_CLIENT) private readonly g1?: G1ReceptionClient,
+    @Optional() @Inject(G1_INVENTORY_CLIENT) private readonly g1Inventory?: Pick<G1InventoryClient, 'getEquipmentByService'>,
   ) {
     this.storage = storage ?? postgresWithdrawalStorage;
   }
@@ -222,7 +225,7 @@ export class WithdrawalWorkflowService {
   }
 
   /** Authenticated GET of the OT (on demand, rate limited). COMPLETADA only means approved on G3's side. */
-  async refreshOrder(idSolicitudRetiro: number, currentUser: AuthUser | null) {
+  async refreshOrder(idSolicitudRetiro: number, currentUser: AuthUser | null, force = false) {
     const dispatch = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
       await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
@@ -231,7 +234,7 @@ export class WithdrawalWorkflowService {
     if (!dispatch?.idOtG3 || !['ACEPTADA', 'CANCELACION_NO_APLICABLE', 'CANCELADA'].includes(dispatch.estadoDespacho)) {
       throw new ConflictException({ code: 'WITHDRAWAL_OT_NOT_AVAILABLE', message: 'La solicitud aún no tiene una OT aceptada por G3.' });
     }
-    if (dispatch.estadoOtLeidoEn && Date.now() - new Date(dispatch.estadoOtLeidoEn).getTime() < ORDER_READ_MIN_INTERVAL_MS) {
+    if (!force && dispatch.estadoOtLeidoEn && Date.now() - new Date(dispatch.estadoOtLeidoEn).getTime() < ORDER_READ_MIN_INTERVAL_MS) {
       return { despacho: this.publicDispatch(dispatch), consultado: false };
     }
     if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
@@ -401,6 +404,103 @@ export class WithdrawalWorkflowService {
       throw new ConflictException({ code: 'G1_RECEPCION_DISTINTA', message: 'Inventario devolvió otro contenido para la misma clave de evento; se conserva la versión registrada.' });
     }
     return { estado: 'SINCRONIZADA' as const, version, claveEvento: reception.claveEvento, estadoRecepcion: reception.estadoRecepcion, equipos: reception.equipos.length };
+  }
+
+  finalizeEnabled() {
+    return (this.config.get<string>('WITHDRAWAL_FINALIZE_ENABLED') ?? '').trim().toLowerCase() === 'true';
+  }
+
+  /**
+   * Effective withdrawal ("baja efectiva") for morosity. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
+   * Outside any transaction: a forced GET of the OT (G3 must report COMPLETADA) and a read of the devices G1
+   * still associates with the service. Then, in ONE transaction under locks: debt and suspension are recomputed,
+   * the evidence is reconciled, and only if everything holds: service -> Baja, contract -> Baja only without other
+   * operational services, customer status recomputed with every service of both companies, request CERRADA,
+   * evidence marked applied and audited. Any failure (write or audit) rolls the whole operation back.
+   * Payments, invoices, signed documents, G1 inventory and G2/G3 records are never written. Idempotent.
+   */
+  async finalize(idSolicitudRetiro: number, currentUser: AuthUser) {
+    if (!this.finalizeEnabled()) {
+      throw new ConflictException({ code: 'WITHDRAWAL_FINALIZE_DISABLED', message: 'La baja efectiva por morosidad está deshabilitada en este ambiente; no se modificó nada.' });
+    }
+    const current = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      return { request, dispatch: await this.storage.findDispatch(tx, idSolicitudRetiro) };
+    });
+    if (current.request.estado === 'CERRADA' && current.dispatch?.aplicadoEn) {
+      return { solicitud: current.request, aplicado: false, yaAplicado: true, idServicio: current.request.idServicio };
+    }
+    if (!current.dispatch?.idOtG3) throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: 'No hay una OT de retiro aceptada por G3', motivos: [{ code: 'SIN_OT' }] });
+    // Fresh approval from G3 (bypasses the read cache) and current G1 association of devices with the service.
+    await this.refreshOrder(idSolicitudRetiro, currentUser, true);
+    if (!this.g1Inventory) throw new ConflictException({ code: 'INTEGRACION_G1_NO_CONFIGURADA', message: 'No se puede verificar el inventario asociado al servicio; no se aplicó la baja.' });
+    let activeEquipment: string[];
+    try {
+      activeEquipment = (await this.g1Inventory.getEquipmentByService(current.request.idServicio, current.request.idEmpresa)).data
+        .map(unit => String(unit.numero_serie).trim().toUpperCase());
+    } catch {
+      throw new ConflictException({ code: 'G1_INVENTARIO_NO_DISPONIBLE', message: 'No fue posible verificar en inventario que el servicio no conserve equipos; no se aplicó la baja.' });
+    }
+
+    return this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const dispatch = (await this.storage.findDispatch(tx, idSolicitudRetiro, true))!;
+      const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio }, include: { contrato: true } });
+      if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+      if (request.estado === 'CERRADA' && service.estadoOperativo === 'Baja' && dispatch.aplicadoEn) {
+        return { solicitud: request, aplicado: false, yaAplicado: true, idServicio: service.idServicio };
+      }
+      if (CLOSED_REQUEST_STATES.includes(request.estado)) throw new BadRequestException('La solicitud de retiro ya esta cerrada o cancelada');
+      const link = await this.storage.findLinkByRequest(tx, idSolicitudRetiro);
+      if (!link || link.idServicio !== service.idServicio) throw new ConflictException('La solicitud no tiene un ticket «Baja de servicio» vinculado; no se aplicó la baja');
+      if (service.idCliente !== request.idCliente || service.idContrato !== request.idContrato || service.idEmpresa !== request.idEmpresa) {
+        throw new ConflictException('Las relaciones del servicio cambiaron; vuelve a consultar');
+      }
+      if (service.estadoOperativo !== 'Suspendido') {
+        throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: `El servicio está ${service.estadoOperativo}; la baja por morosidad exige que siga suspendido.` });
+      }
+      // Debt recomputed right before applying: a payment after the physical withdrawal never applies the baja
+      // automatically nor reactivates; it requires a commercial decision with the technical evidence.
+      if (!hasOverdueCollectibleDebt(await this.overdueInvoices(tx, service.idEmpresa, service.idCliente, service.idContrato!))) {
+        const action = paymentDuringWithdrawal('DESPUES_DEL_RETIRO', false);
+        throw new ConflictException({ code: 'WITHDRAWAL_DEBT_REGULARIZED', accion: action.accion, message: action.message });
+      }
+      const assessment = assessWithdrawalClosure({
+        evidence: { idOtG3: dispatch.idOtG3, estadoOt: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
+          equiposRetirados: dispatch.equiposRetirados, equiposFaltantes: dispatch.equiposFaltantes },
+        idServicio: service.idServicio, receptions: await this.storage.findReceptions(tx, idSolicitudRetiro), activeEquipment,
+      });
+      if (assessment.outcome !== 'APLICAR_BAJA') {
+        throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons });
+      }
+      const updated = await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: { estadoOperativo: 'Baja' } });
+      let contratoDeBaja = false;
+      if (service.idContrato) {
+        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${service.idContrato} FOR UPDATE`;
+        const operational = await tx.servicioContratado.count({ where: { idContrato: service.idContrato, estadoOperativo: { not: 'Baja' } } });
+        if (operational === 0) { await tx.contrato.update({ where: { idContrato: service.idContrato }, data: { estado: 'Baja' } }); contratoDeBaja = true; }
+      }
+      await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${service.idCliente} FOR UPDATE`;
+      const customer = await tx.cliente.findUnique({ where: { idCliente: service.idCliente }, include: { contratos: { select: { estado: true } }, servicios: { select: { estadoOperativo: true } } } });
+      let estadoCliente = customer?.estado ?? null;
+      if (customer) {
+        const next = resolveCustomerLifecycleStatus({ currentStatus: customer.estado, contractStates: customer.contratos.map(c => c.estado), serviceStates: customer.servicios.map(s => s.estadoOperativo) });
+        if (next !== customer.estado) await tx.cliente.update({ where: { idCliente: customer.idCliente }, data: { estado: next } });
+        estadoCliente = next;
+      }
+      const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA', estadoDespachoTecnico: 'COMPLETADA_G3' } });
+      await this.storage.markApplied(tx, idSolicitudRetiro);
+      await this.audit(tx, currentUser, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
+        idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, recepcionClaveEvento: dispatch.recepcionClaveEvento,
+        estadoAnterior: service.estadoOperativo, estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente,
+        equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie),
+        // main has no return-to-prospect rule; PR #81's EXCLIENTE proposal awaits a separate decision.
+        retornoProspectos: 'SIN_REGLA_VIGENTE',
+      });
+      return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, retornoProspectos: 'SIN_REGLA_VIGENTE' };
+    });
   }
 
   // ----- helpers -----

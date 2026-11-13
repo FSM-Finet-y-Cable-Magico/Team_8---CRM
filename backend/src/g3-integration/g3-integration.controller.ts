@@ -168,6 +168,12 @@ export class ServiceWithdrawalController {
     return this.workflow.syncReception(id, user);
   }
 
+  @Post(':id/finalize')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  finalize(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.finalize(id, user);
+  }
+
   @Post(':id/cancel')
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
   cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
