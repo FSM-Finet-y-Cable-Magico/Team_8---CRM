@@ -113,6 +113,9 @@ export function ProspectWorkflowPanel({
   const canEditProspect = permissions.createProspects && !isWorkflowLocked
     && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada');
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
+  // A stored status (even 'Factible') without coordinates is not a confirmed location: the user must be able to mark it
+  // manually, since automatic geocoding may be disabled or unavailable. A saved point is only changed through "Editar".
+  const manualLocation = canEditProspect && (editingProspect || (!isQuoted && (currentProspect.latitud == null || currentProspect.longitud == null)));
   const commercialReady = Boolean(coverage?.coberturaComercial && isFactible && hasSavedLocation && !checkingCoverage
     && !locatingAddress && !coverageSyncError && !isWorkflowLocked && !editingProspect && !savingProspect);
   const planOptions = plans.filter((plan) =>
@@ -449,6 +452,7 @@ export function ProspectWorkflowPanel({
               key={prospect.idProspecto}
               presentation="summary"
               showAddressRetry={canEditProspect}
+              allowManualLocation={manualLocation}
               idEmpresa={prospect.empresa.idEmpresa}
               direccion={address}
               value={location}

@@ -34,7 +34,7 @@ export type CoverageResult = {
   cajas: Array<{ id: number; nombre: string; latitud: number; longitud: number; puertosLibres: number }>;
 };
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false }: {
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
@@ -47,6 +47,8 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   presentation?: 'editor' | 'status' | 'summary';
   minimal?: boolean;
   showAddressRetry?: boolean;
+  // Summary only: lets the user mark the map or type coordinates when the address cannot be located automatically.
+  allowManualLocation?: boolean;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
   const [coverage, setResult] = useState<(CoverageResult & { queryKey: string }) | null>(null);
@@ -89,10 +91,11 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     setGeocodeMessage('');
     current.current.onChange(location);
   }, [rememberAttempt, setGeocodeMessage]);
-  const selection = useRef({ onChange: selectLocation, disabled });
+  const manualLocation = presentation === 'summary' && allowManualLocation && !disabled;
+  const selection = useRef({ onChange: selectLocation, disabled, manual: manualLocation });
   const resultListener = useRef(onResult);
   const busyListener = useRef(onBusyChange);
-  selection.current = { onChange: selectLocation, disabled };
+  selection.current = { onChange: selectLocation, disabled, manual: manualLocation };
   resultListener.current = onResult;
   busyListener.current = onBusyChange;
   const waitingForAddress = autoGeocode && !disabled && !value && !attempted.current.has(version);
@@ -133,7 +136,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     map.current = instance;
     layers.current = L.layerGroup().addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
-      if (presentation === 'editor' && !selection.current.disabled) {
+      if ((presentation === 'editor' || selection.current.manual) && !selection.current.disabled) {
         selection.current.onChange({ latitud: Number(event.latlng.lat.toFixed(6)), longitud: Number(event.latlng.lng.toFixed(6)) });
       }
     });
@@ -260,19 +263,19 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
       const first = data.candidatos[0];
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
-      else setGeocodeMessage(presentation === 'editor'
+      else setGeocodeMessage(presentation === 'editor' || manualLocation
         ? userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.')
         : 'No pudimos ubicar esta dirección. Revisa la calle, el número y la comuna.');
     } catch {
       if (!controller.signal.aborted && current.current.version === version) {
-        setGeocodeMessage(presentation === 'editor'
+        setGeocodeMessage(presentation === 'editor' || manualLocation
           ? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'
           : 'No pudimos ubicar esta dirección. Puedes reintentar o registrar el prospecto para revisarlo después.');
       }
     } finally {
       if (!controller.signal.aborted && current.current.version === version) setGeocoding(false);
     }
-  }, [direccion, version, rememberAttempt, presentation, setGeocodeMessage]);
+  }, [direccion, version, rememberAttempt, presentation, manualLocation, setGeocodeMessage]);
 
   useEffect(() => {
     setGeocoding(false);
@@ -330,6 +333,18 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       {presentation === 'summary' && <>
         <div ref={container} className="coverage-map" aria-label="Mapa de ubicación del prospecto" />
         {mapWarning && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base. La consulta de cobertura sigue disponible.</p>}
+        {manualLocation && <>
+          {geocodeMessage && <p role="status">{geocodeMessage}</p>}
+          {error && <p role="alert">{error}</p>}
+          {!value && <p className="coverage-note">Marca el domicilio en el mapa o ingresa sus coordenadas para verificar la cobertura.</p>}
+          <details className="coverage-manual-coordinates"><summary>Ingresar coordenadas</summary>
+            <div className="coverage-coordinates">
+              <label>Latitud<input type="text" inputMode="decimal" value={coordinates.latitud} placeholder="-33.57" onChange={event => setCoordinates({ ...coordinates, latitud: event.target.value })} /></label>
+              <label>Longitud<input type="text" inputMode="decimal" value={coordinates.longitud} placeholder="-70.61" onChange={event => setCoordinates({ ...coordinates, longitud: event.target.value })} /></label>
+            </div>
+            <button type="button" className="secondary compact" onClick={applyCoordinates}>Ubicar punto</button>
+          </details>
+        </>}
       </>}
     </section>;
   }

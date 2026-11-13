@@ -13,7 +13,7 @@ function load(file,mocks) {
     if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.startsWith('.'))throw Error(name);return require(name);
   },exports);return exports;
 }
-async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,canEdit=false,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false}={}) {
+async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,canEdit=false,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false,noLocation=false,geocodeDisabled=false}={}) {
   t.mock.timers.enable({apis:['setTimeout']});
   const saved={window:globalThis.window,document:globalThis.document,ResizeObserver:globalThis.ResizeObserver};
   const events=new EventTarget();
@@ -33,8 +33,8 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
   const zone=n=>({idZonaPago:n,idEmpresa:n,activo:true,nombreZona:'Zona '+n,tipoZona:'COBERTURA_GENERAL',poligonoGeojson:{type:'Polygon',coordinates:[[[n,0],[n,1],[n+0.1,1],[n,0]]]}});
   let persisted={idProspecto:10,idCliente:null,nombreCompleto:'QA',empresa:{idEmpresa:company},estadoPipeline:g2?(requiresReview?'NUEVO':'Prospecto Nuevo'):state,
     requiereRevisionComercial:requiresReview,revisionOrigenG2Disponible:g2&&requiresReview&&reviewAvailable,origenContacto:null,
-    direccion:g2?'Calle QA':null,comuna:null,region:null,
-    latitud:g2?null:outside?-35:-33.475,longitud:g2?null:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:existingContract?[{idContrato:20,estado:'Firmado'}]:[]};
+    direccion:g2||noLocation?'Calle QA':null,comuna:noLocation?'La Florida':null,region:noLocation?'Metropolitana de Santiago':null,
+    latitud:g2||noLocation?null:outside?-35:-33.475,longitud:g2||noLocation?null:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:existingContract?[{idContrato:20,estado:'Firmado'}]:[]};
   const api={get:async(path,options)=>{calls.push({path,options});
     if(path==='/coverage/status')return {data:{configurado:true}};
     if(path==='/coverage/zones')return {data:[zone(1),zone(2),{...zone(1),idZonaPago:3,activo:false}]};
@@ -42,6 +42,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
     post:async(path,body)=>{calls.push({path,body});
       if(path==='/coverage/geocode'){
         if(geocodeFailure)throw Error('QA geocoding unavailable');
+        if(geocodeDisabled)return {data:{candidatos:[],motivo:'PROVEEDOR_DESHABILITADO',mensaje:'La ubicación automática no está habilitada. Marca el punto en el mapa o ingresa las coordenadas.'}};
         return {data:{candidatos:[{latitud:-33.475,longitud:-70.675}]}};
       }
       if(path.endsWith('/g2-review')){
@@ -197,6 +198,36 @@ test('geocodificación fallida deja reintentar, quita el aviso a los tres segund
   assert.ok(!h.text().includes('No se pudo ubicar la dirección'));
   assert.equal(h.persisted().latitud,null); assert.equal(h.persisted().comuna,null);
 });
+test('Factible heredado sin coordenadas: no habilita cotizar; ubicación manual persiste el punto y recalcula la factibilidad',async t=>{
+  const h=await harness(t,{canEdit:true,noLocation:true,geocodeDisabled:true});
+  assert.equal(h.persisted().estadoPipeline,'Factible');
+  assert.ok(h.text().includes('La ubicación automática no está habilitada'),'explica por qué no se ubicó');
+  assert.equal(h.button('Generar cotización'),undefined,'un Factible sin punto guardado no es una ubicación confirmada');
+  assert.equal(h.calls.filter(c=>c.path==='/coverage/check').length,0);
+  assert.ok(h.tree.root.findAllByProps({placeholder:'-33.57'}).length>0,'ofrece coordenadas manuales');
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();
+  const writes=h.calls.filter(c=>c.path.endsWith('/location'));
+  assert.equal(writes.length,1);assert.deepEqual(writes[0].body,{ubicacion:{latitud:-33.475,longitud:-70.675}});
+  assert.equal(h.persisted().latitud,-33.475);assert.equal(h.persisted().estadoPipeline,'Factible');
+  assert.ok(h.button('Generar cotización'),'cotizar solo tras punto guardado y cobertura del backend');
+  assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,0,'un punto guardado solo se corrige desde Editar');
+});
+
+test('Factible heredado sin coordenadas fuera de cobertura queda No Factible y no cotiza',async t=>{
+  const h=await harness(t,{canEdit:true,noLocation:true,geocodeDisabled:true,outside:true});
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-35,lng:-70.675}}));await h.tick();
+  assert.equal(h.persisted().estadoPipeline,'No Factible');assert.equal(h.button('Generar cotización'),undefined);
+});
+
+test('Cotizacion Enviada sin coordenadas no escribe ubicación desde el resumen: requiere Editar',async t=>{
+  const h=await harness(t,{canEdit:true,noLocation:true,geocodeDisabled:true,state:'Cotizacion Enviada',quoted:true});
+  assert.equal(h.tree.root.findAllByProps({placeholder:'-33.57'}).length,0);
+  await act(async()=>h.maps.at(-1).handlers.click({latlng:{lat:-33.475,lng:-70.675}}));await h.tick();
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/location')||c.path.includes('/feasibility')).length,0);
+  await act(async()=>h.button('Editar prospecto').props.onClick());
+  assert.ok(h.tree.root.findAllByProps({placeholder:'-33.57'}).length>0,'al editar sí puede marcar el punto');
+});
+
 test('React: FACTIBLE → PDF → Cotizacion Enviada conserva plan; reabrir/nueva sesión recupera cotización persistida',async t=>{
   const h=await harness(t);assert.deepEqual(h.optionIds(0),[1,4]);assert.deepEqual(h.optionIds(1),[]);
   await h.select(0,1);await act(async()=>h.button('Generar cotización').props.onClick());

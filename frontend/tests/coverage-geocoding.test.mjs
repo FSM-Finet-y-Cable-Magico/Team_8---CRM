@@ -202,6 +202,40 @@ test('mapa resumido conserva punto, es de solo lectura y actualiza sin geocodifi
   assert.equal(h.requests('/coverage/geocode').length, 0);
 });
 
+test('resumen editable sin ubicación: geocodificación deshabilitada muestra el motivo y permite marcar mapa o coordenadas', async t => {
+  const mensaje = 'La ubicación automática no está habilitada. Marca el punto en el mapa o ingresa las coordenadas.';
+  const h = await harness(t, { picker: { presentation: 'summary', allowManualLocation: true, showAddressRetry: true },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje } }) });
+  await h.tick(700); await h.tick(0);
+  assert.equal(h.requests('/coverage/geocode').length, 1);
+  assert.ok(h.text().includes(mensaje), 'muestra el motivo real, no "dirección no encontrada"');
+  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.equal(h.requests('/coverage/check').length, 0, 'sin punto no se consulta ni se supone cobertura');
+  assert.ok(!h.text().includes('Cobertura factible'));
+  assert.ok(h.text().includes('Ingresar coordenadas'));
+  await h.mapClick(-33.45, -70.63); await h.tick(350);
+  assert.deepEqual(h.location(), { latitud: -33.45, longitud: -70.63 });
+  assert.equal(h.requests('/coverage/check').length, 1, 'la cobertura la decide /coverage/check con el punto marcado');
+  assert.ok(h.text().includes('Cobertura factible'));
+});
+
+test('resumen editable acepta coordenadas válidas y rechaza fuera de rango sin consultar', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', allowManualLocation: true, autoGeocode: false } });
+  await h.tick(0);
+  await h.change('-33.57', '123'); await h.change('-70.61', '-70.6'); await h.click('Ubicar punto');
+  assert.equal(h.location(), null); assert.ok(h.text().includes('Ingresa una latitud entre -90 y 90'));
+  assert.equal(h.requests('/coverage/check').length, 0);
+  await h.change('-33.57', '-33.46'); await h.click('Ubicar punto'); await h.tick(350);
+  assert.deepEqual(h.location(), { latitud: -33.46, longitud: -70.6 });
+  assert.equal(h.requests('/coverage/geocode').length, 0);
+});
+
+test('resumen sin permiso de ubicación manual sigue de solo lectura', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', allowManualLocation: true, disabled: true, autoGeocode: false } });
+  await h.tick(0); await h.mapClick(-33.45, -70.63);
+  assert.equal(h.location(), null); assert.ok(!h.text().includes('Ingresar coordenadas'));
+});
+
 test('editor completo conserva corrección manual, coordenadas y atribución en los otros módulos', async t => {
   const pending = deferred();
   const h = await harness(t, { picker: {}, geocode: () => pending.promise });
