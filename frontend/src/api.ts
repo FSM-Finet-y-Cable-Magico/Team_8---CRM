@@ -65,6 +65,8 @@ export type Prospect = {
   ubicacionInstalacion?: { direccion: string | null; comuna: string | null; ciudad: string | null; fuenteComuna: string | null };
   cotizaciones?: Array<{ idCotizacion: number; codigo?: string | null; idPlan: number; fechaEnvio: string; vigente?: boolean }>;
   requiereRevisionComercial?: boolean;
+  /** Derived by the backend (never stored): last operational relationship in this company ended. */
+  excliente?: { etiqueta: string; situacionFinanciera: string };
   revisionOrigenG2Disponible?: boolean;
   idProspecto: number;
   idCliente: number | null;

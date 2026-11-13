@@ -32,6 +32,7 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
       { idEvento: 10, idEmpresa: 2, idCliente: 34, idServicio: 71, idContrato: 30, tipo: 'AVISO_PREVIO_RETIRO', fecha: new Date('2026-11-01') }] as any[],
     requests: [] as any[],
     tickets: [] as any[],
+    prospects: [] as any[],
     audits: [] as any[],
     links: [] as WithdrawalTicketLink[],
     dispatches: [] as WithdrawalDispatch[],
@@ -61,7 +62,7 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
     }
     return row[key] === cond;
   });
-  let nextRequest = 15; let nextTicket = 77;
+  let nextRequest = 15; let nextTicket = 77; let nextProspect = 500;
   const forbidden = (name: string) => ({ create: () => { state.forbiddenWrites.push(name); }, update: () => { state.forbiddenWrites.push(name); }, updateMany: () => { state.forbiddenWrites.push(name); } });
   const db: any = {
     $queryRaw: async () => [],
@@ -74,6 +75,12 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
     contrato: {
       findUnique: async ({ where }: any) => clone(state.contracts.find(c => c.idContrato === where.idContrato) ?? null),
       update: async ({ where, data }: any) => { const row = state.contracts.find(c => c.idContrato === where.idContrato); Object.assign(row, data); return clone(row); },
+      count: async ({ where }: any) => state.contracts.filter(c => matches(c, where)).length,
+    },
+    prospecto: {
+      findFirst: async ({ where }: any) => clone([...state.prospects].sort((a, b) => a.idProspecto - b.idProspecto).find(p => matches(p, where)) ?? null),
+      create: async ({ data }: any) => { const row = { idProspecto: nextProspect++, clasificacionComercial: 'PROSPECTO', ...data }; state.prospects.push(row); return clone(row); },
+      update: () => { state.forbiddenWrites.push('prospecto.update'); },
     },
     cliente: {
       findUnique: async ({ where }: any) => {

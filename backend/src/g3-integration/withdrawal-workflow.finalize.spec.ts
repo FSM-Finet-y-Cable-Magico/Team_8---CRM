@@ -20,14 +20,15 @@ async function readyToFinalize(options: Parameters<typeof withdrawalHarness>[0] 
   await service.syncReception(15, comercial());
   return { ...h, service, g1, g1Inventory, finalize: (user = comercial()) => service.finalize(15, user) };
 }
-const snapshot = (h: { state: any }) => JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, r: h.state.requests, d: h.state.dispatches.map((d: any) => d.aplicadoEn), t: h.state.tickets });
+const snapshot = (h: { state: any }) => JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, r: h.state.requests, d: h.state.dispatches.map((d: any) => d.aplicadoEn), t: h.state.tickets, p: h.state.prospects });
 
 describe('Baja efectiva por morosidad', () => {
   it('camino feliz: servicio Baja, contrato conservado (otro servicio operativo), cliente recalculado, solicitud CERRADA', async () => {
     const h = await readyToFinalize();
     h.g3Replies.push(orderRead('COMPLETADA'));
     const result = await h.finalize();
-    expect(result).toMatchObject({ aplicado: true, yaAplicado: false, idServicio: 61, contratoDeBaja: false, retornoProspectos: 'SIN_REGLA_VIGENTE' });
+    expect(result).toMatchObject({ aplicado: true, yaAplicado: false, idServicio: 61, contratoDeBaja: false, retornoProspectos: 'MANTIENE_RELACION_OPERATIVA' });
+    expect(h.state.prospects).toEqual([]);
     expect(h.state.services.find((s: any) => s.idServicio === 61).estadoOperativo).toBe('Baja');
     expect(h.state.services.find((s: any) => s.idServicio === 62).estadoOperativo).toBe('Activo');
     expect(h.state.contracts[0].estado).toBe('Suspendido');
@@ -106,6 +107,55 @@ describe('Baja efectiva por morosidad', () => {
     expect(h.state.services.find((s: any) => s.idServicio === 80).estadoOperativo).toBe('Activo');
     expect(h.state.contracts.find((c: any) => c.idContrato === 40).estado).toBe('Activo');
     expect(h.state.customers[0].estado).not.toBe('Baja');
+  });
+
+  describe('Excliente en Prospectos (FINET 13-11-2026)', () => {
+    const lastService = (x: any) => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 62); };
+    it('última relación en la empresa y sin prospecto vinculado: crea UNO vinculado, en Fuera pipeline, sin tocar al cliente', async () => {
+      const h = await readyToFinalize({ finalize: true }, lastService);
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      const result = await h.finalize();
+      expect(result).toMatchObject({ retornoProspectos: 'CREADO', idProspectoExcliente: 500 });
+      expect(h.state.prospects).toEqual([expect.objectContaining({ idProspecto: 500, idEmpresa: 1, idCliente: 33, rut: '12345678-5', nombreCompleto: 'Cliente QA',
+        estadoPipeline: 'Fuera pipeline', origenContacto: 'Excliente', clasificacionComercial: 'PROSPECTO' })]);
+      expect(h.state.customers[0]).toMatchObject({ idCliente: 33, rut: '123456785', nombreCompleto: 'Cliente QA', estado: 'Baja' });
+      expect(h.state.audits.find(a => a.accion === 'EXCLIENTE_VISIBLE_EN_PROSPECTOS')).toMatchObject({ idEntidadAfectada: 500, valorNuevo: { resultado: 'CREADO' } });
+      expect(h.state.forbiddenWrites).toEqual([]);
+      await h.finalize();
+      expect(h.state.prospects).toHaveLength(1);
+    });
+    it('con prospecto ya vinculado (el de su conversión) lo reutiliza sin reescribir su historial', async () => {
+      const h = await readyToFinalize({ finalize: true }, x => { lastService(x);
+        x.state.prospects.push({ idProspecto: 410, idEmpresa: 1, idCliente: 33, rut: '12345678-5', estadoPipeline: 'Servicio Activo', clasificacionComercial: 'PROSPECTO' }); });
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.finalize()).resolves.toMatchObject({ retornoProspectos: 'REUTILIZADO', idProspectoExcliente: 410 });
+      expect(h.state.prospects).toEqual([expect.objectContaining({ idProspecto: 410, estadoPipeline: 'Servicio Activo' })]);
+      expect(h.state.forbiddenWrites).toEqual([]);
+    });
+    it('un prospecto con el mismo RUT sin vínculo no se modifica ni se duplica: queda para revisión', async () => {
+      const h = await readyToFinalize({ finalize: true }, x => { lastService(x);
+        x.state.prospects.push({ idProspecto: 420, idEmpresa: 1, idCliente: null, rut: '12345678-5', estadoPipeline: 'Prospecto Nuevo', clasificacionComercial: 'PROSPECTO' }); });
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.finalize()).resolves.toMatchObject({ retornoProspectos: 'PROSPECTO_SIN_VINCULO_EXISTENTE', idProspectoExcliente: 420 });
+      expect(h.state.prospects).toEqual([expect.objectContaining({ idProspecto: 420, idCliente: null })]);
+      expect(h.state.audits.find(a => a.accion === 'EXCLIENTE_REQUIERE_REVISION_PROSPECTO')).toBeTruthy();
+    });
+    it('la otra empresa conserva su relación: el excliente es solo de la empresa donde terminó', async () => {
+      const h = await readyToFinalize({ finalize: true }, x => { lastService(x);
+        x.state.services.push({ idServicio: 80, idCliente: 33, idEmpresa: 2, idContrato: 40, idDireccion: 6, estadoOperativo: 'Activo', tipoServicio: 'TV' });
+        x.state.contracts.push({ idContrato: 40, idCliente: 33, idEmpresa: 2, estado: 'Activo' }); });
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.finalize()).resolves.toMatchObject({ retornoProspectos: 'CREADO' });
+      expect(h.state.prospects).toEqual([expect.objectContaining({ idEmpresa: 1, idCliente: 33 })]);
+      expect(h.state.services.find((s: any) => s.idServicio === 80).estadoOperativo).toBe('Activo');
+    });
+    it('una falla posterior revierte también el prospecto creado', async () => {
+      const h = await readyToFinalize({ finalize: true }, lastService);
+      h.state.failAuditOn = 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD';
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.finalize()).rejects.toThrow('AUDIT_FAILED');
+      expect(h.state.prospects).toEqual([]);
+    });
   });
 
   it('apagada por defecto: responde deshabilitada sin escribir', async () => {

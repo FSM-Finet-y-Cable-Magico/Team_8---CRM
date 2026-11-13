@@ -10,6 +10,7 @@ import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt, overdueDebtSummary 
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { TicketsService } from '../tickets/tickets.service';
+import { ensureFormerCustomerProspect } from '../common/returning-customer';
 import { G1_INVENTORY_CLIENT, G1_RECEPTION_CLIENT, G1IntegrationError, G1InventoryClient, G1ReceptionClient } from '../g1-integration/g1-integration.types';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
 import { assessWithdrawalClosure, paymentDuringWithdrawal } from './withdrawal-closure';
@@ -490,6 +491,9 @@ export class WithdrawalWorkflowService {
         if (next !== customer.estado) await tx.cliente.update({ where: { idCliente: customer.idCliente }, data: { estado: next } });
         estadoCliente = next;
       }
+      // FINET 13-11-2026: if this was the last operational relationship in the company, the person becomes visible as
+      // excliente in that company's Prospects (derived view; identity, history, debt and other companies untouched).
+      const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa, idUsuario: currentUser.idUsuario });
       const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA', estadoDespachoTecnico: 'COMPLETADA_G3' } });
       await this.storage.markApplied(tx, idSolicitudRetiro);
       // FINET 13-11-2026: the «Baja de servicio» ticket is closed only here, inside this successful transaction.
@@ -499,10 +503,10 @@ export class WithdrawalWorkflowService {
         idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, recepcionClaveEvento: dispatch.recepcionClaveEvento,
         estadoAnterior: service.estadoOperativo, estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente,
         equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie), ticketBaja: ticketBaja.action,
-        // main has no return-to-prospect rule; PR #81's EXCLIENTE proposal awaits a separate decision.
-        retornoProspectos: 'SIN_REGLA_VIGENTE',
+        retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}),
       });
-      return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, ticketBaja: ticketBaja.action, retornoProspectos: 'SIN_REGLA_VIGENTE' };
+      return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, ticketBaja: ticketBaja.action,
+        retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}) };
     });
   }
 

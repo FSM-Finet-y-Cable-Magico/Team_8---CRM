@@ -5,6 +5,7 @@ import { Prisma, Prospecto } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { activeProspectWhere, LOST_PROSPECT_PIPELINE_STATUS, managedProspectWhere, pendingActivationWhere } from '../common/customer-lifecycle';
+import { FORMER_CUSTOMER_VIEW, formerCustomerDebt, formerCustomerInCompanyWhere, formerCustomerLabel, formerCustomerProspectWhere } from '../common/returning-customer';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
   buildInstallOrderObservations,
@@ -119,28 +120,54 @@ export class ProspectsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const base = this.searchFilters(query);
-    const where: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] });
-    const stateFilter = query.estado ? this.stateWhere(query.estado) : null;
-    const [total, rows, grouped] = await Promise.all([
-      this.prisma.prospecto.count({ where: stateFilter ? { AND: [where, stateFilter] } : where }),
+    const managed: Prisma.ProspectoWhereInput = managedProspectWhere({ AND: [companyScope, ...base] });
+    // Exclientes (FINET 13-11-2026): derived from recorded facts, always within the company scope; same search,
+    // filters and pagination. 'Excliente' is a view filter, never a stored pipeline state.
+    const former: Prisma.ProspectoWhereInput = { AND: [companyScope, ...base, formerCustomerProspectWhere(await this.scopedCompanyIds(companyScope))] };
+    const where: Prisma.ProspectoWhereInput = { OR: [managed, former] };
+    const stateFilter = query.estado && query.estado !== FORMER_CUSTOMER_VIEW ? this.stateWhere(query.estado) : null;
+    const filtered = query.estado === FORMER_CUSTOMER_VIEW ? former : stateFilter ? { AND: [managed, stateFilter] } : where;
+    const [total, rows, grouped, formerCount] = await Promise.all([
+      this.prisma.prospecto.count({ where: filtered }),
       this.prisma.prospecto.findMany({
-        where: stateFilter ? { AND: [where, stateFilter] } : where,
+        where: filtered,
         orderBy: [{ fechaCreacion: 'desc' }, { idProspecto: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: prospectListInclude(companyScope),
       }),
-      this.prisma.prospecto.groupBy({ by: ['estadoPipeline'], where, _count: { _all: true } }),
+      this.prisma.prospecto.groupBy({ by: ['estadoPipeline'], where: managed, _count: { _all: true } }),
+      this.prisma.prospecto.count({ where: former }),
     ]);
     const counts: Record<string, number> = {};
     for (const group of grouped) {
       const key = group.estadoPipeline ?? INITIAL_PIPELINE_STATUS;
       counts[key] = (counts[key] ?? 0) + group._count._all;
     }
+    if (formerCount) counts[FORMER_CUSTOMER_VIEW] = formerCount;
     return {
-      items: await this.projectProspectRows(rows),
+      items: await this.projectProspectRows(rows, { formerCustomers: true }),
       total, page, pageSize, counts,
     };
+  }
+
+  /** Companies whose exclientes this scope may see: the scoped one, or every company in the consolidated view. */
+  private async scopedCompanyIds(companyScope: { idEmpresa?: number }) {
+    if (companyScope.idEmpresa) return [companyScope.idEmpresa];
+    return (await this.prisma.empresa.findMany({ select: { idEmpresa: true } })).map(company => company.idEmpresa);
+  }
+
+  /** Former-customer view of linked rows, recomputed on every read (never stored). */
+  private async formerCustomerViews(prospects: Array<{ idProspecto: number; idCliente: number | null; idEmpresa: number | null }>) {
+    const views = new Map<number, { etiqueta: string; situacionFinanciera: string }>();
+    for (const prospect of prospects) {
+      if (prospect.idCliente == null || prospect.idEmpresa == null) continue;
+      const former = await this.prisma.cliente.count({ where: { AND: [{ idCliente: prospect.idCliente }, formerCustomerInCompanyWhere(prospect.idEmpresa)] } });
+      if (!former) continue;
+      const debt = await formerCustomerDebt(this.prisma, prospect.idCliente, prospect.idEmpresa);
+      views.set(prospect.idProspecto, { etiqueta: formerCustomerLabel(debt), situacionFinanciera: debt });
+    }
+    return views;
   }
 
   private stateWhere(estado: string): Prisma.ProspectoWhereInput {
@@ -183,6 +210,7 @@ export class ProspectsService {
 
   private async projectProspectRows(
     prospects: Array<Prisma.ProspectoGetPayload<{ include: ReturnType<typeof prospectListInclude> }>>,
+    options: { formerCustomers?: boolean } = {},
   ) {
     const evidenceRows = await readG2OriginAudits(this.prisma, prospects.filter(isG2ProspectReviewCandidate).map(p => p.idProspecto));
     const pendingContractIds = prospects.flatMap(prospect => prospect.contratos
@@ -197,8 +225,11 @@ export class ProspectsService {
       distinct: ['idEntidadAfectada'],
     }) : [];
     const confirmationByContract = new Map(confirmations.map(event => [event.idEntidadAfectada, event.fechaHora]));
+    // Only the Prospects listing (search) includes exclientes; other projections keep their exact previous shape.
+    const formerViews = options.formerCustomers ? await this.formerCustomerViews(prospects) : new Map<number, { etiqueta: string; situacionFinanciera: string }>();
     return prospects.map(({ _count, ...prospect }) => ({
       ...prospect,
+      ...(formerViews.has(prospect.idProspecto) ? { excliente: formerViews.get(prospect.idProspecto) } : {}),
       contratos: prospect.contratos.map(contract => ({
         ...contract, fechaConfirmacion: confirmationByContract.get(contract.idContrato) ?? null,
       })),
@@ -208,10 +239,10 @@ export class ProspectsService {
         .map(({ idCotizacion, codigo, idPlan, fechaEnvio, factibilidadVerificada, plan }) => ({
           idCotizacion, codigo, idPlan, fechaEnvio, vigente: factibilidadVerificada === true && plan?.activo !== false,
         })),
-      requiereRevisionComercial: prospect.clasificacionComercial !== 'PROSPECTO'
+      requiereRevisionComercial: !formerViews.has(prospect.idProspecto) && (prospect.clasificacionComercial !== 'PROSPECTO'
         || (!([...PIPELINE_STATUSES.slice(0, 6), LOST_PIPELINE_STATUS, null].includes(prospect.estadoPipeline))
           && !(prospect.contratos.some((contract) => contract.estado === PENDING_SIGNATURE_STATUS)
-            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? ''))),
+            && [PENDING_SIGNATURE_PIPELINE_STATUS, PENDING_SIGNATURE_STATUS, EXTERNAL_CONTRACT_PIPELINE_STATUS].includes(prospect.estadoPipeline ?? '')))),
     }));
   }
 
