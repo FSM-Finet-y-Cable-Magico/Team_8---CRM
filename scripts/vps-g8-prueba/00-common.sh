@@ -3,7 +3,7 @@
 # Nothing here writes to PostgreSQL, deletes images/volumes or prints secret values.
 set -euo pipefail
 
-SHA=44c531c67482e783d07c5b9aad6d3b584a117b04
+SHA=9e06348019e16e5fe40a6e09a2d7171d552169f5  # código de aplicación a desplegar
 SHA7=${SHA:0:7}
 NEW_BACKEND_IMAGE="finet-g8-backend:tk-$SHA7"
 NEW_FRONTEND_IMAGE="finet-g8-frontend:tk-$SHA7"

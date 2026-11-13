@@ -14,4 +14,9 @@ for image in "$NEW_BACKEND_IMAGE" "$NEW_FRONTEND_IMAGE"; do
   [ "$rev" = "$SHA" ] || { echo "FAIL revisión distinta de $SHA"; exit 1; }
   [ "$arch" = "$ARCH" ] || { echo "FAIL arquitectura $arch distinta del daemon $ARCH"; exit 1; }
 done
+# The frontend bakes VITE_API_URL at build time; a Windows path (e.g. "D:/Git/api" from Git Bash
+# path conversion) or an absolute URL different from the current one would break the UI.
+API=$(d8 run --rm --network none --entrypoint sh "$NEW_FRONTEND_IMAGE" -c 'cat /usr/share/nginx/html/assets/*.js | grep -c "[A-Z]:/"' || true)
+[ "${API:-1}" = "0" ] || { echo "FAIL el bundle del frontend contiene rutas de unidad Windows (build defectuoso)"; exit 1; }
+echo "frontend VITE_API_URL=$(d8 image inspect "$NEW_FRONTEND_IMAGE" --format '{{index .Config.Labels "cl.finet.g8.vite-api-url"}}') (comparar con la fase A)"
 echo "OK ambas imágenes son de la revisión $SHA"

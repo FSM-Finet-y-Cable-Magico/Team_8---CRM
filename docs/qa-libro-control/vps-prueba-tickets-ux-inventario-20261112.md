@@ -1,15 +1,19 @@
 # Prueba controlada en VPS G8 — rama `fix/tickets-ux-inventario-g8-20261112`
 
-**Versión 2 (12-11-2026).** Estado: kit preparado y probado en una simulación local; **nada se ejecutó en la VPS**.
+**Versión 3 (12-11-2026).** Estado: kit preparado y probado en una simulación local; la rama se validó en navegador sobre una QA aislada (§6). **Nada se ejecutó en la VPS**.
 **Destinatario:** operador autorizado de la VPS G8 (sesión SSH en el servidor correcto).
-**Código a desplegar:** `44c531c67482e783d07c5b9aad6d3b584a117b04`. Los commits posteriores de la rama solo agregan este documento y `scripts/vps-g8-prueba/` (sin código de aplicación).
+**Código a desplegar:** `9e06348019e16e5fe40a6e09a2d7171d552169f5`: los 7 tickets más la corrección TK-02 de servicios por empresa que encontró la validación en navegador. Los commits posteriores de la rama solo tocan este documento y `scripts/vps-g8-prueba/`, sin código de aplicación.
 **La fase E (recreación) requiere autorización explícita del propietario G8.** El script se niega a correr sin `CONFIRM_SHA` y sin un preflight en PASS.
 
 ## 0. Qué cambia y qué no
 
 - Solo se recrean los contenedores `backend` y `frontend` de `finet-g8-prueba`, con imágenes construidas del SHA anterior. PostgreSQL, G1, G2, G3, sus contenedores y los volúmenes no se tocan.
-- Entre `626cf4e7` (imagen citada para la VPS), `main` y el SHA a desplegar **no cambian** `backend/prisma/`, `db/`, los `package-lock.json`, los Dockerfiles ni `frontend/nginx.conf.template`. No hay migración, `db push`, seed ni dependencias nuevas.
-- Cambio de contrato interno (API JWT de G8, no S2S): en vista por empresa `GET /customers` devuelve `estado: null`, `estadoGlobalDisponible: false` y `estadosServicioEmpresa`. **Backend y frontend se activan y se revierten juntos.**
+- Entre `626cf4e7` (imagen citada para la VPS), `main` y `9e063480` **no cambian** `backend/prisma/`, `db/`, los `package-lock.json`, los Dockerfiles ni `frontend/nginx.conf.template`. No hay migración, `db push`, seed ni dependencias nuevas.
+- Cambios de contrato interno (API JWT de G8, no S2S):
+  - En vista por empresa, `GET /customers` devuelve `estado: null`, `estadoGlobalDisponible: false` y `estadosServicioEmpresa`.
+  - `GET /services/customer/:id` acepta un `scope` opcional, que solo filtra para el administrador.
+
+  **Backend y frontend se activan y se revierten juntos.**
 
 ## 1. Prohibido
 
@@ -20,12 +24,14 @@ En el smoke **no** pulsar «Generar instalación», «Consultar cierre» ni «Re
 
 | Artefacto | Valor |
 |---|---|
-| Imagen backend | `finet-g8-backend:tk-44c531c` · ID local `sha256:79e036fa8ad45909001e67795a2a7761e752f8b57073258876f2bd714d781877` · configuración `sha256:d53893acbaff2388b97123d275b14a26bc3db00973070614a06e46d9aa11ca4d` |
-| Imagen frontend | `finet-g8-frontend:tk-44c531c` · ID local `sha256:35ffdea3b76d55b3bed28fe82944bb79bdc902075e3a08f42c8761cb02d57d6d` · configuración `sha256:5f0408421979e783b96e4211a9ce3fc50d8a0563d9ca44c724f4131451046755` |
-| Etiqueta de revisión (ambas) | `org.opencontainers.image.revision=44c531c67482e783d07c5b9aad6d3b584a117b04` |
+| Imagen backend | `finet-g8-backend:tk-9e06348` · ID local `sha256:1e4a702036e87224a42af15e94ccbbe9880c9d98672ab0691dd77da3a5ddae90` · configuración `sha256:9cc40bb2046d2e4062bc2dd921ac9b093743a5f5c4da5d2391ad772054a9cba0` |
+| Imagen frontend | `finet-g8-frontend:tk-9e06348` · ID local `sha256:5553a6a817a15ced507bcc4a1601225ea498901c3e369807a229492772a19680` · configuración `sha256:872395b3fa210efb7e0b36ad92b7b54d13f2c75c05844eee45a1cd52c67896ca` |
+| Etiqueta de revisión (ambas) | `org.opencontainers.image.revision=9e06348019e16e5fe40a6e09a2d7171d552169f5` |
 | Plataforma | `linux/amd64`; motor Prisma `linux-musl-openssl-3.0.x` |
-| Frontend | `VITE_API_URL=/api` (relativo); plantilla nginx sha256 `582c78a0c13a7e21f8e8a5dcae209bcfa116ae942ef31b69409a58188ba66678` |
-| Paquete | `g8-tk-44c531c-images.tar.gz` · sha256 `cefeb6cc3f9302e7a7075be81095f2a284c020cac318c9e45858576a93d945be` |
+| Frontend | `VITE_API_URL=/api` (relativo; etiqueta `cl.finet.g8.vite-api-url`); bundle sin rutas de unidad Windows (lo verifica `03`) |
+| Paquete | `g8-tk-9e06348-images.tar.gz` · sha256 `32be9b95aa4bb2d9682f9980dbacf7f109d7fec14361422d4d86cfc7e29b5c98` |
+
+**Imágenes anteriores descartadas:** `tk-44c531c`. Su frontend quedó defectuoso: Git Bash convirtió `--build-arg VITE_API_URL=/api` en `D:/Git/api` y el login fallaba con «Unsupported protocol D:». La prueba en navegador lo detectó. Al construir desde Git Bash en Windows hay que exportar `MSYS_NO_PATHCONV=1`; `03-load-images.sh` ahora rechaza un bundle con rutas de unidad.
 
 Tras `docker load` en un daemon con el almacén clásico, el ID visible es el **digest de configuración**: el ID local de Docker Desktop (containerd) es otro. La prueba de identidad es la etiqueta de revisión, que verifica `03-load-images.sh`.
 
@@ -58,10 +64,10 @@ Si la fase A muestra que el frontend actual tiene una URL de API absoluta o un `
 ## 4. Procedimiento en la VPS
 
 ```bash
-# 0. Transferir por el canal SSH autorizado (scp/rsync) a ~/g8-deploy/kit-44c531c/:
-#    scripts/vps-g8-prueba/* + g8-tk-44c531c-images.tar.gz + g8-tk-44c531c-images.tar.gz.sha256
-cd ~/g8-deploy/kit-44c531c
-export WORK=$HOME/g8-deploy/tk-44c531c-$(date +%Y%m%d-%H%M%S)
+# 0. Transferir por el canal SSH autorizado (scp/rsync) a ~/g8-deploy/kit-9e06348/:
+#    scripts/vps-g8-prueba/* + g8-tk-9e06348-images.tar.gz + g8-tk-9e06348-images.tar.gz.sha256
+cd ~/g8-deploy/kit-9e06348
+export WORK=$HOME/g8-deploy/tk-9e06348-$(date +%Y%m%d-%H%M%S)
 # Opcionales si difieren: G8_DOCKER_HOST (por defecto unix:///run/user/1000/docker.sock),
 # PG_CONTAINER, PG_USER, PG_DB, CB, CF, EXPECTED_PROJECT.
 
@@ -78,7 +84,7 @@ Entregar para la autorización: `01-preflight.txt`, `02-backup.txt`, `03-load.tx
 ### Activación (solo con autorización explícita)
 
 ```bash
-CONFIRM_SHA=44c531c67482e783d07c5b9aad6d3b584a117b04 bash 05-activate.sh
+CONFIRM_SHA=9e06348019e16e5fe40a6e09a2d7171d552169f5 bash 05-activate.sh
 ```
 
 ### Rollback
@@ -101,3 +107,22 @@ El rollback revierte **ambos** servicios. No restaura el dump, no hace `DROP` ni
 | Integridad | Firma y PDF históricos accesibles; cotizaciones y contratos con los mismos conteos; Tickets y facturación sin cambios; consola del navegador sin errores nuevos. | — |
 
 **Abortar y ejecutar `06-rollback.sh`** si falla el login, `07` informa FAIL en montajes o PDF, la huella de datos cambia sin operaciones legítimas de usuarios en la ventana, se pierde el aislamiento por empresa, fallan la firma, los contratos o los pagos, o G3 recibe solicitudes no autorizadas. Coordinar una ventana sin uso concurrente del CRM de prueba. La prueba en VPS es validación de aceptación; no autoriza merge.
+
+## 6. Validación en navegador sobre QA aislada (12-11-2026)
+
+**Entorno**
+- Proyecto Docker `g8tk-qa-local`, con nombres, volúmenes, puertos (`127.0.0.1:18480/18441`) y credenciales propios y aleatorios.
+- PostgreSQL desechable con `db/init`, las migraciones del repo y `db/seed-crm-local.sql` (datos ficticios), más fixtures por ticket.
+- Imágenes `tk-9e06348`.
+- Backend en una red sin salida a internet; G1 y G3 reemplazados por un simulador local en `127.0.0.1` del mismo contenedor.
+- Correo, firma, facturación y WhatsApp desactivados.
+
+**Resultado:** Edge 157 (Playwright), escritorio 1440×900 y móvil 390×844: 90 comprobaciones, 0 FAIL.
+
+**Errores de consola:** solo recursos externos bloqueados a propósito (fuentes y teselas OSM) y los 404/403/503 esperados de las búsquedas negativas de inventario.
+
+**Hallazgos corregidos durante la validación**
+- Frontend `tk-44c531c` defectuoso (ver §2).
+- En vista de empresa, el administrador veía servicios de otras empresas en la ficha del cliente (commit `9e063480`). Para los demás roles el aislamiento ya era correcto.
+
+**Diferencias de la ruta local** (no afectan a la VPS): `db/init` difiere del esquema global (`/api/ready` informa `DEGRADED`); además faltaba `orden_trabajo.cierre_equipos` y los nombres de empresa no coincidían con el seed. Se ajustaron solo en la base desechable.

@@ -44,7 +44,7 @@ backend_ready "$CB" || echo "FAIL readiness no disponible"
 
 echo "== frontend actual: URL de API incrustada y proxy"
 d8 exec "$CF" sh -c 'grep -ho "https\?://[a-zA-Z0-9.:-]*/api" /usr/share/nginx/html/assets/*.js 2>/dev/null | sort -u; echo "referencias a \"/api\": $(cat /usr/share/nginx/html/assets/*.js | grep -o "\"/api\"" | wc -l)"; grep -h "proxy_pass" /etc/nginx/conf.d/*.conf 2>/dev/null || echo "sin proxy_pass en nginx del frontend"; sha256sum /etc/nginx/templates/default.conf.template 2>/dev/null || echo "sin plantilla nginx"'
-echo "plantilla nginx de la imagen nueva: 582c78a0c13a7e21f8e8a5dcae209bcfa116ae942ef31b69409a58188ba66678 (bundle con /api relativo)"
+echo "imagen nueva: bundle con /api relativo (VITE_API_URL=/api); si el actual usa otra URL o proxy_pass, no activar el frontend"
 
 echo "== base de datos: huella solo lectura"
 db_fingerprint | tee "$WORK/db-antes.txt"
