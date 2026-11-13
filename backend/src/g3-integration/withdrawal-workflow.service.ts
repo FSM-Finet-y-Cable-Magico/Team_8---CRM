@@ -27,6 +27,9 @@ import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalDispatch, With
 
 type Db = Prisma.TransactionClient;
 const CLOSED_REQUEST_STATES = ['CANCELADA', 'CERRADA'];
+/** Legitimate, auditable system actor of the automatic finalization (no user is impersonated). */
+export const WITHDRAWAL_SYSTEM_ACTOR = 'SISTEMA_G8_SEGUIMIENTO_RETIROS';
+type FinalizationActor = { kind: 'USUARIO'; user: AuthUser } | { kind: 'SISTEMA'; origen: typeof WITHDRAWAL_SYSTEM_ACTOR };
 /**
  * public.solicitud_retiro_servicio.estado_despacho_tecnico only admits this value in the global contract
  * (db/global/init-global.sql, CHECK solicitud_retiro_servicio_despacho_check). G8 never changes it: the technical
@@ -81,9 +84,18 @@ export class WithdrawalWorkflowService {
     const facts = await this.loadFacts(db, service, currentUser);
     const result = evaluateWithdrawalEligibility(facts);
     const capabilities = await this.storage.capabilities(db);
+    // Existing request: the same access of the Libro de Control follows it (ticket, dispatch, OT, closure) instead of a second one.
+    let seguimiento: Record<string, unknown> | null = null;
+    if (facts.activeRequest && capabilities.ticketLink && capabilities.g3Dispatch) {
+      const id = facts.activeRequest.idSolicitudRetiro;
+      const [link, dispatch] = await Promise.all([this.storage.findLinkByRequest(db, id), this.storage.findDispatch(db, id)]);
+      const ticket = link ? await db.ticket.findUnique({ where: { idTicket: link.idTicket }, select: { idTicket: true, codigoSeguimiento: true, estado: true } }) : null;
+      seguimiento = { idSolicitudRetiro: id, estado: facts.activeRequest.estado, flujoGuiado: Boolean(link), ticket, despacho: dispatch ? this.publicDispatch(dispatch) : null };
+    }
     return {
       idServicio, motivo: WITHDRAWAL_MOTIVE_MOROSITY, eligible: result.eligible, checks: result.checks, firstFailure: result.firstFailure,
       habilitado: capabilities.ticketLink && capabilities.g3Dispatch, despachoG3Habilitado: this.dispatchEnabled(), capabilities,
+      bajaAutomaticaHabilitada: this.finalizeEnabled(), seguimiento,
       deuda: facts.debt, solicitudActiva: facts.activeRequest,
       // Read-only context preloaded by the Libro de Control form (ported from PR #81 2c5de07d). Display only:
       // initiate() never trusts it and re-reads everything under lock.
@@ -258,7 +270,13 @@ export class WithdrawalWorkflowService {
       return { despacho: this.publicDispatch(dispatch), consultado: false };
     }
     if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
-    const outcome = interpretWithdrawalOrderRead(await this.g3.readOrder(dispatch.idOtG3, dispatch.idEmpresa), { idOt: dispatch.idOtG3, idEmpresa: dispatch.idEmpresa });
+    const snapshot = dispatch.payloadSnapshot as Record<string, unknown>;
+    const asNumber = (value: unknown) => typeof value === 'number' ? value : undefined;
+    const outcome = interpretWithdrawalOrderRead(await this.g3.readOrder(dispatch.idOtG3, dispatch.idEmpresa), {
+      idOt: dispatch.idOtG3, idEmpresa: dispatch.idEmpresa, requestId: dispatch.requestId, traceId: dispatch.traceId,
+      idServicio: asNumber(snapshot.id_servicio_externo), idContrato: asNumber(snapshot.id_contrato_externo),
+      idCliente: asNumber(snapshot.id_cliente_externo), idTicket: asNumber(snapshot.id_ticket_externo),
+    });
     if (outcome.kind !== 'LEIDA') throw new ConflictException({ code: outcome.code, message: outcome.message });
     const stored = await this.prisma.$transaction(async tx => {
       const fresh = await this.storage.findDispatch(tx, idSolicitudRetiro, true);
@@ -427,23 +445,37 @@ export class WithdrawalWorkflowService {
   }
 
   /**
-   * Automatic follow-up of ONE request (WithdrawalTrackingProcessor). Read-only towards G3/G1: a GET of the OT while it is
-   * not final (respecting the read cache) and, once the BAJA closure is in, a GET of the G1 reception whose result is
-   * stored as an immutable version. It never dispatches, cancels, finalizes nor writes to other systems. Idempotent.
+   * Automatic follow-up of ONE request (WithdrawalTrackingProcessor). Towards G3/G1 it only reads: a GET of the OT while it
+   * is not final (respecting the read cache) and, once the BAJA closure is in, a GET of the G1 reception stored as an
+   * immutable version (informative). When WITHDRAWAL_FINALIZE_ENABLED=true, G3 reports COMPLETADA (approved) and the
+   * BAJA closure was received, it applies the baja through finalizeApprovedBySystem() (FINET 13-11-2026), which re-reads
+   * the approval by GET and re-checks everything under locks. It never dispatches, cancels nor writes to other systems.
    */
   async track(idSolicitudRetiro: number) {
     const dispatch = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
       return this.storage.findDispatch(tx, idSolicitudRetiro);
     });
-    if (!dispatch?.idOtG3 || dispatch.aplicadoEn) return { ordenConsultada: false, recepcion: 'NO_APLICA' as const };
+    if (!dispatch?.idOtG3 || dispatch.aplicadoEn) return { ordenConsultada: false, recepcion: 'NO_APLICA' as const, baja: 'NO_APLICA' as const };
     let ordenConsultada = false;
-    if (!['COMPLETADA', 'CANCELADA'].includes(dispatch.estadoOt ?? '')) {
-      ordenConsultada = (await this.refreshOrder(idSolicitudRetiro, null)).consultado;
+    let estadoOt = dispatch.estadoOt;
+    if (!['COMPLETADA', 'CANCELADA'].includes(estadoOt ?? '')) {
+      const read = await this.refreshOrder(idSolicitudRetiro, null);
+      ordenConsultada = read.consultado;
+      estadoOt = read.despacho.estadoOt;
     }
-    if (!dispatch.cierreClave || !this.g1?.configured()) return { ordenConsultada, recepcion: 'NO_APLICA' as const };
-    const reception = await this.syncReception(idSolicitudRetiro, null);
-    return { ordenConsultada, recepcion: reception.estado };
+    let recepcion: 'NO_APLICA' | 'PENDIENTE' | 'SINCRONIZADA' = 'NO_APLICA';
+    let receptionError: unknown = null;
+    if (dispatch.cierreClave && this.g1?.configured()) {
+      try { recepcion = (await this.syncReception(idSolicitudRetiro, null)).estado; } catch (error) { receptionError = error; }
+    }
+    if (estadoOt === 'COMPLETADA' && dispatch.cierreClave && this.finalizeEnabled()) {
+      const applied = await this.finalizeApprovedBySystem(idSolicitudRetiro);
+      return { ordenConsultada, recepcion, baja: applied.aplicado ? 'APLICADA' as const : 'YA_APLICADA' as const };
+    }
+    // A G1 failure never blocks the baja; while nothing was applied it is reported so the follow-up retries it.
+    if (receptionError) throw receptionError;
+    return { ordenConsultada, recepcion, baja: 'PENDIENTE' as const };
   }
 
   trackableRequests(limit: number) {
@@ -459,41 +491,53 @@ export class WithdrawalWorkflowService {
   }
 
   /**
-   * Effective withdrawal ("baja efectiva") for morosity. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
-   * Outside any transaction: a forced GET of the OT (G3 must report COMPLETADA) and a read of the devices G1
-   * still associates with the service. Then, in ONE transaction under locks: debt and suspension are recomputed,
-   * the evidence is reconciled, and only if everything holds: service -> Baja, contract -> Baja only without other
-   * operational services, customer status recomputed with every service of both companies, request CERRADA,
-   * evidence marked applied and audited. Any failure (write or audit) rolls the whole operation back.
-   * Payments, invoices, signed documents, G1 inventory and G2/G3 records are never written. Idempotent.
+   * Effective withdrawal ("baja efectiva") for morosity requested by an Administrador: reconciliation / authorized retry of
+   * the same operation the follow-up applies automatically. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
    */
-  async finalize(idSolicitudRetiro: number, currentUser: AuthUser) {
+  finalize(idSolicitudRetiro: number, currentUser: AuthUser) {
+    return this.applyFinalization(idSolicitudRetiro, { kind: 'USUARIO', user: currentUser });
+  }
+
+  /**
+   * Internal automatic finalization (FINET 13-11-2026), run ONLY by WithdrawalTrackingProcessor after it reconciled G3's
+   * approval. Same transaction and checks as finalize(); the actor is the G8 system (idUsuario null in the audit plus an
+   * explicit `actor`), never a borrowed Administrador. A raw webhook never reaches this: approval is re-read by GET here.
+   */
+  finalizeApprovedBySystem(idSolicitudRetiro: number) {
+    return this.applyFinalization(idSolicitudRetiro, { kind: 'SISTEMA', origen: WITHDRAWAL_SYSTEM_ACTOR });
+  }
+
+  /**
+   * Outside any transaction: a forced authenticated GET of the OT (G3 must report COMPLETADA = approved by the head
+   * technician) and a best-effort read of the devices G1 still associates with the service (informative only). Then, in
+   * ONE transaction under locks: debt and suspension are recomputed, the evidence is reconciled, and only if everything
+   * holds: service -> Baja, contract -> Baja only without other operational services, customer status recomputed with
+   * every service of both companies, excliente visible in Prospectos when it was the last relationship in the company,
+   * request CERRADA, evidence marked applied, «Baja de servicio» ticket closed and audited (missing devices and G1 notes
+   * included). Any failure (write or audit) rolls the whole operation back. Payments, invoices, debt, signed documents,
+   * G1 inventory and G2/G3 records are never written. Idempotent.
+   */
+  private async applyFinalization(idSolicitudRetiro: number, actor: FinalizationActor) {
+    const user = actor.kind === 'USUARIO' ? actor.user : null;
     if (!this.finalizeEnabled()) {
       throw new ConflictException({ code: 'WITHDRAWAL_FINALIZE_DISABLED', message: 'La baja efectiva por morosidad está deshabilitada en este ambiente; no se modificó nada.' });
     }
     const current = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
-      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, user);
       return { request, dispatch: await this.storage.findDispatch(tx, idSolicitudRetiro) };
     });
     if (current.request.estado === 'CERRADA' && current.dispatch?.aplicadoEn) {
       return { solicitud: current.request, aplicado: false, yaAplicado: true, idServicio: current.request.idServicio };
     }
     if (!current.dispatch?.idOtG3) throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: 'No hay una OT de retiro aceptada por G3', motivos: [{ code: 'SIN_OT' }] });
-    // Fresh approval from G3 (bypasses the read cache) and current G1 association of devices with the service.
-    await this.refreshOrder(idSolicitudRetiro, currentUser, true);
-    if (!this.g1Inventory) throw new ConflictException({ code: 'INTEGRACION_G1_NO_CONFIGURADA', message: 'No se puede verificar el inventario asociado al servicio; no se aplicó la baja.' });
-    let activeEquipment: string[];
-    try {
-      activeEquipment = (await this.g1Inventory.getEquipmentByService(current.request.idServicio, current.request.idEmpresa)).data
-        .map(unit => String(unit.numero_serie).trim().toUpperCase());
-    } catch {
-      throw new ConflictException({ code: 'G1_INVENTARIO_NO_DISPONIBLE', message: 'No fue posible verificar en inventario que el servicio no conserve equipos; no se aplicó la baja.' });
-    }
+    // Fresh approval from G3 (bypasses the read cache). G1 is informative: its absence never blocks a G3-approved baja.
+    await this.refreshOrder(idSolicitudRetiro, user, true);
+    const activeEquipment = await this.readAssociatedEquipment(current.request.idServicio, current.request.idEmpresa);
 
     return this.prisma.$transaction(async tx => {
-      await this.assertStorage(tx);
-      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const capabilities = await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, user);
       const dispatch = (await this.storage.findDispatch(tx, idSolicitudRetiro, true))!;
       const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio }, include: { contrato: true } });
       if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
@@ -518,10 +562,10 @@ export class WithdrawalWorkflowService {
       const assessment = assessWithdrawalClosure({
         evidence: { idOtG3: dispatch.idOtG3, estadoOt: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
           equiposRetirados: dispatch.equiposRetirados, equiposFaltantes: dispatch.equiposFaltantes },
-        idServicio: service.idServicio, receptions: await this.storage.findReceptions(tx, idSolicitudRetiro), activeEquipment,
+        idServicio: service.idServicio, receptions: capabilities.g1Reception ? await this.storage.findReceptions(tx, idSolicitudRetiro) : [], activeEquipment,
       });
       if (assessment.outcome !== 'APLICAR_BAJA') {
-        throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons });
+        throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons, avisos: assessment.avisos });
       }
       const updated = await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: { estadoOperativo: 'Baja' } });
       let contratoDeBaja = false;
@@ -540,21 +584,36 @@ export class WithdrawalWorkflowService {
       }
       // FINET 13-11-2026: if this was the last operational relationship in the company, the person becomes visible as
       // excliente in that company's Prospects (derived view; identity, history, debt and other companies untouched).
-      const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa, idUsuario: currentUser.idUsuario });
+      const idUsuario = user?.idUsuario ?? null;
+      const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa, idUsuario });
       const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA' } });
       await this.storage.markApplied(tx, idSolicitudRetiro);
       // FINET 13-11-2026: the «Baja de servicio» ticket is closed only here, inside this successful transaction.
       const ticketBaja = await this.tickets.closeWithdrawalTicket(tx, { idTicket: link.idTicket, idEmpresa: service.idEmpresa,
-        idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario: currentUser.idUsuario });
-      await this.audit(tx, currentUser, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
-        idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, recepcionClaveEvento: dispatch.recepcionClaveEvento,
+        idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario });
+      await this.audit(tx, user, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
+        actor: actor.kind === 'SISTEMA' ? actor.origen : 'USUARIO',
+        idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, estadoOtG3: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
         estadoAnterior: service.estadoOperativo, estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente,
-        equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie), ticketBaja: ticketBaja.action,
+        equiposRetiradosDeclarados: dispatch.equiposRetirados.map(item => item.numeroSerie),
+        equiposFaltantes: dispatch.equiposFaltantes.map(item => item.numeroSerie),
+        inventarioG1: { recepcionClaveEvento: dispatch.recepcionClaveEvento, equiposAsociados: activeEquipment?.length ?? null },
+        avisos: assessment.avisos.map(item => item.code), ticketBaja: ticketBaja.action,
         retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}),
       });
       return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, ticketBaja: ticketBaja.action,
-        retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}) };
+        avisos: assessment.avisos, retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}) };
     });
+  }
+
+  /** Devices G1 still associates with the service (uppercase serials), or null when G1 is not configured or not reachable. */
+  private async readAssociatedEquipment(idServicio: number, idEmpresa: number): Promise<string[] | null> {
+    if (!this.g1Inventory) return null;
+    try {
+      return (await this.g1Inventory.getEquipmentByService(idServicio, idEmpresa)).data.map(unit => String(unit.numero_serie).trim().toUpperCase());
+    } catch {
+      return null;
+    }
   }
 
   // ----- helpers -----

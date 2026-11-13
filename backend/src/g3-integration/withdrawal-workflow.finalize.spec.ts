@@ -175,33 +175,69 @@ describe('Baja efectiva por morosidad', () => {
   });
 
   it.each([
-    ['G3 aún en PENDIENTE_APROBACION', (h: any) => { h.g3Replies.push(orderRead('PENDIENTE_APROBACION')); }, 'CIERRE_NO_CONFIRMADO'],
-    ['equipo aún asociado al servicio en G1', (h: any) => { h.g3Replies.push(orderRead('COMPLETADA')); h.g1Inventory.getEquipmentByService.mockResolvedValueOnce({ status: 200, durationMs: 1, data: [{ numero_serie: 'QA-OTRO' }] }); }, 'RETIRO_PARCIAL'],
+    ['G3 aún en PENDIENTE_APROBACION (cerrada por el técnico, sin aprobar)', (h: any) => { h.g3Replies.push(orderRead('PENDIENTE_APROBACION')); }, 'CIERRE_NO_CONFIRMADO'],
+    ['G3 en curso', (h: any) => { h.g3Replies.push(orderRead('EN_CURSO')); }, 'CIERRE_NO_CONFIRMADO'],
+    ['OT cancelada en G3', (h: any) => { h.g3Replies.push(orderRead('CANCELADA')); }, 'OT_CANCELADA'],
+    ['cierre declara la misma serie retirada y faltante', (h: any) => { h.g3Replies.push(orderRead('COMPLETADA')); h.state.dispatches[0].equiposFaltantes = [{ numeroSerie: 'QA-ONT-RET-1' }]; }, 'SERIE_RETIRADA_Y_FALTANTE'],
   ])('bloquea sin escribir: %s', async (_name, prepare, code) => {
     const h = await readyToFinalize();
     prepare(h);
     const before = snapshot(h);
     await expect(h.finalize()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_CLOSURE_BLOCKED', motivos: expect.arrayContaining([expect.objectContaining({ code })]) } });
     expect(snapshot(h)).toBe(before);
+    expect(h.state.tickets[0].estado).toBe('Abierto');
   });
 
-  it('recepción G1 parcial o con faltantes bloquea', async () => {
-    const partial = await readyToFinalize({ finalize: true });
-    partial.state.receptions.forEach((r: any) => { r.estadoRecepcion = 'PARCIAL'; });
-    partial.g3Replies.push(orderRead('COMPLETADA'));
-    await expect(partial.finalize()).rejects.toMatchObject({ response: { motivos: expect.arrayContaining([expect.objectContaining({ code: 'RECEPCION_G1_INCOMPLETA' })]) } });
-    const missing = await readyToFinalize({ finalize: true });
-    missing.state.dispatches[0].equiposFaltantes = [{ numeroSerie: 'QA-NO-ENTREGADA', motivo: 'Cliente no la entregó' }];
-    missing.g3Replies.push(orderRead('COMPLETADA'));
-    await expect(missing.finalize()).rejects.toMatchObject({ response: { motivos: expect.arrayContaining([expect.objectContaining({ code: 'EQUIPOS_FALTANTES' })]) } });
-  });
-
-  it('G1 de inventario no disponible: no se aplica', async () => {
+  // FINET 13-11-2026: the commercial baja depends on G3's approval; the warehouse never blocks it and is never faked.
+  it.each([
+    ['equipo aún asociado al servicio en G1', (h: any) => { h.g1Inventory.getEquipmentByService.mockResolvedValueOnce({ status: 200, durationMs: 1, data: [{ numero_serie: 'QA-OTRO' }] }); }, 'EQUIPOS_ASOCIADOS_EN_INVENTARIO'],
+    ['recepción G1 parcial', (h: any) => { h.state.receptions.forEach((r: any) => { r.estadoRecepcion = 'PARCIAL'; }); }, 'RECEPCION_G1_INCOMPLETA'],
+    ['recepción G1 ausente', (h: any) => { h.state.receptions.splice(0); }, 'RECEPCION_G1_PENDIENTE'],
+    ['inventario G1 no disponible', (h: any) => { h.g1Inventory.getEquipmentByService.mockRejectedValueOnce(new Error('down')); }, 'INVENTARIO_NO_CONSULTADO'],
+    ['equipos faltantes declarados por el técnico', (h: any) => { h.state.dispatches[0].equiposFaltantes = [{ numeroSerie: 'QA-NO-ENTREGADA', motivo: 'Cliente no la entregó' }]; }, 'EQUIPOS_FALTANTES'],
+    ['cero equipos recuperados', (h: any) => { h.state.dispatches[0].equiposRetirados = []; h.state.dispatches[0].equiposFaltantes = [{ numeroSerie: 'QA-ONT-RET-1' }]; }, 'SIN_EQUIPOS_RETIRADOS'],
+  ])('G3 aprobada: aplica la baja aunque haya %s, y lo deja en la auditoría', async (_name, prepare, aviso) => {
     const h = await readyToFinalize();
+    prepare(h);
     h.g3Replies.push(orderRead('COMPLETADA'));
-    h.g1Inventory.getEquipmentByService.mockRejectedValueOnce(new Error('down'));
-    await expect(h.finalize()).rejects.toMatchObject({ response: { code: 'G1_INVENTARIO_NO_DISPONIBLE' } });
-    expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
+    const receptionsBefore = JSON.stringify(h.state.receptions);
+    const result = await h.finalize();
+    expect(result).toMatchObject({ aplicado: true, avisos: expect.arrayContaining([expect.objectContaining({ code: aviso })]) });
+    expect(h.state.services[0].estadoOperativo).toBe('Baja');
+    expect(h.state.tickets[0].estado).toBe('Cerrado');
+    const audit = h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD');
+    expect(audit.valorNuevo).toMatchObject({ avisos: expect.arrayContaining([aviso]), equiposFaltantes: expect.any(Array), inventarioG1: expect.any(Object) });
+    // G8 never writes, releases or dissociates inventory, and never invents a reception.
+    expect(JSON.stringify(h.state.receptions)).toBe(receptionsBefore);
+    expect(h.state.forbiddenWrites).toEqual([]);
+  });
+
+  it('sin cliente de inventario G1 configurado también aplica (aviso INVENTARIO_NO_CONSULTADO)', async () => {
+    const h = withdrawalHarness({ finalize: true });
+    const service = new WithdrawalWorkflowService(h.prisma, h.audit, h.tickets as never, h.config, h.g3, h.storage);
+    h.g3Replies.push(created());
+    await service.initiate({ idServicio: 61, observaciones: 'Cliente sin pago tras aviso previo del 01-11' }, comercial());
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    await service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { trace_id: h.state.dispatches[0].traceId })));
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    await expect(service.finalize(15, comercial())).resolves.toMatchObject({ aplicado: true, avisos: expect.arrayContaining([expect.objectContaining({ code: 'INVENTARIO_NO_CONSULTADO' })]) });
+  });
+
+  it('la finalización de sistema usa la misma transacción: actor auditable y excliente cuando era la última relación', async () => {
+    const h = await readyToFinalize({ finalize: true }, x => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 62); });
+    h.g3Replies.push(orderRead('COMPLETADA'));
+    const result = await h.service.finalizeApprovedBySystem(15);
+    expect(result).toMatchObject({ aplicado: true, contratoDeBaja: true, retornoProspectos: expect.any(String) });
+    expect(h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toMatchObject({ idUsuario: null,
+      valorNuevo: expect.objectContaining({ actor: 'SISTEMA_G8_SEGUIMIENTO_RETIROS' }) });
+    await expect(h.service.finalizeApprovedBySystem(15)).resolves.toMatchObject({ aplicado: false, yaAplicado: true });
+  });
+
+  it('la finalización de sistema respeta el interruptor: apagada no escribe', async () => {
+    const h = await readyToFinalize({ finalize: false });
+    const before = snapshot(h);
+    await expect(h.service.finalizeApprovedBySystem(15)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_FINALIZE_DISABLED' } });
+    expect(snapshot(h)).toBe(before);
   });
 
   it('servicio reactivado por un pago concurrente: no se da de baja', async () => {

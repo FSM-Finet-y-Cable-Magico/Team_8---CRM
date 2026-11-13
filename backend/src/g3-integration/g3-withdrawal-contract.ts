@@ -172,9 +172,15 @@ export type OrderReadOutcome =
 
 /**
  * GET of a BAJA OT. `origen_integracion` only describes installation requests, so it is null for a
- * BAJA: correlation is the persisted id_ot + id_empresa, never a request_id in that response.
+ * BAJA: correlation is the persisted id_ot + id_empresa + tipo BAJA (the request_id/trace_id/customer/contract/service/
+ * ticket were correlated when the OT was accepted and when the BAJA closure was stored). FINET 13-11-2026: if G3 does
+ * include any of those identifiers in the GET, each one present must match too (stricter, never a contract change).
  */
-export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: { idOt: number; idEmpresa: number }): OrderReadOutcome {
+export type OrderReadExpectation = {
+  idOt: number; idEmpresa: number;
+  requestId?: string; traceId?: string; idServicio?: number; idContrato?: number; idCliente?: number; idTicket?: number;
+};
+export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: OrderReadExpectation): OrderReadOutcome {
   if (reply.status === null || reply.status === 408 || reply.status === 429 || (reply.status ?? 0) >= 500 || reply.status === 404) {
     return { kind: 'NO_DISPONIBLE', status: reply.status, code: errorCode(reply.body, reply.status ? `G3_HTTP_${reply.status}` : 'G3_NO_DISPONIBLE'), message: 'No fue posible consultar la OT en G3' };
   }
@@ -186,6 +192,16 @@ export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: { idO
   if (envelope?.success !== true || !data) return bad('G3_RESPUESTA_INVALIDA', 'G3 respondió sin la envoltura { success, data }');
   if (data.id_ot !== expected.idOt || data.id_empresa !== expected.idEmpresa) return bad('G3_CORRELACION_INVALIDA', 'La OT consultada no corresponde a la solicitud');
   if (data.tipo_ot !== G3_WITHDRAWAL_TYPE) return bad('G3_TIPO_OT_INVALIDO', 'La OT consultada no es de BAJA');
+  const optional: Array<[string, unknown]> = [
+    ['request_id', expected.requestId], ['trace_id', expected.traceId?.toLowerCase()], ['id_servicio_externo', expected.idServicio],
+    ['id_contrato_externo', expected.idContrato], ['id_cliente_externo', expected.idCliente], ['id_ticket_externo', expected.idTicket],
+  ];
+  for (const [field, value] of optional) {
+    const reported = data[field];
+    if (value === undefined || reported === undefined || reported === null) continue;
+    const normalized = field === 'trace_id' && typeof reported === 'string' ? reported.toLowerCase() : reported;
+    if (normalized !== value) return bad('G3_CORRELACION_INVALIDA', `La OT consultada informa otro ${field}; no corresponde a la solicitud`);
+  }
   if (data.origen_integracion !== undefined && data.origen_integracion !== null) {
     return bad('G3_CORRELACION_INVALIDA', 'La OT consultada declara un origen de instalación');
   }
