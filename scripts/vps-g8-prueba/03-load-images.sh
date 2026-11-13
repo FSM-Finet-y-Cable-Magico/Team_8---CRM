@@ -10,6 +10,14 @@ fail() { echo "FAIL $*"; rm -f "$WORK/C_PASS"; exit 1; }
 echo "== 1. integridad del paquete $IMAGES_ARCHIVE"
 sha256sum -c "$IMAGES_ARCHIVE.sha256" || fail "sha256 del archivo transferido"
 gunzip -t "$IMAGES_ARCHIVE" || fail "gzip corrupto"
+: "${BACKEND_CONFIG_DIGEST:?release.env sin BACKEND_CONFIG_DIGEST}" "${FRONTEND_CONFIG_DIGEST:?release.env sin FRONTEND_CONFIG_DIGEST}"
+# The archive must contain exactly the configs recorded at build time (docker load then verifies every blob digest).
+archive_digest() { gunzip -c "$IMAGES_ARCHIVE" | tar -xOf - manifest.json | python3 -c "import json,sys
+tag=sys.argv[1]; m=[e for e in json.load(sys.stdin) if tag in (e.get('RepoTags') or [])]
+print('sha256:'+(m[0]['Config'].split('/')[-1] if m[0]['Config'].startswith('blobs/') else m[0]['Config'][:-5]) if len(m)==1 else 'AUSENTE')" "$1"; }
+[ "$(archive_digest "$NEW_BACKEND_IMAGE")" = "$BACKEND_CONFIG_DIGEST" ] || fail "el archivo no contiene el backend construido ($BACKEND_CONFIG_DIGEST)"
+[ "$(archive_digest "$NEW_FRONTEND_IMAGE")" = "$FRONTEND_CONFIG_DIGEST" ] || fail "el archivo no contiene el frontend construido ($FRONTEND_CONFIG_DIGEST)"
+echo "OK el archivo contiene las configuraciones del build ($BACKEND_CONFIG_DIGEST / $FRONTEND_CONFIG_DIGEST)"
 gunzip -c "$IMAGES_ARCHIVE" | d8 load || fail "docker load"
 
 echo "== 2. etiquetas de revisión y arquitectura"
@@ -21,8 +29,14 @@ for image in "$NEW_BACKEND_IMAGE" "$NEW_FRONTEND_IMAGE"; do
   [ "$rev" = "$SHA" ] || fail "$image: revisión '$rev' distinta de $SHA"
   [ "$arch" = "$ARCH" ] || fail "$image: arquitectura $arch distinta del daemon $ARCH"
 done
-[ -n "${BACKEND_IMAGE_ID:-}" ] && { [ "$(d8 image inspect "$NEW_BACKEND_IMAGE" --format '{{.Id}}')" = "$BACKEND_IMAGE_ID" ] || fail "ID del backend distinto del construido ($BACKEND_IMAGE_ID)"; }
-[ -n "${FRONTEND_IMAGE_ID:-}" ] && { [ "$(d8 image inspect "$NEW_FRONTEND_IMAGE" --format '{{.Id}}')" = "$FRONTEND_IMAGE_ID" ] || fail "ID del frontend distinto del construido ($FRONTEND_IMAGE_ID)"; }
+# Image ID depends on the store: classic (overlay2) shows the CONFIG digest, containerd shows the MANIFEST digest
+# (the ID seen on the build machine). Either one identifies the built image; anything else is rejected.
+check_id() { local image=$1 cfg=$2 manifest=$3 id; id=$(d8 image inspect "$image" --format '{{.Id}}')
+  if [ "$id" = "$cfg" ]; then echo "OK $image ID = digest de configuración del build (almacén clásico)"
+  elif [ "$id" = "$manifest" ]; then echo "OK $image ID = digest de manifiesto del build (almacén containerd)"
+  else fail "$image: ID $id no corresponde al build (config $cfg / manifiesto $manifest)"; fi; }
+check_id "$NEW_BACKEND_IMAGE" "$BACKEND_CONFIG_DIGEST" "${BACKEND_IMAGE_ID:-}"
+check_id "$NEW_FRONTEND_IMAGE" "$FRONTEND_CONFIG_DIGEST" "${FRONTEND_IMAGE_ID:-}"
 
 echo "== 3. compatibilidad backend/frontend (mismo build del mismo código)"
 for key in org.opencontainers.image.revision org.opencontainers.image.source org.opencontainers.image.ref.name org.opencontainers.image.created; do

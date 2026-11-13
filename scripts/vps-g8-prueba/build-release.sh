@@ -18,6 +18,8 @@ remote=$(git -C "$REPO" ls-remote origin "refs/heads/$BRANCH" | cut -f1)
 mkdir -p "$OUT/src" "$OUT/kit"
 SHA7=${SHA:0:7}
 CREATED=$(git -C "$REPO" show -s --format=%cI "$SHA")
+# Last commit that changed application code (backend/ or frontend/): traceability of what the images contain.
+APP_CODE_SHA=$(git -C "$REPO" log -1 --format=%H "$SHA" -- backend frontend)
 BACKEND_IMAGE="finet-g8-backend:tk-$SHA7"; FRONTEND_IMAGE="finet-g8-frontend:tk-$SHA7"
 ARCHIVE="g8-tk-$SHA7-images.tar.gz"
 
@@ -46,6 +48,14 @@ BID=$(docker image inspect "$BACKEND_IMAGE" --format '{{.Id}}'); FID=$(docker im
 docker save "$BACKEND_IMAGE" "$FRONTEND_IMAGE" | gzip -6 > "$OUT/kit/$ARCHIVE"
 gunzip -t "$OUT/kit/$ARCHIVE"
 ( cd "$OUT/kit" && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256" )
+# Config digest of each image, read from the archive itself: it is the image ID a classic (overlay2) Docker store
+# shows after `docker load`, while a containerd store shows the manifest digest (BID/FID). 03 accepts either.
+config_digest() { gunzip -c "$OUT/kit/$ARCHIVE" | tar -xOf - manifest.json | python3 -c "import json,sys
+tag=sys.argv[1]; m=[e for e in json.load(sys.stdin) if tag in (e.get('RepoTags') or [])]
+assert len(m)==1, 'tag ausente en manifest.json'
+c=m[0]['Config']; print('sha256:'+(c.split('/')[-1] if c.startswith('blobs/') else c.removesuffix('.json')))" "$1"; }
+BCFG=$(config_digest "$BACKEND_IMAGE"); FCFG=$(config_digest "$FRONTEND_IMAGE")
+[[ "$BCFG" =~ ^sha256:[0-9a-f]{64}$ && "$FCFG" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "FAIL no se pudo leer el digest de configuración" >&2; exit 1; }
 
 cp "$KIT_SRC"/0*.sh "$KIT_SRC/compare.py" "$KIT_SRC/db-fingerprint.sql" "$OUT/kit/"
 if [ "$(cat "$OUT"/kit/*.sh "$OUT/kit/compare.py" | tr -cd '\r' | wc -c)" -ne 0 ]; then echo "FAIL scripts del kit con fin de línea CRLF" >&2; exit 1; fi
@@ -58,8 +68,11 @@ NEW_BACKEND_IMAGE=$BACKEND_IMAGE
 NEW_FRONTEND_IMAGE=$FRONTEND_IMAGE
 BACKEND_IMAGE_ID=$BID
 FRONTEND_IMAGE_ID=$FID
+BACKEND_CONFIG_DIGEST=$BCFG
+FRONTEND_CONFIG_DIGEST=$FCFG
 VITE_API_URL=$VITE_API_URL
 CREATED=$CREATED
+APP_CODE_SHA=$APP_CODE_SHA
 EOF
 ( cd "$OUT/kit" && sha256sum release.env 0*.sh compare.py db-fingerprint.sql RUNBOOK.md "$ARCHIVE" > MANIFEST.sha256 )
 ( cd "$OUT" && tar -czf "g8-release-tk-$SHA7.tar.gz" kit )   # relative paths: GNU tar reads C:/... as a remote host

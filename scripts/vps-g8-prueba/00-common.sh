@@ -95,12 +95,16 @@ db_fingerprint() {
   pgd exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U "$PG_USER" -d "$PG_DB" -At < "$KIT_DIR/db-fingerprint.sql"
 }
 
-# Readiness endpoint of a running backend: read-only schema check + integration flags. Non-2xx = failure.
+# Readiness endpoint of a running backend (read-only schema check). Apt ONLY with HTTP 200, database=UP,
+# global_schema=READY, missing_columns=0 and different_columns=0: a degraded schema is never accepted.
 backend_ready() {
-  d8 exec "$1" node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/ready').then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.log('ERROR',e.message);process.exit(1)})"
+  d8 exec "$1" node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/ready').then(async r=>{const t=await r.text();console.log(r.status,t);let j={};try{j=JSON.parse(t)}catch{}
+const ok=r.status===200&&j.database==='UP'&&j.global_schema==='READY'&&j.missing_columns===0&&j.different_columns===0;
+if(!ok)console.log('READINESS NO APTA: status='+r.status+' database='+j.database+' global_schema='+j.global_schema+' missing_columns='+j.missing_columns+' different_columns='+j.different_columns);
+process.exit(ok?0:1)}).catch(e=>{console.log('ERROR',e.message);process.exit(1)})"
 }
-# Wait until the backend answers /api/ready with 2xx (max ~3 min).
-wait_ready() { for _ in $(seq 1 36); do backend_ready "$1" >/dev/null 2>&1 && { backend_ready "$1"; return 0; }; sleep 5; done; echo "FAIL $1 no responde /api/ready"; return 1; }
+# Wait until the backend is apt (max ~3 min); on failure print the last readiness answer.
+wait_ready() { for _ in $(seq 1 36); do backend_ready "$1" >/dev/null 2>&1 && { backend_ready "$1"; return 0; }; sleep 5; done; backend_ready "$1" || true; echo "FAIL $1 sin readiness apta"; return 1; }
 
 # sha256 manifest normalized (GNU vs Git-for-Windows "*" binary marker), sorted by path.
 norm_manifest() { sed -E 's/^([0-9a-f]{64}) [ *]/\1  /' "$@" | sort -k2; }
