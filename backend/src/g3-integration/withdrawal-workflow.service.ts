@@ -360,7 +360,7 @@ export class WithdrawalWorkflowService {
   }
 
   /** Reads the G1 reception for the request (after the BAJA closure) and stores it as an immutable version. */
-  async syncReception(idSolicitudRetiro: number, currentUser: AuthUser) {
+  async syncReception(idSolicitudRetiro: number, currentUser: AuthUser | null) {
     const dispatch = await this.prisma.$transaction(async tx => {
       const capabilities = await this.storage.capabilities(tx);
       if (!capabilities.g1Reception) throw new ConflictException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE', message: 'El almacenamiento de recepciones aún no está aplicado.' });
@@ -405,6 +405,34 @@ export class WithdrawalWorkflowService {
       throw new ConflictException({ code: 'G1_RECEPCION_DISTINTA', message: 'Inventario devolvió otro contenido para la misma clave de evento; se conserva la versión registrada.' });
     }
     return { estado: 'SINCRONIZADA' as const, version, claveEvento: reception.claveEvento, estadoRecepcion: reception.estadoRecepcion, equipos: reception.equipos.length };
+  }
+
+  /**
+   * Automatic follow-up of ONE request (WithdrawalTrackingProcessor). Read-only towards G3/G1: a GET of the OT while it is
+   * not final (respecting the read cache) and, once the BAJA closure is in, a GET of the G1 reception whose result is
+   * stored as an immutable version. It never dispatches, cancels, finalizes nor writes to other systems. Idempotent.
+   */
+  async track(idSolicitudRetiro: number) {
+    const dispatch = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      return this.storage.findDispatch(tx, idSolicitudRetiro);
+    });
+    if (!dispatch?.idOtG3 || dispatch.aplicadoEn) return { ordenConsultada: false, recepcion: 'NO_APLICA' as const };
+    let ordenConsultada = false;
+    if (!['COMPLETADA', 'CANCELADA'].includes(dispatch.estadoOt ?? '')) {
+      ordenConsultada = (await this.refreshOrder(idSolicitudRetiro, null)).consultado;
+    }
+    if (!dispatch.cierreClave || !this.g1?.configured()) return { ordenConsultada, recepcion: 'NO_APLICA' as const };
+    const reception = await this.syncReception(idSolicitudRetiro, null);
+    return { ordenConsultada, recepcion: reception.estado };
+  }
+
+  trackableRequests(limit: number) {
+    return this.prisma.$transaction(async tx => {
+      const capabilities = await this.storage.capabilities(tx);
+      if (!capabilities.g3Dispatch || !capabilities.ticketLink) return null;
+      return this.storage.listTrackable(tx, limit);
+    });
   }
 
   finalizeEnabled() {

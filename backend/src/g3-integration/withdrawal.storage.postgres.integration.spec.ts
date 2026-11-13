@@ -85,6 +85,26 @@ class Rollback extends Error {}
     })).rejects.toThrow(/recepcion_g1_clave_check/);
   });
 
+  it('listTrackable: solo OT aceptadas, no aplicadas, OT no cancelada y solicitud CRM activa (tabla pública mínima de prueba)', async () => {
+    await inTx(async tx => {
+      const has = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT to_regclass('public.solicitud_retiro_servicio') IS NOT NULL AS ok`;
+      if (!has[0]?.ok) return; // ephemeral DB without the public fixture table: covered by the in-memory harness
+      const make = async (id: number, estado: string, patch: Record<string, unknown>) => {
+        await tx.$executeRaw`INSERT INTO public.solicitud_retiro_servicio (id_solicitud_retiro, estado) VALUES (${id}, ${estado})`;
+        await storage.insertDispatch(tx, { ...dispatchRow, idSolicitudRetiro: id, requestId: `g8-retiro-1-${id}` });
+        await storage.updateDispatch(tx, id, patch as never);
+      };
+      await make(601, 'EN_PROCESO', { estadoDespacho: 'ACEPTADA', idOtG3: 941 });
+      await make(602, 'EN_PROCESO', { estadoDespacho: 'CANCELACION_NO_APLICABLE', idOtG3: 942 });
+      await make(603, 'CANCELADA', { estadoDespacho: 'ACEPTADA', idOtG3: 943 });
+      await make(604, 'EN_PROCESO', { estadoDespacho: 'ACEPTADA', idOtG3: 944, estadoOt: 'CANCELADA' });
+      await make(605, 'EN_PROCESO', { estadoDespacho: 'PENDIENTE' });
+      await make(606, 'CERRADA', { estadoDespacho: 'ACEPTADA', idOtG3: 946 });
+      expect((await storage.listTrackable(tx, 50)).sort()).toEqual([601, 602]);
+      expect(await storage.listTrackable(tx, 1)).toHaveLength(1);
+    });
+  });
+
   it('las restricciones protegen la evidencia', async () => {
     await expect(db.$transaction(tx => storage.insertDispatch(tx, { ...dispatchRow, requestId: 'g8-retiro-2-501' }))).rejects.toThrow(/solicitud_g3_request_check/);
     await expect(db.$transaction(async tx => {

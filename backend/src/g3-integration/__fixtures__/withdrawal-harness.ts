@@ -171,6 +171,10 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
       Object.assign(state.dispatches.find(d => d.idSolicitudRetiro === id)!, { recepcionClaveEvento: clave, recepcionSincronizadaEn: new Date() });
       return existing.length ? 'REPETIDA' : 'NUEVA';
     },
+    listTrackable: async (_tx, limit) => state.dispatches
+      .filter(d => !d.aplicadoEn && d.idOtG3 !== null && ['ACEPTADA', 'CANCELACION_NO_APLICABLE'].includes(d.estadoDespacho) && d.estadoOt !== 'CANCELADA'
+        && !['CERRADA', 'CANCELADA'].includes(state.requests.find(r => r.idSolicitudRetiro === d.idSolicitudRetiro)?.estado))
+      .slice(0, limit).map(d => d.idSolicitudRetiro),
     markApplied: async (_tx, id) => { const row = state.dispatches.find(d => d.idSolicitudRetiro === id)!; row.aplicadoEn = row.aplicadoEn ?? new Date(); },
   };
 

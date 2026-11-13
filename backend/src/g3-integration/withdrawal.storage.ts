@@ -61,6 +61,11 @@ export interface WithdrawalStorage {
    */
   storeReceptionVersion(tx: Db, idSolicitudRetiro: number, idEmpresa: number, claveEvento: string, rows: StoredReception[]): Promise<'NUEVA' | 'REPETIDA' | 'CONFLICTO'>;
   markApplied(tx: Db, idSolicitudRetiro: number): Promise<void>;
+  /**
+   * Requests whose follow-up is still meaningful: an OT accepted by G3 (also when G3 refused a late cancellation),
+   * not applied, OT not cancelled and the CRM request neither closed nor cancelled. Terminal ones never come back.
+   */
+  listTrackable(tx: Db, limit: number): Promise<number[]>;
 }
 
 const LINK_COLUMNS = Prisma.sql`id_solicitud_retiro AS "idSolicitudRetiro", id_ticket AS "idTicket", id_aviso AS "idAviso",
@@ -175,6 +180,18 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
     await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.solicitud_g3 SET recepcion_clave_evento = ${claveEvento},
       recepcion_sincronizada_en = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
     return existing.length ? 'REPETIDA' : 'NUEVA';
+  },
+  async listTrackable(tx, limit) {
+    const rows = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT g.id_solicitud_retiro AS id FROM g8_retiros.solicitud_g3 g
+      WHERE g.aplicado_en IS NULL AND g.id_ot_g3 IS NOT NULL
+        AND g.estado_despacho IN ('ACEPTADA', 'CANCELACION_NO_APLICABLE')
+        AND (g.estado_ot IS NULL OR g.estado_ot <> 'CANCELADA')
+        AND EXISTS (SELECT 1 FROM public.solicitud_retiro_servicio r
+                    WHERE r.id_solicitud_retiro = g.id_solicitud_retiro AND r.estado NOT IN ('CERRADA', 'CANCELADA'))
+      ORDER BY g.updated_at ASC, g.id_solicitud_retiro ASC
+      LIMIT ${limit}`);
+    return rows.map(row => Number(row.id));
   },
   async markApplied(tx, idSolicitudRetiro) {
     await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.solicitud_g3 SET aplicado_en = COALESCE(aplicado_en, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
