@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { activeWithdrawalReactivationError, activeWithdrawalWhere, findActiveWithdrawal } from '../common/active-withdrawal';
@@ -6,7 +6,7 @@ import { APPROVED_EXTENSIONS } from '../billing/invoice-balance';
 import { AuthUser } from '../common/auth.types';
 import { companyResponse } from '../common/company-response';
 import { resolveCustomerLifecycleStatus } from '../common/customer-lifecycle';
-import { ACTIVE_AGREEMENT_STATES, hasOverdueCollectibleDebt } from '../common/overdue-debt';
+import { ACTIVE_AGREEMENT_STATES, overdueDebtSummary } from '../common/overdue-debt';
 import { ensureFormerCustomerProspect } from '../common/returning-customer';
 import { addYearsToDateOnly, parseDateOnly, todayDateOnly } from '../common/date-rules';
 import {
@@ -21,7 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AttachEquipmentDto } from './dto/attach-equipment.dto';
 import { CreateServiceInstallOrderDto } from './dto/create-service-install-order.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
-import { DeactivateServiceDto } from './dto/deactivate-service.dto';
+import { ADMIN_DEACTIVATION_REASONS, DeactivateServiceDto } from './dto/deactivate-service.dto';
 import { ServiceInstallAvailabilityDto } from './dto/service-install-availability.dto';
 import { ServiceInstallDayAvailabilityDto } from './dto/service-install-day-availability.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -345,7 +345,18 @@ export class ServicesService {
     return companyResponse(updated, currentUser);
   }
 
+  /**
+   * Administrative baja (Administrador only, closed non-morosity reason). A morosity baja is ONLY the guided withdrawal
+   * started from the Libro de Control after a valid suspension: this route rejects any suspended service and any
+   * contract with overdue collectible debt (covered by an agreement or not), so a payment or an agreement changing the
+   * state can never turn it into a shortcut.
+   */
   async deactivate(idServicio: number, dto: DeactivateServiceDto, currentUser: AuthUser) {
+    if (!isAdministrator(currentUser.roles)) {
+      throw new ForbiddenException({ code: 'ADMIN_DEACTIVATION_ONLY', message: 'La baja administrativa la autoriza solo un Administrador. La baja por morosidad se inicia desde el Libro de Control.' });
+    }
+    const reason = dto.motivoAdministrativo;
+    if (!ADMIN_DEACTIVATION_REASONS.includes(reason)) throw new BadRequestException('Indica un motivo administrativo válido (no morosidad)');
     const service = await this.getServiceOrThrow(idServicio, currentUser);
 
     if (service.estadoOperativo === 'Baja') {
@@ -374,20 +385,20 @@ export class ServicesService {
       }
       const withdrawal = await tx.servicioRetiroSolicitud.findFirst({ where: activeWithdrawalWhere(idServicio, fresh.idEmpresa) });
       if (withdrawal) throw new BadRequestException('El retiro por morosidad requiere cierre tecnico autorizado; la solicitud no confirma la baja');
-      // PR #81 (45d4dda6): this route cannot be the shortcut of a baja por morosidad. A suspended service with overdue
-      // collectible debt (no active agreement) only leaves through the withdrawal request and its confirmed technical
-      // closure. Other legitimate reasons (active service, suspension without overdue debt) keep working as before.
-      if (fresh.estadoOperativo === 'Suspendido' && fresh.idContrato) {
+      // PR #81 (45d4dda6) + FINET 13-11-2026: never the shortcut of a morosity baja. A suspended service leaves only through
+      // payment (reactivation) or the guided withdrawal; an operational service with overdue collectible debt must
+      // regularize it first. An active agreement does not open this route: the debt still exists.
+      const morosityRequired = () => new BadRequestException({
+        code: 'MOROSITY_WITHDRAWAL_REQUIRED',
+        message: 'Este servicio no puede darse de baja administrativamente: un servicio suspendido o con deuda vencida solo se da de baja desde el Libro de Control (suspensión y retiro guiado). El servicio pasa a Baja cuando el retiro técnico está aprobado.',
+      });
+      if (fresh.estadoOperativo === 'Suspendido') throw morosityRequired();
+      if (fresh.idContrato) {
         const invoices = await tx.factura.findMany({
           where: { idContrato: fresh.idContrato, contrato: { idEmpresa: fresh.idEmpresa, idCliente: fresh.idCliente } },
           include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } } } },
         });
-        if (hasOverdueCollectibleDebt(invoices)) {
-          throw new BadRequestException({
-            code: 'MOROSITY_WITHDRAWAL_REQUIRED',
-            message: 'Un servicio suspendido por morosidad no puede darse de baja directamente. Inicia la baja y el retiro desde el Libro de Control; el servicio pasa a Baja cuando el retiro técnico está confirmado.',
-          });
-        }
+        if (overdueDebtSummary(invoices).overdueCount > 0) throw morosityRequired();
       }
       const deactivatedService = await tx.servicioContratado.update({
         where: { idServicio },
@@ -429,6 +440,8 @@ export class ServicesService {
         estadoOperativo: deactivatedService.estadoOperativo,
         observacion: observation,
         idContrato: deactivatedService.idContrato,
+        tipoBaja: 'ADMINISTRATIVA',
+        motivoAdministrativo: reason,
       },
     }, tx);
       // FINET 13-11-2026 (also PR #81): if this ended the customer's last operational relationship in the company, the

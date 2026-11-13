@@ -2,6 +2,9 @@ import { AuditService } from '../audit/audit.service';
 import { ServicesService } from './services.service';
 
 const actor = { idUsuario: 2, idEmpresa: 1, roles: ['Comercial'], email: null, nombreCompleto: 'QA' };
+// FINET 13-11-2026: the administrative baja is an Administrador-only exception with a closed non-morosity reason.
+const admin = { ...actor, idUsuario: 3, roles: ['Administrador'] };
+const adminDto = (observacion = 'Fin de relacion administrativa autorizado') => ({ motivoAdministrativo: 'SOLICITUD_CLIENTE_SIN_DEUDA' as const, observacion });
 function setup() {
   const state = { service: { idServicio: 40, idCliente: 10, idContrato: 20, idEmpresa: 1, estadoOperativo: 'Activo', observaciones: null },
     contract: { idContrato: 20, idCliente: 10, idEmpresa: 1, estado: 'Activo' }, customer: 'Activo', audits: [] as unknown[],
@@ -47,7 +50,7 @@ describe('Suspension, solicitud y baja conservan autoridades distintas', () => {
     const initial = await c.tx.servicioContratado.findUnique();
     c.tx.servicioContratado.findUnique.mockResolvedValueOnce(initial);
     c.state.contract.idEmpresa = 2;
-    await expect(c.service.deactivate(40, {}, actor)).rejects.toThrow('no corresponde');
+    await expect(c.service.deactivate(40, adminDto(), admin)).rejects.toThrow('no corresponde');
     expect(c.tx.servicioContratado.update).not.toHaveBeenCalled();
     expect(c.state.service.estadoOperativo).toBe('Activo');
     expect(c.state.audits).toHaveLength(0);
@@ -62,20 +65,20 @@ describe('Suspension, solicitud y baja conservan autoridades distintas', () => {
   it('retiro por morosidad abierto no puede confirmarse como baja administrativa', async () => {
     const c = setup(); c.state.service.estadoOperativo = 'Suspendido';
     c.tx.servicioRetiroSolicitud.findFirst.mockResolvedValue({ idSolicitudRetiro: 7 } as never);
-    await expect(c.service.deactivate(40, {}, actor)).rejects.toThrow('cierre tecnico autorizado');
+    await expect(c.service.deactivate(40, adminDto(), admin)).rejects.toThrow('cierre tecnico autorizado');
     expect(c.tx.servicioContratado.update).not.toHaveBeenCalled();
     expect(c.state.audits).toHaveLength(0);
   });
 
   it('baja administrativa por otro motivo conserva ruta y auditoria atomica', async () => {
     const c = setup();
-    await c.service.deactivate(40, { observacion: 'Fin de relacion administrativa autorizado' }, actor);
+    await c.service.deactivate(40, adminDto('Fin de relacion administrativa autorizado'), admin);
     expect(c.state.service.estadoOperativo).toBe('Baja');
     expect(c.state.contract.estado).toBe('Baja');
     expect(c.state.customer).toBe('Baja');
     expect(c.state.audits.map(a => (a as { accion: string }).accion)).toEqual(['DAR_BAJA_SERVICIO', 'EXCLIENTE_VISIBLE_EN_PROSPECTOS']);
     const before = structuredClone(c.state);
-    await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin);
     expect(c.state).toEqual(before);
     expect(c.db.$transaction).toHaveBeenCalledTimes(1);
   });
@@ -83,23 +86,39 @@ describe('Suspension, solicitud y baja conservan autoridades distintas', () => {
   it('fallo de auditoria revierte servicio, contrato y cliente', async () => {
     const c = setup(); const before = structuredClone(c.state);
     c.tx.logAuditoria.create.mockRejectedValueOnce(new Error('AUDIT_FAILED'));
-    await expect(c.service.deactivate(40, {}, actor)).rejects.toThrow('AUDIT_FAILED');
+    await expect(c.service.deactivate(40, adminDto(), admin)).rejects.toThrow('AUDIT_FAILED');
     expect(c.state).toEqual(before);
   });
 
   it('otro servicio operativo mantiene cliente y contrato sin bajas independientes', async () => {
     const c = setup(); c.other();
-    await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin);
     expect(c.state.contract.estado).toBe('Activo');
     expect(c.state.customer).toBe('Activo');
     expect(c.tx.cliente.update).not.toHaveBeenCalled();
   });
 
-  it('otra empresa no entra en transaccion ni consulta solicitudes', async () => {
+  it('un usuario no administrador (cualquier empresa) no entra en transaccion ni consulta solicitudes', async () => {
+    for (const user of [actor, { ...actor, idEmpresa: 2 }, { ...actor, roles: ['Soporte'] }]) {
+      const c = setup();
+      await expect(c.service.deactivate(40, adminDto(), user)).rejects.toMatchObject({ response: { code: 'ADMIN_DEACTIVATION_ONLY' } });
+      expect(c.db.$transaction).not.toHaveBeenCalled();
+      expect(c.tx.servicioRetiroSolicitud.findFirst).not.toHaveBeenCalled();
+      expect(c.state.service.estadoOperativo).toBe('Activo');
+    }
+  });
+
+  it('exige un motivo administrativo cerrado: la morosidad no es un motivo de esta ruta', async () => {
     const c = setup();
-    await expect(c.service.deactivate(40, {}, { ...actor, idEmpresa: 2 })).rejects.toThrow('empresa');
+    await expect(c.service.deactivate(40, { motivoAdministrativo: 'MOROSIDAD' as never, observacion: 'No paga hace meses' }, admin)).rejects.toThrow('motivo administrativo');
     expect(c.db.$transaction).not.toHaveBeenCalled();
-    expect(c.tx.servicioRetiroSolicitud.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('la auditoria registra la baja como ADMINISTRATIVA con su motivo', async () => {
+    const c = setup();
+    await c.service.deactivate(40, adminDto(), admin);
+    expect(c.state.audits[0]).toMatchObject({ accion: 'DAR_BAJA_SERVICIO', idUsuario: 3,
+      valorNuevo: expect.objectContaining({ tipoBaja: 'ADMINISTRATIVA', motivoAdministrativo: 'SOLICITUD_CLIENTE_SIN_DEUDA' }) });
   });
 });
 
@@ -113,8 +132,9 @@ describe('La baja directa no es el atajo de una baja por morosidad', () => {
 
   it('servicio suspendido con deuda exigible vencida y sin solicitud de retiro no puede darse de baja directamente', async () => {
     const c = suspended(); c.state.invoices = [overdue()];
-    await expect(c.service.deactivate(40, { observacion: 'No paga' }, actor)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
-    expect(c.tx.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { idContrato: 20, contrato: { idEmpresa: 1, idCliente: 10 } } }));
+    await expect(c.service.deactivate(40, adminDto('No paga'), admin)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
+    // Suspended: rejected before reading invoices (suspension already means non-payment).
+    expect(c.tx.factura.findMany).not.toHaveBeenCalled();
     expect(c.tx.servicioContratado.update).not.toHaveBeenCalled();
     expect(c.tx.contrato.update).not.toHaveBeenCalled();
     expect(c.tx.prospecto.create).not.toHaveBeenCalled();
@@ -125,7 +145,7 @@ describe('La baja directa no es el atajo de una baja por morosidad', () => {
   it('una solicitud de retiro cancelada no reabre el atajo mientras la deuda siga vencida', async () => {
     const c = suspended(); c.state.invoices = [overdue()];
     c.tx.servicioRetiroSolicitud.findFirst.mockResolvedValue(null as never); // only CANCELADA/CERRADA requests remain
-    await expect(c.service.deactivate(40, {}, actor)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
+    await expect(c.service.deactivate(40, adminDto(), admin)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
     expect(c.state.service.estadoOperativo).toBe('Suspendido');
   });
 
@@ -134,24 +154,38 @@ describe('La baja directa no es el atajo de una baja por morosidad', () => {
     ['una prórroga aprobada mantiene vigente el vencimiento', [overdue({ prorrogasPago: [{ nuevaFecha: new Date('2999-01-01'), estado: 'APROBADA' }] })]],
     ['un convenio de pago activo cubre la deuda', [overdue({ conveniosPago: [{ estado: 'ACTIVO' }] })]],
     ['no hay documentos', []],
-  ])('suspendido sin deuda exigible vencida (%s) conserva la baja por otro motivo', async (_name, invoices) => {
+  ])('un servicio suspendido nunca sale por la baja administrativa, aunque %s', async (_name, invoices) => {
     const c = suspended(); c.state.invoices = invoices;
-    await c.service.deactivate(40, { observacion: 'Termino de relacion solicitado por el cliente' }, actor);
-    expect(c.state.service.estadoOperativo).toBe('Baja');
-    expect((c.state.audits[0] as { accion: string }).accion).toBe('DAR_BAJA_SERVICIO');
+    await expect(c.service.deactivate(40, adminDto('Termino de relacion solicitado por el cliente'), admin)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
+    expect(c.state.service.estadoOperativo).toBe('Suspendido');
+    expect(c.state.audits).toHaveLength(0);
   });
 
-  it('servicio activo con facturas vencidas conserva la baja administrativa: no es un retiro por morosidad', async () => {
-    const c = setup(); c.state.invoices = [overdue()];
-    await c.service.deactivate(40, { observacion: 'Cambio de domicilio sin cobertura' }, actor);
+  it.each([
+    ['sin convenio', overdue()],
+    ['cubierta por un convenio activo', overdue({ conveniosPago: [{ estado: 'ACTIVO' }] })],
+  ])('servicio activo con deuda vencida (%s) no puede darse de baja administrativamente', async (_name, invoice) => {
+    const c = setup(); c.state.invoices = [invoice];
+    await expect(c.service.deactivate(40, adminDto('Cambio de domicilio sin cobertura'), admin)).rejects.toMatchObject({ response: { code: 'MOROSITY_WITHDRAWAL_REQUIRED' } });
+    expect(c.state.service.estadoOperativo).toBe('Activo');
+    expect(c.tx.servicioContratado.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pagada', [overdue({ estado: 'Pagada', pagos: [{ monto: 19990 }] })]],
+    ['con prórroga vigente', [overdue({ prorrogasPago: [{ nuevaFecha: new Date('2999-01-01'), estado: 'APROBADA' }] })]],
+    ['sin documentos', []],
+  ])('servicio activo sin deuda vencida (%s) conserva la baja administrativa autorizada', async (_name, invoices) => {
+    const c = setup(); c.state.invoices = invoices;
+    await c.service.deactivate(40, adminDto('Cambio de domicilio sin cobertura'), admin);
     expect(c.state.service.estadoOperativo).toBe('Baja');
-    expect(c.tx.factura.findMany).not.toHaveBeenCalled();
   });
 
   it('la baja no borra deuda, facturas ni pagos: solo consulta', async () => {
-    const c = suspended(); c.state.invoices = [overdue({ estado: 'Pagada', pagos: [{ monto: 19990 }] })];
+    const c = setup(); c.state.invoices = [overdue({ estado: 'Pagada', pagos: [{ monto: 19990 }] })];
     const invoices = structuredClone(c.state.invoices);
-    await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin);
+    expect(c.state.service.estadoOperativo).toBe('Baja');
     expect(c.state.invoices).toEqual(invoices);
     expect(Object.keys(c.tx.factura)).toEqual(['findMany']);
   });
@@ -160,7 +194,7 @@ describe('La baja directa no es el atajo de una baja por morosidad', () => {
 describe('Baja directa y excliente en Prospectos (misma regla que la baja por retiro)', () => {
   it('al terminar la última relación operativa crea UN prospecto vinculado al mismo cliente, sin recrearlo ni marcar estados nuevos', async () => {
     const c = setup();
-    await c.service.deactivate(40, { observacion: 'Fin de servicio' }, actor);
+    await c.service.deactivate(40, adminDto('Fin de servicio'), admin);
     expect(c.tx.prospecto.create).toHaveBeenCalledTimes(1);
     const data = c.tx.prospecto.create.mock.calls[0][0].data;
     expect(data).toMatchObject({ idCliente: 10, idEmpresa: 1, estadoPipeline: 'Fuera pipeline', origenContacto: 'Excliente' });
@@ -172,7 +206,7 @@ describe('Baja directa y excliente en Prospectos (misma regla que la baja por re
   it('un prospecto ya vinculado se reutiliza sin escribirlo: su historial no cambia', async () => {
     const c = setup();
     c.state.prospects.push({ idProspecto: 5, idCliente: 10, idEmpresa: 1, estadoPipeline: 'Servicio Activo' });
-    await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin);
     expect(c.tx.prospecto.create).not.toHaveBeenCalled();
     expect(c.tx.prospecto.update).not.toHaveBeenCalled();
     expect(c.state.prospects[0].estadoPipeline).toBe('Servicio Activo');
@@ -180,7 +214,7 @@ describe('Baja directa y excliente en Prospectos (misma regla que la baja por re
 
   it('si conserva otro servicio operativo no pasa a excliente', async () => {
     const c = setup(); c.other();
-    await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin);
     expect(c.tx.prospecto.create).not.toHaveBeenCalled();
     expect(c.state.audits.map(a => (a as { accion: string }).accion)).toEqual(['DAR_BAJA_SERVICIO']);
   });
@@ -188,13 +222,13 @@ describe('Baja directa y excliente en Prospectos (misma regla que la baja por re
   it('un fallo al registrar el excliente revierte también la baja del servicio, el contrato y el cliente', async () => {
     const c = setup(); const before = structuredClone(c.state);
     c.tx.prospecto.create.mockRejectedValueOnce(new Error('PROSPECT_WRITE_FAILED'));
-    await expect(c.service.deactivate(40, {}, actor)).rejects.toThrow('PROSPECT_WRITE_FAILED');
+    await expect(c.service.deactivate(40, adminDto(), admin)).rejects.toThrow('PROSPECT_WRITE_FAILED');
     expect(c.state).toEqual(before);
   });
 
   it('repetir la baja no crea un segundo prospecto', async () => {
     const c = setup();
-    await c.service.deactivate(40, {}, actor); await c.service.deactivate(40, {}, actor);
+    await c.service.deactivate(40, adminDto(), admin); await c.service.deactivate(40, adminDto(), admin);
     expect(c.state.prospects).toHaveLength(1);
     expect(c.db.$transaction).toHaveBeenCalledTimes(1);
   });

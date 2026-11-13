@@ -5,8 +5,20 @@ import { parseDateOnly } from '../common/date-rules';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateServiceWithdrawalDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
-import { APPROVED_EXTENSIONS, invoiceBalance } from '../billing/invoice-balance';
 import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalStorage } from './withdrawal.storage';
+
+/** Morosity in any spelling or accent ("Morosidad", "moroso", "mora", "no pago", "impago", "falta de pago"). */
+export function isMorosityReason(value: string) {
+  const text = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]+/g, ' ').trim();
+  return /\bMOROS|\bMORA\b|\bNO PAGO\b|\bIMPAGO|\bFALTA DE PAGO\b/.test(text);
+}
+
+function guidedFlowRequired() {
+  return new BadRequestException({
+    code: 'WITHDRAWAL_GUIDED_FLOW_REQUIRED',
+    message: 'El retiro por morosidad (o de un servicio suspendido) solo se inicia desde el Libro de Control: «Dar de baja el servicio» crea la solicitud, el ticket y el retiro técnico juntos.',
+  });
+}
 
 @Injectable()
 export class ServiceWithdrawalService {
@@ -35,8 +47,15 @@ export class ServiceWithdrawalService {
     });
   }
 
+  /**
+   * Generic withdrawal request (customer request «Retiro de servicio», not morosity). FINET 13-11-2026: a withdrawal for
+   * MOROSITY is created ONLY by POST /service-withdrawals/initiate from the Libro de Control (request + official ticket +
+   * private link + G3 snapshot + audit in one transaction, after suspension and previous notice). This route rejects a
+   * morosity reason (any spelling) and any suspended service, so it cannot be used to bypass that circuit.
+   */
   async create(dto: CreateServiceWithdrawalDto, currentUser: AuthUser) {
     if (!dto.motivo.trim()) throw new BadRequestException('El motivo de retiro es obligatorio');
+    if (isMorosityReason(dto.motivo)) throw guidedFlowRequired();
     const authorized = await this.prisma.servicioContratado.findUnique({
       where: { idServicio: dto.idServicio },
     });
@@ -68,23 +87,10 @@ export class ServiceWithdrawalService {
         throw new ConflictException('Ya existe una solicitud de retiro activa para este servicio; revisala antes de continuar');
       }
       if (service.estadoOperativo === 'Baja') throw new BadRequestException('El servicio ya esta de baja');
-      let idAviso: number | null = null;
-      if (motivo.toUpperCase() === 'MOROSIDAD') {
-        if (service.estadoOperativo !== 'Suspendido' || !idContrato || !observaciones) {
-          throw new BadRequestException('El retiro por morosidad requiere servicio suspendido, contrato y observaciones');
-        }
-        const invoices = await tx.factura.findMany({ where: { idContrato, contrato: { idEmpresa: service.idEmpresa, idCliente: service.idCliente } },
-          include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } });
-        if (!invoices.some(invoice => { const balance = invoiceBalance(invoice); return Number(balance.saldoExigible) > 0 && balance.diasAtraso > 0; })) {
-          throw new BadRequestException('El retiro por morosidad requiere deuda exigible vencida');
-        }
-        const notice = await tx.eventoGestionComercial.findFirst({ where: {
-          idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio,
-          idContrato, tipo: 'AVISO_PREVIO_RETIRO',
-        }, orderBy: { idEvento: 'desc' } });
-        if (!notice) throw new BadRequestException('Registra el aviso previo de retiro en el Libro de Control');
-        idAviso = notice.idEvento;
-      }
+      // FINET 13-11-2026: a suspended service (suspension = non-payment) only leaves through payment or the guided
+      // withdrawal of the Libro de Control; this generic request cannot open a parallel withdrawal for it.
+      if (service.estadoOperativo === 'Suspendido') throw guidedFlowRequired();
+      const idAviso: number | null = null;
       const created = await tx.servicioRetiroSolicitud.create({
       data: {
         idEmpresa: service.idEmpresa,

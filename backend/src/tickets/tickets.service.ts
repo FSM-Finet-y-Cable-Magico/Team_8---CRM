@@ -9,7 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
 import { compareTicketsByUrgency } from './ticket-priority';
-import { isGeneralTicketCategory, readTicketCategoryCatalog } from './ticket-attention-categories';
+import { isGeneralTicketCategory, officialTicketAttentionName, readTicketCategoryCatalog } from './ticket-attention-categories';
+import { postgresWithdrawalStorage } from '../g3-integration/withdrawal.storage';
 import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
@@ -22,6 +23,18 @@ import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 const TICKET_STATUSES = ['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'];
 /** Official attention category (Documento 0, table 11.9). The ID is resolved in each connection's catalogue. */
 export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
+
+/** Canonical official name (formatting-equivalent), never a fixed ID: the same rule as the attention catalogue. */
+export function isWithdrawalCategoryName(name: string) {
+  return officialTicketAttentionName(name) === WITHDRAWAL_TICKET_CATEGORY;
+}
+
+function withdrawalCategoryReserved() {
+  return new BadRequestException({
+    code: 'WITHDRAWAL_TICKET_CATEGORY_RESERVED',
+    message: 'La categoría «Baja de servicio» se genera solo al iniciar la baja desde el Libro de Control; no se puede crear ni reclasificar un ticket manualmente con ella.',
+  });
+}
 type AuditEntry = Parameters<AuditService['record']>[0];
 
 @Injectable()
@@ -247,6 +260,9 @@ export class TicketsService {
       throw new BadRequestException('La categoría no está disponible para clasificación manual de tickets');
     }
 
+    if (isWithdrawalCategoryName(category.nombre)) throw withdrawalCategoryReserved();
+    await this.assertNotManagedByWithdrawal(ticket, 'reclasificarse');
+
     return this.writeAudited(
       tx => this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria }, tx),
       () => ({
@@ -287,6 +303,7 @@ export class TicketsService {
     }
 
     if (['Resuelto', 'Cerrado'].includes(dto.estado)) {
+      await this.assertNotManagedByWithdrawal(ticket, 'resolverse ni cerrarse manualmente');
       await this.assertNoPendingWorkOrderForClosure(idTicket);
     }
 
@@ -310,6 +327,7 @@ export class TicketsService {
   async registerDiagnosis(idTicket: number, dto: RegisterDiagnosisDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
     this.assertCrmWrite(ticket.estado);
+    await this.assertNotManagedByWithdrawal(ticket, 'cerrarse con un diagnóstico');
     await this.assertNoPendingWorkOrderForClosure(idTicket);
 
     if (!dto.causaRaiz.trim()) {
@@ -402,6 +420,8 @@ export class TicketsService {
       throw new BadRequestException('Categoria seleccionada invalida');
     }
 
+    if (isWithdrawalCategoryName(categoria.nombre)) throw withdrawalCategoryReserved();
+
     if (!categoria.nombreAtencion) {
       throw new BadRequestException('Selecciona una categoría oficial de atención disponible; las categorías técnicas o ambiguas no admiten nuevas altas comerciales');
     }
@@ -481,6 +501,25 @@ export class TicketsService {
       const result = await write(tx);
       await this.auditService.record(audit(result), tx);
       return result;
+    });
+  }
+
+  /**
+   * A «Baja de servicio» ticket LINKED to a withdrawal request (g8_retiros.solicitud_ticket) only changes category or
+   * closes inside the withdrawal flow: closeWithdrawalTicket() in the finalization transaction. Historical tickets of
+   * that category without a link keep their usual handling. The private storage is only read when the ticket has
+   * the official category (resolved by its canonical name, never a fixed ID); without the 002 storage there are no links.
+   */
+  private async assertNotManagedByWithdrawal(ticket: Pick<Ticket, 'idTicket' | 'idCategoria'>, action: string) {
+    const category = (await this.categories()).find(row => row.idCategoria === ticket.idCategoria);
+    if (!category || !isWithdrawalCategoryName(category.nombre)) return;
+    const db = this.prisma as unknown as Prisma.TransactionClient;
+    if (!(await postgresWithdrawalStorage.capabilities(db)).ticketLink) return;
+    const link = await postgresWithdrawalStorage.findLinkByTicket(db, ticket.idTicket);
+    if (!link) return;
+    throw new ConflictException({
+      code: 'WITHDRAWAL_TICKET_MANAGED_BY_FLOW', idSolicitudRetiro: link.idSolicitudRetiro,
+      message: `Este ticket pertenece a la baja por morosidad (solicitud N° ${link.idSolicitudRetiro}) y no puede ${action}: se cierra automáticamente al aplicarse la baja, o se gestiona cancelando el retiro desde el Libro de Control.`,
     });
   }
 

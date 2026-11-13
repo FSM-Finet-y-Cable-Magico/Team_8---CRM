@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { ServiceWithdrawalService } from './service-withdrawal.service';
+import { isMorosityReason, ServiceWithdrawalService } from './service-withdrawal.service';
 
 const user = { idUsuario: 5, idEmpresa: 1, email: null, nombreCompleto: 'Comercial', roles: ['Comercial'] };
 
@@ -44,29 +44,30 @@ function setup() {
 describe('Etapa 3 - CU-84 solicitud de retiro', () => {
   beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-11-11T12:00:00Z')); });
   afterEach(() => jest.useRealTimers());
-  const dto = { idServicio: 50, motivo: 'MOROSIDAD', fechaSolicitada: '2026-09-30', observaciones: 'Aviso registrado; solicitar revision de retiro' };
+  // Generic customer request «Retiro de servicio» (not morosity). The morosity withdrawal is only /initiate (Libro de Control).
+  const dto = { idServicio: 50, motivo: 'Cambio de domicilio sin cobertura', fechaSolicitada: '2026-09-30', observaciones: 'Cliente solicita retiro por mudanza' };
 
   it('dos solicitudes iguales conservan una sola solicitud y auditoria bajo bloqueo', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
+    const c = setup();
     const [a, b] = await Promise.all([c.service.create(dto, user), c.service.create(dto, user)]);
     expect(a.idSolicitudRetiro).toBe(b.idSolicitudRetiro);
     expect(c.prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(c.rows()).toHaveLength(1);
     expect(c.audit.record).toHaveBeenCalledTimes(1);
-    expect(c.serviceRow.estadoOperativo).toBe('Suspendido');
+    expect(c.serviceRow.estadoOperativo).toBe('Activo');
     expect(c.prisma.ticket.create).not.toHaveBeenCalled();
     expect(c.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
-    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ idAviso: 7, motivo: 'MOROSIDAD' }) }), c.prisma);
+    expect(c.audit.record).toHaveBeenCalledWith(expect.objectContaining({ valorNuevo: expect.objectContaining({ idAviso: null, motivo: dto.motivo }) }), c.prisma);
   });
 
   it('un payload diferente no reemplaza la evidencia de una solicitud activa', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido'; await c.service.create(dto, user);
+    const c = setup(); await c.service.create(dto, user);
     await expect(c.service.create({ ...dto, observaciones: 'Otra operacion' }, user)).rejects.toBeInstanceOf(ConflictException);
     expect(c.rows()[0].observaciones).toBe(dto.observaciones);
   });
 
   it('fallo de auditoria revierte solicitud y permite repetir sin duplicados', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
+    const c = setup();
     c.audit.record.mockRejectedValueOnce(new Error('AUDIT_FAILED'));
     await expect(c.service.create(dto, user)).rejects.toThrow('AUDIT_FAILED');
     expect(c.rows()).toHaveLength(0);
@@ -75,17 +76,27 @@ describe('Etapa 3 - CU-84 solicitud de retiro', () => {
     expect(c.rows()).toHaveLength(1);
   });
 
-  it.each(['estado', 'aviso', 'deuda', 'contrato'])('morosidad sin %s valido no crea solicitud', async invalid => {
+  it.each(['MOROSIDAD', 'Morosidad', ' morosidad ', 'Cliente moroso', 'Retiro por mora', 'No pago', 'IMPAGO reiterado', 'falta de pago', 'Morosidád'])(
+    'un motivo de morosidad (%p) no se acepta aquí: solo el flujo guiado del Libro de Control', async motivo => {
+      const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
+      await expect(c.service.create({ ...dto, motivo }, user)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_GUIDED_FLOW_REQUIRED' } });
+      expect((c.prisma as unknown as { $transaction: jest.Mock }).$transaction).not.toHaveBeenCalled();
+      expect(c.rows()).toHaveLength(0);
+      expect(c.audit.record).not.toHaveBeenCalled();
+    });
+
+  it('un servicio suspendido no admite una solicitud genérica con otro motivo', async () => {
     const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
-    if (invalid === 'estado') c.serviceRow.estadoOperativo = 'Activo';
-    if (invalid === 'aviso') c.prisma.eventoGestionComercial.findFirst.mockResolvedValue(null as never);
-    if (invalid === 'deuda') c.prisma.factura.findMany.mockResolvedValue([]);
-    if (invalid === 'contrato') c.serviceRow.contrato.idCliente = 999;
-    await expect(c.service.create(dto, user)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(c.service.create(dto, user)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_GUIDED_FLOW_REQUIRED' } });
     expect(c.rows()).toHaveLength(0);
-    expect(c.prisma.servicioContratado.update).not.toHaveBeenCalled();
-    expect(c.prisma.ticket.create).not.toHaveBeenCalled();
+    expect(c.prisma.factura.findMany).not.toHaveBeenCalled();
+    expect(c.audit.record).not.toHaveBeenCalled();
   });
+
+  it.each(['Cambio de domicilio', 'Cliente sin deuda se muda de ciudad', 'Retiro voluntario', 'Moraleja: fin de contrato'])(
+    'un motivo ajeno a la morosidad (%p) se conserva', motivo => {
+      expect(isMorosityReason(motivo)).toBe(false);
+    });
 
   it('rechaza contrato distinto aunque sea del mismo cliente sin consultas cruzadas', async () => {
     const c = setup();
@@ -93,8 +104,8 @@ describe('Etapa 3 - CU-84 solicitud de retiro', () => {
     expect(c.prisma.contrato.findUnique).not.toHaveBeenCalled();
   });
 
-  it('no admite cierre manual en lugar de evidencia tecnica y cancelacion no reactiva', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido'; await c.service.create(dto, user);
+  it('no admite cierre manual en lugar de evidencia tecnica y cancelacion no reactiva ni da de baja', async () => {
+    const c = setup(); await c.service.create(dto, user);
     await expect(c.service.update(1, { estado: 'CERRADA' }, user)).rejects.toThrow('evidencia tecnica');
     expect(c.rows()[0].estado).toBe('REGISTRADA');
     await c.service.update(1, { estado: 'CANCELADA' }, user);
@@ -102,54 +113,7 @@ describe('Etapa 3 - CU-84 solicitud de retiro', () => {
     expect(c.prisma.servicioContratado.update).not.toHaveBeenCalled();
     expect(c.prisma.ticket.create).not.toHaveBeenCalled();
     expect(c.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
-    expect(c.serviceRow.estadoOperativo).toBe('Suspendido');
-  });
-
-  it('el aviso y la deuda se consultan por empresa, cliente, servicio y contrato exactos', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
-    await c.service.create(dto, user);
-    expect(c.prisma.eventoGestionComercial.findFirst).toHaveBeenCalledWith({
-      where: { idEmpresa: 1, idCliente: 30, idServicio: 50, idContrato: 20, tipo: 'AVISO_PREVIO_RETIRO' },
-      orderBy: { idEvento: 'desc' },
-    });
-    expect(c.prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { idContrato: 20, contrato: { idEmpresa: 1, idCliente: 30 } },
-    }));
-    expect(c.prisma.ticket.create).not.toHaveBeenCalled();
-  });
-
-  it('deuda regularizada bloquea una nueva solicitud sin crear ticket ni consultar otro aviso', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
-    c.prisma.factura.findMany.mockResolvedValue([{ estado: 'Pagada', monto: 7000, pagos: [{ monto: 7000 }], fechaLimitePago: new Date('2020-01-01'), prorrogasPago: [] }] as never);
-    await expect(c.service.create(dto, user)).rejects.toThrow('deuda exigible vencida');
-    expect(c.rows()).toHaveLength(0);
-    expect(c.prisma.eventoGestionComercial.findFirst).not.toHaveBeenCalled();
-    expect(c.prisma.ticket.create).not.toHaveBeenCalled();
-    expect(c.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
-    expect(c.prisma.servicioContratado.update).not.toHaveBeenCalled();
-    expect(c.audit.record).not.toHaveBeenCalled();
-  });
-
-  it('una factura anulada no acredita deuda para solicitar retiro', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
-    c.prisma.factura.findMany.mockResolvedValue([{ estado: 'Anulada', monto: 7000, pagos: [], fechaLimitePago: new Date('2020-01-01'), prorrogasPago: [] }]);
-    await expect(c.service.create(dto, user)).rejects.toThrow('deuda exigible vencida');
-    expect(c.rows()).toHaveLength(0);
-    expect(c.prisma.ticket.create).not.toHaveBeenCalled();
-  });
-
-  it('replay posterior a regularizar conserva solicitud y evidencia sin despacho ni nueva auditoria', async () => {
-    const c = setup(); c.serviceRow.estadoOperativo = 'Suspendido';
-    const original = await c.service.create(dto, user);
-    c.prisma.factura.findMany.mockResolvedValue([]);
-    const replay = await c.service.create(dto, user);
-    expect(replay).toEqual(original);
-    expect(c.rows()).toHaveLength(1);
-    expect(c.audit.record).toHaveBeenCalledTimes(1);
-    expect(c.prisma.factura.findMany).toHaveBeenCalledTimes(1);
-    expect(c.prisma.ticket.create).not.toHaveBeenCalled();
-    expect(c.prisma.ordenTrabajo.create).not.toHaveBeenCalled();
-    expect(c.prisma.servicioContratado.update).not.toHaveBeenCalled();
+    expect(c.serviceRow.estadoOperativo).toBe('Activo');
   });
 
   it('empresa ajena se rechaza antes de crear solicitud, ticket o consultar evidencia comercial', async () => {
