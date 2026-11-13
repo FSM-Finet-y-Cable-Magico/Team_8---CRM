@@ -62,12 +62,13 @@ export class G3ClosureDto {
   // rejects non-null installation references on repairs before acknowledging.
   @ValidateIf(object => object.tipo_ot !== 'REPARACION') @IsString() @IsNotEmpty() @MaxLength(100) request_id?: string | null;
   @ValidateIf(object => object.tipo_ot !== 'REPARACION') @IsString() @IsNotEmpty() @MaxLength(60) trace_id?: string | null;
-  @ValidateIf(object => object.tipo_ot !== 'REPARACION') @Type(() => Number) @IsInt() @Min(1) @Max(2147483647) id_prospecto?: number | null;
+  // BAJA carries no prospect/plan: its own contract (g3-withdrawal-closure-contract.ts) requires them null.
+  @ValidateIf(object => object.tipo_ot !== 'REPARACION' && object.tipo_ot !== 'BAJA') @Type(() => Number) @IsInt() @Min(1) @Max(2147483647) id_prospecto?: number | null;
   @ValidateIf(object => object.tipo_ot !== 'REPARACION') @Type(() => Number) @IsInt() @Min(1) @Max(2147483647) id_contrato?: number | null;
-  @ValidateIf(object => object.tipo_ot !== 'REPARACION') @Type(() => Number) @IsInt() @Min(1) @Max(2147483647) id_plan?: number | null;
+  @ValidateIf(object => object.tipo_ot !== 'REPARACION' && object.tipo_ot !== 'BAJA') @Type(() => Number) @IsInt() @Min(1) @Max(2147483647) id_plan?: number | null;
   @IsArray() @ArrayMaxSize(1000) @ValidateNested({ each: true }) @Type(() => G3ClosureEquipmentDto) equipos_instalados!: G3ClosureEquipmentDto[];
   @IsArray() @ArrayMaxSize(1000) @ValidateNested({ each: true }) @Type(() => G3ClosureEquipmentDto) equipos_retirados!: G3ClosureEquipmentDto[];
-  @ValidateIf((_object, value) => value !== undefined) @IsIn(['INSTALACION', 'REPARACION']) tipo_ot?: 'INSTALACION' | 'REPARACION';
+  @ValidateIf((_object, value) => value !== undefined) @IsIn(['INSTALACION', 'REPARACION', 'BAJA']) tipo_ot?: 'INSTALACION' | 'REPARACION' | 'BAJA';
   @ValidateIf((_object, value) => value !== undefined) @IsString() @Matches(/\S/) @MaxLength(100) clave_idempotencia?: string;
   @ValidateIf((_object, value) => value !== undefined) @IsDateString({ strict: true, strictSeparator: true })
   @Matches(/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/) @MaxLength(40) fecha_completada?: string;
@@ -102,6 +103,19 @@ export class CreateServiceWithdrawalDto {
   @IsString() @IsNotEmpty() @MaxLength(1000) motivo!: string;
   @IsDateString() fechaSolicitada!: string;
   @IsOptional() @IsString() @MaxLength(1000) observaciones?: string;
+}
+
+export class InitiateServiceWithdrawalDto {
+  @Type(() => Number) @IsInt() @Min(1) idServicio!: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
+  @IsString() @Matches(/\S/) @MaxLength(1000) observaciones!: string;
+  @IsOptional() @IsDateString() fechaSolicitada?: string;
+  /** Explicit confirmation from the Libro de Control form (PR #81): the HTTP route never starts a withdrawal without it. */
+  @Equals(true) confirmacion!: boolean;
+}
+
+export class CancelServiceWithdrawalDto {
+  @IsString() @Matches(/\S/) @MaxLength(300) motivo!: string;
 }
 
 export class UpdateServiceWithdrawalDto {

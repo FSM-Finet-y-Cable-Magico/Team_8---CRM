@@ -1,9 +1,8 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
-import { APPROVED_EXTENSIONS, invoiceBalance } from '../billing/invoice-balance';
+import { customerDebtPosition } from '../common/customer-debt';
 import { PrismaService } from '../prisma/prisma.service';
-import { rutLookupVariants } from '../rut/rut.util';
 
 type DebtContext = {
   idEmpresa: number | null;
@@ -29,27 +28,10 @@ export class ContractDebtException extends BadRequestException {
 /** Same collectible balance as Libro de Control. RUT lookup only vetoes aliases;
  * it never authorizes a customer association, changes identity or exposes debt. */
 export async function assertNoContractDebt(tx: Prisma.TransactionClient, context: DebtContext) {
-  const variants = context.rut ? rutLookupVariants(context.rut) : [];
-  if (!Number.isInteger(context.idEmpresa) || Number(context.idEmpresa) < 1 || (!context.idCliente && !variants.length)) {
-    throw new ContractDebtException(context, 'REVISION_FINANCIERA');
-  }
-  const identities: Prisma.ContratoWhereInput[] = [
-    ...(context.idCliente ? [{ idCliente: context.idCliente }] : []),
-    ...(variants.length ? [{ cliente: { rut: { in: variants, mode: 'insensitive' as const } } },
-      { prospecto: { rut: { in: variants, mode: 'insensitive' as const } } }] : []),
-  ];
-  const invoices = await tx.factura.findMany({
-    where: { contrato: { idEmpresa: context.idEmpresa, OR: identities } },
-    include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS },
-  });
-  const balances = invoices.map(invoice => invoiceBalance(invoice));
-  if (balances.some(balance => balance.saldoExigible !== null && balance.saldoExigible > 0)) {
-    throw new ContractDebtException(context, 'DEUDA_PENDIENTE');
-  }
-  // Missing historical amounts cannot be treated as proof of regularization.
-  if (balances.some(balance => balance.saldoExigible === null)) {
-    throw new ContractDebtException(context, 'REVISION_FINANCIERA');
-  }
+  // La posición de deuda es la misma que muestra la proyección de excliente: una sola regla.
+  const position = await customerDebtPosition(tx, { idEmpresa: context.idEmpresa, idCliente: context.idCliente, rut: context.rut });
+  if (position === 'CON_DEUDA') throw new ContractDebtException(context, 'DEUDA_PENDIENTE');
+  if (position === 'INDETERMINADA') throw new ContractDebtException(context, 'REVISION_FINANCIERA');
 }
 
 /** Called only after rollback. A refusal needs its own committed audit; recording

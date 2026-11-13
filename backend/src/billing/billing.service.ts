@@ -5,6 +5,7 @@ import { MessagingService } from '../messaging/messaging.service';
 import { TemplateKey } from '../messaging/outbound-messaging.port';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { activeWithdrawalWhere } from '../common/active-withdrawal';
 import { AuthUser } from '../common/auth.types';
 import { throwZoneNameConflict } from '../common/zone-name-conflict';
 import { parseDateOnly, todayDateOnly } from '../common/date-rules';
@@ -269,6 +270,7 @@ export class BillingService {
       const remaining = new Prisma.Decimal(balance.saldo!).minus(dto.monto);
       const paidInFull = remaining.isZero();
       let reactivatedServiceIds: number[] = [];
+      let withdrawalServiceIds: number[] = [];
       if (paidInFull) {
         await tx.factura.update({ where: { idFactura: invoice.idFactura }, data: { estado: 'Pagada' } });
         const otherInvoices = await tx.factura.findMany({ where: {
@@ -277,6 +279,15 @@ export class BillingService {
         }, include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } });
         const pendingOverdue = otherInvoices.some(row => invoiceBalance(row).diasAtraso > 0);
         if (!pendingOverdue) {
+          // Payment during a withdrawal for morosity (FINET): the payment and the invoice are recorded as always, but a
+          // service with an active withdrawal request (OT BAJA possibly in progress) is never reactivated automatically;
+          // the withdrawal flow requires a commercial decision instead (withdrawal-closure.ts, DECISION_COMERCIAL_REQUERIDA).
+          const suspendedIds = contract.servicios
+            .filter(service => service.idEmpresa === contract.idEmpresa && service.estadoOperativo === 'Suspendido')
+            .map(service => service.idServicio);
+          const withdrawals = suspendedIds.length ? await tx.servicioRetiroSolicitud.findMany({
+            where: activeWithdrawalWhere({ in: suspendedIds }, contract.idEmpresa), select: { idServicio: true } }) : [];
+          withdrawalServiceIds = [...new Set(withdrawals.map(row => row.idServicio))];
           const g3CandidateIds = contract.servicios
             .filter(service => service.idEmpresa === contract.idEmpresa && service.estadoOperativo === 'Suspendido' && service.ordenes.length === 0)
             .map(service => service.idServicio);
@@ -290,12 +301,13 @@ export class BillingService {
             select: { idServicio: true },
           }) : [];
           const g3InstalledServices = new Set(g3Closures.map(closure => closure.idServicio));
-          reactivatedServiceIds = contract.servicios.filter(service => service.idEmpresa === contract.idEmpresa && canActivateService({
+          reactivatedServiceIds = contract.servicios.filter(service => service.idEmpresa === contract.idEmpresa
+            && !withdrawalServiceIds.includes(service.idServicio) && canActivateService({
             intent: 'COMMERCIAL_PAYMENT_REACTIVATION', targetStatus: 'Activo', currentStatus: service.estadoOperativo,
             contractStatus: contract.estado, installationCompleted: service.ordenes.length > 0 || g3InstalledServices.has(service.idServicio),
             historicalImport: customer.importadoMasivo === true || this.isHistoricalService(service.datosTecnicos, service.fechaCreacion), serviceExists: true,
           })).map(service => service.idServicio);
-          if (reactivatedServiceIds.length || contract.estado === 'Moroso') {
+          if (reactivatedServiceIds.length || (contract.estado === 'Moroso' && !withdrawalServiceIds.length)) {
             await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { estado: 'Activo', fechaSuspension: null } });
           }
           if (reactivatedServiceIds.length) await tx.servicioContratado.updateMany({
@@ -305,7 +317,7 @@ export class BillingService {
           const otherSuspended = await tx.contrato.findFirst({ where: {
             idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: 'Suspendido',
           }, select: { idContrato: true } });
-          if (!otherSuspended && (reactivatedServiceIds.length || customer.estado === 'Moroso') && await this.canUpdateGlobalCustomer(tx, customer, contract.idEmpresa)) await tx.cliente.updateMany({
+          if (!otherSuspended && (reactivatedServiceIds.length || (customer.estado === 'Moroso' && !withdrawalServiceIds.length)) && await this.canUpdateGlobalCustomer(tx, customer, contract.idEmpresa)) await tx.cliente.updateMany({
             where: { idCliente: customer.idCliente, idEmpresa: contract.idEmpresa, estado: { in: ['Moroso', 'Suspendido'] } }, data: { estado: 'Activo' },
           });
         }
@@ -314,7 +326,8 @@ export class BillingService {
         idUsuario: integration ? null : currentUser.idUsuario,
         accion: integration ? 'REGISTRAR_PAGO_G2' : 'REGISTRAR_PAGO', entidadAfectada: 'pago', idEntidadAfectada: payment.idPago,
         valorNuevo: { idEmpresa: contract.idEmpresa, idFactura: invoice.idFactura, idCliente: customer.idCliente,
-          monto: dto.monto, saldoAnterior: balance.saldo, saldoNuevo: remaining.toNumber(), pagadaCompleta: paidInFull, serviciosReactivados: reactivatedServiceIds },
+          monto: dto.monto, saldoAnterior: balance.saldo, saldoNuevo: remaining.toNumber(), pagadaCompleta: paidInFull, serviciosReactivados: reactivatedServiceIds,
+          ...(withdrawalServiceIds.length ? { serviciosSinReactivarPorRetiro: withdrawalServiceIds } : {}) },
       }, tx);
       if (reactivatedServiceIds.length) await this.auditService.record({
         idUsuario: integration ? null : currentUser.idUsuario, accion: 'REACTIVAR_SERVICIO_POR_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: contract.idContrato,
