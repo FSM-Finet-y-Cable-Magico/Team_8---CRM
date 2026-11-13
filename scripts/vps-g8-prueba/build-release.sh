@@ -21,7 +21,8 @@ CREATED=$(git -C "$REPO" show -s --format=%cI "$SHA")
 BACKEND_IMAGE="finet-g8-backend:tk-$SHA7"; FRONTEND_IMAGE="finet-g8-frontend:tk-$SHA7"
 ARCHIVE="g8-tk-$SHA7-images.tar.gz"
 
-git -C "$REPO" archive --format=tar "$SHA" | ( cd "$OUT/src" && tar -xf - )
+# Repository bytes (LF), never the Windows checkout conversion (core.autocrlf would turn the scripts into CRLF).
+git -c core.autocrlf=false -C "$REPO" archive --format=tar "$SHA" | ( cd "$OUT/src" && tar -xf - )
 # Kit and runbook also come from the archived commit, never from the working tree.
 KIT_SRC="$OUT/src/scripts/vps-g8-prueba"
 labels=(--label "org.opencontainers.image.revision=$SHA" --label "org.opencontainers.image.source=$SOURCE"
@@ -47,6 +48,7 @@ gunzip -t "$OUT/kit/$ARCHIVE"
 ( cd "$OUT/kit" && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256" )
 
 cp "$KIT_SRC"/0*.sh "$KIT_SRC/compare.py" "$KIT_SRC/db-fingerprint.sql" "$OUT/kit/"
+if [ "$(cat "$OUT"/kit/*.sh "$OUT/kit/compare.py" | tr -cd '\r' | wc -c)" -ne 0 ]; then echo "FAIL scripts del kit con fin de línea CRLF" >&2; exit 1; fi
 cp "$OUT/src/docs/qa-libro-control/vps-release-tickets-g8-20261113.md" "$OUT/kit/RUNBOOK.md"
 cat > "$OUT/kit/release.env" <<EOF
 SHA=$SHA
