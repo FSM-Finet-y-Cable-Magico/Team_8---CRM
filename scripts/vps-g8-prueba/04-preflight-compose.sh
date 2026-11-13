@@ -3,6 +3,7 @@
 # running containers, only the backend and frontend images change. Read-only for services.
 source "$(dirname "$0")/00-common.sh"
 exec > >(tee "$WORK/04-preflight-compose.txt") 2>&1
+[ "$(cat "$WORK/C_PASS" 2>/dev/null)" = "$SHA" ] || { echo "FAIL ejecute antes 03-load-images.sh hasta PASS"; exit 1; }
 discover
 [ -r "$WORK/rollback.env" ] || { echo "FAIL ejecute antes 02-backup.sh (falta rollback.env)"; exit 1; }
 source "$WORK/rollback.env"

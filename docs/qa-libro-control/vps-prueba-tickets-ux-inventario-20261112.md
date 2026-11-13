@@ -1,5 +1,7 @@
 # Prueba controlada en VPS G8 — rama `fix/tickets-ux-inventario-g8-20261112`
 
+> **OBSOLETO (13-11-2026).** Este runbook y el kit v3 (SHA fijo 9e063480, imágenes tk-9e06348) no deben usarse. El release vigente usa el kit v4: [vps-release-tickets-g8-20261113.md](vps-release-tickets-g8-20261113.md).
+
 **Versión 3 (12-11-2026).** Estado: kit preparado y probado en una simulación local; la rama se validó en navegador sobre una QA aislada (§6). **Nada se ejecutó en la VPS**.
 **Destinatario:** operador autorizado de la VPS G8 (sesión SSH en el servidor correcto).
 **Código a desplegar:** `9e06348019e16e5fe40a6e09a2d7171d552169f5`: los 7 tickets más la corrección TK-02 de servicios por empresa que encontró la validación en navegador. Los commits posteriores de la rama solo tocan este documento y `scripts/vps-g8-prueba/`, sin código de aplicación.
