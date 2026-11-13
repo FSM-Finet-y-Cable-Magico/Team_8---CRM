@@ -5,8 +5,8 @@ set -euo pipefail
 
 SHA=9e06348019e16e5fe40a6e09a2d7171d552169f5  # código de aplicación a desplegar
 SHA7=${SHA:0:7}
-NEW_BACKEND_IMAGE="finet-g8-backend:tk-$SHA7"
-NEW_FRONTEND_IMAGE="finet-g8-frontend:tk-$SHA7"
+NEW_BACKEND_IMAGE=${NEW_BACKEND_IMAGE:-"finet-g8-backend:tk-$SHA7"}
+NEW_FRONTEND_IMAGE=${NEW_FRONTEND_IMAGE:-"finet-g8-frontend:tk-$SHA7"}
 CB=${CB:-finet-g8-prueba-backend-1}
 CF=${CF:-finet-g8-prueba-frontend-1}
 EXPECTED_PROJECT=${EXPECTED_PROJECT:-finet-g8-prueba}
