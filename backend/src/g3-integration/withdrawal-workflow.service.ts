@@ -78,6 +78,19 @@ export class WithdrawalWorkflowService {
       idServicio, motivo: WITHDRAWAL_MOTIVE_MOROSITY, eligible: result.eligible, checks: result.checks, firstFailure: result.firstFailure,
       habilitado: capabilities.ticketLink && capabilities.g3Dispatch, despachoG3Habilitado: this.dispatchEnabled(), capabilities,
       deuda: facts.debt, solicitudActiva: facts.activeRequest,
+      // Read-only context preloaded by the Libro de Control form (ported from PR #81 2c5de07d). Display only:
+      // initiate() never trusts it and re-reads everything under lock.
+      contexto: {
+        empresa: { idEmpresa: service.idEmpresa, nombre: service.empresa?.nombre ?? null },
+        cliente: { idCliente: service.idCliente, nombre: service.cliente?.nombreCompleto ?? null, rut: service.cliente?.rut ?? null },
+        contrato: service.contrato ? { idContrato: service.contrato.idContrato, estado: service.contrato.estado } : null,
+        servicio: { idServicio: service.idServicio, tipo: service.tipoServicio, estado: service.estadoOperativo },
+        deuda: facts.debt,
+        aviso: facts.notice ? { idEvento: facts.notice.idEvento, fecha: facts.notice.fecha ?? null } : null,
+        direccionRetiro: facts.address,
+        solicitudActiva: facts.activeRequest,
+        responsable: { idUsuario: currentUser.idUsuario, nombre: currentUser.nombreCompleto },
+      },
     };
   }
 

@@ -14,6 +14,37 @@ function setup(options: Parameters<typeof withdrawalHarness>[0] = {}) {
 }
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+describe('Baja por morosidad: elegibilidad para el formulario del Libro de Control (PR #81)', () => {
+  it('precarga empresa, cliente, contrato, servicio, deuda, aviso, dirección y responsable sin escribir nada', async () => {
+    const h = setup({ dispatch: false });
+    const before = structuredClone(h.state);
+    const result = await h.service.eligibility(61, comercial());
+    expect(result).toMatchObject({ idServicio: 61, eligible: true, habilitado: true, despachoG3Habilitado: false });
+    expect(result.contexto).toMatchObject({
+      empresa: { idEmpresa: 1, nombre: 'Empresa 1' },
+      cliente: { idCliente: 33, nombre: 'Cliente QA', rut: '123456785' },
+      contrato: { idContrato: 20 },
+      servicio: { idServicio: 61, estado: 'Suspendido' },
+      aviso: { idEvento: 9 },
+      direccionRetiro: { direccion: 'Calle QA 123', comuna: 'Ñuñoa' },
+      solicitudActiva: null,
+      responsable: { idUsuario: 7, nombre: 'Comercial QA' },
+    });
+    expect(result.contexto.deuda).toEqual(result.deuda);
+    expect(h.state).toEqual(before);
+    expect(h.g3Calls).toHaveLength(0);
+  });
+
+  it('tras iniciar, el contexto informa la solicitud activa y el requisito deja de cumplirse', async () => {
+    const h = setup({ dispatch: false });
+    await h.start();
+    const result = await h.service.eligibility(61, comercial());
+    expect(result.eligible).toBe(false);
+    expect(result.contexto.solicitudActiva).toMatchObject({ idSolicitudRetiro: 15 });
+    expect(result.firstFailure?.code).toBe('SIN_SOLICITUD_ACTIVA');
+  });
+});
+
 describe('Baja por morosidad: inicio atómico', () => {
   it('crea solicitud, ticket, vínculo, auditoría y snapshot exacto, sin llamar a G3 si el despacho está apagado', async () => {
     const h = setup({ dispatch: false });

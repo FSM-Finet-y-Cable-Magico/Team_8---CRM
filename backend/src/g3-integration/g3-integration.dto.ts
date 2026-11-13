@@ -110,6 +110,8 @@ export class InitiateServiceWithdrawalDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
   @IsString() @Matches(/\S/) @MaxLength(1000) observaciones!: string;
   @IsOptional() @IsDateString() fechaSolicitada?: string;
+  /** Explicit confirmation from the Libro de Control form (PR #81): the HTTP route never starts a withdrawal without it. */
+  @Equals(true) confirmacion!: boolean;
 }
 
 export class CancelServiceWithdrawalDto {
