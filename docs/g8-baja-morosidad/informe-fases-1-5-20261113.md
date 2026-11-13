@@ -5,7 +5,8 @@
 
 Fuentes contrastadas:
 - G3 `Team-3-FSM` `main` `8a8e5dd0b82e25001bddad8b98602bcb90181505`: `integraciones.controller.ts`, `bajas.service.ts`, `dto/solicitud-baja.dto.ts`, `ordenes/fan-out/payload-cierre.ts`, `momento-fan-out.ts`, migración `20261112190000_solicitud_baja_integracion` y `docker-compose.vps.yml`.
-- Contrato G1 `respuesta-g1-a-g8-recepcion-equipos` (12-11-2026), tal como lo citan los documentos de FINET. **El archivo original no estuvo disponible en este equipo.**
+- Contrato G1 `respuesta-g1-a-g8-recepcion-equipos` (12-11-2026), tal como lo citan los documentos de FINET, **contrastado el 13-11 con el código real de G1** `Team_1-Inventario-y-Bodega` `main` `2131b7f5` (`IntegracionesService.consultarRecepciones` y su spec).
+- G3 `main` avanzó a `fe9ad2a` (13-11): solo monitoreo SmartOLT; sin cambios en cierres, BAJA ni integraciones.
 - PR #81 (`integrate/p0b-jean-claude-20261112` `c3486103`), usado solo como referencia.
 
 ## 1. Commits
@@ -16,7 +17,11 @@ Fuentes contrastadas:
 | 2 | `d899df4` | Elegibilidad, inicio atómico, despacho idempotente de OT BAJA, seguimiento GET y cancelación; almacenamiento `g8_retiros` y migración 002 revisada (sin ejecutar). |
 | 3 | `43dc120` | Validador y handler propios del cierre BAJA, recepción G1 y conciliación pura. |
 | 4 | `9b32d09` | Finalización comercial transaccional, apagada por defecto. |
-| 5 | (este commit) | Migración probada en PostgreSQL efímera; corrección de dos defectos encontrados con SQL real; este informe. |
+| 5 | `f61fb9c` | Migración probada en PostgreSQL efímera; corrección de dos defectos encontrados con SQL real; este informe. |
+| G1 | `3da1342` | Recepción alineada con la respuesta real de G1 2131b7f5 (`estado_g1` null solo en `NO_RECIBIDO`; `clave_evento` con `id_cierre` numérico). |
+| FINET | `dfcd6af` | El ticket «Baja de servicio» se cierra dentro de la baja efectiva. |
+| FINET | `bf68868` | El excliente se muestra en Prospectos de la empresa donde terminó (vista derivada). |
+| FINET | `98fbcb0` | Seguimiento automático configurable cada 5 minutos. |
 
 ## 2. Fase 1 — HTTP 400 en cierres de REPARACION
 
@@ -123,9 +128,10 @@ Cada `clave_evento` se guarda como versión inmutable; la misma clave con otro c
 | `POST /service-withdrawals/:id/finalize` | Baja efectiva (ver §5). |
 | Webhook `POST /api/integraciones/fsm/ordenes/:id/cierre` (alias `/api/integrations/g3/events/work-order-closed`) | `tipo_ot=BAJA` va a su handler; INSTALACION y REPARACION no cambian. |
 
-**Interruptores (ambos `false` por defecto):**
+**Interruptores (todos `false` por defecto):**
 - `G3_WITHDRAWAL_DISPATCH_ENABLED`: envío de OT a G3.
 - `WITHDRAWAL_FINALIZE_ENABLED`: baja efectiva.
+- `WITHDRAWAL_TRACKING_ENABLED`: seguimiento automático (solo lectura); `WITHDRAWAL_TRACKING_INTERVAL_MS` = 300000 por defecto, acotado a 1–60 min.
 
 Sin el esquema `g8_retiros` aplicado, el flujo responde bloqueado y no escribe nada. Para cierres de G3 responde 503, para que G3 reintente.
 
@@ -152,7 +158,32 @@ Sin el esquema `g8_retiros` aplicado, el flujo responde bloqueado y no escribe n
 
 Una falla de escritura o de auditoría revierte todo, y repetir la operación es idempotente. No se tocan pagos, facturas, documentos firmados, inventario G1 ni registros de G2/G3.
 
-**Retorno a Prospectos:** `main` **no tiene** una regla vigente. La marca `EXCLIENTE` del PR #81 es una propuesta que modifica Prospectos (módulo que la rama de tickets también cambió). Se informa como `SIN_REGLA_VIGENTE` y requiere decisión de FINET. El ticket «Baja de servicio» queda abierto: también falta decidir si se resuelve automáticamente al aplicar la baja.
+### 5.1 Criterios FINET del 13-11-2026 (implementados)
+
+**Excliente en Prospectos** (`bf68868`). No agrega estados ni columnas; la condición se deriva de hechos ya registrados:
+- se muestra el prospecto vinculado al cliente (`idCliente`) cuando, **en esa empresa**, el cliente no tiene servicio no-`Baja` ni contrato fuera de `Baja`/`Anulado`, y sí tiene alguna relación en `Baja`;
+- si vuelve a contratar en esa empresa, deja de mostrarse sin escribir nada;
+- la etiqueta («Excliente sin deuda», «con deuda pendiente», «con saldo por revisar») se calcula al listar desde facturas, pagos y prórrogas; nunca se guarda;
+- la finalización reutiliza el prospecto vinculado **sin reescribir su historial**, o crea uno con el estado existente `Fuera pipeline` si no hay; un prospecto del mismo RUT sin vínculo queda para revisión;
+- nunca se crea ni modifica al cliente, ni se duplica el RUT; las otras empresas no cambian;
+- `Excliente` es un filtro de vista del listado, no un estado de pipeline.
+
+**Ticket «Baja de servicio»** (`dfcd6af`):
+- se cierra (`Cerrado`, con fecha, nota y auditoría `CERRAR_TICKET_BAJA_SERVICIO`) **solo** dentro de la transacción de una finalización exitosa;
+- aplica las reglas vigentes: transición solo hacia adelante, estados técnicos de G3 en solo lectura, OT local pendiente lo impide;
+- un ticket inconsistente aborta toda la baja; uno ya cerrado no se reescribe.
+
+**Seguimiento automático** (`98fbcb0`):
+- cada 5 minutos si `WITHDRAWAL_TRACKING_ENABLED=true`;
+- solo GET de la OT y de la recepción G1, con las mismas operaciones idempotentes del modo bajo demanda;
+- nunca despacha, cancela ni aplica la baja;
+- lote de 50 y sin ciclos superpuestos;
+- reintentos con espera de 1, 2, 4, 8 y 12 ciclos, y suspensión tras 6 fallas;
+- las solicitudes terminales (aplicada, cancelada, cerrada u OT cancelada) salen del seguimiento.
+
+**Retorno de `finalize`:** `ticketBaja` (`CERRADO`/`YA_CERRADO`) y `retornoProspectos`, que puede ser `CREADO`, `REUTILIZADO`, `PROSPECTO_SIN_VINCULO_EXISTENTE` o `MANTIENE_RELACION_OPERATIVA`.
+
+**Efecto sobre datos históricos:** la vista derivada también muestra como excliente a quien ya terminó todas sus relaciones en una empresa **antes** de esta rama, siempre que tenga un prospecto vinculado. Antes de activar, conviene contarlos en la base efectiva con una consulta de solo lectura (§8).
 
 ## 6. Base de datos y seguridad (Fase 5)
 
@@ -208,7 +239,9 @@ Si G3 apuntara `DATABASE_URL` a una base administrada por otro (con `MIGRAR_AL_A
 | `withdrawal-workflow.dispatch.spec.ts` | 36/36: atomicidad con rollback, doble clic, dos empresas, reintentos, timeout tras crear, concurrencia (un solo POST), deuda regularizada, snapshot alterado, cancelación válida, tardía e idempotente, PATCH bloqueado, sin escrituras prohibidas. |
 | `withdrawal-workflow.closure.spec.ts` | 18/18: cierre real, duplicado y conflicto, correlaciones cruzadas, OT aprendida por cierre, 503, G1 pendiente/401/403/5xx, versiones y conflicto. |
 | `withdrawal-workflow.finalize.spec.ts` | 13/13: camino feliz, último servicio, multiempresa, apagado, deuda regularizada, bloqueos, G1 caído, reactivación concurrente, auditoría fallida (rollback total), otra empresa, cancelada. |
-| `withdrawal.storage.postgres.integration.spec.ts` (PostgreSQL efímera) | 5/5. Se omite por defecto. |
+| `withdrawal.storage.postgres.integration.spec.ts` (PostgreSQL efímera) | 7/7 tras los criterios FINET (incluye `estado_g1` null, formato de clave y `listTrackable`). Se omite por defecto. |
+| Criterios FINET (13-11) | Cierre de ticket: 14 unitarias + 5 de flujo. Excliente: 5 de finalización + 6 de listado + 1 de UI. Seguimiento: 10. Recepción G1 real: 3 fixtures + 8 rechazos. |
+| Batería completa tras los criterios | Backend: 2217 pass y 59 omitidas (BD). Frontend: 263/263. Lint sin errores y build correcto. |
 | Backend completo | 2167 pass, 57 skipped (BD), 0 fallos. Lint sin errores en los archivos tocados. |
 
 ## 8. Gates pendientes antes de una QA E2E real y de activar
@@ -218,9 +251,15 @@ Si G3 apuntara `DATABASE_URL` a una base administrada por otro (con `MIGRAR_AL_A
    - confirmar el SHA desplegado en la VPS (la API pública en 8343 no lo demuestra), su base efectiva y la existencia de su tabla (§6.3);
    - entregar un payload real anonimizado del cierre REPARACION que dio 400 y del cierre BAJA;
    - acordar datos ficticios: clientes de prueba que **existan en G3** con la misma comuna.
-3. **G1:** confirmar el endpoint de recepciones accesible desde la red de G8, el formato de `clave_evento` y fixtures de recepción completa, parcial, con daño y no recibida.
+3. **G1:** el formato quedó verificado contra el código de G1 `2131b7f5`:
+   - `clave_evento` = `g1-recepcion-{empresa}-{ot}-{id_cierre}`;
+   - resultados `RECIBIDO`, `RECIBIDO_CON_DANO` y `NO_RECIBIDO`;
+   - `estado_g1` null en faltantes desconocidos;
+   - 404 sin cierre.
+
+   Falta confirmar que el **despliegue** de G1 incluye ese código y que el endpoint es accesible desde la red de G8.
 4. **Administrador de BD G8:** aprobar y aplicar la 002 en la base efectiva de G8 según §6.2, con respaldo.
-5. **FINET:** decidir el retorno a Prospectos (EXCLIENTE), el cierre del ticket al aplicar la baja y la sincronización automática (hoy el seguimiento es bajo demanda; G3 sugiere cada 5 minutos).
+5. **FINET:** criterios decididos el 13-11 e implementados (§5.1). Antes de activar, contar en la base efectiva (solo lectura) los clientes que ya cumplen la condición de excliente.
 6. **QA E2E coordinada** con datos ficticios: activar `G3_WITHDRAWAL_DISPATCH_ENABLED` solo en esa QA, recorrer el camino feliz y los casos bloqueados, y recién después evaluar `WITHDRAWAL_FINALIZE_ENABLED` con autorización humana explícita.
 
 ## 9. Plan de PR
