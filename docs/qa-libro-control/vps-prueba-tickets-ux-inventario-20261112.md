@@ -1,214 +1,103 @@
 # Prueba controlada en VPS G8 — rama `fix/tickets-ux-inventario-g8-20261112`
 
-**Fecha:** 12-11-2026 · **Estado:** PREPARADO, NO EJECUTADO. Ningún comando de esta guía se ejecutó en la VPS.
+**Versión 2 (12-11-2026).** Estado: kit preparado y probado en una simulación local; **nada se ejecutó en la VPS**.
 **Destinatario:** operador autorizado de la VPS G8 (sesión SSH en el servidor correcto).
-**Requisito para ejecutar la fase E:** autorización humana explícita del propietario G8 para este SHA.
+**Código a desplegar:** `44c531c67482e783d07c5b9aad6d3b584a117b04`. Los commits posteriores de la rama solo agregan este documento y `scripts/vps-g8-prueba/` (sin código de aplicación).
+**La fase E (recreación) requiere autorización explícita del propietario G8.** El script se niega a correr sin `CONFIRM_SHA` y sin un preflight en PASS.
 
-## 0. Qué se despliega y qué no
+## 0. Qué cambia y qué no
 
-- Rama derivada de `origin/main` `1db945341b6df6d8369d2aeddff5c4af343a3383`, sin merge, sin PR #81 ni baja por morosidad.
-- Commits: TK-01, TK-02/TK-05, TK-04, TK-08/TK-09 (+ ajuste de spec), TK-07 y este documento. El SHA a construir es el `HEAD` publicado de la rama (se informa en la entrega). Las imágenes se construyen **desde ese SHA exacto**.
-- **Sin cambios** en `backend/prisma/`, `db/`, `package-lock.json` ni Dockerfiles: no requiere migración, `db push`, seed ni dependencias nuevas. Si alguna verificación muestra lo contrario, **ABORTAR**.
-- Cambio de contrato interno backend→frontend (solo API JWT de G8, no S2S): en vista por empresa `GET /customers` devuelve `estado: null`, `estadoGlobalDisponible: false` y `estadosServicioEmpresa: string[]` en lugar del marcador `'Restringido por empresa'`. Consolidado devuelve `estadoGlobalDisponible: true`.
-  - **Backend y frontend se despliegan y revierten juntos.** Frontend antiguo + backend nuevo muestra «Sin dato» en vista empresa; frontend nuevo + backend antiguo mostraría el marcador antiguo como estado.
-- Solo se recrean `backend` y `frontend` de `finet-g8-prueba`. PostgreSQL, G1, G2, G3 y sus contenedores no se tocan.
+- Solo se recrean los contenedores `backend` y `frontend` de `finet-g8-prueba`, con imágenes construidas del SHA anterior. PostgreSQL, G1, G2, G3, sus contenedores y los volúmenes no se tocan.
+- Entre `626cf4e7` (imagen citada para la VPS), `main` y el SHA a desplegar **no cambian** `backend/prisma/`, `db/`, los `package-lock.json`, los Dockerfiles ni `frontend/nginx.conf.template`. No hay migración, `db push`, seed ni dependencias nuevas.
+- Cambio de contrato interno (API JWT de G8, no S2S): en vista por empresa `GET /customers` devuelve `estado: null`, `estadoGlobalDisponible: false` y `estadosServicioEmpresa`. **Backend y frontend se activan y se revierten juntos.**
 
-## 1. Prohibido en todo el procedimiento
+## 1. Prohibido
 
-`docker compose down`, `down -v`, `restart` de la base, `docker image prune`, `docker volume rm`, `prisma migrate deploy`, `prisma db push`, `npm run seed*`, `cleanup*`, `db:bootstrap:local`, `init-global`, cualquier `UPDATE/DELETE/ALTER` en PostgreSQL, imprimir `docker inspect ... .Config.Env`, `docker compose config` sin `--quiet` o sin filtrar `environment`, y copiar secretos al chat o a tickets.
+`docker compose down`, `down -v`, `up -V/--renew-anon-volumes`, `restart` de la base, `image prune`, `volume rm`, `prisma migrate/db push`, `seed*`, `cleanup*`, `init-global`, cualquier `INSERT/UPDATE/DELETE/ALTER`, imprimir `docker inspect` completo o `compose config` (contienen secretos), y copiar a chats o tickets los archivos `*.inspect.json` y `config.*.json` del directorio de trabajo (quedan con permisos `600`).
+En el smoke **no** pulsar «Generar instalación», «Consultar cierre» ni «Reintentar envío»: crean o consultan OT reales en G3.
 
-En el smoke **no** pulsar «Generar instalación», «Consultar cierre» ni «Reintentar envío» salvo con un contrato QA designado y coordinado con G3 (crean/consultan OT reales).
+## 2. Artefactos
 
-## 2. Fase A — Inventario solo lectura en la VPS
-
-```bash
-hostname; whoami; pwd
-d8() { docker --host unix:///run/user/1000/docker.sock "$@"; }
-TS=$(date +%Y%m%d-%H%M%S)
-WORK="$HOME/g8-deploy/tk-$TS"; mkdir -p "$WORK" && chmod 700 "$WORK"
-
-d8 version --format 'server={{.Server.Version}} arch={{.Server.Arch}}'
-d8 ps --filter 'name=finet-g8-prueba' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-
-for c in finet-g8-prueba-backend-1 finet-g8-prueba-frontend-1; do
-  d8 inspect "$c" --format '{{.Name}} | cfg={{.Config.Image}} | id={{.Image}} | {{.State.Status}} | health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-  d8 inspect "$c" --format 'project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}}'
-  d8 inspect "$c" --format 'workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-  d8 inspect "$c" --format 'files={{index .Config.Labels "com.docker.compose.project.config_files"}}'
-  d8 inspect "$c" --format 'envfiles={{index .Config.Labels "com.docker.compose.project.environment_file"}}'
-  d8 inspect "$c" --format '{{range .Mounts}}mount {{.Type}} {{.Name}} {{.Source}} -> {{.Destination}} rw={{.RW}}{{println}}{{end}}'
-  d8 inspect "$c" --format '{{range $k,$v := .NetworkSettings.Networks}}net {{$k}}{{println}}{{end}}{{range $p,$b := .HostConfig.PortBindings}}port {{$p}} {{$b}}{{println}}{{end}}restart={{.HostConfig.RestartPolicy.Name}}'
-  # Solo NOMBRES de variables y un hash de los valores: nunca los valores.
-  d8 inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | sort > "$WORK/$c.env-names.txt"
-  d8 inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' | sort | sha256sum | cut -c1-16 > "$WORK/$c.env-hash.txt"
-done
-```
-
-Registrar en `$WORK/estado-inicial.txt` (sin secretos): nombre e **ID inmutable** de cada imagen, proyecto, servicio, `working_dir`, lista exacta de `config_files` y `environment_file`, mounts, redes, puertos y arquitectura.
-
-**Parar** si: el proyecto no es `finet-g8-prueba`, el servidor o usuario no son los esperados, algún contenedor no está `running/healthy`, o `/app/generated` no está montado como volumen persistente.
-
-URL de API incrustada en el frontend actual (el build nuevo debe usar la misma):
-
-```bash
-d8 exec finet-g8-prueba-frontend-1 sh -c 'grep -ho "https\?://[a-zA-Z0-9.:-]*/api" /usr/share/nginx/html/assets/*.js | sort -u'
-# Sin resultado => el bundle usa "/api" relativo detrás del proxy actual (VITE_API_URL vacío o /api).
-```
-
-Línea base de datos **solo lectura** (conteos y hashes, sin RUT ni PII en pantalla). Verificar antes qué daemon aloja `finet-postgres-global` (`docker ps` o `d8 ps`) y usar el mismo:
-
-```bash
-docker exec finet-postgres-global psql -X -v ON_ERROR_STOP=1 -U finet_db_admin -d finet_global_validacion -At -c "
-BEGIN READ ONLY;
-SELECT 'prospecto', count(*), md5(coalesce(string_agg(id_prospecto||':'||coalesce(estado_pipeline,'')||':'||coalesce(rut,''), '|' ORDER BY id_prospecto),'')) FROM public.prospecto
-UNION ALL SELECT 'cotizacion', count(*), md5(coalesce(string_agg(id_cotizacion::text, '|' ORDER BY id_cotizacion),'')) FROM public.cotizacion
-UNION ALL SELECT 'contrato', count(*), md5(coalesce(string_agg(id_contrato||':'||coalesce(estado,''), '|' ORDER BY id_contrato),'')) FROM public.contrato
-UNION ALL SELECT 'cliente', count(*), md5(coalesce(string_agg(id_cliente||':'||estado||':'||coalesce(rut,''), '|' ORDER BY id_cliente),'')) FROM public.cliente
-UNION ALL SELECT 'servicio_contratado', count(*), md5(coalesce(string_agg(id_servicio||':'||estado_operativo, '|' ORDER BY id_servicio),'')) FROM public.servicio_contratado
-UNION ALL SELECT 'integracion_instalacion_g3', count(*), md5(coalesce(string_agg(id_integracion::text, '|' ORDER BY id_integracion),'')) FROM public.integracion_instalacion_g3;
-COMMIT;" | tee "$WORK/db-antes.txt"
-```
-
-Si algún nombre de tabla/columna no coincide con la base real, ajustar solo la consulta de lectura; no crear objetos.
-
-## 3. Fase B — Respaldos nuevos y verificados (antes de recrear)
-
-```bash
-BK="$WORK/backup"; mkdir -p "$BK" && chmod 700 "$BK"
-
-# 1) Dump consistente (formato custom) y verificación de que es legible.
-docker exec finet-postgres-global pg_dump -U finet_db_admin -d finet_global_validacion -Fc > "$BK/finet_global_validacion-$TS.dump"
-test -s "$BK/finet_global_validacion-$TS.dump" && docker exec -i finet-postgres-global pg_restore --list < "$BK/finet_global_validacion-$TS.dump" | head -5
-
-# 2) PDFs/constancias del volumen /app/generated (copia desde el contenedor en marcha).
-d8 cp finet-g8-prueba-backend-1:/app/generated "$BK/generated"
-( cd "$BK/generated" && find . -type f | sort | xargs -r sha256sum ) > "$BK/generated.sha256"
-wc -l "$BK/generated.sha256"
-tar -C "$BK" -czf "$BK/generated-$TS.tar.gz" generated && tar -tzf "$BK/generated-$TS.tar.gz" | wc -l
-
-# 3) Proteger las imágenes actuales para rollback (usar los IDs de la fase A).
-d8 tag <ID_IMAGEN_BACKEND_ACTUAL>  finet-g8-backend:rollback-$TS
-d8 tag <ID_IMAGEN_FRONTEND_ACTUAL> finet-g8-frontend:rollback-$TS
-d8 image inspect finet-g8-backend:rollback-$TS finet-g8-frontend:rollback-$TS --format '{{.Id}}'
-```
-
-**Parar** si el dump está vacío o `pg_restore --list` falla, si el número de archivos de `generated` es 0 cuando la instancia tiene PDF históricos, o si los tags de rollback no apuntan a los IDs de la fase A. Los respaldos antiguos no reemplazan esta toma.
-
-## 4. Fase C — Construcción de imágenes del mismo SHA (equipo de desarrollo)
-
-En una máquina con Docker y desde una **exportación limpia** del SHA aprobado (no desde un checkout con cambios):
-
-```bash
-SHA=<SHA_COMPLETO_APROBADO>; SHA7=${SHA:0:7}; ARCH=linux/<arch de la fase A, p. ej. amd64>
-API_URL=<valor observado en la fase A; vacío si el bundle usa /api relativo>
-SRC=$(mktemp -d); git archive "$SHA" | tar -x -C "$SRC"
-
-docker build --platform "$ARCH" --target prod \
-  --label org.opencontainers.image.revision="$SHA" --label org.opencontainers.image.source=fix/tickets-ux-inventario-g8-20261112 \
-  -t finet-g8-backend:tk-$SHA7 "$SRC/backend"
-docker build --platform "$ARCH" --target prod --build-arg VITE_API_URL="$API_URL" \
-  --label org.opencontainers.image.revision="$SHA" --label org.opencontainers.image.source=fix/tickets-ux-inventario-g8-20261112 \
-  -t finet-g8-frontend:tk-$SHA7 "$SRC/frontend"
-
-docker save finet-g8-backend:tk-$SHA7 finet-g8-frontend:tk-$SHA7 | gzip > g8-tk-$SHA7.tar.gz
-sha256sum g8-tk-$SHA7.tar.gz > g8-tk-$SHA7.tar.gz.sha256
-```
-
-Transferir ambos archivos a `$WORK/` por el canal SSH ya autorizado (p. ej. `scp`) y en la VPS:
-
-```bash
-cd "$WORK" && sha256sum -c g8-tk-$SHA7.tar.gz.sha256
-gunzip -c g8-tk-$SHA7.tar.gz | d8 load
-for i in finet-g8-backend:tk-$SHA7 finet-g8-frontend:tk-$SHA7; do
-  d8 image inspect "$i" --format '{{.Id}} {{.Architecture}} rev={{index .Config.Labels "org.opencontainers.image.revision"}}'
-done
-```
-
-**Parar** si la revisión de alguna imagen no es exactamente `$SHA`, si las dos difieren entre sí o si la arquitectura no coincide con el daemon. No se usa registro externo salvo que el equipo ya tenga uno autenticado y aprobado.
-
-## 5. Fase D — Override fuera de Git y preflight comparativo
-
-Usar **los archivos exactos de las etiquetas** de la fase A (`config_files`, `environment_file`, `working_dir`). Si backend y frontend tienen listas distintas, mantener dos arreglos.
-
-```bash
-PROJECT=finet-g8-prueba
-WD=<working_dir de la fase A>
-BACK=(-f <archivo1> -f <archivo2> ...)   # config_files del backend, en el mismo orden
-C=(-f <archivo1> ...)                     # config_files del frontend
-ENVF=(--env-file <environment_file si la etiqueta lo informa>)
-OV="$WORK/override.tk-$SHA7.yaml"
-cat > "$OV" <<EOF
-services:
-  <servicio_backend_de_la_etiqueta>:
-    image: finet-g8-backend:tk-$SHA7
-  <servicio_frontend_de_la_etiqueta>:
-    image: finet-g8-frontend:tk-$SHA7
-EOF
-RB="$WORK/override.rollback-$TS.yaml"
-sed -e "s#finet-g8-backend:tk-$SHA7#finet-g8-backend:rollback-$TS#" -e "s#finet-g8-frontend:tk-$SHA7#finet-g8-frontend:rollback-$TS#" "$OV" > "$RB"
-
-cc() { d8 compose -p "$PROJECT" --project-directory "$WD" "${ENVF[@]}" "$@"; }
-cc "${BACK[@]}" -f "$OV" config --quiet && cc "${C[@]}" -f "$OV" config --quiet && cc "${BACK[@]}" -f "$RB" config --quiet
-
-# Estructura sin environment: la única diferencia esperada es la línea image.
-strip='del(.services[].environment)'
-diff <(cc "${BACK[@]}" config --format json | jq -S "$strip") <(cc "${BACK[@]}" -f "$OV" config --format json | jq -S "$strip")
-diff <(cc "${C[@]}"    config --format json | jq -S "$strip") <(cc "${C[@]}"    -f "$OV" config --format json | jq -S "$strip")
-# Environment idéntico (solo hashes).
-for f in "" "-f $OV"; do cc "${BACK[@]}" $f config --format json | jq -S '.services[].environment' | sha256sum | cut -c1-16; done
-
-# Plan de Compose: solo deben recrearse los dos servicios G8.
-cc "${BACK[@]}" -f "$OV" up --dry-run -d --no-deps --no-build --pull never <servicio_backend>
-cc "${C[@]}"    -f "$OV" up --dry-run -d --no-deps --no-build --pull never <servicio_frontend>
-```
-
-**Parar** si `diff` muestra algo distinto de `image`, si los hashes de environment difieren, si el dry-run planea recrear otro servicio, red o volumen, o si un volumen nuevo/vacío quedaría montado sobre `/app/generated`. (Si `jq` no existe en la VPS, usar `python3 -c` equivalente; no imprimir `environment`.) Si el `config` actual difiere de lo que corre (archivos cambiados desde el último `up`), detenerse y revisar antes: el `up` aplicaría también esos cambios.
-
-## 6. Fase E — Recreación (requiere autorización explícita)
-
-```bash
-cc "${BACK[@]}" -f "$OV" up -d --no-deps --no-build --pull never <servicio_backend>
-# Esperar healthy del backend antes de seguir:
-d8 inspect finet-g8-prueba-backend-1 --format '{{.Config.Image}} {{.Image}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}'
-d8 logs --since 5m finet-g8-prueba-backend-1 2>&1 | grep -Ei 'error|migrat|prisma' | head -20   # revisar que no haya secretos antes de compartir
-
-cc "${C[@]}" -f "$OV" up -d --no-deps --no-build --pull never <servicio_frontend>
-d8 ps --filter 'name=finet-g8-prueba' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-for c in finet-g8-prueba-backend-1 finet-g8-prueba-frontend-1; do
-  d8 inspect "$c" --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1 | sort | diff - "$WORK/$c.env-names.txt" && echo "$c env-names OK"
-  d8 inspect "$c" --format '{{range .Mounts}}mount {{.Type}} {{.Name}} -> {{.Destination}}{{println}}{{end}}'
-done
-```
-
-El hash de valores de entorno puede variar solo por variables propias de la imagen (`PATH`, `NODE_VERSION`, `NGINX_VERSION`); los **nombres** deben coincidir y los mounts deben ser los mismos de la fase A.
-
-## 7. Fase F — Smoke y puertas de salida
-
-Técnico: backend `healthy`, `GET /api/health` 200, frontend `/health` 200, login correcto, mismos mounts, `d8 cp finet-g8-prueba-backend-1:/app/generated` con el mismo `sha256` de la fase B para archivos preexistentes, y repetir la consulta de la fase A: **conteos y hashes idénticos** en `prospecto`, `cotizacion`, `contrato`, `cliente`, `servicio_contratado` e `integracion_instalacion_g3` (el login escribe `log_auditoria`, que no se compara).
-
-Funcional por ticket (Desktop y móvil, sin escrituras salvo las autorizadas):
-
-| Ticket | Comprobación |
+| Artefacto | Valor |
 |---|---|
-| TK-01 | Clientes → «Ver pendientes de activación» → Gestionar: en el mismo modal aparece el estado de instalación; sin tracking se ve «Generar instalación» (no pulsar); con tracking se ve la OT existente; no aparece «Opciones de instalación»; el icono de refresco solo consulta. Rol sin permiso: botón bloqueado con aviso. |
-| TK-02/05 | Consolidado vs. cada empresa: columna «Estado del cliente» vs. «Estado del servicio en esta empresa»; nunca «Restringido por empresa» ni «Estado global no compartido»; filtro con solo valores reales; mismo RUT/nombre/contacto del cliente compartido en ambas empresas. |
-| TK-04 | Prospecto de origen web con RUT sin guion se ve `cuerpo-DV`; buscar con `123456785`, `12345678-5` y `12.345.678-5` encuentra el mismo; un RUT con DV inválido se ve tal cual. |
-| TK-07 | Lápiz de prospecto: diseño equivalente al editor de clientes; cancelar no guarda; con contrato el editor sigue bloqueado. Guardar solo con prospecto QA autorizado. |
-| TK-08/09 | Inventario: «Catálogo de tipos de equipo» con aclaración de que no es stock; «Consultar unidad física» con una serie autorizada muestra la ficha en el panel; faltantes «No informado»; cambiar de empresa limpia la ficha. |
-| Integridad | Firma/PDF históricos accesibles, cotizaciones y contratos con los mismos conteos, Tickets y facturación sin cambios. |
+| Imagen backend | `finet-g8-backend:tk-44c531c` · ID local `sha256:79e036fa8ad45909001e67795a2a7761e752f8b57073258876f2bd714d781877` · configuración `sha256:d53893acbaff2388b97123d275b14a26bc3db00973070614a06e46d9aa11ca4d` |
+| Imagen frontend | `finet-g8-frontend:tk-44c531c` · ID local `sha256:35ffdea3b76d55b3bed28fe82944bb79bdc902075e3a08f42c8761cb02d57d6d` · configuración `sha256:5f0408421979e783b96e4211a9ce3fc50d8a0563d9ca44c724f4131451046755` |
+| Etiqueta de revisión (ambas) | `org.opencontainers.image.revision=44c531c67482e783d07c5b9aad6d3b584a117b04` |
+| Plataforma | `linux/amd64`; motor Prisma `linux-musl-openssl-3.0.x` |
+| Frontend | `VITE_API_URL=/api` (relativo); plantilla nginx sha256 `582c78a0c13a7e21f8e8a5dcae209bcfa116ae942ef31b69409a58188ba66678` |
+| Paquete | `g8-tk-44c531c-images.tar.gz` · sha256 `cefeb6cc3f9302e7a7075be81095f2a284c020cac318c9e45858576a93d945be` |
 
-**Abortar y revertir** si falla el login, cambia algún hash de la fase A, faltan PDF, se pierde aislamiento por empresa, deja de funcionar firma/contratos/pagos, caen integraciones o G3 recibe solicitudes no autorizadas. HTTP 200 por sí solo no acredita el arreglo.
+Tras `docker load` en un daemon con el almacén clásico, el ID visible es el **digest de configuración**: el ID local de Docker Desktop (containerd) es otro. La prueba de identidad es la etiqueta de revisión, que verifica `03-load-images.sh`.
 
-## 8. Rollback (solo imágenes G8; sin tocar la base)
+Si la fase A muestra que el frontend actual tiene una URL de API absoluta o un `proxy_pass` propio, **no activar el frontend**: reconstruirlo con ese valor (`--build-arg VITE_API_URL=<valor>`) y repetir C y D.
+
+## 3. Kit `scripts/vps-g8-prueba/`
+
+| Script | Fase | Efecto |
+|---|---|---|
+| `00-common.sh` | — | Definiciones. Toma proyecto, `working_dir`, archivos Compose, `env_file` y servicios de las **etiquetas de los contenedores en marcha**; nunca los adivina. |
+| `01-preflight-readonly.sh` | A | Solo lectura: imágenes por ID, montajes, redes, puertos, nombres de variables (sin valores), persistencia de `/app/generated`, host y base de las conexiones (sin credenciales), `/api/ready` (comprobación de esquema en transacción `READ ONLY`), URL de API y proxy del frontend, y huella de datos `db-antes.txt`. |
+| `02-backup.sh` | B | `pg_dump -Fc` verificado con `pg_restore --list`; copia de `/app/generated` con manifiesto sha256 y **prueba de recuperación** (extrae y verifica cada hash); etiqueta `rollback-<TS>` y `docker save` verificado de las imágenes actuales; deja `rollback.env`. |
+| `03-load-images.sh` | C | Verifica el sha256 del paquete, hace `docker load` y exige revisión = SHA y la misma arquitectura en las dos imágenes. |
+| `04-preflight-compose.sh` | D | Crea los overrides fuera de Git y compara con `compare.py` los **contenedores en marcha** contra lo que Compose crearía: (1) sin override, para descartar diferencias acumuladas; (2) con override, donde solo puede cambiar la imagen; (3) con override de rollback. Luego ejecuta `up --dry-run`. Si todo pasa, deja `PREFLIGHT_PASS`. |
+| `compare.py` | D | Imagen; variables efectivas (ENV de la imagen nueva + `environment`/`env_file` resueltos, comparados por igualdad **sin imprimir valores**); montajes por destino, tipo, origen y solo-lectura (incluidos volúmenes con nombre y `secrets`); redes; puertos; `Cmd/Entrypoint/WorkingDir/User`; `restart`; `ExposedPorts`; healthcheck. Exige que `/app/generated` siga montado. |
+| `05-activate.sh` | E | **Bloqueado** sin `CONFIRM_SHA` y `PREFLIGHT_PASS`. `up -d --no-deps --no-build --pull never`: primero backend (espera salud y `/api/ready`) y después frontend; termina con `07`. |
+| `06-rollback.sh` | R | Vuelve a las imágenes `rollback-<TS>` (o las recupera del `docker save` verificado), con los mismos montajes, redes y variables; termina con `07`. |
+| `07-postcheck.sh` | E/R | Imagen y revisión, nombres de variables, montajes idénticos a la fase A, `/api/ready`, PDF preexistentes por sha256 y huella de datos idéntica a `db-antes.txt`. |
+| `db-fingerprint.sql` | A/E/R | `BEGIN READ ONLY`: conteo + md5 de `prospecto`, `cotizacion`, `contrato`, `cliente`, `servicio_contratado`, `integracion_instalacion_g3` y `orden_trabajo`; verifica las columnas que leen los cambios TK-02/TK-04. |
+
+**Prueba local del kit** (Docker Desktop, proyecto simulado `g8kit-test` con PostgreSQL desechable, backend y frontend reales, e imágenes «anteriores» distintas):
+- Ciclo A→B→C→D→E→post-check→rollback→post-check: todo **PASS**.
+- Negativos del preflight: variable con otro valor (FAIL, sin imprimir el valor), volumen de PDF eliminado (FAIL), volumen de PDF con otro nombre (FAIL), activación sin `CONFIRM_SHA` (bloqueada, exit 2).
+- La prueba corrigió cuatro defectos del kit antes de entregarlo:
+  1. un volumen con nombre ausente se clasificaba como anónimo;
+  2. faltaba esperar `/api/ready` tras recrear;
+  3. una línea vacía en la lista de variables daba un falso aviso;
+  4. el formato de los manifiestos sha256 no se normalizaba.
+
+## 4. Procedimiento en la VPS
 
 ```bash
-cc "${BACK[@]}" -f "$RB" up -d --no-deps --no-build --pull never <servicio_backend>
-cc "${C[@]}"    -f "$RB" up -d --no-deps --no-build --pull never <servicio_frontend>
-d8 ps --filter 'name=finet-g8-prueba' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+# 0. Transferir por el canal SSH autorizado (scp/rsync) a ~/g8-deploy/kit-44c531c/:
+#    scripts/vps-g8-prueba/* + g8-tk-44c531c-images.tar.gz + g8-tk-44c531c-images.tar.gz.sha256
+cd ~/g8-deploy/kit-44c531c
+export WORK=$HOME/g8-deploy/tk-44c531c-$(date +%Y%m%d-%H%M%S)
+# Opcionales si difieren: G8_DOCKER_HOST (por defecto unix:///run/user/1000/docker.sock),
+# PG_CONTAINER, PG_USER, PG_DB, CB, CF, EXPECTED_PROJECT.
+
+bash 01-preflight-readonly.sh     # A — revisar 01-preflight.txt
+bash 02-backup.sh                 # B — exige OK de recuperación de PDF y de imágenes
+bash 03-load-images.sh            # C — exige "OK ambas imágenes son de la revisión ..."
+bash 04-preflight-compose.sh      # D — exige "RESULTADO PREFLIGHT: PASS"
 ```
 
-Revertir **ambos** servicios juntos (ver §0). No restaurar el dump, no ejecutar `DROP` ni deshacer esquema por un rollback de UI: la rama no cambia esquema ni datos. Si entre el despliegue y el rollback se registraron datos nuevos, conservarlos; ambas versiones leen el mismo esquema.
+**Detenerse** si la fase A informa `FAIL /app/generated NO está montado`, si `/api/ready` no responde o informa `database: DOWN`, si el frontend actual usa una URL absoluta o un `proxy_pass` propio (ver §2), si algún paso de B falla, o si D no termina en PASS. Para la compatibilidad de esquema, registrar en A `global_schema`, `missing_columns` y `different_columns`: la imagen nueva usa el mismo esquema que la actual, así que esos valores deben repetirse después de E. Además `columnas_requeridas` debe ser `0`.
 
-## 9. Evidencia a entregar
+Entregar para la autorización: `01-preflight.txt`, `02-backup.txt`, `03-load.txt`, `04-preflight-compose.txt` y `rollback.env`. Son salidas saneadas; los JSON y `backup/` no se comparten.
 
-SHA, IDs y etiquetas de las dos imágenes nuevas y de las de rollback, salida sanitizada de las fases A/D/E, `db-antes.txt` vs. `db-despues.txt`, cantidad y hash de `generated`, capturas por ticket (Desktop/móvil) y lista de desviaciones. La prueba en VPS es validación de aceptación; no autoriza merge a `main`/`develop`.
+### Activación (solo con autorización explícita)
+
+```bash
+CONFIRM_SHA=44c531c67482e783d07c5b9aad6d3b584a117b04 bash 05-activate.sh
+```
+
+### Rollback
+
+```bash
+bash 06-rollback.sh
+```
+
+El rollback revierte **ambos** servicios. No restaura el dump, no hace `DROP` ni deshace esquema: la rama no cambia esquema ni datos. Los datos creados entre la activación y el rollback se conservan.
+
+## 5. Smoke funcional (después de E; Desktop 1440×900 y móvil 390×844)
+
+| Ticket | Comprobación | No hacer |
+|---|---|---|
+| TK-01 | Clientes → «Ver pendientes de activación» → Gestionar: la instalación aparece en el mismo modal; sin tracking se ve «Generar instalación» y el aviso «No activa el servicio»; con tracking se ve la OT existente sin opción de generar otra; no existe «Opciones de instalación»; el icono de refresco solo consulta (GET). Con un rol sin permiso, el botón aparece deshabilitado y con aviso. | Pulsar «Generar instalación» / «Consultar cierre» |
+| TK-02/05 | Consolidado: columna «Estado del cliente». Cada empresa: «Estado del servicio en esta empresa». Nunca «Restringido por empresa» ni «Estado global no compartido». El filtro solo ofrece valores reales. El cliente compartido muestra el mismo RUT, nombre y contacto en ambas empresas. | Cambiar estados |
+| TK-04 | Un prospecto web con RUT sin guion se ve `cuerpo-DV`; `123456785`, `12345678-5` y `12.345.678-5` encuentran el mismo; un DV inválido se ve tal cual. | Editar RUT |
+| TK-07 | El lápiz del prospecto abre un diseño equivalente al editor de clientes; cancelar no guarda; con contrato, el editor sigue bloqueado. | Guardar salvo en un prospecto QA autorizado |
+| TK-08/09 | «Catálogo de tipos de equipo» con el aviso de que no es stock; «Consultar unidad física» con una serie autorizada muestra la ficha en el panel; los faltantes dicen «No informado»; cambiar de empresa limpia la ficha. | — |
+| Integridad | Firma y PDF históricos accesibles; cotizaciones y contratos con los mismos conteos; Tickets y facturación sin cambios; consola del navegador sin errores nuevos. | — |
+
+**Abortar y ejecutar `06-rollback.sh`** si falla el login, `07` informa FAIL en montajes o PDF, la huella de datos cambia sin operaciones legítimas de usuarios en la ventana, se pierde el aislamiento por empresa, fallan la firma, los contratos o los pagos, o G3 recibe solicitudes no autorizadas. Coordinar una ventana sin uso concurrente del CRM de prueba. La prueba en VPS es validación de aceptación; no autoriza merge.
