@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { parseDateOnly } from '../common/date-rules';
@@ -6,10 +6,19 @@ import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateServiceWithdrawalDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
 import { APPROVED_EXTENSIONS, invoiceBalance } from '../billing/invoice-balance';
+import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalStorage } from './withdrawal.storage';
 
 @Injectable()
 export class ServiceWithdrawalService {
-  constructor(private readonly prisma: PrismaService, private readonly auditService: AuditService) {}
+  private readonly storage: WithdrawalStorage;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+    @Optional() @Inject(WITHDRAWAL_STORAGE) storage?: WithdrawalStorage,
+  ) {
+    this.storage = storage ?? postgresWithdrawalStorage;
+  }
 
   async list(currentUser: AuthUser, scope = 'consolidado') {
     const idEmpresa = this.scope(currentUser, scope);
@@ -121,6 +130,11 @@ export class ServiceWithdrawalService {
       throw new ConflictException('La solicitud cambio; vuelve a consultar');
     }
     this.assertCompany(fresh.idEmpresa, currentUser);
+    // A request whose OT is managed with G3 changes state only through the integrated flow
+    // (cancel / finalize): a manual CANCELADA here would leave the OT alive in G3.
+    if ((await this.storage.capabilities(tx)).g3Dispatch && await this.storage.findDispatch(tx, idSolicitudRetiro)) {
+      throw new ConflictException({ code: 'WITHDRAWAL_MANAGED_BY_G3', message: 'Esta solicitud tiene un retiro técnico gestionado con G3: usa Cancelar retiro o la baja efectiva, no el cambio manual de estado.' });
+    }
     // No technical withdrawal callback is ratified. A manual status is not evidence.
     if (dto.estado === 'CERRADA') throw new BadRequestException('El cierre requiere evidencia tecnica de retiro autorizada; aun no esta habilitado');
     if (['CANCELADA', 'CERRADA'].includes(fresh.estado)) {

@@ -313,13 +313,17 @@ describe('ProspectsService', () => {
   });
 
   describe('search (paginado, incluye Perdido)', () => {
-    function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = []) {
+    function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = [], options: { formerCount?: number; former?: boolean; invoices?: unknown[] } = {}) {
       const prisma = {
         prospecto: {
-          count: jest.fn().mockResolvedValue(total),
+          // First count: listing total; second: exclientes in scope.
+          count: jest.fn().mockResolvedValueOnce(total).mockResolvedValueOnce(options.formerCount ?? 0),
           findMany: jest.fn().mockResolvedValue(rows),
           groupBy: jest.fn().mockResolvedValue(grouped),
         },
+        empresa: { findMany: jest.fn().mockResolvedValue([{ idEmpresa: 1 }, { idEmpresa: 2 }]) },
+        cliente: { count: jest.fn().mockResolvedValue(options.former ? 1 : 0) },
+        factura: { findMany: jest.fn().mockResolvedValue(options.invoices ?? []) },
       };
       const service = new ProspectsService(prisma as unknown as PrismaService, {} as AuditService,
         {} as MailService, {} as CoverageDomainService, {} as never);
@@ -335,7 +339,7 @@ describe('ProspectsService', () => {
       const result = await service.search(admin, { page: 3, pageSize: 20 });
       const call = prisma.prospecto.findMany.mock.calls[0][0];
       expect(JSON.stringify(call.where)).not.toContain('"not":"Perdido"');
-      expect(call.where.AND).toEqual(expect.arrayContaining([{ idCliente: null }]));
+      expect(call.where.OR[0].AND).toEqual(expect.arrayContaining([{ idCliente: null }]));
       expect(call).toMatchObject({ skip: 40, take: 20 });
       expect(result).toMatchObject({ total: 101, page: 3, pageSize: 20, counts: { Perdido: 40, 'Prospecto Nuevo': 61 } });
       expect(result.items[0]).toMatchObject({ estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado', requiereRevisionComercial: false });
@@ -380,7 +384,51 @@ describe('ProspectsService', () => {
     it('un usuario comercial queda limitado a su empresa aunque pida otro scope', async () => {
       const { prisma, service } = searchFixture();
       await service.search({ ...admin, roles: ['Comercial'], idEmpresa: 1 }, { scope: '2' });
-      expect(prisma.prospecto.findMany.mock.calls[0][0].where.AND).toEqual(expect.arrayContaining([{ AND: [{ idEmpresa: 1 }] }]));
+      const where = prisma.prospecto.findMany.mock.calls[0][0].where;
+      expect(where.OR[0].AND).toEqual(expect.arrayContaining([{ AND: [{ idEmpresa: 1 }] }]));
+      // Exclientes: same company scope and only that company's former customers.
+      expect(where.OR[1].AND[0]).toEqual({ idEmpresa: 1 });
+      expect(JSON.stringify(where.OR[1])).not.toContain('"idEmpresa":2');
+      expect(prisma.empresa.findMany).not.toHaveBeenCalled();
+    });
+
+    const formerRow = { idProspecto: 410, idEmpresa: 1, idCliente: 33, estadoPipeline: 'Servicio Activo', clasificacionComercial: 'PROSPECTO',
+      contratos: [{ idContrato: 20, estado: 'Baja' }], cotizaciones: [], _count: {} };
+    const invoice = (monto: number, pagado: number) => ({ monto, estado: 'Vencida', fechaLimitePago: new Date('2026-01-10'), pagos: pagado ? [{ monto: pagado }] : [], prorrogasPago: [] });
+
+    it('suma a los excliente de la empresa con etiqueta de deuda calculada y sin revisión comercial', async () => {
+      const { prisma, service } = searchFixture([formerRow], 1, [], { formerCount: 1, former: true, invoices: [invoice(20000, 5000)] });
+      const result = await service.search(admin, { scope: '1' });
+      expect(result.items[0]).toMatchObject({ idProspecto: 410, estadoPipeline: 'Servicio Activo', requiereRevisionComercial: false,
+        excliente: { etiqueta: 'Excliente con deuda pendiente', situacionFinanciera: 'CON_DEUDA' } });
+      expect(result.counts).toMatchObject({ Excliente: 1 });
+      expect(JSON.stringify(prisma.cliente.count.mock.calls[0][0].where)).toContain('"estadoOperativo":"Baja"');
+      expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { contrato: { idCliente: 33, idEmpresa: 1 } } }));
+    });
+
+    it.each([
+      ['sin deuda', [invoice(20000, 20000)], 'Excliente sin deuda'],
+      ['sin facturas', [], 'Excliente sin deuda'],
+      ['monto desconocido', [{ ...invoice(0, 0), monto: null }], 'Excliente con saldo por revisar'],
+    ])('etiqueta %s', async (_name, invoices, etiqueta) => {
+      const { service } = searchFixture([formerRow], 1, [], { former: true, invoices });
+      expect((await service.search(admin, { scope: '1' })).items[0].excliente).toMatchObject({ etiqueta });
+    });
+
+    it('si recontrató en la empresa deja de ser excliente sin escribir nada', async () => {
+      const { service } = searchFixture([formerRow], 1, [], { former: false });
+      const item = (await service.search(admin, { scope: '1' })).items[0];
+      expect(item).not.toHaveProperty('excliente');
+    });
+
+    it('el filtro Excliente lista solo exclientes y la vista consolidada considera todas las empresas', async () => {
+      const { prisma, service } = searchFixture();
+      await service.search(admin, { estado: 'Excliente' });
+      const where = prisma.prospecto.findMany.mock.calls[0][0].where;
+      expect(where).not.toHaveProperty('OR');
+      expect(JSON.stringify(where)).toContain('"idCliente":{"not":null}');
+      expect(JSON.stringify(where)).not.toContain('"estadoPipeline":"Excliente"');
+      expect(prisma.empresa.findMany).toHaveBeenCalled();
     });
 
     it('rechaza fechas de filtro inválidas', async () => {
