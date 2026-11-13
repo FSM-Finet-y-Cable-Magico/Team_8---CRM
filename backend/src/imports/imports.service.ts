@@ -1,12 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { parse } from 'csv-parse/sync';
-import ExcelJS from 'exceljs';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
 import { isAdministrator } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateRut } from '../rut/rut.util';
 import { canActivateService } from '../services/service-activation.policy';
+import { parseHistoricalBook, readImportMatrix } from './historical-book-file';
+import { HistoricalBookImportService } from './historical-book-import.service';
 
 type RawRow = Record<string, unknown>;
 
@@ -38,6 +38,7 @@ export class ImportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    @Optional() private readonly historicalBook?: HistoricalBookImportService,
   ) {}
 
   async importClients(file: Express.Multer.File | undefined, currentUser: AuthUser, requestedCompanyId?: number) {
@@ -46,6 +47,11 @@ export class ImportsService {
     }
 
     const idEmpresa = this.resolveCompanyId(currentUser, requestedCompanyId);
+    const historical = await parseHistoricalBook(file);
+    if (historical) {
+      if (!this.historicalBook) throw new BadRequestException('El importador histórico no está disponible');
+      return this.historicalBook.import(historical, currentUser, idEmpresa);
+    }
     const rows = await this.parseFile(file);
 
     if (!rows.length) {
@@ -202,80 +208,53 @@ export class ImportsService {
     };
   }
 
+  async previewClients(file: Express.Multer.File | undefined, user: AuthUser, requestedCompanyId?: number, sheet?: string) {
+    if (!file) throw new BadRequestException('Archivo no informado');
+    const idEmpresa = this.resolveCompanyId(user, requestedCompanyId);
+    const historical = await parseHistoricalBook(file, sheet);
+    if (historical) {
+      if (!this.historicalBook) throw new BadRequestException('El importador histórico no está disponible');
+      return this.historicalBook.preview(historical, user, idEmpresa);
+    }
+    const rows = await this.parseFile(file);
+    const { normalized, rejected } = this.normalizeRows(rows);
+    const seen = new Set<string>();
+    const prepared = normalized.map(row => {
+      const issues: string[] = [];
+      const rut = validateRut(row.rut);
+      if (!rut.valid || !rut.normalized) issues.push('RUT inválido');
+      else if (seen.has(rut.normalized)) issues.push('RUT duplicado en archivo');
+      else seen.add(rut.normalized);
+      return { rowNumber: row.rowNumber, rut: rut.valid ? rut.normalized : null, action: issues.length ? 'REVISAR' : row.tipoRegistro === 'cliente' ? 'CREAR_CLIENTE' : 'CREAR_PROSPECTO', issues, warnings: [] as string[] };
+    });
+    const ruts = [...seen];
+    const [customers, prospects] = await Promise.all([
+      this.prisma.cliente.findMany({ where: { rut: { in: ruts } }, select: { rut: true } }),
+      this.prisma.prospecto.findMany({ where: { rut: { in: ruts } }, select: { rut: true } }),
+    ]);
+    const existing = new Set([...customers, ...prospects].map(row => row.rut));
+    prepared.forEach(row => { if (row.rut && existing.has(row.rut)) { row.action = 'REVISAR'; row.issues.push('RUT ya existe en base de datos'); } });
+    const details = [...prepared, ...rejected.map(row => ({ rowNumber: row.rowNumber, rut: null, action: 'REVISAR', issues: [row.reason], warnings: [] as string[] }))].sort((a, b) => a.rowNumber - b.rowNumber);
+    const rejectionRate = details.filter(row => row.action === 'REVISAR').length / Math.max(1, details.length);
+    return { formatVersion: 'CLIENTES_CSV_XLSX_V1', totalRows: details.length, readyRows: rejectionRate > MAX_REJECTION_RATE ? 0 : details.filter(row => row.action !== 'REVISAR').length,
+      rejectedRows: details.filter(row => row.action === 'REVISAR').length, skippedRows: 0, warningRows: 0, rows: details, persisted: false,
+      policy: rejectionRate > MAX_REJECTION_RATE ? 'Más del 30% de las filas del formato general requieren revisión.' : 'Los registros sin tipo explícito se incorporan como clientes; solo las filas marcadas prospecto crean prospectos.' };
+  }
+
   private async parseFile(file: Express.Multer.File): Promise<RawRow[]> {
-    const extension = file.originalname.split('.').pop()?.toLowerCase();
-
-    if (extension === 'csv') {
-      return parse(file.buffer.toString('utf8'), {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      }) as RawRow[];
-    }
-
-    if (extension === 'xlsx' || extension === 'xls') {
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(file.buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-      const firstSheet = workbook.worksheets[0];
-
-      if (!firstSheet) {
-        throw new BadRequestException('El archivo Excel no contiene hojas');
-      }
-
-      const headerValues = firstSheet.getRow(1).values;
-      const headers = (Array.isArray(headerValues) ? headerValues.slice(1) : [])
-        .map((header) => this.excelCellValue(header as ExcelJS.CellValue).trim())
-        .filter(Boolean);
-      const rows: RawRow[] = [];
-
-      firstSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) {
-          return;
-        }
-
-        const rawRow: RawRow = {};
-
-        headers.forEach((header, index) => {
-          rawRow[header] = this.excelCellValue(row.getCell(index + 1).value);
-        });
-
-        rows.push(rawRow);
-      });
-
-      return rows;
-    }
-
-    throw new BadRequestException('El archivo debe ser CSV, XLS o XLSX');
+    const { matrix } = await readImportMatrix(file);
+    const headerIndex = matrix.slice(0, 20).findIndex(row => row.some(cell => cell.trim().toLowerCase() === 'rut'));
+    if (headerIndex < 0) throw new BadRequestException('No se encontró una columna RUT en el archivo');
+    const headers = matrix[headerIndex];
+    return matrix.slice(headerIndex + 1).map((values, index) => ({ values, rowNumber: index + headerIndex + 2 })).filter(row => row.values.some(Boolean))
+      .map(row => ({ ...Object.fromEntries(headers.flatMap((key, index) => key.trim() ? [[key, row.values[index] ?? '']] : [])), __sourceRow: row.rowNumber }));
   }
-
-  private excelCellValue(value: ExcelJS.CellValue) {
-    if (value === null || value === undefined) {
-      return '';
-    }
-
-    if (typeof value === 'object') {
-      if ('text' in value && typeof value.text === 'string') {
-        return value.text;
-      }
-
-      if ('result' in value && value.result !== undefined) {
-        return String(value.result);
-      }
-
-      if ('richText' in value && Array.isArray(value.richText)) {
-        return value.richText.map((part) => part.text).join('');
-      }
-    }
-
-    return String(value);
-  }
-
   private normalizeRows(rows: RawRow[]): { normalized: NormalizedImportRow[]; rejected: RejectedRow[] } {
     const normalized: NormalizedImportRow[] = [];
     const rejected: RejectedRow[] = [];
 
     rows.forEach((row, index) => {
-      const rowNumber = index + 2;
+      const rowNumber = Number(row.__sourceRow) || index + 2;
       const rut = this.value(row, ['rut', 'RUT']);
       const nombreCompleto =
         this.value(row, ['nombre_completo', 'nombreCompleto', 'Nombre Completo']) ||
@@ -284,6 +263,7 @@ export class ImportsService {
       const telefono = this.value(row, ['telefono', 'celular', 'Celular']);
       const direccion = this.value(row, ['direccion', 'direccion_fisica', 'Direccion']);
       const tipoRegistro = this.value(row, ['tipo_registro', 'tipo', 'Tipo']).toLowerCase();
+      if (tipoRegistro && !['cliente', 'prospecto'].includes(tipoRegistro)) { rejected.push({ rowNumber, rut, reason: 'Tipo de registro no reconocido' }); return; }
       const estado = this.value(row, ['estado', 'Estado']);
       const tipoServicio = this.value(row, ['tipo_servicio', 'tipoServicio', 'Tipo Servicio']);
       const estadoServicio = this.value(row, ['estado_servicio', 'estadoServicio', 'Estado Servicio']);
@@ -297,14 +277,14 @@ export class ImportsService {
         return;
       }
 
-      if (tipoRegistro === 'cliente' && tipoServicio && !HISTORICAL_SERVICE_TYPES.includes(
+      if (tipoRegistro !== 'prospecto' && tipoServicio && !HISTORICAL_SERVICE_TYPES.includes(
         tipoServicio as (typeof HISTORICAL_SERVICE_TYPES)[number],
       )) {
         rejected.push({ rowNumber, rut, reason: 'tipo_servicio historico no reconocido' });
         return;
       }
 
-      if (tipoRegistro === 'cliente' && estadoServicio && !HISTORICAL_SERVICE_STATES.includes(
+      if (tipoRegistro !== 'prospecto' && estadoServicio && !HISTORICAL_SERVICE_STATES.includes(
         estadoServicio as (typeof HISTORICAL_SERVICE_STATES)[number],
       )) {
         rejected.push({ rowNumber, rut, reason: 'estado_servicio historico no reconocido' });
@@ -324,7 +304,7 @@ export class ImportsService {
         telefono,
         direccion,
         estado: estado || undefined,
-        tipoRegistro: tipoRegistro === 'cliente' ? 'cliente' : 'prospecto',
+        tipoRegistro: tipoRegistro === 'prospecto' ? 'prospecto' : 'cliente',
         tipoServicio: tipoServicio
           ? tipoServicio as NormalizedImportRow['tipoServicio']
           : undefined,

@@ -118,6 +118,7 @@ type Summary = {
   empresas: Company[];
   metricas: {
     clientes: number;
+    clientesRegistrados?: number;
     prospectos: number;
     pendientesActivacion?: number;
     instalacionesPendientes?: number;
@@ -201,6 +202,9 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [focusedInstallationContractId, setFocusedInstallationContractId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const dataRequest = useRef(0);
+  const dataScope = useRef(scope);
+  dataScope.current = scope;
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [prospectsLoading, setProspectsLoading] = useState(true);
   const [prospectsError, setProspectsError] = useState('');
@@ -253,17 +257,19 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
     }
     try {
       const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000 });
-      if (request === prospectsRequest.current) setProspects(data);
+      if (request === prospectsRequest.current && dataScope.current === scope) setProspects(data);
     } catch {
-      if (request === prospectsRequest.current) {
+      if (request === prospectsRequest.current && dataScope.current === scope) {
         setProspectsError('No se pudieron cargar los prospectos. Comprueba la conexión del servidor y la configuración de la base de datos.');
       }
     } finally {
-      if (request === prospectsRequest.current) setProspectsLoading(false);
+      if (request === prospectsRequest.current && dataScope.current === scope) setProspectsLoading(false);
     }
   }
 
   async function loadData() {
+    const request = ++dataRequest.current;
+    const current = () => request === dataRequest.current && dataScope.current === scope;
     void loadProspects();
     setMessage('');
     const errors: string[] = [];
@@ -295,6 +301,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         ? api.get<WorkOrder[]>('/work-orders', { params: { scope } })
         : Promise.resolve({ data: [] as WorkOrder[] }),
     ]);
+    if (!current()) return;
     const summaryData = settledData(summaryResult, null as Summary | null, errors);
     const companyOptions = isAdmin
       ? settledData(companiesResult, [] as Company[], errors)
@@ -317,6 +324,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
         api.get<Role[]>('/users/roles'),
         api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
       ]);
+      if (!current()) return;
       setUsers(settledData(usersResult, [] as UserRow[], errors));
       setRoles(settledData(rolesResult, [] as Role[], errors));
       setAudit(settledData(auditResult, [] as AuditLog[], errors));
@@ -328,7 +336,22 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }
 
   useEffect(() => {
+    setSummary(null);
+    setCustomers([]);
+    setPendingActivationProspects([]);
+    setWorkOrders([]);
     void loadData();
+    const refresh = () => { if (document.visibilityState !== 'hidden') void loadData(); };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      dataRequest.current++;
+      prospectsRequest.current++;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [scope]);
 
   function logout() {

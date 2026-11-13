@@ -1,7 +1,7 @@
 import { ArgumentsHost, Body, CanActivate, Catch, Controller, ExceptionFilter, ExecutionContext, Get, Header, HttpException, Injectable, Param,
   ParseIntPipe, Patch, Post, Req, Res, StreamableFile, UseFilters, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Equals, IsBoolean, IsString, Length, Matches } from 'class-validator';
+import { Equals, IsBoolean, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,7 +16,7 @@ export class SignatureTokenDto {
   @IsString() @Length(43, 43) @Matches(/^[A-Za-z0-9_-]{43}$/) token!: string;
 }
 export class SignatureAcceptDto extends SignatureTokenDto {
-  @IsString() @Matches(/^\d{6}$/) code!: string;
+  @IsOptional() @IsString() @Matches(/^\d{6}$/) code?: string;
   @IsString() @Matches(/^[a-f0-9]{64}$/) hashOriginal!: string;
   @IsBoolean() @Equals(true) consent!: boolean;
   @IsString() @Equals(SIGNATURE_CONSENT_VERSION) consentVersion!: string;
@@ -98,7 +98,7 @@ export class PublicSignatureController {
   code(@Body() dto: SignatureTokenDto) { return this.service.requestCode(dto.token); }
   @Post('sign')
   sign(@Body() dto: SignatureAcceptDto, @Req() req: Request) {
-    return this.service.sign(dto.token, dto.code, dto.hashOriginal, dto.consent, dto.consentVersion,
+    return this.service.sign(dto.token, dto.code ?? '', dto.hashOriginal, dto.consent, dto.consentVersion,
       req.ip ?? '', req.get('user-agent') ?? '');
   }
 }

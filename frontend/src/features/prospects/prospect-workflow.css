@@ -138,3 +138,24 @@
 .prospect-loss-dialog .prospect-loss-actions {
   justify-content: center;
 }
+
+.prospect-loss-summary { padding: 18px 20px; border: 0; border-radius: 12px; background: #eef4f5; color: #38545a; }
+.prospect-loss-summary-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.prospect-loss-facts { display: flex; flex-wrap: wrap; gap: 16px 44px; margin: 0; }
+.prospect-loss-facts div { display: grid; gap: 5px; }
+.prospect-loss-facts dt, .prospect-loss-observation > span { color: #617d83; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.prospect-loss-facts dd { margin: 0; font-size: .85rem; font-weight: 600; }
+.prospect-loss-summary-header > button { flex-shrink: 0; width: auto; box-shadow: none; }
+.prospect-loss-observation { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d5e3e5; }
+.prospect-loss-observation p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .83rem; line-height: 1.55; }
+.prospect-loss-observation summary { margin-top: 9px; width: fit-content; color: #276d70; cursor: pointer; font-size: .78rem; font-weight: 650; }
+.prospect-loss-observation summary:focus-visible { outline: 2px solid #276d70; outline-offset: 3px; }
+.prospect-loss-observation details[open] p { padding-top: 6px; }
+.theme-dark .prospect-loss-summary { background: #25373a; color: #dcebee; }
+.theme-dark .prospect-loss-facts dt, .theme-dark .prospect-loss-observation > span, .theme-dark .prospect-loss-observation summary { color: #acd0d3; }
+.theme-dark .prospect-loss-observation { border-color: #416064; }
+@media (max-width: 600px) {
+  .prospect-loss-summary-header { align-items: flex-start; flex-direction: column; }
+  .prospect-loss-summary-header > button { width: 100%; }
+  .prospect-loss-facts { gap: 14px 24px; }
+}

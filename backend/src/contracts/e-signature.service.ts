@@ -5,7 +5,7 @@ import { assignAutomatic, assertPendingSignature, resolveSignatureMode } from '.
 import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -56,6 +56,10 @@ export class ESignatureService implements OnModuleInit {
       const storage = await inspectPrivateSignatureSchema(this.db);
       if (!storage.ready) throw new Error('PRIVATE_SIGNATURE_SCHEMA_NOT_READY');
     } catch { throw new Error('CONTRACT_SIGNATURE_SCHEMA_NOT_READY'); }
+    this.contracts.setAutomaticSignatureDelivery(async (id, actor) => {
+      const state = await this.status(id, actor);
+      if (state.enabled && state.sendAllowed && state.policy.mode === 'automatic') await this.create(id, actor);
+    });
   }
 
   async status(idContrato: number, actor: AuthUser) {
@@ -328,20 +332,14 @@ export class ESignatureService implements OnModuleInit {
     return createHmac('sha256', requireSignatureSettings(this.config).secret).update(id + ':' + code).digest('hex');
   }
 
-  async sign(token: string, code: string, hashOriginal: string, consent: boolean, consentVersion: string, ip: string, agent: string) {
+  async sign(token: string, _code: string, hashOriginal: string, consent: boolean, consentVersion: string, ip: string, agent: string) {
     if (!consent || consentVersion !== SIGNATURE_CONSENT_VERSION || !/^[a-f0-9]{64}$/.test(hashOriginal)
-        || !/^\d{6}$/.test(code)) throw new BadRequestException('Revisa el documento, acepta sus condiciones e introduce el código');
+        ) throw new BadRequestException('Revisa el documento y acepta sus condiciones');
     const result = await this.withToken(token, async (tx, row) => {
       if (hashOriginal !== row.hashOriginal) return failure('El PDF revisado no coincide');
       if (row.estado === 'FIRMADA') return { estado: 'FIRMADA', idSolicitud: row.idSolicitud };
-      if (!row.pdfVisto || !row.otpHash || !row.otpExpiracion || row.otpExpiracion.getTime() <= Date.now()
-          || !(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && requireSignatureSettings(this.config).test) || row.otpIntentos >= 5) return failure('Código no vigente');
-      const expected = Buffer.from(row.otpHash, 'hex'), supplied = Buffer.from(this.otpHash(row.idSolicitud, code), 'hex');
-      if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
-        await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: { otpIntentos: { increment: 1 } } });
-        if (row.otpIntentos >= 4) await this.invalidate(tx, row, 'INTENTOS_AGOTADOS');
-        return failure('Código incorrecto');
-      }
+      if (!row.pdfVisto) return failure('Revisa el contrato antes de firmar');
+      if (!(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && requireSignatureSettings(this.config).test)) return failure('La entrega del enlace personal no está confirmada');
       const signedAt = new Date();
       const pdf = await this.seal(row, signedAt);
       const actor: AuthUser = { idUsuario: row.idUsuarioCreador, idEmpresa: row.idEmpresa, roles: ['Comercial'],
@@ -370,7 +368,7 @@ export class ESignatureService implements OnModuleInit {
     const printable = (v: string) => Array.from(v).map(character => {
       try { font.encodeText(character); return character; } catch { return '?'; }
     }).join('');
-    const lines = ['Constancia de firma electrónica simple', 'Aceptación mediante código enviado al correo registrado.',
+    const lines = ['Constancia de firma electrónica simple', 'Aceptación mediante enlace personal enviado al correo registrado.',
       'Solicitud: ' + row.idSolicitud, 'Fecha UTC: ' + when.toISOString(),
       'Correo: ' + row.destinatario, 'SHA-256 del PDF original:', row.hashOriginal,
       'SHA-256 de los datos congelados:', digest(canonicalSnapshot(row.datosSnapshot)),

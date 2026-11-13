@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-export const SIGNATURE_CONSENT = 'He revisado el PDF identificado por su huella SHA-256 y acepto sus condiciones. Autorizo registrar mi aceptación mediante este código enviado a mi correo, como firma electrónica simple. Puedo descargar el documento y su constancia.';
+export const SIGNATURE_CONSENT = 'He leído el contrato y acepto sus condiciones. Autorizo registrar mi aceptación desde este enlace personal como firma electrónica simple. Podré descargar el contrato firmado y su constancia.';
 // Couple the version to the exact text: an already-open page cannot accept revised wording silently.
 export const SIGNATURE_CONSENT_VERSION = 'fes-correo-v1-' + createHash('sha256').update(SIGNATURE_CONSENT).digest('hex').slice(0, 16);
 export function signatureSettings(config: ConfigService) {

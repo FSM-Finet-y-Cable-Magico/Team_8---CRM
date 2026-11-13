@@ -394,25 +394,44 @@ export class ContractsService {
     };
   }
 
+  private automaticSignatureDelivery?: (id: number, actor: AuthUser) => Promise<void>;
+
+  setAutomaticSignatureDelivery(deliver: (id: number, actor: AuthUser) => Promise<void>) {
+    this.automaticSignatureDelivery = deliver;
+  }
+
+  private async deliverSignature(id: number, actor: AuthUser) {
+    if (!this.automaticSignatureDelivery) return;
+    try { await this.automaticSignatureDelivery(id, actor); }
+    catch {
+      await this.auditService.record({ idUsuario: actor.idUsuario, accion: 'ENVIO_FIRMA_REQUIERE_REVISION',
+        entidadAfectada: 'contrato', idEntidadAfectada: id, valorNuevo: { envioConfirmado: false } });
+    }
+  }
+
   async generateDigitalContract(idContrato: number, currentUser: AuthUser, onlyIfMissing = false) {
     // Reject unauthorized callers before taking a lock, then refresh under that lock.
     await this.getContractOrThrow(idContrato, currentUser);
-    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+    const document = await this.withDigitalContractTransaction(async (tx, ownedFile) => {
       await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
       return this.writeDigitalContract(tx, idContrato, currentUser, ownedFile, onlyIfMissing);
     });
+    await this.deliverSignature(idContrato, currentUser);
+    return document;
   }
 
   async registerWithDigitalContract<T extends { contrato: { idContrato: number } }>(
     currentUser: AuthUser,
     register: (tx: Prisma.TransactionClient) => Promise<{ result: T; reuseDocument: boolean }>,
   ): Promise<T> {
-    return this.withDigitalContractTransaction(async (tx, ownedFile) => {
+    const registered = await this.withDigitalContractTransaction(async (tx, ownedFile) => {
       // Registration holds the contract row lock or has just inserted the row.
       const { result, reuseDocument } = await register(tx);
       await this.writeDigitalContract(tx, result.contrato.idContrato, currentUser, ownedFile, reuseDocument);
       return result;
     }, Prisma.TransactionIsolationLevel.Serializable);
+    await this.deliverSignature(registered.contrato.idContrato, currentUser);
+    return registered;
   }
 
   private async writeDigitalContract(

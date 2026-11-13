@@ -3,25 +3,25 @@ import { BarChart3 } from 'lucide-react';
 import { api, apiErrorMessage, type Company } from '../../api';
 import { reportMinimumDate } from '../../constants';
 import { dateInputValue, formatDateOnly } from '../../lib';
+import { ReportPeriodPicker } from './ReportPeriodPicker';
 
 export function ReportsPanel({ companies, initialScope }: { companies: Company[]; initialScope: string }) {
-  const [type, setType] = useState('clientes');
+  const [type, setType] = useState('libro-control');
   const [format, setFormat] = useState('csv');
-  const [scopeMode, setScopeMode] = useState(initialScope === 'consolidado' ? 'consolidado' : 'empresa');
-  const [companyId, setCompanyId] = useState(initialScope === 'consolidado' ? '' : initialScope);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [companyId, setCompanyId] = useState(initialScope);
+  const [period, setPeriod] = useState({ from: '', to: '' });
+  const [busy, setBusy] = useState(false);
+  const { from: dateFrom, to: dateTo } = period;
   const [status, setStatus] = useState('');
   const today = dateInputValue(new Date());
 
   useEffect(() => {
-    if (!companyId && companies[0]) {
-      setCompanyId(String(companies[0].idEmpresa));
-    }
-  }, [companies, companyId]);
+    setCompanyId(initialScope);
+  }, [initialScope]);
 
   async function exportReport() {
-    if (scopeMode === 'empresa' && !companyId) {
+    if (busy) return;
+    if (!companyId) {
       setStatus('Selecciona la empresa incluida en el reporte.');
       return;
     }
@@ -41,16 +41,19 @@ export function ReportsPanel({ companies, initialScope }: { companies: Company[]
       return;
     }
 
+    setBusy(true);
+    setStatus('');
     try {
       const response = await api.get('/reports/export', {
         params: {
           type,
           format,
-          scope: scopeMode === 'consolidado' ? 'consolidado' : companyId,
+          scope: companyId,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
         },
         responseType: 'blob',
+        timeout: 120000,
       });
       const url = URL.createObjectURL(response.data);
       const link = document.createElement('a');
@@ -61,6 +64,8 @@ export function ReportsPanel({ companies, initialScope }: { companies: Company[]
       setStatus('Reporte generado correctamente');
     } catch (err) {
       setStatus(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -77,56 +82,28 @@ export function ReportsPanel({ companies, initialScope }: { companies: Company[]
           <label>
             Tipo de reporte
             <select value={type} onChange={(event) => setType(event.target.value)}>
+              <option value="libro-control">Libro de control</option>
               <option value="clientes">Clientes</option>
               <option value="prospectos">Prospectos</option>
               <option value="tickets">Tickets</option>
               <option value="inventario">Inventario</option>
-              <option value="cobranza">Cobranza</option>
-              <option value="materiales">Materiales</option>
             </select>
           </label>
           <label>
             Formato
             <select value={format} onChange={(event) => setFormat(event.target.value)}>
               <option value="csv">CSV</option>
-              <option value="xlsx">XLSX</option>
+              <option value="xlsx">Excel (.xlsx)</option>
             </select>
           </label>
-          <label>
-            Período desde
-            <input
-              type="date"
-              min={reportMinimumDate}
-              max={today}
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-            />
-          </label>
-          <label>
-            Período hasta
-            <input
-              type="date"
-              min={reportMinimumDate}
-              max={today}
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-            />
-          </label>
-          <label>
-            Alcance
-            <select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}>
-              <option value="consolidado">Consolidado: todas las empresas</option>
-              <option value="empresa">Una empresa</option>
-            </select>
-          </label>
+          <ReportPeriodPicker value={period} onChange={setPeriod} min={reportMinimumDate} max={today} />
           <label>
             Empresa
             <select
               value={companyId}
-              disabled={scopeMode === 'consolidado'}
               onChange={(event) => setCompanyId(event.target.value)}
             >
-              <option value="">Seleccionar empresa</option>
+              <option value="consolidado">Todas las empresas</option>
               {companies.map((company) => (
                 <option key={company.idEmpresa} value={company.idEmpresa}>
                   {company.nombre}
@@ -135,9 +112,8 @@ export function ReportsPanel({ companies, initialScope }: { companies: Company[]
             </select>
           </label>
         </div>
-        <small className="report-help">Periodo permitido: desde {formatDateOnly(reportMinimumDate)} hasta hoy.</small>
-        <button type="button" className="report-button" onClick={exportReport}>
-          Generar reporte
+        <button type="button" className="report-button" disabled={busy} onClick={exportReport}>
+          {busy ? 'Generando reporte…' : 'Generar reporte'}
         </button>
         {status && <p className="inline-status">{status}</p>}
       </div>

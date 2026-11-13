@@ -29,7 +29,6 @@ export class CustomersService {
     const customers = await this.prisma.cliente.findMany({
       where: { ...(idCliente === undefined ? {} : { idCliente }), AND: filters },
       orderBy: { fechaCreacion: 'desc' },
-      take: 100,
       include: {
         empresa: true,
         contratos: {
@@ -252,6 +251,20 @@ export class CustomersService {
 
     if (!normalizedTerm) {
       throw new BadRequestException('Debe informar un criterio de busqueda');
+    }
+
+    if (normalizedTerm.includes('@')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedTerm)) throw new NotFoundException('Cliente no encontrado');
+      const matches = await this.prisma.cliente.findMany({
+        where: { AND: [{ email: { equals: normalizedTerm, mode: 'insensitive' } }, this.companyScope(currentUser, 'consolidado')] },
+        include: { contratos: { where: companyFilter, select: { idEmpresa: true } }, ...this.companyServiceStatesInclude(idEmpresa) },
+        take: 2,
+      });
+      if (matches.length > 1) throw new BadRequestException('Más de un cliente tiene ese correo. Ingresa su RUT para identificarlo.');
+      const customer = matches[0];
+      if (!customer) throw new NotFoundException('Cliente no encontrado');
+      if (!this.canAccessCustomer(customer, currentUser)) throw new BadRequestException('El cliente no pertenece a tu empresa');
+      return this.visibleCustomer(customer, idEmpresa);
     }
 
     // Preserve the existing numeric-contract search precedence.

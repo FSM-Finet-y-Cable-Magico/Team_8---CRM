@@ -45,9 +45,9 @@ function completedFields(tracking: G3InstallationTracking | null, service?: Cust
 }
 
 type InstallationTarget = { contractId: number; prospectId?: never } | { prospectId: number; contractId?: never };
-export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, service }: InstallationTarget & {
+export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, singleRefresh = false, service }: InstallationTarget & {
   canRequest: boolean; blockedReason?: string; onChanged?: () => void; compact?: boolean;
-  installationSummary?: boolean; hideRequest?: boolean; service?: CustomerService;
+  installationSummary?: boolean; hideRequest?: boolean; singleRefresh?: boolean; service?: CustomerService;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,14 +175,11 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
   const state = completed ? 'Completada' : STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';
-  // Refresh (icon) is a read-only GET. Closure reconciliation is a POST that may record the closure,
-  // so it stays an explicit, labelled action for roles that manage installation orders, and is not
-  // offered in the customer contract summary (G3 also reports closures through its webhook).
-  const consultClosure = delivered && !completed && !installationSummary && canRequest && (
+  const consultClosure = delivered && !completed && !installationSummary && !singleRefresh && canRequest && (
     <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy}
       title="Consulta al equipo técnico si la orden ya fue cerrada y registra el cierre confirmado" onClick={() => void run('reconcile')}>Consultar cierre</button>
   );
-  const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
+  const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run(singleRefresh && canRequest && !completed ? 'reconcile' : 'detail')}>
     <RefreshCw size={17} aria-hidden="true" />
   </button>;
   if (installationSummary) return <section className="customer-installation-summary" aria-label="Instalación">

@@ -106,7 +106,6 @@ export class ProspectsService {
     const prospects = await this.prisma.prospecto.findMany({
       where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
-      take: 100,
       include: prospectListInclude(companyScope),
     });
     return this.projectProspectRows(prospects);
@@ -228,7 +227,6 @@ export class ProspectsService {
     const prospects = await this.prisma.prospecto.findMany({
       where: { OR: companies.map(({ idEmpresa }) => pendingActivationWhere({ idEmpresa })) },
       orderBy: { fechaCreacion: 'desc' },
-      take: 100,
       include: {
         empresa: true,
         contratos: {
@@ -415,28 +413,39 @@ export class ProspectsService {
     await this.assertManualCommercialChange(prospect);
 
     const isReactivation = currentStatus === LOST_PIPELINE_STATUS;
-    const updated = await this.prisma.prospecto.update({
-      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
-      data: {
-        estadoPipeline: nextStatus,
-        motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
-      },
-      include: { empresa: true },
-    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
+    const save = async (db: PrismaService | Prisma.TransactionClient) => {
+      const updated = await db.prospecto.update({
+        where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
+        data: {
+          estadoPipeline: nextStatus,
+          motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
+          ...(isReactivation ? { observacionPerdida: null, fechaPerdida: null, idUsuarioPerdida: null, idZonaPago: null } : {}),
+        },
+        include: { empresa: true },
+      }).catch((error: unknown) => this.rethrowConcurrentChange(error));
 
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
-      entidadAfectada: 'prospecto',
-      idEntidadAfectada: idProspecto,
-      valorAnterior: {
-        estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
-        ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
-      },
-      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
+      const auditEntry = {
+        idUsuario: currentUser.idUsuario,
+        accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
+        entidadAfectada: 'prospecto',
+        idEntidadAfectada: idProspecto,
+        valorAnterior: {
+          estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
+          ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
+        },
+        valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
+      };
+      if (isReactivation) await this.auditService.record(auditEntry, db as Prisma.TransactionClient);
+      else await this.auditService.record(auditEntry);
+
+      return updated;
+    };
+    if (!isReactivation) return save(this.prisma);
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT id_prospecto FROM public.prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+      await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      return save(tx);
     });
-
-    return updated;
   }
 
   async verifyFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser) {
@@ -490,10 +499,11 @@ export class ProspectsService {
   async update(idProspecto: number, dto: UpdateProspectDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const wasQuoted = prospect.estadoPipeline === QUOTE_SENT_PIPELINE_STATUS;
+    const wasLost = prospect.estadoPipeline === LOST_PIPELINE_STATUS;
     if (prospect.estadoPipeline === 'NUEVO') {
       throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
     }
-    if (!wasQuoted) this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (!wasQuoted && !wasLost) this.assertFeasibilityStage(prospect.estadoPipeline);
     if (wasQuoted && !dto.ubicacion) {
       throw new BadRequestException('Vuelve a comprobar la ubicación y cobertura antes de emitir otra cotización');
     }
@@ -511,12 +521,12 @@ export class ProspectsService {
     const cobertura = dto.ubicacion
       ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
       : null;
-    const refreshFeasibility = Boolean(cobertura && (restartQuoteFlow || addressChanged
+    const refreshFeasibility = !wasLost && Boolean(cobertura && (restartQuoteFlow || addressChanged
       || dto.ubicacion?.latitud !== prospect.latitud || dto.ubicacion?.longitud !== prospect.longitud));
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
-      if (await tx.contrato.findFirst({ where: { idProspecto } })) {
+      if (await tx.contrato.findFirst({ where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } } })) {
         throw new BadRequestException('La ubicacion contratada requiere revision contractual. Para una comuna ausente utiliza Completar datos de instalacion.');
       }
       const previous = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
@@ -601,7 +611,7 @@ export class ProspectsService {
         || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud) {
         throw new ConflictException('El prospecto cambió durante la consulta de cobertura; vuelve a consultar');
       }
-      if (current.idCliente != null || await tx.contrato.findFirst({ where: { idProspecto } })) {
+      if (current.idCliente != null || await tx.contrato.findFirst({ where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } } })) {
         throw new BadRequestException('La factibilidad contratada requiere su flujo autorizado; no se modificó la ubicación');
       }
       // A negative recheck invalidates previous positive checks used by installation scheduling.
@@ -951,6 +961,7 @@ export class ProspectsService {
         where: {
           idProspecto,
           idEmpresa: prospect.idEmpresa,
+          estado: { notIn: ['Baja', 'Anulado'] },
         },
         orderBy: { idContrato: 'desc' },
       });

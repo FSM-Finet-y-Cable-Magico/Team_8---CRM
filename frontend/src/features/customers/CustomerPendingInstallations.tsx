@@ -63,7 +63,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
           <p className="customer-pending-activation-note">La activación del cliente se realizará cuando se complete la instalación.</p>
           {/* The installation order is generated from this same modal, for the exact contract shown. */}
           {contract && <div className="installation-workflow-modal customer-pending-installation">
-            <InstallOrderForm key={contract.idContrato} prospect={selectedProspect} contractId={contract.idContrato} canRequest={canManage} onChanged={() => onChanged?.()} />
+            <InstallOrderForm key={contract.idContrato} prospect={selectedProspect} contractId={contract.idContrato} canRequest={canManage} singleRefresh onChanged={() => onChanged?.()} />
           </div>}
         </> : <>
           <div className="customer-pending-toolbar">

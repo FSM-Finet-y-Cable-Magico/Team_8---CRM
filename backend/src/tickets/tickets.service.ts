@@ -38,7 +38,6 @@ export class TicketsService {
     const fetched = await this.prisma.ticket.findMany({
       where: this.companyScope(currentUser, scope),
       orderBy: [{ prioridad: 'asc' }, { fechaCreacion: 'desc' }],
-      take: 150,
     });
     // El texto de la prioridad no ordena por urgencia (Baja < Media) ni entre vocabularios.
     const tickets = [...fetched].sort(compareTicketsByUrgency);

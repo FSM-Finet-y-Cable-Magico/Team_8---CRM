@@ -110,3 +110,16 @@ test('no ofrece reactivar sin permiso, para clientes o con contratos vigentes', 
     act(() => tree.unmount());
   }
 });
+
+test('la pérdida muestra motivo y fecha con observación larga desplegable y sin texto explicativo', () => {
+  let tree;
+  const observation = 'Motivo comercial detallado. '.repeat(30);
+  act(() => { tree = create(React.createElement(Workflow, { prospect: { ...lostProspect, observacionPerdida: observation }, plans: [], permissions, onChanged() {} })); });
+  const loss = tree.root.findByProps({ className: 'prospect-loss-summary' });
+  assert.match(JSON.stringify(tree.toJSON()), /Precio elevado/);
+  assert.ok(!JSON.stringify(tree.toJSON()).includes('Se conserva su historial comercial'));
+  const details = loss.findByType('details');
+  assert.equal(details.findByType('summary').children.join(''), 'Leer observación completa');
+  assert.equal(details.findByType('p').children.join(''), observation);
+  act(() => tree.unmount());
+});

@@ -27,7 +27,6 @@ export class WorkOrdersService {
     const orders = await this.prisma.ordenTrabajo.findMany({
       where: this.companyScope(currentUser, scope),
       orderBy: { fechaCreacion: 'desc' },
-      take: 150,
     });
     const customerIds = [...new Set(orders.map((order) => order.idCliente).filter((id): id is number => id !== null))];
     const prospectIds = [...new Set(orders.map((order) => order.idProspecto).filter((id): id is number => id !== null))];

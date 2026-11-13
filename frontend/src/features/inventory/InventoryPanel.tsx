@@ -192,8 +192,7 @@ export function InventoryPanel({ companyId, companyName }: { companyId: number; 
       </div>
 
       <div className="inventory-consultation-grid">
-        <section className="inventory-catalog" aria-labelledby="inventory-catalog-title" aria-busy={loading}>
-          <header className="inventory-serial-heading"><Boxes size={22} aria-hidden="true" /><div><h2 id="inventory-catalog-title">Catálogo de tipos de equipo</h2><p className="inventory-section-note">Modelos y categorías registrados por Inventario y Bodega. No es un listado de existencias ni de unidades físicas.</p></div></header>
+        <section className="inventory-catalog" aria-label="Tipos de equipo" aria-busy={loading}>
           <div className="inventory-catalog-table-shell">
             <table className="inventory-catalog-table">
               <caption className="inventory-sr-only">Tipos de equipo de {companyName}</caption>

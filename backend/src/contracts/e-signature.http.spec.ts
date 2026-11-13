@@ -57,6 +57,13 @@ describe('Barrera y DTO públicos de firma', () => {
     }
     expect(service.sign).not.toHaveBeenCalled();
   });
+  it('acepta la firma desde el enlace sin exigir un código adicional', async () => {
+    await start();
+    await request(app.getHttpServer()).post('/contract-signatures/sign').send({ token,
+      hashOriginal: 'f'.repeat(64), consent: true, consentVersion: SIGNATURE_CONSENT_VERSION }).expect(201);
+    expect(service.sign).toHaveBeenCalledWith(token, '', 'f'.repeat(64), true, SIGNATURE_CONSENT_VERSION,
+      expect.any(String), expect.any(String));
+  });
 });
 
 describe('Rutas internas con JWT y roles reales', () => {

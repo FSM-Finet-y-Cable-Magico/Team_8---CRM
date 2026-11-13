@@ -21,6 +21,26 @@ describe('CustomersService', () => {
     roles: ['Soporte'],
   };
 
+  it('busca un correo exacto sin distinguir mayúsculas y respeta la empresa', async () => {
+    const customer = { idCliente: 5, idEmpresa: 2, email: 'qa@example.cl', contratos: [{ idEmpresa: 2 }] };
+    const prisma = { cliente: { findMany: jest.fn().mockResolvedValue([customer]) } };
+    const service = new CustomersService(prisma as never, { record: jest.fn() } as never);
+    expect(await service.findByRutOrContract(' QA@example.cl ', supportUser)).toMatchObject({ idCliente: 5 });
+    expect(prisma.cliente.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { AND: [{ email: { equals: 'QA@example.cl', mode: 'insensitive' } }, { OR: [{ idEmpresa: 2 }, { contratos: { some: { idEmpresa: 2 } } }] }] }, take: 2,
+    }));
+  });
+
+  it('un correo compartido requiere RUT y un correo ausente o mal formado no encuentra clientes', async () => {
+    const prisma = { cliente: { findMany: jest.fn().mockResolvedValue([{ idCliente: 1 }, { idCliente: 2 }]) } };
+    const service = new CustomersService(prisma as never, { record: jest.fn() } as never);
+    await expect(service.findByRutOrContract('qa@example.cl', supportUser)).rejects.toThrow('Ingresa su RUT');
+    prisma.cliente.findMany.mockResolvedValue([]);
+    await expect(service.findByRutOrContract('ausente@example.cl', supportUser)).rejects.toThrow('Cliente no encontrado');
+    await expect(service.findByRutOrContract('qa@', supportUser)).rejects.toThrow('Cliente no encontrado');
+    expect(prisma.cliente.findMany).toHaveBeenCalledTimes(2);
+  });
+
   it('edita contacto de la empresa titular y registra la auditoría en la misma transacción', async () => {
     const commercial = { ...supportUser, roles: ['Comercial'] };
     const customer = { idCliente: 7, nombreCompleto: 'Cliente de prueba', email: 'old@example.test', telefono: null };

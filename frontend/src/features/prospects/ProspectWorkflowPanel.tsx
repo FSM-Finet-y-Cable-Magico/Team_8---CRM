@@ -59,6 +59,9 @@ export function ProspectWorkflowPanel({
   const [reviewing, setReviewing] = useState(false);
   const reviewPending = useRef(false);
   const [editingProspect, setEditingProspect] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
+  const reactivationPending = useRef(false);
+  const [coverageCycle, setCoverageCycle] = useState(0);
   const [savingProspect, setSavingProspect] = useState(false);
   const [prospectForm, setProspectForm] = useState({ nombreCompleto: '', telefono: '', email: '', origenContacto: '', direccion: '', comuna: '', region: '' });
   const changedListener = useRef(onChanged);
@@ -108,10 +111,12 @@ export function ProspectWorkflowPanel({
   const pendingContract = currentProspect.contratos?.find((contract) => contract.estado === 'Pendiente firma contrato') ?? null;
   const lossReasons = pendingContract ? LOSS_REASONS.filter(reason => reason !== 'Sin cobertura') : LOSS_REASONS;
   const signaturePolicy = useSignatureStatus(pendingContract?.idContrato);
-  const isWorkflowLocked = isFinal || Boolean(currentProspect.contratos?.length) || currentProspect.idCliente != null;
+  const hasCurrentContract = (currentProspect.contratos ?? []).some(contract => !['Baja', 'Anulado'].includes(contract.estado ?? ''));
+  const hasCommercialRelations = hasCurrentContract || currentProspect.idCliente != null;
+  const isWorkflowLocked = isFinal || hasCommercialRelations;
   const canVerify = permissions.verifyFeasibility || permissions.createProspects;
-  const canEditProspect = permissions.createProspects && !isWorkflowLocked
-    && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada');
+  const canEditProspect = permissions.createProspects && !requiresReview && !hasCommercialRelations && !reactivating
+    && (FEASIBILITY_STAGES.includes(currentStatus) || currentStatus === 'Cotizacion Enviada' || currentStatus === 'Perdido');
   const hasSavedLocation = location !== null && currentProspect.latitud === location.latitud && currentProspect.longitud === location.longitud;
   // A stored status (even 'Factible') without coordinates is not a confirmed location: the user must be able to mark it
   // manually, since automatic geocoding may be disabled or unavailable. A saved point is only changed through "Editar".
@@ -166,7 +171,7 @@ export function ProspectWorkflowPanel({
         .then(result => {
           if (controller.signal.aborted || !result) return;
           const { data } = result;
-          setSynchronized({ source: prospect, updated: { ...prospect, ...data } });
+          setSynchronized(previous => ({ source: prospect, updated: { ...(previous?.source === prospect ? previous.updated : prospect), ...data } }));
           changedListener.current();
         })
         .catch(err => {
@@ -263,6 +268,22 @@ export function ProspectWorkflowPanel({
       setStatusIsError(true);
       setStatus(apiErrorMessage(err));
     }
+  }
+
+  async function reactivateProspect() {
+    if (!canReactivate || reactivationPending.current || editingProspect) return;
+    reactivationPending.current = true;
+    setReactivating(true); setStatus(''); setStatusIsError(false);
+    try {
+      const { data } = await api.patch<Prospect>(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: 'Prospecto Nuevo' });
+      setSynchronized({ source: prospect, updated: { ...currentProspect, ...data,
+        cotizaciones: quotes.map(quote => ({ ...quote, vigente: false })) } });
+      setCoverage(null); setCoverageSyncError(false); setQuotePlanId(''); setContractPlanId('');
+      setCoverageCycle(cycle => cycle + 1);
+      setStatus('Prospecto reactivado. Verificando cobertura para iniciar una nueva cotización.');
+      changedListener.current();
+    } catch (error) { setStatusIsError(true); setStatus(apiErrorMessage(error)); }
+    finally { reactivationPending.current = false; setReactivating(false); }
   }
 
   async function generateQuote() {
@@ -432,24 +453,25 @@ export function ProspectWorkflowPanel({
         </div>}
       </section>}
 
-      {isLost && <section className="prospect-action-card" aria-label="Prospecto perdido">
-        <p><strong>Prospecto perdido.</strong> Se conserva su historial comercial; no se puede cotizar ni contratar hasta reactivarlo.</p>
-        <dl className="prospect-overview-data">
+      {isLost && <section className="prospect-loss-summary" aria-label="Prospecto perdido">
+        <div className="prospect-loss-summary-header"><dl className="prospect-loss-facts">
           <div><dt>Motivo</dt><dd>{currentProspect.motivoPerdida ?? 'No registrado'}</dd></div>
           <div><dt>Fecha</dt><dd>{currentProspect.fechaPerdida ? formatDateTime(currentProspect.fechaPerdida) : 'No registrada'}</dd></div>
-          <div><dt>Observación</dt><dd>{currentProspect.observacionPerdida ?? 'Sin observación'}</dd></div>
         </dl>
-        {canReactivate && <button type="button" onClick={() => void runAction(
-          () => api.patch(`/prospects/${prospect.idProspecto}/pipeline`, { estadoPipeline: 'Prospecto Nuevo' }),
-          'Prospecto reactivado como Prospecto Nuevo. Verifica la cobertura antes de cotizar.',
-        )}>Reactivar prospecto</button>}
+        {canReactivate && <button type="button" className="compact" disabled={reactivating || editingProspect || savingProspect} onClick={() => void reactivateProspect()}>{reactivating ? 'Reactivando…' : 'Reactivar prospecto'}</button>}</div>
+        <div className="prospect-loss-observation"><span>Observación</span>
+          {(currentProspect.observacionPerdida?.length ?? 0) > 160 ? <>
+            <p>{currentProspect.observacionPerdida!.slice(0, 160)}…</p>
+            <details><summary>Leer observación completa</summary><p>{currentProspect.observacionPerdida}</p></details>
+          </> : <p>{currentProspect.observacionPerdida || 'Sin observación'}</p>}
+        </div>
       </section>}
 
       <div className="workflow-grid prospect-action-grid">
         {(canVerify || permissions.generateQuotes || permissions.contractPlans) && prospect.empresa && (
           <section className="prospect-coverage-card">
             <CoveragePicker
-              key={prospect.idProspecto}
+              key={`${prospect.idProspecto}-${coverageCycle}`}
               presentation="summary"
               showAddressRetry={canEditProspect}
               allowManualLocation={manualLocation}

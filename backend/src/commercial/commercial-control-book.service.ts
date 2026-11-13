@@ -37,6 +37,7 @@ const EXPORT_COLUMNS = {
 } as const;
 
 type ExportColumn = keyof typeof EXPORT_COLUMNS;
+export const CONTROL_BOOK_REPORT_COLUMNS = EXPORT_COLUMNS;
 
 @Injectable()
 export class CommercialControlBookService {
@@ -151,6 +152,11 @@ export class CommercialControlBookService {
       },
       filtersApplied: this.appliedFilters(query),
     };
+  }
+
+  async reportRows(query: ControlBookQueryDto, user: AuthUser) {
+    this.assertViewer(user);
+    return this.loadRows(query, user);
   }
 
   async export(query: ControlBookQueryDto, format: 'csv' | 'xlsx', user: AuthUser) {

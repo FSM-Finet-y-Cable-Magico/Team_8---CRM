@@ -8,7 +8,11 @@ export { MailDeliveryError } from './smtp.config';
 export type QuoteEmail = { idEmpresa?: number; to: string; prospectName: string; companyName: string; pdf: Buffer; filename: string };
 export type TaxDocumentEmail = { idEmpresa?: number; to: string; customerName: string; tipoDte: number; folio: string; idPago: number; pdf: Buffer; filename: string; deliveryKey?: string };
 export type MailDeliveryResult = { status: 'sent' | 'not_configured' | 'simulated'; messageId?: string };
-type Message = { idEmpresa?: number; to: string; subject: string; text: string; pdf?: Buffer; filename?: string; deliveryKey?: string };
+type Message = { idEmpresa?: number; to: string; subject: string; text: string; html?: string; pdf?: Buffer; filename?: string; deliveryKey?: string };
+
+function contractEmail(title: string, content: string, action = '') {
+  return `<html lang="es"><body style="margin:0;background:#f3f7f5;font-family:Arial,sans-serif;color:#253c34"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px"><table role="presentation" width="100%" style="max-width:580px;background:#fff;border:1px solid #dfe9e3;border-radius:16px" cellpadding="0" cellspacing="0"><tr><td style="padding:36px"><p style="color:#237c68;font-size:12px;letter-spacing:1px">GESTIÓN DE CONTRATOS</p><h1 style="font-size:26px;line-height:1.3">${title}</h1><p style="font-size:15px;line-height:1.8;color:#52685e">${content}</p>${action}<p style="margin-top:32px;padding-top:20px;border-top:1px solid #e4ece7;color:#718278;font-size:12px;line-height:1.6">Este mensaje corresponde a su proceso de contratación. Si no reconoce esta solicitud, comuníquese con la empresa antes de continuar.</p></td></tr></table></td></tr></table></body></html>`;
+}
 
 @Injectable()
 export class MailService implements OnModuleInit {
@@ -61,8 +65,10 @@ export class MailService implements OnModuleInit {
   }
 
   sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string }) {
-    return this.sendMessage({ ...message, subject: 'Revisa y firma tu contrato',
-      text: 'Tu contrato está disponible para revisar y firmar mediante un código enviado a tu correo. Abre este enlace personal; no lo compartas:\n' + message.link });
+    const link = message.link.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return this.sendMessage({ ...message, subject: 'Su contrato está disponible para revisión y firma',
+      text: 'Estimado/a cliente:\n\nSu contrato está disponible para revisión. Acceda al enlace personal, descargue el documento y revise sus condiciones antes de aceptar y firmar. El enlace tiene una vigencia de 48 horas y es de uso exclusivo del titular; no lo comparta.\n\nRevisar y firmar contrato: ' + message.link,
+      html: contractEmail('Su contrato está listo', 'Estimado/a cliente:<br><br>Le invitamos a revisar su contrato. Podrá descargar el documento, leer sus condiciones y registrar su firma desde una misma página.<br><br>Este enlace personal estará disponible durante 48 horas. Por su privacidad, no lo comparta.', `<p style="margin:28px 0"><a href="${link}" style="display:inline-block;background:#237c68;color:#fff;padding:16px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Revisar y firmar contrato</a></p>`) });
   }
 
   sendSignatureCode(message: { idEmpresa: number; to: string; code: string }) {
@@ -72,8 +78,9 @@ export class MailService implements OnModuleInit {
   }
 
   sendSignedContract(message: { idEmpresa: number; to: string; pdf: Buffer; filename: string }) {
-    return this.sendMessage({ ...message, subject: 'Tu contrato y constancia de firma',
-      text: 'Adjuntamos el contrato que aceptaste y su constancia de firma electrónica simple. Conserva una copia.' });
+    return this.sendMessage({ ...message, subject: 'Confirmación de firma de su contrato',
+      text: 'Estimado/a cliente:\n\nSu firma se ha registrado correctamente. Adjuntamos su contrato firmado junto con la constancia de aceptación mediante firma electrónica simple. Le recomendamos descargar y conservar una copia para futuras consultas.\n\nGracias por su confianza.',
+      html: contractEmail('Contrato firmado correctamente', 'Estimado/a cliente:<br><br>Confirmamos que su firma se ha registrado correctamente.<br><br>Encontrará adjunto su <strong>contrato firmado y la constancia de aceptación</strong>. Le recomendamos descargar el archivo y conservar una copia para futuras consultas.<br><br>Gracias por su confianza.') });
   }
 
   sendTest(to: string, idEmpresa?: number) {
@@ -107,7 +114,7 @@ export class MailService implements OnModuleInit {
         const result = await transport.sendMail({
           from: { address: settings.from, name: settings.fromName }, to: { address: message.to, name: '' },
           envelope: { from: settings.from, to: [message.to] }, subject: message.subject, text: `${message.text}\n\nSaludos,\n${settings.fromName}`,
-          messageId, disableFileAccess: true, disableUrlAccess: true,
+          html: message.html, messageId, disableFileAccess: true, disableUrlAccess: true,
           attachments: message.pdf ? [{ filename: message.filename!, content: message.pdf, contentType: 'application/pdf' }] : [],
         });
         // SMTP acceptance is not proof of inbox delivery. QUIT is not a second acceptance barrier.

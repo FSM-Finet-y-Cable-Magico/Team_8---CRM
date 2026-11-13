@@ -1,5 +1,26 @@
 import type { Ticket, TicketCategory } from '../../api';
 
+const searchText = (value: string | number | null | undefined) => String(value ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-CL').replace(/[_#]/g, ' ').trim();
+const compactSearchText = (value: string) => value.replace(/[^a-z0-9]/g, '');
+
+export function ticketMatchesSearch(ticket: Ticket, query: string) {
+  const terms = searchText(query).split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const fields = [
+    ticket.idTicket, ticket.codigoSeguimiento, ticket.descripcion, ticket.idServicio,
+    ticket.idServicio ? `Servicio ${ticket.idServicio}` : null,
+    ticket.cliente?.nombreCompleto, ticket.cliente?.rut, ticket.cliente?.email, ticket.cliente?.telefono,
+    ticket.idCategoria, ticket.categoria?.nombre, ticket.categoria?.nombreAtencion,
+    ticket.prioridad, ticket.estado, ticket.estadoPresentacion,
+    ...(ticket.workOrders ?? []).flatMap(order => [
+      `OT ${order.idOt}`, `Orden de trabajo ${order.idOt}`, order.codigoSeguimiento, order.tipoOt, order.estado,
+    ]),
+  ].map(searchText);
+  return terms.every(term => fields.some(field => field.includes(term)
+    || Boolean(compactSearchText(term) && compactSearchText(field).includes(compactSearchText(term)))));
+}
+
 // Documento 0 / Tabla 11.9. IDs and eligibility still come from the backend.
 export const TICKET_ATTENTION_LABELS = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
   'Facturación y cobro', 'Consulta general', 'Baja de servicio'] as const;
