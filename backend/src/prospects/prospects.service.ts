@@ -158,13 +158,13 @@ export class ProspectsService {
   }
 
   /** Former-customer view of linked rows, recomputed on every read (never stored). */
-  private async formerCustomerViews(prospects: Array<{ idProspecto: number; idCliente: number | null; idEmpresa: number | null }>) {
+  private async formerCustomerViews(prospects: Array<{ idProspecto: number; idCliente: number | null; idEmpresa: number | null; rut?: string | null }>) {
     const views = new Map<number, { etiqueta: string; situacionFinanciera: string }>();
     for (const prospect of prospects) {
       if (prospect.idCliente == null || prospect.idEmpresa == null) continue;
       const former = await this.prisma.cliente.count({ where: { AND: [{ idCliente: prospect.idCliente }, formerCustomerInCompanyWhere(prospect.idEmpresa)] } });
       if (!former) continue;
-      const debt = await formerCustomerDebt(this.prisma, prospect.idCliente, prospect.idEmpresa);
+      const debt = await formerCustomerDebt(this.prisma, prospect.idCliente, prospect.idEmpresa, prospect.rut);
       views.set(prospect.idProspecto, { etiqueta: formerCustomerLabel(debt), situacionFinanciera: debt });
     }
     return views;

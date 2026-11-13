@@ -403,7 +403,8 @@ describe('ProspectsService', () => {
         excliente: { etiqueta: 'Excliente con deuda pendiente', situacionFinanciera: 'CON_DEUDA' } });
       expect(result.counts).toMatchObject({ Excliente: 1 });
       expect(JSON.stringify(prisma.cliente.count.mock.calls[0][0].where)).toContain('"estadoOperativo":"Baja"');
-      expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { contrato: { idCliente: 33, idEmpresa: 1 } } }));
+      // Same debt position as the recontract guard (customer-debt.ts): customer and RUT aliases, only this company.
+      expect(prisma.factura.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { contrato: { idEmpresa: 1, OR: expect.arrayContaining([{ idCliente: 33 }]) } } }));
     });
 
     it.each([

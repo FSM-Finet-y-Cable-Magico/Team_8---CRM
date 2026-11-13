@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
-import { APPROVED_EXTENSIONS, invoiceBalance } from '../billing/invoice-balance';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
+import { customerDebtPosition } from './customer-debt';
 
 /**
  * Excliente en Prospectos (criterio FINET 13-11-2026): al terminar la última relación operativa de una persona
@@ -52,19 +52,16 @@ const LABELS: Record<FormerCustomerDebt, string> = {
 };
 export const formerCustomerLabel = (debt: FormerCustomerDebt) => LABELS[debt];
 
-/** Deuda exigible del cliente en esa empresa (todas sus facturas allí), con el mismo cálculo de saldo del Libro. */
-export async function formerCustomerDebt(db: Pick<Prisma.TransactionClient, 'factura'>, idCliente: number, idEmpresa: number): Promise<FormerCustomerDebt> {
-  const invoices = await db.factura.findMany({
-    where: { contrato: { idCliente, idEmpresa } },
-    include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS },
-  });
-  let unknown = false;
-  for (const invoice of invoices) {
-    const balance = invoiceBalance(invoice);
-    if (balance.saldoExigible === null) { unknown = true; continue; }
-    if (balance.saldoExigible > 0) return 'CON_DEUDA';
-  }
-  return unknown ? 'SALDO_POR_REVISAR' : 'SIN_DEUDA';
+/**
+ * Deuda exigible del excliente en esa empresa. Es la MISMA posición que usa la guarda de recontratación
+ * (customerDebtPosition, PR #81 23dc6c45): cliente y alias de su RUT, solo esa empresa. Así la etiqueta nunca dice
+ * «sin deuda» a quien la guarda bloquearía por deuda.
+ */
+export async function formerCustomerDebt(
+  db: Pick<Prisma.TransactionClient, 'factura'>, idCliente: number, idEmpresa: number, rut?: string | null,
+): Promise<FormerCustomerDebt> {
+  const position = await customerDebtPosition(db, { idEmpresa, idCliente, rut: rut ?? null });
+  return position === 'INDETERMINADA' ? 'SALDO_POR_REVISAR' : position;
 }
 
 export type EnsureFormerCustomerResult =
