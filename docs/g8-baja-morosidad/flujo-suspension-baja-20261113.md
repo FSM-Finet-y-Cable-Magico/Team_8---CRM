@@ -76,7 +76,7 @@ La correlación se comprueba en tres momentos: aceptación de la OT (`request_id
 
 - Valor efectivo de `BILLING_CUT_DAYS` en el backend de la VPS.
 - Valores efectivos de los tres interruptores.
-- Migración privada `db/g8/migrations/002_service_withdrawal.sql` y sus grants en `finet-postgres-global` / `finet_global_validacion`. Sin ella, iniciar la baja responde bloqueado y no escribe nada.
+- Migraciones privadas `002_service_withdrawal.sql` **y** `003_withdrawal_voluntary_termination.sql`, con sus grants, en `finet-postgres-global` / `finet_global_validacion`. La 003 es obligatoria: la restricción de la 002 exigía la recepción G1 para marcar la baja aplicada. Sin ambas, el flujo responde bloqueado y no escribe nada. Ver `termino-voluntario-20261113.md`.
 - E2E real con G3 (OT de prueba con técnico y aprobación) y G1.
 
 ## Fuera de alcance
