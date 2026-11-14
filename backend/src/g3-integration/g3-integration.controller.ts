@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, Optional, Param, ParseIntPipe, Patch, Post, Query, Res, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthUser } from '../common/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -9,12 +9,21 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
 import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
-import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto, InitiateServiceWithdrawalDto, CancelServiceWithdrawalDto, VoluntaryTerminationDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
+import { WithdrawalWorkflowService } from './withdrawal-workflow.service';
 import { independentRepairAcknowledgement, installationClosure } from './g3-closure-contract';
+import { isWithdrawalClosure, withdrawalClosure } from './g3-withdrawal-closure-contract';
 
-function receiveApprovedClosure(processor: G3ClosureProcessor, dto: G3ClosureDto, response?: Response) {
+async function receiveApprovedClosure(processor: G3ClosureProcessor, workflow: WithdrawalWorkflowService | undefined, dto: G3ClosureDto, response?: Response) {
+  // BAJA has its own validator and handler: it never enters the installation or repair paths.
+  if (isWithdrawalClosure(dto)) {
+    if (!workflow) throw new ServiceUnavailableException({ code: 'WITHDRAWAL_FLOW_NOT_AVAILABLE', message: 'G8 no tiene habilitado el registro de cierres de BAJA' });
+    const result = await workflow.receiveWithdrawalClosure(withdrawalClosure(dto));
+    response?.status(200);
+    return result;
+  }
   const acknowledgement = independentRepairAcknowledgement(dto);
   if (acknowledgement) {
     response?.status(200);
@@ -28,6 +37,7 @@ export class G3IntegrationController {
   constructor(
     private readonly installations: InstallationIntegrationService,
     private readonly closureProcessor: G3ClosureProcessor,
+    @Optional() private readonly workflow?: WithdrawalWorkflowService,
   ) {}
 
   @Post('installations')
@@ -99,13 +109,13 @@ export class G3IntegrationController {
   @IntegrationGroups('G3')
   @IntegrationCompanyScope('body')
   receiveClosure(@Body() dto: G3ClosureDto, @Res({ passthrough: true }) response?: Response) {
-    return receiveApprovedClosure(this.closureProcessor, dto, response);
+    return receiveApprovedClosure(this.closureProcessor, this.workflow, dto, response);
   }
 }
 
 @Controller('integraciones/fsm')
 export class G3CanonicalWebhookController {
-  constructor(private readonly closureProcessor: G3ClosureProcessor) {}
+  constructor(private readonly closureProcessor: G3ClosureProcessor, @Optional() private readonly workflow?: WithdrawalWorkflowService) {}
 
   @Post('ordenes/:idOt/cierre')
   @UseGuards(IntegrationApiKeyGuard)
@@ -119,14 +129,64 @@ export class G3CanonicalWebhookController {
     if (dto.id_ot !== undefined && dto.id_ot !== idOt) {
       throw new BadRequestException('El id_ot de la ruta no coincide con el payload');
     }
-    return receiveApprovedClosure(this.closureProcessor, { ...dto, id_ot: idOt }, response);
+    return receiveApprovedClosure(this.closureProcessor, this.workflow, { ...dto, id_ot: idOt }, response);
   }
 }
 
 @Controller('service-withdrawals')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ServiceWithdrawalController {
-  constructor(private readonly withdrawals: ServiceWithdrawalService) {}
+  constructor(private readonly withdrawals: ServiceWithdrawalService, private readonly workflow: WithdrawalWorkflowService) {}
+
+  @Get('eligibility/:idServicio')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  eligibility(@Param('idServicio', ParseIntPipe) idServicio: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.eligibility(idServicio, user);
+  }
+
+  @Post('initiate')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  initiate(@Body() dto: InitiateServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.initiate(dto, user);
+  }
+
+  /** Voluntary termination from Tickets: commercial termination now, technical withdrawal (OT BAJA VOLUNTARIA) prepared. */
+  @Post('voluntary')
+  @Roles(...ACCESS_ROLES.CREATE_TICKETS)
+  terminateVoluntarily(@Body() dto: VoluntaryTerminationDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.terminateVoluntarily(dto, user);
+  }
+
+  @Post(':id/dispatch')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  dispatch(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.dispatch(id, user);
+  }
+
+  @Post(':id/order-status')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  refreshOrder(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.refreshOrder(id, user);
+  }
+
+  @Post(':id/reception-sync')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  syncReception(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.syncReception(id, user);
+  }
+
+  /** Effective baja: Administrador only (PR #81 policy), on top of WITHDRAWAL_FINALIZE_ENABLED and the G3/G1 evidence. */
+  @Post(':id/finalize')
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
+  finalize(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.workflow.finalize(id, user);
+  }
+
+  @Post(':id/cancel')
+  @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
+  cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.cancel(id, dto.motivo, user);
+  }
 
   @Get()
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)

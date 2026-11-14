@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { ESignatureService } from './e-signature.service';
-import { SIGNATURE_CONSENT_VERSION } from './e-signature.config';
+import { DEMO_SIGNATURE_CONSENT_VERSION, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 import { MailService } from '../mail/mail.service';
 
 describe('Aceptación desde enlace personal', () => {
@@ -11,7 +11,9 @@ describe('Aceptación desde enlace personal', () => {
     const contracts = { markContractSigned: jest.fn() };
     const mail = { sendSignatureCode: jest.fn() };
     const audit = { record: jest.fn() };
-    const service = new ESignatureService({} as never, new ConfigService(), mail as never, audit as never, contracts as never);
+    const service = new ESignatureService({} as never, new ConfigService({ NODE_ENV: 'test', CONTRACT_SIGNATURE_ENABLED: 'true',
+      CONTRACT_SIGNATURE_PUBLIC_URL: 'http://localhost/', CONTRACT_SIGNATURE_COMPANIES: '[1]',
+      CONTRACT_SIGNATURE_OTP_SECRET: 'a'.repeat(64) }), mail as never, audit as never, contracts as never);
     const internals = service as unknown as { withToken: (token: string, action: (tx: unknown, row: unknown) => unknown) => Promise<unknown>;
       seal: () => Promise<Buffer>; deliverSigned: () => Promise<void> };
     jest.spyOn(internals, 'withToken').mockImplementation(async (_token, action) => {
@@ -34,6 +36,7 @@ describe('Aceptación desde enlace personal', () => {
     [{ pdfVisto: null }, 'Revisa el contrato'],
     [{ correoEstado: 'FALLIDO' }, 'entrega del enlace'],
     [{ hashOriginal: 'b'.repeat(64) }, 'PDF revisado no coincide'],
+    [{ consentimientoVersion: DEMO_SIGNATURE_CONSENT_VERSION }, 'modo de firma actual'],
   ])('rechaza evidencia incompleta %j', async (overrides, message) => {
     const h = setup(overrides);
     await expect(h.service.sign('enlace', '', 'a'.repeat(64), true, SIGNATURE_CONSENT_VERSION, '', '')).rejects.toThrow(message);

@@ -64,7 +64,9 @@ export class MailService implements OnModuleInit {
       text: `Hola ${message.customerName},\n\nAdjuntamos ${name.toLowerCase()} electronica ${message.folio}, correspondiente al pago ${message.idPago}.` });
   }
 
-  sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string }) {
+  sendSignatureInvitation(message: { idEmpresa: number; to: string; link: string; demo?: boolean }) {
+    if (message.demo) return this.sendMessage({ ...message, subject: 'Demostración de firma de contrato',
+      text: 'Abre este enlace personal para revisar el contrato, registrar tu aceptación de demostración y descargar la copia:\n' + message.link });
     const link = message.link.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return this.sendMessage({ ...message, subject: 'Su contrato está disponible para revisión y firma',
       text: 'Estimado/a cliente:\n\nSu contrato está disponible para revisión. Acceda al enlace personal, descargue el documento y revise sus condiciones antes de aceptar y firmar. El enlace tiene una vigencia de 48 horas y es de uso exclusivo del titular; no lo comparta.\n\nRevisar y firmar contrato: ' + message.link,

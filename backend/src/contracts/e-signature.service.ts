@@ -14,7 +14,8 @@ import { MailDeliveryError, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildContractSnapshot, canonicalSnapshot } from './contract-snapshot';
 import { ContractsService } from './contracts.service';
-import { requireSignatureSettings, signatureSettings, SIGNATURE_CONSENT, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
+import { DEMO_SIGNATURE_CONSENT, DEMO_SIGNATURE_CONSENT_VERSION, requireSignatureSettings, signatureSettings,
+  SIGNATURE_CONSENT, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 
 type Failure = { failure: string };
 type Tx = Prisma.TransactionClient;
@@ -118,6 +119,8 @@ export class ESignatureService implements OnModuleInit {
             reason = 'Genera una nueva versión del PDF para preparar su solicitud de firma por correo.';
           } else if (row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() <= Date.now()) {
             reason = 'El enlace de firma expiró. Genera una nueva versión del PDF para continuar.';
+          } else if (row.estado === 'PENDIENTE' && settings && settings.demo !== (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION)) {
+            reason = 'Anula la solicitud pendiente y genera una nueva versión para usar el modo de firma actual.';
           } else if (!['BORRADOR','PENDIENTE'].includes(row.estado) || latest.estadoFirma === 'Firmado manualmente') {
             reason = 'La solicitud no admite un nuevo envío. Revisa su estado antes de generar otra versión.';
           } else if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -184,7 +187,12 @@ export class ESignatureService implements OnModuleInit {
       if (row.estado === 'PENDIENTE' && row.fechaExpiracion.getTime() <= Date.now()) {
         await this.invalidate(tx, row, 'PLAZO_CUMPLIDO', true); return failure('El enlace expiró. Genera una nueva versión');
       }
-      if (row.estado === 'PENDIENTE') return { existing: true as const, row };
+      if (row.estado === 'PENDIENTE') {
+        if (settings.demo !== (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION)) {
+          throw new ConflictException('Genera una nueva versión para usar el modo de firma actual');
+        }
+        return { existing: true as const, row };
+      }
       if (row.estado !== 'BORRADOR') throw new ConflictException('Genera una nueva versión para reenviar a firma');
       const snapshot = await buildContractSnapshot(tx, idContrato, true);
       if (!sameSnapshot(snapshot, row.datosSnapshot) || row.hashOriginal !== latest.hashDocumento
@@ -193,10 +201,14 @@ export class ESignatureService implements OnModuleInit {
         return failure('Los datos cambiaron. Genera un nuevo PDF antes de enviar a firma');
       }
       if (!this.mail.isConfigured(row.idEmpresa)) throw new BadRequestException('Correo de empresa no configurado');
+      if (settings.demo && !snapshot.cliente.email?.toLowerCase().endsWith('.invalid')) {
+        throw new BadRequestException('La demostración requiere un correo ficticio con dominio .invalid');
+      }
       const now = new Date();
       const updated = await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
         estado: 'PENDIENTE', tokenHash: digest(token), destinatario: snapshot.cliente.email!,
         fechaCreacion: now, fechaExpiracion: new Date(now.getTime() + 48 * 3600000), correoEstado: 'EN_PROCESO',
+        ...(settings.demo ? { consentimientoVersion: DEMO_SIGNATURE_CONSENT_VERSION } : {}),
       } });
       await this.audit.record({ idUsuario: actor.idUsuario, accion: 'SOLICITAR_FIRMA_CONTRATO',
         entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
@@ -208,7 +220,8 @@ export class ESignatureService implements OnModuleInit {
       let estado = 'INDETERMINADO';
       try {
         const sent = await this.mail.sendSignatureInvitation({ idEmpresa: result.row.idEmpresa,
-          to: result.row.destinatario, link: settings.url + '/firmar#' + token });
+          to: result.row.destinatario, link: settings.url + '/firmar#' + token,
+          ...(settings.demo ? { demo: true } : {}) });
         estado = sent.status === 'sent' ? 'ENVIADO' : sent.status === 'simulated' && settings.test ? 'SIMULADO' : 'FALLIDO';
       } catch { /* Never log SMTP responses, links or recipient addresses. */ }
       await signatureRepository(this.db).updateMany({ where: { idSolicitud: result.row.idSolicitud,
@@ -255,6 +268,9 @@ export class ESignatureService implements OnModuleInit {
         return failure('El enlace expiró. Contacta a la empresa');
       }
       if (row.estado === 'PENDIENTE') {
+        if (settings.demo !== (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION)) {
+          return failure('La solicitud no corresponde al modo de firma actual. Solicita un nuevo enlace.');
+        }
         const current = await tx.contrato.findUniqueOrThrow({ where: { idContrato: row.idContrato } });
         if (current.estado !== 'Pendiente firma contrato' || await resolveSignatureMode(tx, current, this.config) !== 'automatic') {
           await this.invalidate(tx, row, 'CONTRATO_NO_ELEGIBLE'); return failure('Contrato no elegible para firma');
@@ -283,10 +299,15 @@ export class ESignatureService implements OnModuleInit {
   }
 
   view(token: string) {
-    return this.withToken(token, async (_tx, row) => ({ estado: row.estado, hashOriginal: row.hashOriginal,
-      hashFirmado: row.hashFirmado, vence: row.fechaExpiracion, firmado: row.firmaFecha,
-      correo: row.destinatario.replace(/^(.).+(@.+)$/, '$1***$2'), consentimiento: SIGNATURE_CONSENT,
-      consentimientoVersion: SIGNATURE_CONSENT_VERSION }));
+    return this.withToken(token, async (_tx, row) => {
+      const demo = row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION;
+      return { estado: row.estado, hashOriginal: row.hashOriginal,
+        hashFirmado: row.hashFirmado, vence: row.fechaExpiracion, firmado: row.firmaFecha,
+        correo: row.destinatario.replace(/^(.).+(@.+)$/, '$1***$2'),
+        consentimiento: demo ? DEMO_SIGNATURE_CONSENT : SIGNATURE_CONSENT,
+        consentimientoVersion: demo ? DEMO_SIGNATURE_CONSENT_VERSION : SIGNATURE_CONSENT_VERSION,
+        ...(demo ? { demo: true } : {}) };
+    });
   }
 
   pdf(token: string) {
@@ -302,8 +323,10 @@ export class ESignatureService implements OnModuleInit {
 
   async requestCode(token: string) {
     const settings = requireSignatureSettings(this.config);
+    if (settings.demo) throw new NotFoundException('Función no disponible');
     const code = String(randomInt(0, 1000000)).padStart(6, '0');
     const prepared = await this.withToken(token, async (tx, row) => {
+      if (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION) return failure('La solicitud pertenece al modo de demostración');
       if (row.estado === 'FIRMADA') return failure('La solicitud ya fue firmada');
       if (!row.pdfVisto) return failure('Descarga y revisa el PDF antes de solicitar el código');
       if (row.otpEnvios >= 5 || row.otpIntentos >= 5 || row.otpSolicitado && Date.now() - row.otpSolicitado.getTime() < 60000) {
@@ -333,14 +356,27 @@ export class ESignatureService implements OnModuleInit {
     return createHmac('sha256', requireSignatureSettings(this.config).secret).update(id + ':' + code).digest('hex');
   }
 
-  async sign(token: string, _code: string, hashOriginal: string, consent: boolean, consentVersion: string, ip: string, agent: string) {
-    if (!consent || consentVersion !== SIGNATURE_CONSENT_VERSION || !/^[a-f0-9]{64}$/.test(hashOriginal)
-        ) throw new BadRequestException('Revisa el documento y acepta sus condiciones');
+  async sign(token: string, code: string | undefined, hashOriginal: string, consent: boolean, consentVersion: string, ip: string, agent: string) {
+    const settings = requireSignatureSettings(this.config);
+    const { demo } = settings;
+    const expectedConsent = demo ? DEMO_SIGNATURE_CONSENT_VERSION : SIGNATURE_CONSENT_VERSION;
+    if (consent !== true || consentVersion !== expectedConsent || !/^[a-f0-9]{64}$/.test(hashOriginal)
+        || (demo && code !== undefined && code !== '')) {
+      throw new BadRequestException(demo ? 'Revisa el documento y acepta las condiciones de la demostración'
+        : 'Revisa el documento y acepta sus condiciones');
+    }
     const result = await this.withToken(token, async (tx, row) => {
+      if (demo !== (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION)) {
+        return failure('La solicitud no corresponde al modo de firma actual. Solicita un nuevo enlace.');
+      }
       if (hashOriginal !== row.hashOriginal) return failure('El PDF revisado no coincide');
       if (row.estado === 'FIRMADA') return { estado: 'FIRMADA', idSolicitud: row.idSolicitud };
-      if (!row.pdfVisto) return failure('Revisa el contrato antes de firmar');
-      if (!(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && requireSignatureSettings(this.config).test)) return failure('La entrega del enlace personal no está confirmada');
+      if (demo) {
+        if (!row.pdfVisto) return failure('Revisa el PDF antes de aceptar la demostración');
+      } else {
+        if (!row.pdfVisto) return failure('Revisa el contrato antes de firmar');
+        if (!(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && settings.test)) return failure('La entrega del enlace personal no está confirmada');
+      }
       const signedAt = new Date();
       const pdf = await this.seal(row, signedAt);
       const actor: AuthUser = { idUsuario: row.idUsuarioCreador, idEmpresa: row.idEmpresa, roles: ['Comercial'],
@@ -352,28 +388,34 @@ export class ESignatureService implements OnModuleInit {
       await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: {
         estado: 'FIRMADA', firmaFecha: signedAt, firmaIp: /^[a-fA-F0-9:.]{1,45}$/.test(ip) ? ip : null,
         firmaUserAgent: agent.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 200),
-        consentimientoVersion: SIGNATURE_CONSENT_VERSION, otpHash: null, pdfFirmado: pdf, hashFirmado: digest(pdf),
+        consentimientoVersion: expectedConsent, otpHash: null, pdfFirmado: pdf, hashFirmado: digest(pdf),
+        ...(demo ? { firmaCorreoEstado: 'SIMULADO' } : {}),
       } });
       await this.audit.record({ accion: 'FIRMAR_CONTRATO_CORREO', entidadAfectada: 'contrato',
-        idEntidadAfectada: row.idContrato, valorNuevo: { estado: 'Firmado', origenFirma: 'electronic' } }, tx);
+        idEntidadAfectada: row.idContrato, valorNuevo: { estado: 'Firmado', origenFirma: 'electronic', ...(demo ? { demostracion: true } : {}) } }, tx);
       return { estado: 'FIRMADA', idSolicitud: row.idSolicitud };
     }).catch(error => auditContractDebtRejection(this.db, this.audit, error));
-    try { await this.deliverSigned(result.idSolicitud); } catch { /* A delivery/status failure cannot undo a committed signature. */ }
+    if (!demo) {
+      try { await this.deliverSigned(result.idSolicitud); } catch { /* A delivery/status failure cannot undo a committed signature. */ }
+    }
     return { estado: result.estado };
   }
 
   private async seal(row: SignatureRow, when: Date) {
+    const demo = row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION;
     const pdf = await PDFDocument.load(row.pdfOriginal, { updateMetadata: false });
     const font = await pdf.embedFont(StandardFonts.Helvetica);
     const page = pdf.addPage([595.28, 841.89]);
     const printable = (v: string) => Array.from(v).map(character => {
       try { font.encodeText(character); return character; } catch { return '?'; }
     }).join('');
-    const lines = ['Constancia de firma electrónica simple', 'Aceptación mediante enlace personal enviado al correo registrado.',
+    const lines = [demo ? 'Constancia de aceptación de demostración' : 'Constancia de firma electrónica simple',
+      demo ? 'Aceptación mediante enlace de prueba.' : 'Aceptación mediante enlace personal enviado al correo registrado.',
       'Solicitud: ' + row.idSolicitud, 'Fecha UTC: ' + when.toISOString(),
       'Correo: ' + row.destinatario, 'SHA-256 del PDF original:', row.hashOriginal,
       'SHA-256 de los datos congelados:', digest(canonicalSnapshot(row.datosSnapshot)),
-      'Consentimiento: ' + SIGNATURE_CONSENT_VERSION, SIGNATURE_CONSENT,
+      'Consentimiento: ' + (demo ? DEMO_SIGNATURE_CONSENT_VERSION : SIGNATURE_CONSENT_VERSION),
+      demo ? DEMO_SIGNATURE_CONSENT : SIGNATURE_CONSENT,
       'Esta constancia no constituye una firma electrónica avanzada.'];
     let y = 785;
     for (const line of lines) {
@@ -403,7 +445,8 @@ export class ESignatureService implements OnModuleInit {
         throw new ConflictException('Empresa no habilitada para entrega de firma');
       }
       const saved = await signatureRepository(tx).findFirst({ where: { idContrato, estado: 'FIRMADA' }, orderBy: { firmaFecha: 'desc' } });
-      if (!saved || !await this.validReferences(tx, saved) || saved.firmaCorreoEstado !== 'FALLIDO') {
+      if (!saved || saved.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION
+          || !await this.validReferences(tx, saved) || saved.firmaCorreoEstado !== 'FALLIDO') {
         throw new ConflictException('Solo puede reintentarse un correo con rechazo confirmado. Revisa los resultados inciertos sin reenviar.');
       }
       await signatureRepository(tx).update({ where: { idSolicitud: saved.idSolicitud }, data: { firmaCorreoEstado: 'PENDIENTE' } });

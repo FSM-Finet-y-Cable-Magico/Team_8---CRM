@@ -391,7 +391,7 @@ export function ProspectWorkflowPanel({
             </div>
             <p>{formatRutForDisplay(prospect.rut) ?? 'RUT no registrado'}</p>
           </div>
-          <StatusBadge value={requiresReview ? 'Revisión comercial requerida' : currentStatus} />
+          <StatusBadge value={currentProspect.excliente?.etiqueta ?? (requiresReview ? 'Revisión comercial requerida' : currentStatus)} />
         </header>
         {requiresReview && (
           <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>

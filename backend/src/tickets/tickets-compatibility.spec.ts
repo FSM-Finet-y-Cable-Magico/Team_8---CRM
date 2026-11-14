@@ -78,7 +78,17 @@ describe('Compatibilidad G8/G3 sin sincronizacion implicita', () => {
     expect(prisma.ticket.update).not.toHaveBeenCalled();
   });
 
-  it.each(attentionNames)('crea atención %s con el ID de la base, no por posición', async name => {
+  // FINET 13-11-2026: «Baja de servicio» stays in the catalogue (history, filters, G2) but is reserved to the guided
+  // withdrawal of the Libro de Control; the other six official categories keep their manual creation.
+  it.each(['Baja de servicio', 'BAJA DE SERVICIO', '  baja  de servicio '])('no crea manualmente un ticket «%s»: categoría reservada al flujo guiado', async nombre => {
+    const { service, prisma, audit } = setup();
+    prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 914, nombre, slaHoras: 9 }]);
+    await expect(service.create({ ...request, idCategoria: 914 }, operator)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'WITHDRAWAL_TICKET_CATEGORY_RESERVED' }) });
+    expect(prisma.ticket.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it.each(attentionNames.filter(name => name !== 'Baja de servicio'))('crea atención %s con el ID de la base, no por posición', async name => {
     const { service, prisma, audit } = setup();
     prisma.categoriaFalla.findMany.mockResolvedValue([{ idCategoria: 914, nombre: name.toUpperCase(), slaHoras: 9 }]);
     await expect(service.create({ ...request, idCategoria: 914 }, operator)).resolves.toMatchObject({ idCategoria: 914, idEmpresa: 2 });

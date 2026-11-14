@@ -41,6 +41,8 @@ async function drawer(t, changes = {}, portfolioRows) {
     './ControlBookCustomerContracts': { ControlBookCustomerContracts: ({ onSelect }) => React.createElement('button', { onClick: () => onSelect(portfolioRows?.[0]?.idContrato ?? 31) }, 'Seleccionar plan') },
     './ControlBookHistory': { ControlBookHistory: () => null },
     './ControlBookManualPayment': { ControlBookManualPayment: () => null },
+    './ControlBookWithdrawal': { ControlBookWithdrawal: () => null },
+    './ControlBookSuspension': { ControlBookSuspension: () => null },
     './ControlBookModal': { ControlBookModal: Modal },
     './control-book-model': model, './control-book-contact-time': times,
   });

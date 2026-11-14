@@ -9,7 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { ticketStateCompatibility } from './ticket-ownership';
 import { compareTicketsByUrgency } from './ticket-priority';
-import { isGeneralTicketCategory, readTicketCategoryCatalog } from './ticket-attention-categories';
+import { isGeneralTicketCategory, officialTicketAttentionName, readTicketCategoryCatalog } from './ticket-attention-categories';
+import { postgresWithdrawalStorage, withdrawalStorageReady } from '../g3-integration/withdrawal.storage';
 import { COMPLETED_TICKET_WORK_ORDER_STATES, isCompletedTicketWorkOrder } from './ticket-work-order-state';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { CreateTicketWorkOrderDto } from './dto/create-ticket-work-order.dto';
@@ -20,6 +21,40 @@ import { UpdateTicketPriorityDto } from './dto/update-ticket-priority.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 
 const TICKET_STATUSES = ['Abierto', 'En progreso', 'Escalado', 'Resuelto', 'Cerrado'];
+/** Official attention category (Documento 0, table 11.9). The ID is resolved in each connection's catalogue. */
+export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
+
+/**
+ * Why a flow ticket closes: the morosity baja was applied, or the equipment withdrawal of a relationship already
+ * terminated voluntarily was approved (also for a «Baja de servicio» ticket whose OT was reused: its category stays).
+ */
+export type FlowTicketClosure = 'BAJA_POR_MOROSIDAD' | 'RETIRO_TRAS_TERMINO_VOLUNTARIO';
+
+/** Voluntary termination requested by the customer (G8-only category, never «Baja de servicio» renamed). */
+export const TERMINATION_TICKET_CATEGORY = 'Término de servicio';
+export type FlowTicketCategory = typeof WITHDRAWAL_TICKET_CATEGORY | typeof TERMINATION_TICKET_CATEGORY;
+
+/** Canonical official name (formatting-equivalent), never a fixed ID: the same rule as the attention catalogue. */
+export function isWithdrawalCategoryName(name: string) {
+  return officialTicketAttentionName(name) === WITHDRAWAL_TICKET_CATEGORY;
+}
+export function isTerminationCategoryName(name: string) {
+  return officialTicketAttentionName(name) === TERMINATION_TICKET_CATEGORY;
+}
+
+function terminationFlowRequired() {
+  return new BadRequestException({
+    code: 'TERMINATION_TICKET_FLOW_REQUIRED',
+    message: 'Un ticket «Término de servicio» se registra con el formulario de término (identidad, fecha y evidencia del requerimiento); no como ticket general.',
+  });
+}
+
+function withdrawalCategoryReserved() {
+  return new BadRequestException({
+    code: 'WITHDRAWAL_TICKET_CATEGORY_RESERVED',
+    message: 'La categoría «Baja de servicio» se genera solo al iniciar la baja desde el Libro de Control; no se puede crear ni reclasificar un ticket manualmente con ella.',
+  });
+}
 type AuditEntry = Parameters<AuditService['record']>[0];
 
 @Injectable()
@@ -143,6 +178,84 @@ export class TicketsService {
     });
   }
 
+  /**
+   * CRM ticket "Baja de servicio" of a withdrawal request (ported from PR #81). Created INSIDE the caller's
+   * transaction: request, link and audit commit or roll back together. The caller already validated, under the
+   * service lock, that company, customer, contract, service and notice match. The category is resolved by its
+   * official name in THIS connection's catalogue: never a fixed ID, never a technical/internal category and never
+   * an arbitrary choice among duplicates. It does not derive to G3, create an OT or change the service state.
+   */
+  async createWithdrawalTicket(tx: Prisma.TransactionClient, input: {
+    idEmpresa: number; idCliente: number; idServicio: number; idContrato: number;
+    idSolicitudRetiro: number | null; idAviso: number | null; descripcion: string; idUsuario: number; categoria?: FlowTicketCategory;
+  }) {
+    const name = input.categoria ?? WITHDRAWAL_TICKET_CATEGORY;
+    const official = (await readTicketCategoryCatalog(tx)).filter(category => category.nombreAtencion === name);
+    if (official.length !== 1) {
+      throw new ConflictException({
+        code: name === WITHDRAWAL_TICKET_CATEGORY ? 'WITHDRAWAL_TICKET_CATEGORY_UNAVAILABLE' : 'TERMINATION_TICKET_CATEGORY_UNAVAILABLE',
+        message: `La categoría oficial «${name}» no está disponible de forma inequívoca en el catálogo de atención; no se registró nada.`,
+      });
+    }
+    const category = official[0];
+    const ticket = await tx.ticket.create({
+      data: {
+        idCliente: input.idCliente, idEmpresa: input.idEmpresa, idServicio: input.idServicio, idUsuarioAsignado: input.idUsuario,
+        idCategoria: category.idCategoria, codigoSeguimiento: this.trackingCode(), prioridad: 'Media', estado: 'Abierto',
+        descripcion: input.descripcion, fechaCreacion: new Date(), origen: 'CRM',
+      },
+    });
+    await this.auditService.record({
+      idUsuario: input.idUsuario, accion: name === WITHDRAWAL_TICKET_CATEGORY ? 'CREAR_TICKET_BAJA_SERVICIO' : 'CREAR_TICKET_TERMINO_SERVICIO', entidadAfectada: 'ticket', idEntidadAfectada: ticket.idTicket,
+      valorNuevo: {
+        idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idContrato: input.idContrato,
+        idSolicitudRetiro: input.idSolicitudRetiro, idAviso: input.idAviso, categoria: category.nombre, idCategoria: category.idCategoria, origen: 'CRM',
+      },
+    }, tx);
+    return ticket;
+  }
+
+  /**
+   * Closes the «Baja de servicio» ticket of a withdrawal ONLY from inside the caller's successful finalization
+   * transaction (FINET criterion 13-11-2026): if anything later in that transaction fails, the ticket stays as it was.
+   * Same rules as a manual close: forward-only transition to the official 'Cerrado', never a technical/unknown state,
+   * never with a pending local OT, optimistic write on the state read. Idempotent: an already closed ticket is left
+   * untouched. Any inconsistency (company, customer, service, category) aborts, so the whole finalization rolls back.
+   */
+  async closeWithdrawalTicket(tx: Prisma.TransactionClient, input: {
+    idTicket: number; idEmpresa: number; idCliente: number; idServicio: number; idSolicitudRetiro: number; idOtG3: number | null; idUsuario: number | null;
+    categoria?: FlowTicketCategory; resultado?: FlowTicketClosure;
+  }): Promise<{ action: 'CERRADO' | 'YA_CERRADO'; estadoAnterior: string }> {
+    const name = input.categoria ?? WITHDRAWAL_TICKET_CATEGORY;
+    const resultado: FlowTicketClosure = input.resultado ?? (name === WITHDRAWAL_TICKET_CATEGORY ? 'BAJA_POR_MOROSIDAD' : 'RETIRO_TRAS_TERMINO_VOLUNTARIO');
+    await tx.$queryRaw`SELECT id_ticket FROM ticket WHERE id_ticket = ${input.idTicket} FOR UPDATE`;
+    const ticket = await tx.ticket.findUnique({ where: { idTicket: input.idTicket } });
+    const inconsistent = (message: string) => new ConflictException({ code: 'WITHDRAWAL_TICKET_INCONSISTENT', message });
+    if (!ticket) throw inconsistent('El ticket «Baja de servicio» vinculado no existe; no se aplicó la baja.');
+    if (ticket.idEmpresa !== input.idEmpresa || ticket.idCliente !== input.idCliente || (ticket.idServicio !== null && ticket.idServicio !== input.idServicio)) {
+      throw inconsistent('El ticket vinculado no corresponde a la empresa, cliente o servicio de la solicitud; no se aplicó la baja.');
+    }
+    const official = (await readTicketCategoryCatalog(tx)).filter(category => category.nombreAtencion === name);
+    if (official.length !== 1 || ticket.idCategoria !== official[0].idCategoria) {
+      throw inconsistent(`El ticket vinculado no tiene la categoría oficial «${name}»; no se cerró el retiro.`);
+    }
+    if (ticket.estado === 'Cerrado') return { action: 'YA_CERRADO', estadoAnterior: ticket.estado };
+    this.assertCrmWrite(ticket.estado);
+    if (TICKET_STATUSES.indexOf(ticket.estado) < 0) throw inconsistent('El ticket vinculado tiene un estado no reconocido; no se aplicó la baja.');
+    const pendingOrder = await tx.ordenTrabajo.findFirst({ where: { idTicket: ticket.idTicket, estado: { notIn: [...COMPLETED_TICKET_WORK_ORDER_STATES] } } });
+    if (pendingOrder) throw inconsistent('El ticket vinculado tiene una OT local sin completar; no se aplicó la baja.');
+    const note = resultado === 'BAJA_POR_MOROSIDAD'
+      ? `Cerrado automáticamente al aplicar la baja por morosidad (solicitud ${input.idSolicitudRetiro}${input.idOtG3 ? `, OT de retiro ${input.idOtG3}` : ''}).`
+      : `Cerrado automáticamente al aprobarse el retiro técnico del servicio terminado (solicitud ${input.idSolicitudRetiro}${input.idOtG3 ? `, OT de retiro ${input.idOtG3}` : ''}).`;
+    await this.updateCrmTicket(ticket, { estado: 'Cerrado', fechaCierre: new Date(), descripcion: `${ticket.descripcion ?? ''}\n${note}`.trim() }, tx);
+    await this.auditService.record({
+      idUsuario: input.idUsuario, accion: name === WITHDRAWAL_TICKET_CATEGORY ? 'CERRAR_TICKET_BAJA_SERVICIO' : 'CERRAR_TICKET_TERMINO_SERVICIO', entidadAfectada: 'ticket', idEntidadAfectada: ticket.idTicket,
+      valorAnterior: { estado: ticket.estado },
+      valorNuevo: { estado: 'Cerrado', automatico: true, resultado, idSolicitudRetiro: input.idSolicitudRetiro, idOtG3: input.idOtG3 },
+    }, tx);
+    return { action: 'CERRADO', estadoAnterior: ticket.estado };
+  }
+
   async createWorkOrder(idTicket: number, dto: CreateTicketWorkOrderDto, currentUser: AuthUser): Promise<never> {
     await this.getTicketOrThrow(idTicket, currentUser);
     void dto;
@@ -171,6 +284,10 @@ export class TicketsService {
     if (!isGeneralTicketCategory(category)) {
       throw new BadRequestException('La categoría no está disponible para clasificación manual de tickets');
     }
+
+    if (isWithdrawalCategoryName(category.nombre)) throw withdrawalCategoryReserved();
+    if (isTerminationCategoryName(category.nombre)) throw terminationFlowRequired();
+    await this.assertNotManagedByWithdrawal(ticket, 'reclasificarse');
 
     return this.writeAudited(
       tx => this.updateCrmTicket(ticket, { idCategoria: dto.idCategoria }, tx),
@@ -212,6 +329,7 @@ export class TicketsService {
     }
 
     if (['Resuelto', 'Cerrado'].includes(dto.estado)) {
+      await this.assertNotManagedByWithdrawal(ticket, 'resolverse ni cerrarse manualmente');
       await this.assertNoPendingWorkOrderForClosure(idTicket);
     }
 
@@ -235,6 +353,7 @@ export class TicketsService {
   async registerDiagnosis(idTicket: number, dto: RegisterDiagnosisDto, currentUser: AuthUser) {
     const ticket = await this.getTicketOrThrow(idTicket, currentUser);
     this.assertCrmWrite(ticket.estado);
+    await this.assertNotManagedByWithdrawal(ticket, 'cerrarse con un diagnóstico');
     await this.assertNoPendingWorkOrderForClosure(idTicket);
 
     if (!dto.causaRaiz.trim()) {
@@ -327,6 +446,9 @@ export class TicketsService {
       throw new BadRequestException('Categoria seleccionada invalida');
     }
 
+    if (isWithdrawalCategoryName(categoria.nombre)) throw withdrawalCategoryReserved();
+    if (isTerminationCategoryName(categoria.nombre)) throw terminationFlowRequired();
+
     if (!categoria.nombreAtencion) {
       throw new BadRequestException('Selecciona una categoría oficial de atención disponible; las categorías técnicas o ambiguas no admiten nuevas altas comerciales');
     }
@@ -406,6 +528,29 @@ export class TicketsService {
       const result = await write(tx);
       await this.auditService.record(audit(result), tx);
       return result;
+    });
+  }
+
+  /**
+   * A «Baja de servicio» ticket LINKED to a withdrawal request (g8_retiros.solicitud_ticket) only changes category or
+   * closes inside the withdrawal flow: closeWithdrawalTicket() in the finalization transaction. Historical tickets of
+   * that category without a link keep their usual handling. The private storage is only read when the ticket has
+   * the official category (resolved by its canonical name, never a fixed ID); without the 002 storage there are no links.
+   */
+  private async assertNotManagedByWithdrawal(ticket: Pick<Ticket, 'idTicket' | 'idCategoria'>, action: string) {
+    const category = (await this.categories()).find(row => row.idCategoria === ticket.idCategoria);
+    if (!category || !(isWithdrawalCategoryName(category.nombre) || isTerminationCategoryName(category.nombre))) return;
+    const db = this.prisma as unknown as Prisma.TransactionClient;
+    if (!withdrawalStorageReady(await postgresWithdrawalStorage.capabilities(db))) return;
+    const link = await postgresWithdrawalStorage.findLinkByTicket(db, ticket.idTicket);
+    const termination = link ? null : await postgresWithdrawalStorage.findTerminationByTicket(db, ticket.idTicket);
+    const idSolicitudRetiro = link?.idSolicitudRetiro ?? termination?.idSolicitudRetiro ?? null;
+    if (!idSolicitudRetiro) return;
+    const request = await this.prisma.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro }, select: { estado: true } });
+    if (!request || ['CANCELADA', 'CERRADA'].includes(request.estado)) return;
+    throw new ConflictException({
+      code: 'WITHDRAWAL_TICKET_MANAGED_BY_FLOW', idSolicitudRetiro,
+      message: `Este ticket sigue un retiro de equipos en curso (solicitud N° ${idSolicitudRetiro}) y no puede ${action}: se cierra automáticamente cuando el retiro técnico es aprobado, o se libera al cancelar el retiro.`,
     });
   }
 

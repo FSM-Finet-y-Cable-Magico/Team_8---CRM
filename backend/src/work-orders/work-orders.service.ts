@@ -2,6 +2,7 @@
 import { Prisma } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { activeWithdrawalReactivationError, findActiveWithdrawal } from '../common/active-withdrawal';
 import { AuthUser } from '../common/auth.types';
 import {
   parseInstallOrderObservations,
@@ -540,6 +541,13 @@ export class WorkOrdersService {
 
       if (claimed.count !== 1) {
         throw new ConflictException('La orden cambio de estado durante el cierre');
+      }
+
+      // FINET 13-11-2026: a repair cannot reactivate a service with an active withdrawal for morosity (OT BAJA may be
+      // in progress); the technician can close it with another final state. Other services are not affected.
+      if (order.idServicio && dto.estadoFinalServicio === 'Activo') {
+        const withdrawal = await findActiveWithdrawal(tx, order.idServicio);
+        if (withdrawal) throw activeWithdrawalReactivationError(withdrawal.idSolicitudRetiro);
       }
 
       const updatedOrder = await tx.ordenTrabajo.update({

@@ -4,7 +4,7 @@ import { Check, Download, FileText, ShieldCheck } from 'lucide-react';
 import './public-signature.css';
 
 type View = { estado: string; hashOriginal: string; hashFirmado: string | null; vence: string;
-  firmado: string | null; correo: string; consentimiento: string; consentimientoVersion: string };
+  firmado: string | null; correo: string; consentimiento: string; consentimientoVersion: string; demo?: boolean };
 const root = String(api.defaults.baseURL || '/api').replace(/\/$/, '');
 export function PublicSignaturePage() {
   const [token] = useState(() => window.location.hash.slice(1));
@@ -66,6 +66,7 @@ export function PublicSignaturePage() {
     <h1>{signed ? 'Contrato firmado' : 'Firma de contrato'}</h1>
     {message && <p role="status" className="signature-notice">{message}</p>}
     {!view ? <p>Abre el enlace personal recibido por correo para revisar tu documento.</p> : <>
+      {view.demo && <p>Firma de demostración</p>}
       <p className="signature-intro">{signed ? 'Su firma se ha registrado correctamente. Descargue su contrato junto con la constancia de aceptación y conserve una copia.'
         : 'Descargue y lea su contrato. Cuando haya revisado sus condiciones, podrá aceptarlo y firmarlo desde esta página.'}</p>
       <button className="signature-download" disabled={busy} onClick={download}><Download size={18} />{signed ? 'Descargar contrato firmado' : 'Descargar contrato para revisar'}</button>

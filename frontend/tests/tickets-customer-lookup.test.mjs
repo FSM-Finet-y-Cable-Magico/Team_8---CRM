@@ -33,7 +33,8 @@ async function harness(t, get = async path => ({ data: path === '/customers/sear
     '../../shared/components': { ToastNotice, StatusBadge: () => null },
     '../../shared/hooks/useTransientMessage': load('../src/shared/hooks/useTransientMessage.ts'),
     './TicketManagementModal': { TicketManagementModal: () => null },
-    './ticket-presentation': { ticketMatchesSearch: () => true, ticketAttentionAvailability: () => ({ options: [category] }) },
+    './ticket-presentation': { ticketMatchesSearch: () => true, manualTicketCategories: () => [category], isTerminationTicketCategory: () => false },
+    '../commercial/control-book-contact-time': load('../src/features/commercial/control-book-contact-time.ts'),
   });
   let tree;
   await act(async () => { tree = create(React.createElement(TicketsPanel, { tickets: [], categories: [category], permissions: { createTickets: true }, onChanged() {} })); });

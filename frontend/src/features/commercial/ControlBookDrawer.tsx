@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { CalendarClock, CalendarDays, CreditCard, Handshake, IdCard, Phone, Wallet } from 'lucide-react';
+import { CalendarClock, CalendarDays, CreditCard, Handshake, IdCard, Pause, Phone, Unplug, Wallet } from 'lucide-react';
 import { api, apiErrorMessage, type Customer, type CustomerService } from '../../api';
 import { CustomerStatusSummary } from '../customers/CustomerStatusBadge';
 import { ControlBookCustomerContracts } from './ControlBookCustomerContracts';
@@ -8,6 +8,8 @@ import { ControlBookModal } from './ControlBookModal';
 import { ACTION_LABELS, ActionName, ControlRow, type InvoiceFocus, CONTROL_ACTIONS, actionDisabledReason, buildInstallments, currency, dateLabel, managementRelations, today } from './control-book-model';
 import { contactDateTimeInput, contactDateTimeISO } from './control-book-contact-time';
 import { ControlBookManualPayment } from './ControlBookManualPayment';
+import { ControlBookWithdrawal } from './ControlBookWithdrawal';
+import { ControlBookSuspension, type SuspensionEligibility } from './ControlBookSuspension';
 
 function DetailList({ values }: { values: Array<[string, string | number | null | undefined]> }) {
   return <dl className="control-detail-list">{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? '—'}</dd></div>)}</dl>;
@@ -39,6 +41,11 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
   const target = contexts.find(item => item.rowId === selectedContext);
   const row = target ?? contexts[0] ?? sourceRow;
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  // FINET 13-11-2026: two successive, independent modals. «Suspender servicio» (automatic eligibility, manual execution)
+  // and, only once a service is suspended, «Dar de baja el servicio». Opening one closes the other: never nested.
+  const [suspensionOpen, setSuspensionOpen] = useState(false);
+  const [suspensionCheck, setSuspensionCheck] = useState<Pick<SuspensionEligibility, 'idContrato' | 'elegible' | 'motivo'> | null>(null);
   useEffect(() => {
     setContexts([]); setContextError('');
     if (!selectedContractId) { setContextLoading(false); return; }
@@ -91,8 +98,20 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
     return () => controller.abort();
   }, [row.idCliente, row.idEmpresa, revision, servicesReload]);
   const closeAction = useCallback(() => { if (!pending.current) { setAction(null); setError(''); } }, []);
+  useEffect(() => {
+    setSuspensionCheck(null);
+    if (!canManagePayments || !selectedContractId) return;
+    const controller = new AbortController();
+    void api.get<SuspensionEligibility>(`/billing/contracts/${selectedContractId}/suspension-eligibility`, { signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted && data.idContrato === selectedContractId) setSuspensionCheck(data); })
+      .catch(() => { if (!controller.signal.aborted) setSuspensionCheck(null); });
+    return () => controller.abort();
+  }, [canManagePayments, selectedContractId, revision]);
 
   const contracts = customer?.contratos?.filter(contract => contract.idEmpresa === row.idEmpresa) ?? [];
+  // La baja por morosidad solo aparece cuando el plan seleccionado tiene un servicio suspendido.
+  const contractServices = services.filter(service => service.idContrato === selectedContractId);
+  const canStartWithdrawal = canManage && Boolean(selectedContractId) && contractServices.some(service => service.estadoOperativo === 'Suspendido');
   const scopedCompany = companyName ?? services.find(service => service.empresa)?.empresa?.nombre
     ?? contracts.find(contract => contract.plan?.empresa)?.plan?.empresa?.nombre
     ?? (customer?.empresa?.idEmpresa === row.idEmpresa ? customer?.empresa?.nombre : null);
@@ -171,7 +190,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
           loading={servicesLoading} error={servicesError} onRetry={() => setServicesReload(value => value + 1)}/>}
         {view === 'profile' && contextLoading && <p role="status">Cargando plan…</p>}
         {view === 'profile' && contextError && <p role="alert">{contextError}</p>}
-        <ControlBookHistory row={row} contracts={contracts} revision={revision} view={view} paused={Boolean(action) || paymentOpen}
+        <ControlBookHistory row={row} contracts={contracts} revision={revision} view={view} paused={Boolean(action) || paymentOpen || withdrawalOpen || suspensionOpen}
           onOpenInvoice={canViewBilling ? openInvoice : undefined}/>
         {financialTools?.(view)}
       </div>
@@ -181,7 +200,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
           return <button type="button" key={value} disabled={!selectedContractId || contextLoading || !contexts.some(item => !actionDisabledReason(value, item)) || saving} onClick={() => openAction(value)}>
             <Icon size={16} aria-hidden="true"/>{value === 'event' ? 'Registrar gestión' : ACTION_LABELS[value]}
           </button>;
-        })}{canViewBilling && canManagePayments && <button type="button" disabled={!selectedContractId || contextLoading || !contexts.some(item => item.idFactura && Number(item.saldoPendiente) > 0) || saving} onClick={() => setPaymentOpen(true)}><CreditCard size={16} aria-hidden="true"/>Pago manual</button>}</div>
+        })}{canViewBilling && canManagePayments && <button type="button" disabled={!selectedContractId || contextLoading || !contexts.some(item => item.idFactura && Number(item.saldoPendiente) > 0) || saving} onClick={() => setPaymentOpen(true)}><CreditCard size={16} aria-hidden="true"/>Pago manual</button>}{canManagePayments && Boolean(selectedContractId) && <button type="button" disabled={contextLoading || saving || !suspensionCheck?.elegible} title={suspensionCheck && !suspensionCheck.elegible ? suspensionCheck.motivo?.message : undefined} onClick={() => { setWithdrawalOpen(false); setSuspensionOpen(true); }}><Pause size={16} aria-hidden="true"/>Suspender servicio</button>}{canStartWithdrawal && <button type="button" disabled={contextLoading || saving} onClick={() => { setSuspensionOpen(false); setWithdrawalOpen(true); }}><Unplug size={16} aria-hidden="true"/>Dar de baja el servicio</button>}</div>
       </section>}
     </div>
     {action && <ControlBookModal title={isContactAction ? 'Registrar gestión' : ACTION_LABELS[action]} busy={saving} onClose={closeAction}>
@@ -224,6 +243,10 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
       {error && <p className="control-feedback error" role="alert">{error}</p>}
       <footer className="control-form-footer"><button type="button" className="control-text-button" disabled={saving} onClick={() => { if (action === 'agreement' && step > 0) setStep(step - 1); else closeAction(); setError(''); }}>{action === 'agreement' && step > 0 ? 'Atrás' : 'Cancelar'}</button><button type="submit" disabled={saving || !target || contextLoading}>{saving ? 'Guardando…' : action === 'agreement' ? step === 1 ? 'Crear convenio' : 'Continuar' : SAVE_LABELS[action]}</button></footer>
     </form></ControlBookModal>}
+    {suspensionOpen && !withdrawalOpen && selectedContractId && <ControlBookSuspension contractId={selectedContractId} customerName={row.nombre} plan={row.plan} canManage={canManagePayments}
+      onBusyChange={setSaving} onClose={() => setSuspensionOpen(false)} onSaved={message => { setSuspensionOpen(false); onSaved(message); }}/>}
+    {withdrawalOpen && !suspensionOpen && selectedContractId && <ControlBookWithdrawal services={contractServices} customerName={row.nombre} plan={row.plan} canManage={canManage}
+      onBusyChange={setSaving} onClose={() => setWithdrawalOpen(false)} onSaved={message => { setWithdrawalOpen(false); onSaved(message); }}/>}
     {paymentOpen && selectedContractId && <ControlBookManualPayment contexts={contexts} contractId={selectedContractId} customerId={sourceRow.idCliente} companyId={sourceRow.idEmpresa} canManage={canManagePayments} onBusyChange={setSaving} onClose={() => setPaymentOpen(false)} onSaved={message => { setPaymentOpen(false); onSaved(message); }}/>}
   </ControlBookModal>;
 }

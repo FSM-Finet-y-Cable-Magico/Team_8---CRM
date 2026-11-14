@@ -27,7 +27,7 @@ La planilla sigue siendo una referencia de experiencia y vocabulario. Las reglas
 - **CU-33:** exportación CSV y XLSX del Libro Control con los filtros, orden y columnas seleccionados.
 - **CU-77:** consulta paginada y filtrable del Libro Control proyectado.
 - **CU-78:** motor central de estado comercial calculado.
-- **CU-79:** aviso previo a retiro asociado a cliente y servicio, sin crear OT externa.
+- **CU-79:** aviso previo a retiro asociado a cliente y servicio, sin crear OT externa. Es requisito de «Dar de baja el servicio» (13-11-2026: ver `docs/g8-baja-morosidad/flujo-suspension-baja-20261113.md`).
 - **CU-80:** convenio estructurado con cuotas verificables y aprobación administrativa.
 - **CU-81:** prórroga estructurada que conserva el vencimiento original.
 - **CU-82:** cambio de día o fecha comprometida con valor anterior, valor nuevo, justificación y responsable.

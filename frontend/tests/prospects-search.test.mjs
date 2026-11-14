@@ -104,3 +104,18 @@ test('el listado presenta con guion el RUT válido recibido sin guion (G2/web) y
   assert.ok(!cells.includes('123456785'));
   await act(async () => tree.unmount());
 });
+
+test('excliente: la fila muestra la etiqueta calculada por el backend en lugar de su estado histórico', async () => {
+  const api = { get: async () => ({ data: { items: [
+    row(4, 'Servicio Activo', { idCliente: 33, excliente: { etiqueta: 'Excliente con deuda pendiente', situacionFinanciera: 'CON_DEUDA' } }),
+    row(5, 'Prospecto Nuevo'),
+  ], total: 2, page: 1, pageSize: 20, counts: { Excliente: 1 } } }) };
+  const Panel = loadPanel(api);
+  let tree;
+  await act(async () => { tree = create(React.createElement(Panel, { ...baseProps, scope: '1' })); });
+  const rows = tree.root.findAllByType('tr').filter(tr => tr.findAllByType('td').length > 2).map(tr => tr.findAllByType('td').map(td => td.children.join('')));
+  assert.equal(rows[0][2], 'Excliente con deuda pendiente');
+  assert.ok(!JSON.stringify(rows[0]).includes('Servicio Activo'));
+  assert.equal(rows[1][2], 'Prospecto Nuevo');
+  await act(async () => tree.unmount());
+});

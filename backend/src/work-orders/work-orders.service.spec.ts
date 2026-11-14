@@ -498,6 +498,7 @@ describe('WorkOrdersService', () => {
       servicioContratado: {
         update: jest.fn().mockResolvedValue({ idServicio: 55, estadoOperativo: 'Activo' }),
       },
+      servicioRetiroSolicitud: { findFirst: jest.fn().mockResolvedValue(null) },
       historialOt: { create: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
@@ -523,5 +524,51 @@ describe('WorkOrdersService', () => {
     });
     expect(prisma.cliente.create).not.toHaveBeenCalled();
     expect(prisma.cliente.update).not.toHaveBeenCalled();
+  });
+
+  describe('reparación de un servicio con retiro por morosidad activo (FINET 13-11-2026)', () => {
+    function repairHarness(withdrawalFor: number | null) {
+      const order = { idOt: 89, idEmpresa: 1, idCliente: 10, idServicio: 55, idTicket: 99, tipoOt: 'Reparacion', estado: 'En Curso', observaciones: null };
+      const writes: string[] = [];
+      const tx = {
+        ordenTrabajo: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          update: jest.fn(async () => { writes.push('orden'); return { ...order, estado: 'Completada' }; }),
+        },
+        ticket: { update: jest.fn(async () => { writes.push('ticket'); return { idTicket: 99, estado: 'Resuelto' }; }) },
+        servicioContratado: { update: jest.fn(async ({ data }: any) => { writes.push('servicio'); return { idServicio: 55, ...data }; }) },
+        servicioRetiroSolicitud: { findFirst: jest.fn(async ({ where }: any) => (where.idServicio === withdrawalFor ? { idSolicitudRetiro: 15 } : null)) },
+        historialOt: { create: jest.fn().mockResolvedValue({}) },
+      };
+      const prisma = {
+        ordenTrabajo: { findUnique: jest.fn().mockResolvedValue(order) },
+        ticket: { findUnique: jest.fn().mockResolvedValue({ idTicket: 99, estado: 'Abierto', descripcion: 'Sin senal' }) },
+        $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+      };
+      const service = new WorkOrdersService(prisma as unknown as PrismaService, { record: jest.fn() } as unknown as AuditService);
+      return { service, tx, writes };
+    }
+
+    it('no puede reactivar el servicio mientras el retiro esté activo y no escribe nada', async () => {
+      const h = repairHarness(55);
+      await expect(h.service.completeRepair(89, { observaciones: 'Senal recuperada', estadoFinalServicio: 'Activo' }, terreno))
+        .rejects.toMatchObject({ response: { code: 'SERVICE_WITHDRAWAL_ACTIVE', idSolicitudRetiro: 15 } });
+      expect(h.writes).toEqual([]);
+      expect(h.tx.servicioRetiroSolicitud.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+        idServicio: 55, motivo: { equals: 'MOROSIDAD', mode: 'insensitive' }, estado: { notIn: ['CANCELADA', 'CERRADA'] } }) }));
+    });
+
+    it('con retiro activo puede cerrarse la reparación con otro estado final del servicio', async () => {
+      const h = repairHarness(55);
+      const result = await h.service.completeRepair(89, { observaciones: 'Sin cambios', estadoFinalServicio: 'En Mantencion' }, terreno);
+      expect(result.servicio).toEqual(expect.objectContaining({ estadoOperativo: 'En Mantencion' }));
+      expect(h.tx.servicioRetiroSolicitud.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('el retiro de otro servicio no altera la reparación normal', async () => {
+      const h = repairHarness(77);
+      const result = await h.service.completeRepair(89, { observaciones: 'Senal recuperada', estadoFinalServicio: 'Activo' }, terreno);
+      expect(result.servicio).toEqual(expect.objectContaining({ idServicio: 55, estadoOperativo: 'Activo' }));
+    });
   });
 });

@@ -88,8 +88,9 @@ export class ServicesController {
     return this.servicesService.update(id, dto, user);
   }
 
+  /** Administrative baja (not morosity): Administrador only; the service also rejects suspended services and overdue debt. */
   @Patch(':id/deactivate')
-  @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
+  @Roles(...ACCESS_ROLES.ADMIN_ONLY)
   deactivate(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: DeactivateServiceDto,

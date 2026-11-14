@@ -4,7 +4,7 @@ import { api, apiErrorMessage, type Ticket, type TicketCategory } from '../../ap
 import { formatDateTime, formatWorkOrderValue } from '../../lib';
 import type { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
-import { isCompletedTicketWorkOrder, isGeneralTicketCategory, isTechnicalTicketReadOnly, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
+import { isCompletedTicketWorkOrder, isGeneralTicketCategory, isTechnicalTicketReadOnly, isTerminationTicketCategory, isWithdrawalTicketCategory, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
 import './ticket-management.css';
 
 type Tab = 'management' | 'activity' | 'resolution';
@@ -41,7 +41,8 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
   const statusChanged = permissions.updateTicketStatus && draft.status !== saved.status;
   const hasChanges = categoryChanged || priorityChanged || statusChanged;
   const canManage = !technicalReadOnly && (permissions.classifyTickets || permissions.updateTicketStatus);
-  const generalCategories = categories.filter(isGeneralTicketCategory);
+  // The reserved «Baja de servicio» is never a reclassification target (the current one is still shown, disabled).
+  const generalCategories = categories.filter(category => isGeneralTicketCategory(category) && !isWithdrawalTicketCategory(category) && !isTerminationTicketCategory(category));
   const resolved = ['Resuelto', 'Cerrado'].includes(saved.status);
   const { report, activities } = ticketContent(ticket);
   const tabs = [

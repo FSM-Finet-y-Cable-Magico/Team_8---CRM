@@ -1,7 +1,7 @@
 import { ArgumentsHost, Body, CanActivate, Catch, Controller, ExceptionFilter, ExecutionContext, Get, Header, HttpException, Injectable, Param,
   ParseIntPipe, Patch, Post, Req, Res, StreamableFile, UseFilters, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Equals, IsBoolean, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -9,7 +9,7 @@ import { AuthUser } from '../common/auth.types';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ACCESS_ROLES } from '../common/permissions';
-import { requireSignatureSettings, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
+import { DEMO_SIGNATURE_CONSENT_VERSION, requireSignatureSettings, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 import { ESignatureService } from './e-signature.service';
 
 export class SignatureTokenDto {
@@ -19,7 +19,7 @@ export class SignatureAcceptDto extends SignatureTokenDto {
   @IsOptional() @IsString() @Matches(/^\d{6}$/) code?: string;
   @IsString() @Matches(/^[a-f0-9]{64}$/) hashOriginal!: string;
   @IsBoolean() @Equals(true) consent!: boolean;
-  @IsString() @Equals(SIGNATURE_CONSENT_VERSION) consentVersion!: string;
+  @IsString() @IsIn([SIGNATURE_CONSENT_VERSION, DEMO_SIGNATURE_CONSENT_VERSION]) consentVersion!: string;
 }
 
 @Injectable()

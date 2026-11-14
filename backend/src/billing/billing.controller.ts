@@ -13,6 +13,7 @@ import { CreateZoneRuleDto } from './dto/create-zone-rule.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { SendBillingNotificationDto } from './dto/send-billing-notification.dto';
 import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
+import { SuspendContractDto } from './dto/suspend-contract.dto';
 
 @Controller('billing')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -49,10 +50,17 @@ export class BillingController {
     return this.billingService.sendNotification(dto, user);
   }
 
+  /** Read-only: the «Suspender servicio» button and modal only show this; the PATCH evaluates it again. */
+  @Get('contracts/:id/suspension-eligibility')
+  @Roles(...ACCESS_ROLES.MANAGE_BILLING)
+  suspensionEligibility(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser) {
+    return this.billingService.suspensionEligibility(idContrato, user);
+  }
+
   @Patch('contracts/:id/suspend')
   @Roles(...ACCESS_ROLES.MANAGE_BILLING)
-  suspendContract(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser) {
-    return this.billingService.suspendContract(idContrato, user);
+  suspendContract(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser, @Body() dto?: SuspendContractDto) {
+    return this.billingService.suspendContract(idContrato, user, dto ?? {});
   }
 
   @Post('payments')

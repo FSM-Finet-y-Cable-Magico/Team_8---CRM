@@ -54,7 +54,8 @@ test('las acciones se presentan al final del detalle del servicio', async t => {
   assert.equal(h.calls.length, 0);
   assert.equal(h.button('Observaciones'), undefined);
   assert.ok(h.button('Cambiar plan'));
-  assert.ok(h.button('Dar de baja'));
+  // FINET 13-11-2026: no «Dar de baja» in Clientes (only the Libro de Control starts a baja).
+  assert.equal(h.button('Dar de baja'), undefined);
   assert.equal(h.tree.root.findAllByProps({ role: 'dialog' }).length, 0);
   assert.doesNotMatch(h.text(), /Garantías del servicio/);
 });
@@ -75,17 +76,12 @@ test('modificar plan conserva seleccion por empresa, fecha, observacion y endpoi
   assert.deepEqual(h.refreshed, [20]);
 });
 
-test('baja permanece separada y requiere confirmar con el mismo payload', async t => {
+test('Clientes no ofrece la baja: solo el cambio de plan, sin llamadas de baja', async t => {
   const h = await harness(t);
   await h.click('Cambiar plan');
-  await h.click('Dar de baja');
-  assert.equal(h.tree.root.findByProps({ role: 'dialog' }).props['aria-label'], 'Dar de baja el servicio');
-  assert.doesNotMatch(h.text(), /Confirma la baja de este servicio/);
-  assert.equal(h.tree.root.findAllByProps({ id: 'service-change-plan-20' }).length, 0);
+  assert.equal(h.button('Dar de baja'), undefined);
+  assert.equal(h.tree.root.findAllByProps({ id: 'service-deactivate-20' }).length, 0);
   assert.equal(h.calls.filter(call => call[0] === 'patch').length, 0);
-  await h.change(h.form('service-deactivate-20').findByType('textarea'), 'Fin del servicio');
-  await h.submit('service-deactivate-20');
-  assert.deepEqual(h.calls.find(call => call[0] === 'patch'), ['patch', '/services/20/deactivate', { observacion: 'Fin del servicio' }]);
 });
 
 test('permisos y estado de baja conservan sus restricciones', async t => {

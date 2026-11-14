@@ -12,6 +12,14 @@ export const TICKET_ATTENTION_NAMES = [
   'Baja de servicio',
 ] as const;
 
+/**
+ * G8-only attention category (FINET 13-11-2026): the customer's voluntary termination, started from Tickets. It is NOT
+ * part of the G2/G8 contract of seven categories above and it is NOT «Baja de servicio» (never renamed nor its ID
+ * reused). It exists only after the authorized additive insertion in categoria_falla (db/proposals/); until then the
+ * option is simply not offered.
+ */
+export const G8_TICKET_ATTENTION_NAMES = ['Término de servicio'] as const;
+
 type CategoryRow = {
   idCategoria: number;
   nombre: string;
@@ -29,7 +37,7 @@ export function ticketCategoryNameKey(name: string) {
 export function officialTicketAttentionName(name: string) {
   const key = ticketCategoryNameKey(name);
   if (key === 'consulta') return 'Consulta general';
-  return TICKET_ATTENTION_NAMES.find(official => ticketCategoryNameKey(official) === key) ?? null;
+  return [...TICKET_ATTENTION_NAMES, ...G8_TICKET_ATTENTION_NAMES].find(official => ticketCategoryNameKey(official) === key) ?? null;
 }
 
 export function isGeneralTicketCategory(category: Pick<CategoryRow, 'nombre' | 'tipo' | 'tipoDisponible'>) {
