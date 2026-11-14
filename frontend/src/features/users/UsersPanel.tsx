@@ -199,6 +199,7 @@ export function UsersPanel({
             </tbody>
           </table>
         </div>
+        {!users.some(row => !deletedIds.includes(row.idUsuario)) && <p className="empty-state">No hay usuarios registrados para mostrar.</p>}
       </section>
 
       <Modal title={editing === 'new' ? 'Crear usuario' : 'Editar usuario'} open={editing !== null} onClose={closeEditor}>

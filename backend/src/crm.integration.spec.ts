@@ -28,7 +28,9 @@ integration('CRM en PostgreSQL con rollback', () => {
         const adapter = { ...tx, $transaction: (fn: (client: Prisma.TransactionClient) => unknown) => fn(tx) };
         const audit = { record: jest.fn() };
         const contracts = new ContractsService(adapter as never, audit as never, {} as never);
-        const created = await contracts.createCustomerContract({ idCliente: customer.idCliente, idPlan: oldPlan.idPlan, idZonaPago: zone.idZonaPago }, user);
+        // Fixture for the change-plan lifecycle; new acquisitions are covered by customer-plan-acquisition.postgres.spec.
+        const created = await tx.contrato.create({ data: { idCliente: customer.idCliente, idPlan: oldPlan.idPlan,
+          idEmpresa: company.idEmpresa, idZonaPago: zone.idZonaPago, fechaInicio: new Date(), diaVencimiento: 15, estado: 'Pendiente firma contrato' } });
         expect(created.diaVencimiento).toBe(15);
         await tx.contrato.update({ where: { idContrato: created.idContrato }, data: { estado: 'Activo' } });
         const service = await tx.servicioContratado.create({ data: { idCliente: customer.idCliente, idEmpresa: company.idEmpresa, idContrato: created.idContrato, tipoServicio: 'Internet', estadoOperativo: 'Activo' } });

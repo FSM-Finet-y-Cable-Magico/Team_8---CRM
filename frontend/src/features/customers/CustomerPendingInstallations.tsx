@@ -81,7 +81,7 @@ export function CustomerPendingInstallations({ prospects, loading, error, reques
                 <td><button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedProspect(prospect)}>Gestionar</button></td>
               </tr>; })}</tbody>
             </table></div>
-            {!activations.length && <p className="customer-pending-note">No hay pendientes que coincidan con la búsqueda.</p>}
+            {!activations.length && <p className="empty-state">{query.trim() ? 'No hay pendientes que coincidan con la búsqueda.' : 'No hay pendientes de activación.'}</p>}
             <TablePagination currentPage={page} totalItems={activations.length} pageSize={pageSize} onPageChange={setPage} />
           </>}
         </>}

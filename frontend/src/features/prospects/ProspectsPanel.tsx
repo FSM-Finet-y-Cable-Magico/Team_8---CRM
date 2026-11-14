@@ -338,7 +338,7 @@ export function ProspectsPanel({
             <tbody>
               {listLoading && <tr><td colSpan={7} role="status">Cargando prospectos…</td></tr>}
               {!listLoading && !listError && visibleProspects.length === 0 && (
-                <tr><td colSpan={7}>{hasFilters ? 'Ningún prospecto coincide con la búsqueda o los filtros.' : 'No hay prospectos pendientes de gestión para la empresa seleccionada.'}</td></tr>
+                <tr><td colSpan={7} className="empty-state">{hasFilters ? 'Ningún prospecto coincide con la búsqueda o los filtros.' : 'No hay prospectos pendientes de gestión para la empresa seleccionada.'}</td></tr>
               )}
               {!listLoading && !listError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>

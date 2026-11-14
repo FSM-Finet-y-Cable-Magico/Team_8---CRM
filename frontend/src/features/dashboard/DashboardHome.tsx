@@ -308,7 +308,7 @@ export function DashboardHome({
                 ))}
               </div>
             </div>
-          ) : <p className="dashboard-chart-empty">Aún no hay prospectos con origen de captación registrado.</p>}
+          ) : <p className="empty-state">Aún no hay prospectos con origen de captación registrado.</p>}
         </article>
 
         <article className="dashboard-installation-panel">

@@ -498,6 +498,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <div hidden={activeTab !== 'customers'}>
             <CustomersPanel
               active={activeTab === 'customers'}
+              writeCompanyId={writeCompanyId}
+              companies={companies}
               pendingInstallationsView={customerPendingView}
               onPendingInstallationsViewConsumed={() => setCustomerPendingView(null)}
               customers={customers}

@@ -233,13 +233,13 @@ for(const options of [{outside:true},{noPlans:true},{locationFailure:true}])test
   if(options.locationFailure)assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
 });
 
-test('geocodificación fallida deja reintentar, quita el aviso a los tres segundos y conserva la dirección',async t=>{
+test('geocodificación fallida deja reintentar y conserva el motivo sin inventar una ubicación',async t=>{
   const h=await harness(t,{g2:true,requiresReview:false,geocodeFailure:true});
   await act(async()=>h.button('Editar prospecto').props.onClick());await h.address();await h.tick();
   assert.ok(h.text().includes('No se pudo ubicar la dirección'));
   assert.ok(h.button('Reintentar dirección'));
   await h.advance(3000);
-  assert.ok(!h.text().includes('No se pudo ubicar la dirección'));
+  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
   assert.equal(h.persisted().latitud,null); assert.equal(h.persisted().comuna,null);
 });
 test('Factible heredado sin coordenadas: no habilita cotizar; ubicación manual persiste el punto y recalcula la factibilidad',async t=>{

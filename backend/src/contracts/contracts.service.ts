@@ -24,6 +24,7 @@ import { ServicesService } from '../services/services.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { ConfirmContractSignatureDto } from './dto/confirm-contract-signature.dto';
 import { CreateCustomerContractDto } from './dto/create-customer-contract.dto';
+import { CoverageDomainService } from '../coverage/coverage-domain.service';
 import { UpdateDigitalContractStatusDto } from './dto/update-digital-contract-status.dto';
 
 type OwnedContractFile = { idContrato?: number; fullPath?: string; relativePath?: string };
@@ -38,6 +39,7 @@ export class ContractsService {
     private readonly auditService: AuditService,
     private readonly servicesService: ServicesService,
     @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly coverage?: CoverageDomainService,
   ) {}
 
   async createCustomerContract(dto: CreateCustomerContractDto, currentUser: AuthUser) {
@@ -59,35 +61,62 @@ export class ContractsService {
     const idEmpresa = plan.idEmpresa ?? customer.idEmpresa;
     this.assertCompanyAccess(idEmpresa, currentUser);
 
-    let diaVencimiento = 1;
-    if (dto.idZonaPago) {
-      const zone = await this.prisma.zonaPago.findUnique({ where: { idZonaPago: dto.idZonaPago } });
-
-      if (!zone || zone.activo === false || (zone.idEmpresa && idEmpresa && zone.idEmpresa !== idEmpresa)) {
-        throw new BadRequestException('La zona de pago no corresponde a la empresa del contrato');
-      }
-      diaVencimiento = zone.diaVencimientoSugerido ?? 1;
+    if (!isAdministrator(currentUser.roles) && customer.idEmpresa !== idEmpresa
+      && !customer.contratos.some(item => item.idEmpresa === idEmpresa)) throw new NotFoundException('Cliente no encontrado en tu empresa');
+    if (!dto.idCotizacion) throw new BadRequestException('Debe generar y seleccionar una cotización factible antes de crear la contratación');
+    const quote = await this.prisma.cotizacion.findUnique({ where: { idCotizacion: dto.idCotizacion }, include: { prospecto: true } });
+    const location = quote?.prospecto;
+    if (!quote?.factibilidadVerificada || !quote.fechaEnvio || quote.idPlan !== plan.idPlan || !location
+      || location.idCliente !== customer.idCliente || location.idEmpresa !== idEmpresa
+      || location.origenContacto !== 'Plan adicional'
+      || (['rut', 'nombreCompleto', 'email', 'telefono'] as const).some(field => location[field] !== customer[field])
+      || location.latitud == null || location.longitud == null || !location.direccion?.trim() || !location.comuna?.trim()) {
+      throw new BadRequestException('La cotización no corresponde al cliente, empresa, plan y dirección de esta contratación');
     }
-
+    if (!this.coverage) throw new BadRequestException('No se pudo verificar la cobertura de la contratación');
+    const commercial = await this.coverage.plansForLocation(idEmpresa ?? 0,
+      { latitud: location.latitud, longitud: location.longitud }, currentUser);
+    const available = commercial.planes.find(item => item.idPlan === plan.idPlan);
+    if (!commercial.coberturaComercial || !available) throw new BadRequestException('El plan ya no está disponible para la dirección cotizada');
+    const zoneId = available.origenPrecio === 'ZONA_PADRE' ? commercial.zona?.idZonaPago
+      : commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago;
+    if (dto.idZonaPago != null && dto.idZonaPago !== zoneId) throw new BadRequestException('La zona se determina automáticamente según la dirección cotizada');
     const fechaInicio = dto.fechaContratacion ? parseDateOnly(dto.fechaContratacion) ?? new Date() : new Date();
-    return this.prisma.$transaction(async tx => {
+    return this.registerWithDigitalContract(currentUser, async tx => {
+    await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${customer.idCliente} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${location.idProspecto} FOR UPDATE`;
+    const currentQuote = await tx.cotizacion.findUnique({ where: { idCotizacion: quote.idCotizacion }, include: { prospecto: true } });
+    const currentLocation = currentQuote?.prospecto;
+    const currentPlan = await tx.plan.findUnique({ where: { idPlan: plan.idPlan } });
+    const currentCustomer = await tx.cliente.findUnique({ where: { idCliente: customer.idCliente } });
+    if (!currentQuote?.factibilidadVerificada || !currentQuote.fechaEnvio || currentQuote.idPlan !== quote.idPlan
+      || !currentPlan || currentPlan.activo === false || currentPlan.idEmpresa !== idEmpresa
+      || !currentLocation || (['idCliente', 'idEmpresa', 'latitud', 'longitud', 'direccion', 'comuna', 'rut', 'email', 'telefono', 'nombreCompleto'] as const).some(
+        field => currentLocation[field] !== location[field])
+      || !currentCustomer || (['rut', 'nombreCompleto', 'email', 'telefono'] as const).some(field => currentCustomer[field] !== customer[field])) {
+      throw new ConflictException('La cotización o los datos del cliente cambiaron. Vuelve a cotizar antes de contratar');
+    }
     await assertNoContractDebt(tx, { idEmpresa, idCliente: customer.idCliente, rut: customer.rut, idUsuario: currentUser.idUsuario });
+    const existing = await tx.contrato.findFirst({ where: { idProspecto: location.idProspecto, idCliente: customer.idCliente,
+      idEmpresa, idPlan: plan.idPlan, estado: { notIn: ['Baja', 'Anulado'] } }, orderBy: { idContrato: 'desc' }, include: CONTRACT_INCLUDE });
+    if (existing) return { result: { contrato: existing }, reuseDocument: true };
     const contract = await tx.contrato.create({
       data: {
         idCliente: customer.idCliente,
+        idProspecto: location.idProspecto,
         idPlan: plan.idPlan,
         idEmpresa,
-        idZonaPago: dto.idZonaPago,
+        idZonaPago: zoneId,
         fechaInicio,
-        diaVencimiento,
+        diaVencimiento: 1,
         estado: 'Pendiente firma contrato',
         observacionContrato: dto.observacion?.trim() || null,
+        direccionInstalacion: location.direccion!.trim(),
+        comunaInstalacion: location.comuna!.trim(),
       },
       include: CONTRACT_INCLUDE,
     });
 
-    await assignAutomatic(tx, contract, this.config, currentUser.idUsuario);
-    await this.reconcileCustomerStatus(customer.idCliente, tx);
     await this.auditService.record({
       idUsuario: currentUser.idUsuario,
       accion: 'CREAR_CONTRATACION_CLIENTE',
@@ -96,12 +125,15 @@ export class ContractsService {
       valorNuevo: {
         idCliente: customer.idCliente,
         idPlan: plan.idPlan,
+        idCotizacion: quote.idCotizacion,
+        idProspecto: location.idProspecto,
+        direccionInstalacion: location.direccion,
         estadoContrato: contract.estado,
       },
     }, tx);
 
-    return contract;
-    }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    return { result: { contrato: contract }, reuseDocument: false };
+    }).then(result => result.contrato)
       .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
   }
 
@@ -622,6 +654,55 @@ export class ContractsService {
       return updated;
     }, { timeout: 20000, isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
       .catch(error => auditContractDebtRejection(this.prisma, this.auditService, error));
+  }
+
+  async cancelPendingContract(idContrato: number, user: AuthUser) {
+    await this.getContractOrThrow(idContrato, user);
+    const cancel = () => this.prisma.$transaction(async tx => {
+      // Signing, PDF replacement and cancellation serialize on the same contract.
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${idContrato} FOR UPDATE`;
+      const contract = await this.getContractOrThrow(idContrato, user, tx);
+      if (contract.estado === 'Anulado') return contract;
+      assertPendingSignature(contract.estado);
+      const documents = await tx.contratoDigital.findMany({ where: { idContrato } });
+      const storage = await signatureStorageAvailable(tx);
+      const accepted = storage ? await signatureRepository(tx).findFirst({ where: { idContrato, estado: 'FIRMADA' } }) : null;
+      if (contract.fechaFirmaManual || documents.some(document => this.isSignedDigitalContract(document)) || accepted) {
+        throw new ConflictException('El contrato ya está firmado y no se puede cancelar desde esta opción');
+      }
+      const [services, installations, invoices] = await Promise.all([
+        tx.servicioContratado.count({ where: { idContrato } }),
+        tx.integracionInstalacionG3.count({ where: { idContrato } }),
+        tx.factura.count({ where: { idContrato } }),
+      ]);
+      if (services || installations || invoices) throw new ConflictException('El contrato tiene servicios, instalaciones o cobros asociados y requiere otra gestión');
+      let revoked = 0;
+      if (storage) for (const estado of ['BORRADOR', 'PENDIENTE']) {
+        revoked += (await signatureRepository(tx).updateMany({ where: { idContrato, estado },
+          data: { estado: 'ANULADA', motivoAnulacion: 'CONTRATO_CANCELADO', otpHash: null, otpExpiracion: null } })).count;
+      }
+      await tx.contratoDigital.updateMany({ where: { idContrato }, data: { estadoFirma: 'Anulado' } });
+      const updated = await tx.contrato.update({ where: { idContrato }, data: { estado: 'Anulado' }, include: CONTRACT_INCLUDE });
+      if (contract.idCliente == null && contract.idProspecto != null) {
+        await tx.$queryRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${contract.idProspecto} FOR UPDATE`;
+        const prospect = await tx.prospecto.findUnique({ where: { idProspecto: contract.idProspecto } });
+        if (prospect?.idCliente == null && /pendiente.*firma/i.test(prospect?.estadoPipeline ?? '')) {
+          await tx.prospecto.update({ where: { idProspecto: contract.idProspecto }, data: { estadoPipeline: 'Factible' } });
+        }
+      }
+      await this.auditService.record({ idUsuario: user.idUsuario, accion: 'CANCELAR_CONTRATO_PENDIENTE',
+        entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
+        valorAnterior: { estado: contract.estado }, valorNuevo: { estado: 'Anulado', solicitudesAnuladas: revoked } }, tx);
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 20000 });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await cancel(); }
+      catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && (error.code === 'P2034'
+          || error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code))))) throw error;
+      }
+    }
+    throw new ConflictException('El contrato se está actualizando. Vuelve a consultar su estado');
   }
 
   private isSignedDigitalContract(document: { estadoFirma: string; fechaFirma?: Date | null }) {

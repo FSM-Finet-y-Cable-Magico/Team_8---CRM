@@ -21,6 +21,9 @@ export function PublicSignaturePage() {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
+      if (typeof data.message === 'string' && /contrato fue cancelado|solicitud no vigente|enlace no disponible|enlace expiró/i.test(data.message)) {
+        setView(null); setReviewed(''); setConsent(false);
+      }
       throw new Error(typeof data.message === 'string' ? data.message : 'No se pudo continuar. Contacta a la empresa.');
     }
     return response;

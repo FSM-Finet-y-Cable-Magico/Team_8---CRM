@@ -6,17 +6,22 @@ import React from 'react';
 import {act,create} from 'react-test-renderer';
 import ts from 'typescript';
 const require=createRequire(import.meta.url);
+const territories={};
+new Function('exports',ts.transpileModule(readFileSync(new URL('../src/shared/data/chile-territories.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(territories);
+const territoryMock={'../../shared/data/chile-territories':territories};
 const textOf=node=>typeof node==='string'?node:(node?.children??[]).map(textOf).join('');
-const customer={idCliente:10,nombreCompleto:'Nombre original',email:'correo@example.invalid',telefono:'+56900000000',rut:'99901019-9',estado:'Activo'};
-async function render(t,fail=false){
+const customer={idCliente:10,nombreCompleto:'Nombre original',email:'correo@example.invalid',telefono:'+56900000000',rut:'99901019-9',estado:'Activo',
+  direcciones:[{direccionCompleta:'Domicilio contratado 123',comuna:'Santiago'}],contratos:[{direccionInstalacion:'Domicilio contratado 123'}]};
+async function render(t,fail=false,addressChange=null){
   const calls=[],events=[];
   const source=readFileSync(new URL('../src/features/customers/CustomerProfileForm.tsx',import.meta.url),'utf8');
   const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  const mocks={'../../api':{api:{patch:async(...args)=>{calls.push(args);if(fail)throw Error('falló');return {data:{...customer,nombreCompleto:'Nombre actualizado'}};}},apiErrorMessage:()=> 'No se pudo guardar'},'./CustomerStatusBadge':{CustomerStatusSummary:()=>null}};
-  const exports={};new Function('require','exports',output)(name=>mocks[name]??require(name),exports);
+  const mocks={'../../api':{api:{patch:async(...args)=>{calls.push(args);if(fail)throw Error('falló');return {data:{...customer,...args[1],nombreCompleto:'Nombre actualizado'}};}},apiErrorMessage:()=> 'No se pudo guardar'},'./CustomerStatusBadge':{CustomerStatusSummary:()=>null}};
+  const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??require(name),exports);
   let tree;await act(async()=>{tree=create(React.createElement(exports.CustomerProfileForm,{customer,onCancel(){},onBusy:value=>events.push(value),onSaved:value=>events.push(value)}));});
   t.after(async()=>{await act(async()=>tree.unmount());});
   await act(async()=>tree.root.findAllByType('input')[0].props.onChange({target:{value:'Nombre actualizado'}}));
+  if(addressChange) for(const [name,value] of Object.entries(addressChange)) await act(async()=>tree.root.findAllByType('label').find(label=>label.props.children[0]===name).findByType(name==='Región'||name==='Comuna'?'select':'input').props.onChange({target:{value}}));
   await act(async()=>tree.root.findByType('form').props.onSubmit({preventDefault(){}}));
   return {tree,calls,events};
 }
@@ -27,6 +32,14 @@ test('edición dentro de la ficha guarda solo campos admitidos y libera bloqueo 
   assert.deepEqual(h.events.slice(0,2),[true,false]);
   assert.equal(h.events[2].nombreCompleto,'Nombre actualizado');
 });
+
+test('editar la dirección actual guarda el domicilio de contacto sin reescribir el domicilio contratado',async t=>{
+  const h=await render(t,false,{'Dirección':'Domicilio actual 456','Comuna':'Ñuñoa'});
+  assert.deepEqual(h.calls[0][1].direccionActual,{direccion:'Domicilio actual 456',comuna:'Ñuñoa'});
+  assert.deepEqual(h.events[2].direccionActual,{direccion:'Domicilio actual 456',comuna:'Ñuñoa'});
+  assert.equal(customer.contratos[0].direccionInstalacion,'Domicilio contratado 123');
+  assert.equal(customer.direcciones[0].direccionCompleta,'Domicilio contratado 123');
+});
 test('error conserva datos editados y habilita reintento sin quedar congelado',async t=>{
   const h=await render(t,true);
   assert.deepEqual(h.events,[true,false]);
@@ -35,11 +48,24 @@ test('error conserva datos editados y habilita reintento sin quedar congelado',a
   assert.equal(h.tree.root.findAllByType('button').find(node=>node.props.type==='submit').props.disabled,false);
 });
 
+test('región y comuna usan listas dependientes y no guardan una combinación incompleta',async t=>{
+  const h=await render(t);
+  const field=name=>h.tree.root.findAllByType('label').find(label=>label.props.children[0]===name).findByType('select');
+  assert.equal(field('Región').props.value,'Metropolitana de Santiago');
+  await act(async()=>field('Región').props.onChange({target:{value:'Valparaíso'}}));
+  assert.equal(field('Comuna').props.value,'');
+  assert.ok(!field('Comuna').findAllByType('option').some(option=>option.props.value==='Santiago'));
+  assert.equal(h.tree.root.findAllByType('button').find(button=>button.props.type==='submit').props.disabled,true);
+  await act(async()=>field('Comuna').props.onChange({target:{value:'San Antonio'}}));
+  await act(async()=>h.tree.root.findByType('form').props.onSubmit({preventDefault(){}}));
+  assert.deepEqual(h.calls.at(-1)[1].direccionActual,{direccion:'Domicilio contratado 123',comuna:'San Antonio'});
+});
+
 test('modal completo alterna editar, cancelar y guardar sin duplicar la ficha ni conservar formularios bloqueados',async t=>{
   function compile(path,mocks={}){
     const source=readFileSync(new URL('../src/features/customers/'+path,import.meta.url),'utf8');
     const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-    const exports={};new Function('require','exports',output)(name=>mocks[name]??require(name),exports);return exports;
+    const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??require(name),exports);return exports;
   }
   const patches=[],warnings=[];
   t.mock.method(console,'error',(...args)=>warnings.push(args.join(' ')));

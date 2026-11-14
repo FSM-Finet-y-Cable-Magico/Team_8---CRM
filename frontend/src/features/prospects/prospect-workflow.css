@@ -57,15 +57,11 @@
 .prospect-selected-plan-price strong { font-size: 1.1rem; }
 .prospect-contract-section { gap: 12px; }
 .prospect-contract-section h4, .prospect-documents h4 { margin: 0; }
-.prospect-contract-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.prospect-contract-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .prospect-contract-layout :is(select, textarea) { min-height: 40px; background: transparent; }
-.prospect-contract-layout textarea { resize: vertical; }
-.prospect-contract-layout button { min-height: 40px; }
+.prospect-contract-layout textarea { min-height: 112px; resize: vertical; line-height: 1.5; font-weight: 400; }
+.prospect-contract-layout button { justify-self: end; width: auto; min-height: 40px; }
 .prospect-contract-address { display: flex; align-items: center; gap: 7px; margin: 0; color: #52685b; font-size: .82rem; }
-@media (max-width: 760px) {
-  .prospect-contract-layout { grid-template-columns: minmax(0, 1fr); }
-  .prospect-contract-layout button { justify-self: start; }
-}
 @media (max-width: 520px) {
   .modal-card:has(.prospect-workflow) .modal-header { flex-direction: row; align-items: center; }
   .prospect-commercial-section { padding-inline: 0; }

@@ -90,7 +90,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
       if (revision !== loadRevision.current || controller.signal.aborted) return;
       setTracking(data);
-      if (!data && canRequest && !savedCompletion) {
+      if (!data && canRequest && !savedCompletion && !installationSummary) {
         const result = await api.post('/integrations/g3/installation-requirements', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
         if (contractId != null && result.data.idContrato !== contractId) { setError('La validación no corresponde al contrato seleccionado. Vuelve a comprobar la instalación.'); return; }
         if (typeof result.data.comunaFaltante !== 'boolean') { setError('No se pudieron comprobar los requisitos de instalación.'); return; }
@@ -101,7 +101,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     } finally {
       if (revision === loadRevision.current && !controller.signal.aborted) setLoading(false);
     }
-  }, [canRequest, contractId, prospectId, savedCompletion]);
+  }, [canRequest, contractId, prospectId, savedCompletion, installationSummary]);
   useEffect(() => {
     void load();
     return () => {
@@ -151,11 +151,8 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     <header><div className="customer-installation-order"><span>Orden de instalación</span><strong>{savedInstallation?.codigoSeguimiento ?? savedInstallation?.idOt ?? '—'}</strong></div><StatusBadge value="Completada" /></header>
     {completedFields(null, service)}
   </section>;
-  if (installationSummary && !tracking && !canRequest) return <p className="customer-contract-note" role={error ? 'status' : undefined}>{error || 'Sin orden de instalación registrada.'}</p>;
+  if (installationSummary && !tracking) return <p className="customer-contract-note customer-installation-empty">Sin orden de instalación registrada.</p>;
   if (!tracking) return <div className="g3-installation-card">
-    {installationSummary ? <p>Sin orden de instalación registrada.</p> : <>
-      {!hideRequest && canRequest && !error && !requirements?.comunaFaltante && <p>Genera la orden de instalación para coordinar la visita del equipo técnico. No activa el servicio: la activación se registra al confirmarse el cierre de la instalación.</p>}
-    </>}
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
     {requirements?.comunaFaltante && requirements.puedeCompletarComuna && <fieldset disabled={busy}>
       <legend>Completar datos de instalación</legend>

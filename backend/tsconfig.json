@@ -15,5 +15,10 @@
     "strict": true,
     "skipLibCheck": true,
     "strictPropertyInitialization": false
+  },
+  "watchOptions": {
+    "watchFile": "fixedPollingInterval",
+    "watchDirectory": "fixedPollingInterval",
+    "fallbackPolling": "dynamicPriority"
   }
 }

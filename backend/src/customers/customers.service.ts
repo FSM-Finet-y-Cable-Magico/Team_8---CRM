@@ -8,6 +8,7 @@ import { rutLookupVariants } from '../rut/rut.util';
 import { UpdateCustomerTechnicalDataDto } from './dto/update-customer-technical-data.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
 import { UpdateCustomerProfileDto } from './dto/update-customer-profile.dto';
+import { customerAddressKey, customerProfileAddress } from './customer-profile-address';
 
 @Injectable()
 export class CustomersService {
@@ -34,6 +35,7 @@ export class CustomersService {
         contratos: {
           where: companyFilter,
           include: {
+            prospecto: { select: { idEmpresa: true, direccion: true, comuna: true, region: true, latitud: true, longitud: true } },
             plan: {
               include: { empresa: true },
             },
@@ -43,16 +45,31 @@ export class CustomersService {
         direcciones: {
           where: idEmpresa === undefined ? {} : { servicios: { some: { idEmpresa } } },
           orderBy: [{ esPrincipal: 'desc' }, { idDireccion: 'asc' }],
-          take: 1,
         },
         ...this.companyServiceStatesInclude(idEmpresa),
       },
     });
 
+    const pricedContracts = customers.flatMap(customer => customer.contratos ?? []).filter(contract => contract.idPlan && contract.idZonaPago
+      && contract.plan?.idEmpresa === contract.idEmpresa && (idEmpresa === undefined || contract.idEmpresa === idEmpresa));
+    const prices = pricedContracts.length ? await this.prisma.planZonaPrecio.findMany({ where: {
+      activo: true, OR: pricedContracts.map(contract => ({ idPlan: contract.idPlan!, idZonaPago: contract.idZonaPago!,
+        plan: { idEmpresa: contract.idEmpresa }, zonaPago: { idEmpresa: contract.idEmpresa } })),
+    }, orderBy: { idPlanZonaPrecio: 'desc' } }) : [];
+    const priceByZone = new Map<string, number>();
+    for (const price of prices) {
+      const key = `${price.idPlan}:${price.idZonaPago}`;
+      if (!priceByZone.has(key)) priceByZone.set(key, Number(price.precioMensual));
+    }
     return customers.map((customer) => {
       const visible = this.visibleCustomer(customer, idEmpresa);
       return {
         ...visible,
+        contratos: this.scopedRecords(customer.contratos ?? [], idEmpresa).map(contract => {
+          const price = contract.plan?.idEmpresa === contract.idEmpresa
+            ? priceByZone.get(`${contract.idPlan}:${contract.idZonaPago}`) ?? Number(contract.plan?.precioMensual) : NaN;
+          return Number.isFinite(price) ? { ...contract, precioMensualAplicable: price } : contract;
+        }),
         empresas: [
           visible.empresa?.nombre,
           ...this.scopedRecords(customer.contratos, idEmpresa).map((contract) => contract.plan?.empresa?.nombre),
@@ -72,16 +89,45 @@ export class CustomersService {
     if (!admin && !user.idEmpresa) throw new ForbiddenException('No tienes permiso para editar este cliente');
     return this.prisma.$transaction(async tx => {
       const where = { idCliente, ...(admin ? {} : { idEmpresa: user.idEmpresa }) };
-      const select = { idCliente: true, nombreCompleto: true, email: true, telefono: true } as const;
+      if (dto.direccionActual || dto.ocultarDireccion) {
+        await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${idCliente} FOR UPDATE`;
+      }
+      const select = { idCliente: true, nombreCompleto: true, email: true, telefono: true, datosTecnicos: true } as const;
       const current = await tx.cliente.findUnique({ where, select });
       if (!current) throw new NotFoundException('Cliente no encontrado en tu empresa');
-      const data = {
+      const profileView = (row: typeof current) => {
+        const { datosTecnicos, ...identity } = row;
+        return { ...identity, ...customerProfileAddress(datosTecnicos) };
+      };
+      const data: Prisma.ClienteUpdateInput = {
         nombreCompleto: dto.nombreCompleto,
         email: dto.email,
         telefono: dto.telefono?.replace(/[() -]/g, '') ?? dto.telefono,
       };
-      const changed = (Object.keys(data) as Array<keyof typeof data>).filter(field => data[field] !== undefined && data[field] !== current[field]);
-      if (!changed.length) return current;
+      const changed: string[] = (['nombreCompleto', 'email', 'telefono'] as const).filter(field => data[field] !== undefined && data[field] !== current[field]);
+      if (dto.direccionActual || dto.ocultarDireccion) {
+        const profile = customerProfileAddress(current.datosTecnicos);
+        if (dto.direccionActual && JSON.stringify(dto.direccionActual) !== JSON.stringify(profile.direccionActual)) {
+          profile.direccionActual = { direccion: dto.direccionActual.direccion.trim(), comuna: dto.direccionActual.comuna.trim() };
+          profile.direccionesOmitidas = (profile.direccionesOmitidas ?? []).filter(key => key !== customerAddressKey(profile.direccionActual!));
+          changed.push('direccionActual');
+        }
+        if (dto.ocultarDireccion) {
+          const key = customerAddressKey(dto.ocultarDireccion);
+          if (profile.direccionActual && key === customerAddressKey(profile.direccionActual)) {
+            throw new BadRequestException('La dirección actual se cambia desde la ficha del cliente');
+          }
+          if (!(profile.direccionesOmitidas ?? []).includes(key)) {
+            if ((profile.direccionesOmitidas?.length ?? 0) >= 100) throw new BadRequestException('Se alcanzó el límite de direcciones omitidas');
+            profile.direccionesOmitidas = [...(profile.direccionesOmitidas ?? []), key];
+            changed.push('direccionesOmitidas');
+          }
+        }
+        if (changed.includes('direccionActual') || changed.includes('direccionesOmitidas')) {
+          data.datosTecnicos = this.mergeTechnicalData(current.datosTecnicos, { crmPerfil: profile });
+        }
+      }
+      if (!changed.length) return profileView(current);
       const updated = await tx.cliente.update({ where, data, select });
       await this.auditService.record({
         idUsuario: user.idUsuario,
@@ -90,7 +136,7 @@ export class CustomersService {
         idEntidadAfectada: idCliente,
         valorNuevo: { campos: changed },
       }, tx);
-      return updated;
+      return profileView(updated);
     });
   }
 
@@ -416,7 +462,7 @@ export class CustomersService {
   }>(customer: T, idEmpresa?: number) {
     const { passwordPortalHash: password, servicios, ...safe } = customer;
     void password;
-    if (idEmpresa === undefined) return { ...safe, estadoGlobalDisponible: true as const };
+    if (idEmpresa === undefined) return { ...safe, ...customerProfileAddress(customer.datosTecnicos), estadoGlobalDisponible: true as const };
     // Only shared identity and attributed relationships may cross the customer's
     // primary-company boundary. The global customer estado is not shared in a
     // company view and no substitute status is invented: estado is null and the
@@ -435,6 +481,7 @@ export class CustomersService {
       nombreCompleto: customer.nombreCompleto,
       email: customer.email,
       telefono: customer.telefono,
+      ...(customer.idEmpresa === idEmpresa ? customerProfileAddress(customer.datosTecnicos) : {}),
       estado: null,
       estadoGlobalDisponible: false as const,
       ...(companyStates ? { estadosServicioEmpresa: companyStates } : {}),

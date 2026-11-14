@@ -4,6 +4,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CustomersService } from './customers.service';
 
 describe('CustomersService', () => {
+  it('muestra el precio de la cobertura del contrato en vez del precio base del catálogo', async () => {
+    const db = { cliente: { findMany: jest.fn().mockResolvedValue([{ idCliente: 7, idEmpresa: 2,
+      contratos: [{ idContrato: 30, idEmpresa: 2, idPlan: 5, idZonaPago: 8,
+        plan: { idEmpresa: 2, precioMensual: 30000, empresa: { idEmpresa: 2, nombre: 'Cable Mágico' } } }],
+    }]) }, planZonaPrecio: { findMany: jest.fn().mockResolvedValue([{ idPlanZonaPrecio: 9, idPlan: 5, idZonaPago: 8, precioMensual: 19990 }]) } };
+    const service = new CustomersService(db as never, {} as never);
+    const [customer] = await service.list({ idUsuario: 1, idEmpresa: 2, roles: ['Comercial'] } as never);
+    expect(customer.contratos[0]).toMatchObject({ idContrato: 30, precioMensualAplicable: 19990 });
+    expect(db.planZonaPrecio.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { activo: true,
+      OR: [{ idPlan: 5, idZonaPago: 8, plan: { idEmpresa: 2 }, zonaPago: { idEmpresa: 2 } }],
+    } }));
+  });
   it('perfil sin cambios no escribe ni duplica auditoria', async () => {
     const customer = { idCliente: 7, nombreCompleto: 'Cliente QA', email: 'qa@example.invalid', telefono: '+56911111111' };
     const tx = { cliente: { findUnique: jest.fn().mockResolvedValue(customer), update: jest.fn() } };

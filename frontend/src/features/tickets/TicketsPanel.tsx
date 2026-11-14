@@ -247,8 +247,8 @@ export function TicketsPanel({
                 </tr>
               ))}
               {visibleTickets.length === 0 && <tr>
-                <td colSpan={8} className="tickets-empty-result">
-                  <p role="status">{query.trim() ? 'No se encontraron tickets que coincidan con la búsqueda.' : 'No hay tickets registrados.'}</p>
+                <td colSpan={8} className="empty-state" role="status">
+                  {query.trim() ? 'No se encontraron tickets que coincidan con la búsqueda.' : 'No hay tickets registrados.'}
                 </td>
               </tr>}
             </tbody>

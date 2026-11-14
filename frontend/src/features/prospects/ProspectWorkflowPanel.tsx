@@ -60,6 +60,8 @@ export function ProspectWorkflowPanel({
   const reviewPending = useRef(false);
   const [editingProspect, setEditingProspect] = useState(false);
   const [reactivating, setReactivating] = useState(false);
+  const [cancellingContract, setCancellingContract] = useState(false);
+  const cancellationPending = useRef(false);
   const reactivationPending = useRef(false);
   const [coverageCycle, setCoverageCycle] = useState(0);
   const [savingProspect, setSavingProspect] = useState(false);
@@ -328,6 +330,14 @@ export function ProspectWorkflowPanel({
     }
   }
 
+  async function cancelPendingContract() {
+    if (!pendingContract || cancellationPending.current) return;
+    cancellationPending.current = true; setCancellingContract(true);
+    try {
+      await runAction(() => api.post('/contracts/' + pendingContract.idContrato + '/cancel', {}), 'Contrato cancelado. El enlace de firma dejó de ser válido.', true);
+    } finally { cancellationPending.current = false; setCancellingContract(false); }
+  }
+
   async function recordLoss() {
     if (savingLoss) return;
     if (!lossObservation.trim()) {
@@ -532,10 +542,11 @@ export function ProspectWorkflowPanel({
                   ))}
                 </select>
               </label>
+              <p className="prospect-contract-address"><MapPin size={15} aria-hidden="true" />{[currentProspect.direccion, currentProspect.comuna].filter(Boolean).join(', ')}</p>
               <label>
                 Observación opcional
                 <textarea
-                  rows={1}
+                  rows={4}
                   value={contractObservation}
                   maxLength={500}
                   disabled={confirmingContract}
@@ -546,7 +557,6 @@ export function ProspectWorkflowPanel({
                 {confirmingContract ? 'Confirmando…' : 'Confirmar contratación'}
               </button>
             </div>
-            <p className="prospect-contract-address"><MapPin size={15} aria-hidden="true" />{[currentProspect.direccion, currentProspect.comuna].filter(Boolean).join(', ')}</p>
           </section>
         )}
       </div>
@@ -562,6 +572,7 @@ export function ProspectWorkflowPanel({
               {pendingContract && permissions.manageContracts && !requiresReview && <ContractDocuments idContrato={pendingContract.idContrato} fechaInicio={pendingContract.fechaInicio} fechaConfirmacion={pendingContract.fechaConfirmacion} canGenerate={permissions.generateDigitalContract} onChanged={onChanged} prospectList />}
             </ul>
             {pendingContract && permissions.manageContracts && !requiresReview && signaturePolicy.status?.policy.manualAllowed && <button type="button" onClick={() => void runAction(async () => { if (!(await signaturePolicy.refresh())?.policy.manualAllowed) throw new Error('Firma manual no autorizada'); return api.patch('/contracts/' + pendingContract.idContrato + '/confirm-signature', {}); }, 'Firma confirmada. La persona queda pendiente de activacion.', true)}>Registrar firma manual</button>}
+            {pendingContract && permissions.manageContracts && !requiresReview && <div className="customer-contract-cancel-actions"><button type="button" aria-label="Cancelar contrato" disabled={cancellingContract || confirmingContract} onClick={() => void cancelPendingContract()}>{cancellingContract ? 'Cancelando…' : 'Cancelar'}</button></div>}
           </section>
         )}
       {canRecordLoss && (

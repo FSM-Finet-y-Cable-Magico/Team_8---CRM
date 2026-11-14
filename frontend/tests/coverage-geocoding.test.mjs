@@ -29,7 +29,90 @@ const result = (estado = 'FACTIBLE') => ({
   planes: estado === 'FACTIBLE' ? [{ idPlan: 1, nombre: 'Plan backend', precioAplicable: 15990 }] : [],
 });
 
-async function harness(t, { geocode = async () => response(), check = async () => ({ data: result() }), picker = null } = {}) {
+test('mapa simple mantiene estado y ubicación automática sin textos auxiliares ni coordenadas', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', simpleSummary: true, allowManualLocation: true } });
+  assert.doesNotMatch(h.text(), /Cobertura comercial|Ingresar coordenadas|Marca el domicilio/);
+  assert.equal(h.tree.root.findAllByType('details').length, 0);
+  await h.tick(700);
+  assert.equal(h.requests('/coverage/geocode').length, 1);
+  assert.deepEqual(h.location(), { latitud: candidate.latitud, longitud: candidate.longitud });
+  assert.ok(h.maps[0].markers.length > 0);
+  await h.tick(350);
+  assert.match(h.text(), /Cobertura factible/);
+});
+
+function activeZone(id, overrides = {}) {
+  return { idZonaPago: id, idEmpresa: 1, nombreZona: 'Zona QA ' + id, activo: true, tipoZona: 'COBERTURA_GENERAL',
+    fechaInicio: null, fechaFin: null,
+    poligonoGeojson: { type: 'Polygon', coordinates: [[[-71.7, -33.1], [-71.5, -33.1], [-71.5, -33], [-71.7, -33.1]]] }, ...overrides };
+}
+
+test('cliente de Cable Mágico inicia con cobertura de FiNet activa en el portal y cambia explícitamente de empresa', async t => {
+  const point = { latitud: -33.3854635, longitud: -70.5071465 };
+  const h = await harness(t, { customerForm: {
+    customer: { idCliente: 10, idEmpresa: 2, nombreCompleto: 'Cliente Cable QA', direcciones: [{ direccionCompleta: 'La Quebrada 9651', comuna: 'Las Condes' }] },
+    services: [], initialCompanyId: 1,
+    companies: [{ idEmpresa: 1, nombre: 'FiNet' }, { idEmpresa: 2, nombre: 'Cable Mágico' }],
+    plans: [{ idPlan: 1, idEmpresa: 1, activo: true, empresa: { nombre: 'FiNet' } }, { idPlan: 2, idEmpresa: 2, activo: true, empresa: { nombre: 'Cable Mágico' } }],
+    onCancel() {}, onCreated() {},
+  }, zones: [activeZone(4, { nombreZona: 'Cobertura FiNet' })],
+    geocode: async () => response([{ ...candidate, ...point }]),
+    check: async body => ({ data: result(body.idEmpresa === 1 ? 'FACTIBLE' : 'NO_FACTIBLE') }),
+  });
+  const company = () => h.tree.root.findAllByType('label').find(label => label.props.children[0] === 'Empresa').findByType('select');
+  assert.equal(company().props.value, '1', 'hereda la empresa del portal, no la empresa principal del cliente');
+  assert.deepEqual(h.requests('/coverage/zones')[0].options.params, { idEmpresa: 1 });
+  assert.equal(h.maps[0].polygons.length, 1);
+  await h.tick(700); await h.tick(350);
+  assert.equal(h.requests('/coverage/check').at(-1).body.idEmpresa, 1);
+  assert.match(h.text(), /Cobertura factible · FiNet/);
+  assert.deepEqual(h.location(), point);
+  await act(async () => company().props.onChange({ target: { value: '2' } }));
+  assert.equal(h.location(), null);
+  await h.tick(700); await h.tick(350);
+  assert.equal(h.requests('/coverage/zones').at(-1).options.params.idEmpresa, 2);
+  assert.equal(h.requests('/coverage/check').at(-1).body.idEmpresa, 2);
+  assert.equal(h.maps.at(-1).polygons.length, 0);
+  assert.match(h.text(), /Sin cobertura comercial · Cable Mágico/);
+});
+
+test('mapa consulta y encuadra zonas vigentes de su empresa sin inventar ubicación del domicilio', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', simpleSummary: true, autoGeocode: false }, zones: [
+    activeZone(1), activeZone(2, { activo: null, tipoZona: 'MICROZONA_COMERCIAL' }),
+    activeZone(3, { idEmpresa: 2 }), activeZone(4, { activo: false }),
+    activeZone(5, { fechaFin: '2000-01-01' }), activeZone(6, { fechaInicio: '2999-01-01' }),
+    activeZone(7, { poligonoGeojson: { type: 'Polygon', coordinates: [] } }),
+  ] });
+  assert.deepEqual(h.requests('/coverage/zones')[0].options.params, { idEmpresa: 1 });
+  assert.equal(h.maps[0].polygons.length, 2);
+  assert.ok(h.maps[0].polygons[0].label.includes('Zona QA 1'));
+  assert.equal(h.maps[0].polygons[1].options.dashArray, '8 5');
+  assert.equal(h.maps[0].bounds.length, 1);
+  assert.deepEqual(h.maps[0].bounds[0].points[0], [-33.1, -71.7]);
+  assert.equal(h.location(), null);
+  assert.match(h.text(), /Ubicación pendiente/);
+  assert.equal(h.requests('/coverage/check').length, 0);
+});
+
+test('zonas se actualizan al cambiar de empresa y refrescar sin mover un domicilio ya seleccionado', async t => {
+  let rows = [activeZone(1), activeZone(2, { idEmpresa: 2, nombreZona: 'Empresa dos' })];
+  const h = await harness(t, { picker: { presentation: 'summary', simpleSummary: true, autoGeocode: false }, zones: () => rows });
+  await h.event('focus');
+  assert.equal(h.maps[0].bounds.length, 1, 'el refresco sin cambios respeta el encuadre');
+  await h.update({ idEmpresa: 2 });
+  assert.equal(h.requests('/coverage/zones').at(-1).options.params.idEmpresa, 2);
+  assert.equal(h.maps[0].polygons.length, 1);
+  assert.match(h.maps[0].polygons[0].label, /Empresa dos/);
+  await h.update({ value: { latitud: -33.04, longitud: -71.6 } });
+  const frames = h.maps[0].bounds.length;
+  rows = [activeZone(3, { idEmpresa: 2 })];
+  await h.event('finet:coverage-updated', { idEmpresa: 2 });
+  assert.equal(h.maps[0].bounds.length, frames);
+  assert.deepEqual(h.maps[0].views.at(-1).point, [-33.04, -71.6]);
+  assert.match(h.maps[0].polygons[0].label, /Zona QA 3/);
+});
+
+async function harness(t, { geocode = async () => response(), check = async () => ({ data: result() }), picker = null, zones = [], customerForm = null } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const old = { window: globalThis.window, document: globalThis.document, ResizeObserver: globalThis.ResizeObserver };
   const events = new EventTarget();
@@ -43,7 +126,8 @@ async function harness(t, { geocode = async () => response(), check = async () =
   const api = {
     get: async (path, options) => {
       calls.push({ path, options });
-      if (path === '/coverage/zones') return { data: [] };
+      if (path === '/prospects/customer-quotes') return { data: [] };
+      if (path === '/coverage/zones') return { data: typeof zones === 'function' ? await zones() : zones };
       assert.equal(path, '/coverage/status'); return { data: { configurado: true } };
     },
     post: async (path, body, options) => {
@@ -56,15 +140,17 @@ async function harness(t, { geocode = async () => response(), check = async () =
   };
   const leaflet = {
     map: () => {
-      const map = { views: [], markers: [], handlers: {}, getZoom: () => 12, invalidateSize() {}, remove() {},
+      const map = { views: [], markers: [], polygons: [], bounds: [], handlers: {}, getZoom: () => 12, invalidateSize() {}, remove() {},
         setView(point, zoom) { this.views.push({ point, zoom }); return this; },
+        fitBounds(points, options) { this.bounds.push({ points, options }); return this; },
         on(name, handler) { this.handlers[name] = handler; } };
       maps.push(map); return map;
     },
     tileLayer: () => ({ addTo() { return this; }, on() { return this; }, off() {} }),
-    layerGroup: () => ({ addTo(map) { this.map = map; return this; }, clearLayers() { this.map.markers = []; } }),
+    layerGroup: () => ({ addTo(map) { this.map = map; return this; }, clearLayers() { this.map.markers = []; this.map.polygons = []; } }),
     circleMarker: point => ({ bindTooltip() { return this; }, addTo(group) { group.map.markers.push(point); } }),
-    polygon: () => ({ bindTooltip() { return this; }, addTo() {} }),
+    polygon: (points, options) => ({ bindTooltip(label) { this.label = label; return this; }, addTo(group) { group.map.polygons.push({ points, options, label: this.label?.textContent }); } }),
+    latLngBounds: points => points,
   };
   const { CoveragePicker } = load('features/coverage/CommercialCoveragePicker.tsx', {
     '../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),
@@ -81,11 +167,18 @@ async function harness(t, { geocode = async () => response(), check = async () =
     '../../shared/components': { Modal: () => null, TablePagination: () => null },
     './ProspectWorkflowPanel': { ProspectWorkflowPanel: () => null }, '../coverage': { CoveragePicker },
   });
-  let props = picker ? { idEmpresa: 1, direccion: 'Calle QA 123, La Florida, Metropolitana, Chile', value: null,
+  const { CustomerPlanForm } = load('features/customers/CustomerPlanForm.tsx', {
+    '../../api': { api, apiErrorMessage: () => 'Error local' }, '../coverage': { CoveragePicker },
+    '../../shared/data/chile-territories': territories,
+    '../../lib': { formatDateTime: String },
+    '../../shared/components': { ToastNotice: () => null },
+    '../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts'),
+  });
+  let props = customerForm ?? (picker ? { idEmpresa: 1, direccion: 'Calle QA 123, La Florida, Metropolitana, Chile', value: null,
     autoGeocode: true, onChange(value) { props = { ...props, value }; tree.update(React.createElement(CoveragePicker, props)); }, ...picker }
     : { prospects: [], loading: false, loadError: '', plans: [], writeCompanyId: 1,
-      permissions: { createProspects: true }, onReload() {}, onCreated() {} };
-  const Component = picker ? CoveragePicker : ProspectsPanel;
+      permissions: { createProspects: true }, onReload() {}, onCreated() {} });
+  const Component = customerForm ? CustomerPlanForm : picker ? CoveragePicker : ProspectsPanel;
   let tree;
   await act(async () => { tree = create(React.createElement(Component, props), { createNodeMock: () => ({}) }); });
   t.after(async () => { await act(async () => tree.unmount()); Object.assign(globalThis, old); });
@@ -209,7 +302,7 @@ test('resumen editable sin ubicación: geocodificación deshabilitada muestra el
   await h.tick(700); await h.tick(0);
   assert.equal(h.requests('/coverage/geocode').length, 1);
   assert.ok(h.text().includes(mensaje), 'muestra el motivo real, no "dirección no encontrada"');
-  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.ok(h.text().includes('Ubicación automática no disponible'));
   assert.equal(h.requests('/coverage/check').length, 0, 'sin punto no se consulta ni se supone cobertura');
   assert.ok(!h.text().includes('Cobertura factible'));
   assert.ok(h.text().includes('Ingresar coordenadas'));
@@ -262,8 +355,47 @@ test('alta con proveedor MANUAL explica que el punto se marca en la ficha', asyn
   const h = await harness(t, { picker: { presentation: 'status' },
     geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje: 'x' } }) });
   await h.tick(700); await h.tick(0);
-  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.ok(h.text().includes('Ubicación automática no disponible'));
   assert.equal(h.requests('/coverage/check').length, 0);
+});
+
+test('dirección guardada con coordenadas consulta cobertura vigente sin volver a geocodificar', async t => {
+  const h = await harness(t, { customerForm: {
+    customer: { idCliente: 10, idEmpresa: 1, direcciones: [{ direccionCompleta: 'Domicilio QA 123', comuna: 'Las Condes' }],
+      contratos: [{ idContrato: 40, idEmpresa: 1, direccionInstalacion: 'Domicilio QA 123', comunaInstalacion: 'Las Condes',
+        prospecto: { idEmpresa: 1, direccion: 'Domicilio QA 123', comuna: 'Las Condes', region: 'Metropolitana de Santiago', ...candidate } }] },
+    services: [], plans: [{ idPlan: 1, idEmpresa: 1, activo: true }], onCancel() {}, onCreated() {},
+  } });
+  await h.tick(350);
+  assert.equal(h.requests('/coverage/geocode').length, 0);
+  assert.equal(h.requests('/coverage/check').length, 1);
+  assert.equal(h.requests('/coverage/check')[0].body.latitud, candidate.latitud);
+  assert.match(h.text(), /Cobertura factible/);
+});
+
+test('una dirección no encontrada conserva el motivo y vuelve a consultarse al seleccionarla otra vez', async t => {
+  const h = await harness(t, { picker: { presentation: 'summary', simpleSummary: true, allowManualLocation: true },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'SIN_RESULTADOS', mensaje: 'Dirección no encontrada' } }) });
+  await h.tick(700); await h.tick(4000);
+  assert.match(h.text(), /Dirección no encontrada/);
+  assert.doesNotMatch(h.text(), /Ubicación pendiente|Sin cobertura comercial|Cobertura factible/);
+  assert.equal(h.requests('/coverage/check').length, 0);
+  const original = h.requests('/coverage/geocode')[0].body.direccion;
+  await h.update({ direccion: 'Otra dirección QA 999, Las Condes, Chile' }); await h.tick(700);
+  await h.update({ direccion: original }); await h.tick(700);
+  assert.equal(h.requests('/coverage/geocode').length, 3);
+});
+
+test('una ubicación guardada recuperada durante la consulta prevalece sobre una respuesta tardía del geocodificador', async t => {
+  const pending = deferred();
+  const h = await harness(t, { picker: { presentation: 'summary', simpleSummary: true }, geocode: () => pending.promise });
+  await h.tick(700);
+  const saved = { latitud: -33.45, longitud: -70.65 };
+  await h.update({ value: saved });
+  await act(async () => pending.resolve(response([{ ...candidate, latitud: -35, longitud: -72 }])));
+  await h.tick(350);
+  assert.deepEqual(h.location(), saved);
+  assert.equal(h.requests('/coverage/check').at(-1).body.latitud, saved.latitud);
 });
 
 test('editor completo conserva corrección manual, coordenadas y atribución en los otros módulos', async t => {

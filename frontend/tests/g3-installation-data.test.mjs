@@ -63,6 +63,16 @@ test('failed preflight does not enable installation', async () => {
   try { assert.equal(h.button('Generar instalación').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
   finally { await h.close(); }
 });
+test('ficha de cliente sin orden muestra solamente la nota pequeña centrada', async () => {
+  const h = await mount({ installationSummary: true, compact: true });
+  try {
+    const note = h.tree.root.findByProps({ className: 'customer-contract-note customer-installation-empty' });
+    assert.equal(note.props.children, 'Sin orden de instalación registrada.');
+    assert.equal(h.tree.root.findAllByType('button').length, 0);
+    assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 0);
+    assert.deepEqual(h.calls.map(call => call[0]), ['GET']);
+  } finally { await h.close(); }
+});
 test('support must ask an authorized commercial role to complete missing data', async () => {
   const h = await mount({ mayComplete: false });
   try {
@@ -229,7 +239,8 @@ test('sin permiso de gestionar instalaciones no se ofrece conciliar el cierre', 
   assert.equal(h.calls.some(([method]) => method === 'POST'), false);
 });
 
-test('la solicitud indica que genera la orden y que no activa el servicio', async t => {
+test('la solicitud conserva generar instalación sin el texto explicativo eliminado', async t => {
   const h = await workflow(t);
-  assert.match(JSON.stringify(h.tree.toJSON()), /No activa el servicio/);
+  assert.doesNotMatch(JSON.stringify(h.tree.toJSON()), /No activa el servicio|Genera la orden de instalación para coordinar/);
+  assert.match(JSON.stringify(h.tree.toJSON()), /Generar instalación/);
 });

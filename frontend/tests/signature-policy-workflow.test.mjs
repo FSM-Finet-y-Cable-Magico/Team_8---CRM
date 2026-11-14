@@ -13,6 +13,7 @@ function load(path,mocks={}) {
   const exports={};
   new Function('require','exports',outputText)(name=>{
     if(name in mocks)return mocks[name];
+    if(name==='./CustomerPlanForm')return {CustomerPlanForm:()=>null};
     if(name==='../../shared/hooks/useTransientMessage')return load('shared/hooks/useTransientMessage.ts');
     if(name.endsWith('.css'))return {};
     if(name.startsWith('.'))throw Error('Unmocked '+name);
@@ -79,6 +80,17 @@ test('Prospectos: muestra el código documental y ofrece motivos comerciales dur
     if (tree) act(() => tree.unmount());
     h.restore();
   }
+});
+
+test('Prospectos: cancelar el contrato pendiente invalida la firma y cierra la ficha',async()=>{
+  const h=harness(state('automatic'));let tree,closed=0,changed=0;
+  try{
+    const {ProspectWorkflowPanel}=load('features/prospects/ProspectWorkflowPanel.tsx',h.common);
+    await act(async()=>{tree=create(React.createElement(ProspectWorkflowPanel,{prospect,plans:[],permissions,onNotify(){},onChanged(){changed++;},onClose(){closed++;}}));});
+    await act(async()=>tree.root.findByProps({'aria-label':'Cancelar contrato'}).props.onClick());
+    assert.deepEqual(h.mutations,[['/contracts/10/cancel',{}]]);
+    assert.equal(changed,1);assert.equal(closed,1);
+  }finally{if(tree)act(()=>tree.unmount());h.restore();}
 });
 test('Prospectos: el mismo ícono descarga el contrato nuevo y recupera un PDF antiguo faltante', async () => {
   const digital = { idContratoDigital: 5, version: 1, fechaGeneracion: '2026-11-11' };
@@ -190,6 +202,61 @@ test('Clientes: contratación pendiente y servicio activo conservan sus acciones
     if (tree) act(() => tree.unmount());
     h.restore();
   }
+});
+
+test('Clientes: una firma recibida refresca el contrato y lo muestra pendiente de instalación', async () => {
+  const h = harness(state('automatic', true)); let tree, refreshes = 0;
+  const InstallationStatus = () => null;
+  try {
+    const { CustomerContractWorkflow } = load('features/customers/CustomerContractWorkflow.tsx', {
+      ...h.common, '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage() {}, clearMessage() {} }) },
+      '../installations/G3InstallationStatus': { G3InstallationStatus: InstallationStatus },
+      './CustomerServiceActions': { CustomerServiceActions: () => null },
+      './ContractDocuments': h.common['../customers/ContractDocuments'],
+      './customer-services-state': load('features/customers/customer-services-state.ts'),
+    });
+    let props = { customer: { idCliente: 1, nombreCompleto: 'Cliente QA', contratos: [{ idContrato: 10, estado: 'Pendiente firma contrato' }] },
+      services: [], servicesLoad: { status: 'empty', customerId: 1, error: '' }, plans: [],
+      permissions: { ...permissions, createInstallOrders: true }, onRefresh: async () => {
+        refreshes++;
+        props = { ...props, customer: { ...props.customer, contratos: [{ idContrato: 10, estado: 'Firmado' }] } };
+        tree.update(React.createElement(CustomerContractWorkflow, props));
+      } };
+    await act(async () => { tree = create(React.createElement(CustomerContractWorkflow, props)); });
+    const pendingBadge = tree.root.findByProps({ className: 'customer-contract-status' });
+    assert.match(JSON.stringify(pendingBadge.children.map(child => child.props?.children ?? child.props?.value)), /Pendiente de firma/);
+    assert.doesNotMatch(JSON.stringify(pendingBadge.children.map(child => child.props?.children ?? child.props?.value)), /Pendiente firma contrato/);
+    await act(async () => tree.root.findByProps({ className: 'customer-contract-row' }).props.onClick());
+    h.set(state('automatic', true, { solicitud: { idSolicitud: 'qa-signed', estado: 'FIRMADA' } }));
+    await h.tick(); await h.tick();
+    assert.equal(refreshes, 1);
+    assert.match(JSON.stringify(tree.toJSON()), /Pendiente de instalación/);
+    assert.equal(tree.root.findByType(InstallationStatus).props.contractId, 10);
+    assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('Clientes: cancelar una firma pendiente anula la contratación y retira el botón',async()=>{
+  const h=harness(state('automatic',true));let tree,refreshes=0;
+  h.api.post=async(path,body)=>{h.mutations.push([path,body]);return{data:{idContrato:10,estado:'Anulado'}};};
+  try{
+    const {CustomerContractWorkflow}=load('features/customers/CustomerContractWorkflow.tsx',{
+      ...h.common,'../../shared/hooks/useTransientMessage':{useTransientMessage:()=>({message:'',showMessage(){},clearMessage(){}})},
+      '../installations/G3InstallationStatus':{G3InstallationStatus:()=>null},'./CustomerServiceActions':{CustomerServiceActions:()=>null},
+      './ContractDocuments':h.common['../customers/ContractDocuments'],'./customer-services-state':load('features/customers/customer-services-state.ts'),
+    });
+    await act(async()=>{tree=create(React.createElement(CustomerContractWorkflow,{
+      customer:{idCliente:1,contratos:[{idContrato:10,estado:'Pendiente firma contrato'}]},services:[],
+      servicesLoad:{status:'empty',customerId:1,error:''},plans:[],permissions,onRefresh:async()=>{refreshes++;},
+    }));});
+    await act(async()=>tree.root.findByProps({className:'customer-contract-row'}).props.onClick());
+    assert.ok(button(tree,'Cancelar'));
+    await act(async()=>button(tree,'Cancelar').props.onClick());
+    assert.deepEqual(h.mutations,[['/contracts/10/cancel',{}]]);
+    assert.equal(button(tree,'Cancelar'),undefined);
+    assert.match(JSON.stringify(tree.toJSON()),/Cancelado/);
+    assert.equal(refreshes,1);
+  }finally{if(tree)act(()=>tree.unmount());h.restore();}
 });
 test('firma confirmada refresca una vez y conserva descarga con el envío apagado',async()=>{
   const signed=state('automatic',false,{signedDownloadAvailable:true,

@@ -13,7 +13,7 @@ const text = n => typeof n === 'string' ? n : (n.children ?? []).map(text).join(
 async function harness(t, { invalid = false, tampered = false } = {}) {
   const token = randomBytes(32).toString('base64url'), pdf = Buffer.from('%PDF-fixture-only');
   const hash = createHash('sha256').update(pdf).digest('hex');
-  let signed = false; const calls = [], downloads = [], historyCalls = [];
+  let signed = false, cancelled=false; const calls = [], downloads = [], historyCalls = [];
   const old = Object.fromEntries(['window','location','history','document','fetch'].map(k => [k, globalThis[k]]));
   const location = { hash: invalid ? '#bad' : '#' + token, pathname: '/firmar' };
   globalThis.window = { location }; globalThis.location = location;
@@ -21,6 +21,7 @@ async function harness(t, { invalid = false, tampered = false } = {}) {
   globalThis.document = { createElement: () => ({ click() { downloads.push(this.download); } }) };
   globalThis.fetch = async (url, options) => {
     const body = JSON.parse(options.body); calls.push({ url, options, body });
+    if(cancelled)return new Response(JSON.stringify({message:'Este contrato fue cancelado. El enlace de firma ya no está disponible.'}),{status:409,headers:{'Content-Type':'application/json'}});
     if (url.endsWith('/pdf')) return new Response(tampered ? Buffer.from('%PDF-wrong') : pdf);
     if (url.endsWith('/sign')) signed = true;
     return new Response(JSON.stringify(url.endsWith('/view') ? { estado: signed ? 'FIRMADA' : 'PENDIENTE',
@@ -36,11 +37,21 @@ async function harness(t, { invalid = false, tampered = false } = {}) {
   } });
   const button = label => tree.root.findAllByType('button').find(n => text(n).includes(label));
   const click = async label => { await act(async () => { await button(label).props.onClick(); }); };
-  return { tree, calls, button, click, token, hash, downloads, historyCalls };
+  return { tree, calls, button, click, token, hash, downloads, historyCalls, cancel:()=>{cancelled=true;} };
 }
 test('enlace inválido no hace llamadas públicas', async t => {
   const h = await harness(t, { invalid: true }); assert.equal(h.calls.length, 0);
   assert.match(JSON.stringify(h.tree.toJSON()), /Enlace inválido/);
+});
+
+test('un enlace cancelado retira la aceptación y muestra el motivo al intentar usarlo',async t=>{
+  const h=await harness(t);
+  h.cancel();
+  await h.click('Descargar contrato');
+  assert.match(JSON.stringify(h.tree.toJSON()),/Este contrato fue cancelado/);
+  assert.equal(h.tree.root.findAllByType('input').length,0);
+  assert.equal(h.button('Aceptar y firmar'),undefined);
+  assert.equal(h.downloads.length,0);
 });
 test('enlace personal permite firmar sin código después de revisar y aceptar el PDF', async t => {
   const h = await harness(t);

@@ -191,7 +191,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
           {activities.length ? <ol className="ticket-activity-list">{activities.map((entry, index) => <li key={`${entry.kind}-${index}`}>
             <span className="ticket-activity-dot" aria-hidden="true">{entry.kind === 'diagnosis' ? <CheckCircle2 size={16} /> : <MessageSquare size={16} />}</span>
             <article><header><strong>{entry.kind === 'diagnosis' ? 'Diagnóstico registrado' : entry.kind === 'status' ? 'Comentario de seguimiento' : 'Observación técnica'}</strong>{entry.date && <time dateTime={entry.date}>{formatDateTime(entry.date)}</time>}</header>{entry.author && <small>{entry.author}</small>}<p>{entry.text.replace(/^Causa raiz:/m, 'Causa raíz:').replace(/^Estado final:/m, 'Estado observado:')}</p></article>
-          </li>)}</ol> : <div className="ticket-empty"><MessageSquare size={24} aria-hidden="true" /><strong>Aún no hay seguimiento registrado</strong><p>Los comentarios, observaciones y diagnósticos aparecerán aquí.</p></div>}
+          </li>)}</ol> : <p className="empty-state">Aún no hay seguimiento registrado.</p>}
         </div>{footer()}
       </div>}
 

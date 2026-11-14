@@ -245,6 +245,8 @@ export type Customer = {
   datosTecnicos: Record<string, unknown> | null;
   empresa?: Company | null;
   empresas?: string[];
+  direccionActual?: { direccion: string; comuna: string };
+  direccionesOmitidas?: string[];
   direcciones?: Array<{
     idDireccion: number;
     direccionCompleta: string;
@@ -256,7 +258,11 @@ export type Customer = {
     idContrato: number;
     idEmpresa: number | null;
     idZonaPago?: number | null;
+    precioMensualAplicable?: number | null;
     direccionInstalacion?: string | null;
+    comunaInstalacion?: string | null;
+    ciudadInstalacion?: string | null;
+    prospecto?: { idEmpresa: number | null; direccion: string | null; comuna: string | null; region: string | null; latitud: number | null; longitud: number | null } | null;
     estado?: string | null;
     fechaInicio?: string | null;
     fechaFirmaManual?: string | null;

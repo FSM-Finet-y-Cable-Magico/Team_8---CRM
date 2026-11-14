@@ -58,7 +58,7 @@ export function PlanZonesModal({ plan, onClose, onSaved }: { plan: Plan; onClose
             <MapPin size={18} aria-hidden="true"/><span><strong>{zone.nombreZona}</strong><small>{zone.tipoZona === 'MICROZONA_COMERCIAL' ? 'Microzona' : 'Cobertura general'}{zone.zonaPadre ? ` · ${zone.zonaPadre.nombreZona}` : ''}{zone.comuna ? ` · ${zone.comuna}` : ''}</small></span>
             {selected.includes(zone.idZonaPago) && <Check className="plan-zone-check" size={17} aria-hidden="true"/>}
           </label>)}
-          {!filtered.length && <p className="plan-zone-empty">{zones.length ? 'No hay zonas para esta búsqueda.' : 'No hay zonas activas. Crea una zona en Cobertura para poder asignarla.'}</p>}
+          {!filtered.length && <p className="empty-state">{zones.length ? 'No hay zonas para esta búsqueda.' : 'No hay zonas activas. Crea una zona en Cobertura para poder asignarla.'}</p>}
         </fieldset>
         {selected.length === 0 && zones.length > 0 && <p className="plan-zone-empty">Este plan quedará sin zonas asignadas.</p>}
       </>}

@@ -248,6 +248,7 @@ export class ESignatureService implements OnModuleInit {
       await this.lock(tx, found.idContrato);
       const row = await signatureRepository(tx).findUnique({ where: { idSolicitud: found.idSolicitud } });
       if (!row || !settings.companies.includes(row.idEmpresa) || row.tokenHash !== digest(token) || !await this.validReferences(tx, row)) return failure('Enlace no disponible');
+      if (row.estado === 'ANULADA' && row.motivoAnulacion === 'CONTRATO_CANCELADO') return failure('Este contrato fue cancelado. El enlace de firma ya no está disponible.');
       if (row.estado !== 'FIRMADA' && row.estado !== 'PENDIENTE') return failure('Solicitud no vigente. Contacta a la empresa');
       if (row.fechaExpiracion.getTime() <= Date.now()) {
         if (row.estado === 'PENDIENTE') await this.invalidate(tx, row, 'PLAZO_CUMPLIDO', true);

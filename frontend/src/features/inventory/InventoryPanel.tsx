@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
-import { Boxes, PackageSearch, RefreshCw, Search, SearchX } from 'lucide-react';
+import { PackageSearch, RefreshCw, Search } from 'lucide-react';
 import { api, type G1EquipmentResponse, type G1EquipmentType, type G1Unit } from '../../api';
 import { formatDateOnly, formatWorkOrderValue } from '../../lib';
 import { TablePagination } from '../../shared/components';
@@ -207,7 +207,7 @@ export function InventoryPanel({ companyId, companyName }: { companyId: number; 
             </table>
             {loading && <div className="inventory-state" role="status"><RefreshCw size={26} className="inventory-spinning" aria-hidden="true" /><strong>Cargando catálogo</strong><p>Consultando los equipos de la empresa.</p></div>}
             {catalogCurrent && catalog.phase === 'error' && catalog.message && <div className="inventory-state" role="status"><PackageSearch size={32} aria-hidden="true" /><strong>{catalog.message.title}</strong><p>{catalog.message.description}</p><button type="button" className="inventory-text-button" onClick={() => setReload(value => value + 1)}>Volver a consultar</button></div>}
-            {ready && !filtered.length && <div className="inventory-state" role="status">{items.length ? <SearchX size={30} aria-hidden="true" /> : <Boxes size={32} aria-hidden="true" />}<strong>{items.length ? 'No hay coincidencias' : 'Todavía no hay equipos en el catálogo'}</strong><p>{items.length ? 'Prueba con otro nombre o cambia la categoría.' : 'Los tipos de equipo se mostrarán cuando Inventario y Bodega los registre.'}</p>{(query || category) && <button type="button" className="inventory-text-button" onClick={() => { setQuery(''); setCategory(''); setPage(1); }}>Limpiar búsqueda</button>}</div>}
+            {ready && !filtered.length && <div className="empty-state" role="status"><p>{items.length ? 'No hay equipos que coincidan con la búsqueda.' : 'Todavía no hay equipos en el catálogo.'}</p>{(query || category) && <button type="button" className="inventory-text-button" onClick={() => { setQuery(''); setCategory(''); setPage(1); }}>Limpiar búsqueda</button>}</div>}
           </div>
           {ready && filtered.length > 0 && <div className="inventory-catalog-footer"><span>{filtered.length} {filtered.length === 1 ? 'tipo de equipo' : 'tipos de equipo'}{filtered.length !== items.length ? ` de ${items.length}` : ''}</span><TablePagination currentPage={currentPage} totalItems={filtered.length} pageSize={pageSize} onPageChange={setPage} /></div>}
         </section>
