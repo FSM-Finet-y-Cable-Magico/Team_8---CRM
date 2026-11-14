@@ -215,14 +215,6 @@ export function TicketsPanel({
             </select>
           </label>
         )}
-        {!attentionCatalog.complete && <div className="ticket-notice" role="status" aria-label="Estado del catálogo de atención">
-          <strong>Catálogo de atención incompleto o no verificado.</strong>
-          <p>{attentionCatalog.options.length} de 7 categorías oficiales verificadas. Solo se ofrecen las categorías habilitadas por el servidor.</p>
-          <details><summary>Revisar categorías pendientes ({attentionCatalog.issues.length})</summary>
-            <ul>{attentionCatalog.issues.map(issue => <li key={issue.name}>{issue.name}: {issue.reason}</li>)}</ul>
-          </details>
-          <p>Solicita al administrador revisar el catálogo de este entorno. No se modifica ninguna categoría automáticamente.</p>
-        </div>}
         <label>
           Categoría
           <select value={createForm.idCategoria} onChange={(event) => setCreateForm({ ...createForm, idCategoria: event.target.value })}>
@@ -234,7 +226,6 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
-        <p className="ticket-muted">El alta general utiliza categorías de atención comercial. «Baja de servicio» se inicia desde el Libro de Control; «Término de servicio» utiliza su formulario propio. Las categorías técnicas e históricas se conservan en la gestión.</p>
         {terminationSelected && <>
           <label>
             Canal del requerimiento

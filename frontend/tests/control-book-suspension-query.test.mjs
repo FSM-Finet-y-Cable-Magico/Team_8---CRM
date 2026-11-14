@@ -43,7 +43,7 @@ async function setup(t, respond = request => ({ data: evaluation(request) }), in
         }
         if (url === '/commercial/control-book') return { data: { items: [{ ...props.row, idContrato: options.params.idContrato }], pagination: { totalPages: 1 } } };
         return { data: [{ idServicio: props.row.idServicio, idCliente: props.row.idCliente, idEmpresa: props.row.idEmpresa,
-          idContrato: props.row.idContrato, estadoOperativo: 'Activo', tipoServicio: 'Internet' }] };
+          idContrato: props.row.idContrato, estadoOperativo: props.row.estadoServicio ?? 'Activo', tipoServicio: 'Internet' }] };
       },
       post: async (...args) => { writes.push(args); throw Error('No escrituras en una evaluación'); },
       patch: async (...args) => { writes.push(args); throw Error('No escrituras en una evaluación'); },
@@ -67,54 +67,67 @@ async function setup(t, respond = request => ({ data: evaluation(request) }), in
     update: async changes => { props = { ...props, ...changes }; await act(async () => tree.update(React.createElement(ControlBookDrawer, props))); } };
 }
 
-test('HTTP 200 elegible: estado y umbral visibles; evaluar y abrir no escribe', async t => {
+test('ambas acciones permanecen visibles sin selección; solo la evaluación elegible habilita suspender', async t => {
+  const h = await setup(t);
+  assert.equal(h.button('Suspender servicio').props.disabled, true);
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, true);
+  await h.click('Suspender servicio'); await h.click('Dar de baja el servicio');
+  assert.equal(h.modals.length, 0); assert.equal(h.requests.length, 0);
+  await h.click('Elegir 31');
+  assert.equal(h.button('Suspender servicio').props.disabled, false);
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, true);
+  await h.click('Suspender servicio'); assert.equal(h.modals.at(-1).contractId, 31);
+  assert.deepEqual(h.writes, []);
+});
+
+test('HTTP 200 elegible: no añade mensajes ni reintento; evaluar y abrir no escribe', async t => {
   const h = await setup(t); await h.click('Elegir 31');
-  assert.match(h.text(), /Elegible para suspensión/); assert.match(h.text(), /20 días de atraso/);
+  assert.doesNotMatch(h.text(), /Elegible para suspensión|Umbral|Requisito pendiente/);
+  assert.equal(h.button('Reintentar evaluación'), undefined);
   assert.equal(h.button('Suspender servicio').props.disabled, false);
   await h.click('Suspender servicio'); assert.equal(h.modals.at(-1).contractId, 31);
   assert.deepEqual(h.writes, []);
 });
 
-for (const [code, expected] of [['DEUDA_CUBIERTA_POR_CONVENIO', /convenio de pago activo/], ['BAJO_UMBRAL_CORTE', /20 días/]]) {
-  test(`HTTP 200 no elegible (${code}): motivo visible, confirmación inaccesible`, async t => {
+for (const code of ['DEUDA_CUBIERTA_POR_CONVENIO', 'BAJO_UMBRAL_CORTE']) {
+  test(`HTTP 200 no elegible (${code}): sin mensajes extra, confirmación inaccesible`, async t => {
     const h = await setup(t, request => ({ data: evaluation(request, { elegible: false, motivo: { code, message: 'Mensaje interno que no se debe reenviar' } }) }));
     await h.click('Elegir 31');
-    assert.match(h.text(), /No elegible para suspensión/); assert.match(h.text(), expected);
-    assert.match(h.text(), /Requisito pendiente/);
+    assert.doesNotMatch(h.text(), /No elegible para suspensión|Requisito pendiente|Umbral/);
     assert.equal(h.button('Suspender servicio').props.disabled, true);
+    await h.click('Suspender servicio'); assert.equal(h.modals.length, 0);
     assert.doesNotMatch(h.text(), /Mensaje interno/); assert.deepEqual(h.writes, []);
   });
 }
 
 for (const status of [400, 403, 404, 500]) {
-  test(`HTTP ${status}: error visible y reintento, sin cuerpo ni secretos del servidor`, async t => {
+  test(`HTTP ${status}: conserva la acción deshabilitada sin mensajes ni secretos del servidor`, async t => {
     const h = await setup(t, () => Promise.reject({ response: { status, data: { message: 'Prisma SQL password=SYNTHETIC_SECRET' } } }));
     await h.click('Elegir 31');
-    assert.match(h.text(), /No se pudo|No tienes/); assert(h.button('Reintentar evaluación'));
-    assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 1);
+    assert.equal(h.button('Reintentar evaluación'), undefined);
+    assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 0);
     assert.equal(h.button('Suspender servicio').props.disabled, true);
     assert.doesNotMatch(h.text(), /Prisma|SQL|SYNTHETIC_SECRET/); assert.deepEqual(h.writes, []);
   });
 }
 
-test('error de red y reintento satisfactorio: solo GET, sin escrituras', async t => {
+test('error de red y actualización de ficha satisfactoria: solo GET, sin escrituras', async t => {
   const h = await setup(t, (request, index) => index === 1 ? Promise.reject(Error('connect private-host:5432')) : { data: evaluation(request) });
-  await h.click('Elegir 31'); assert.match(h.text(), /No se pudo/); assert.doesNotMatch(h.text(), /private-host/);
-  await h.click('Reintentar evaluación');
+  await h.click('Elegir 31'); assert.equal(h.button('Suspender servicio').props.disabled, true); assert.doesNotMatch(h.text(), /private-host/);
+  await h.update({ revision: 1 });
   assert.equal(h.requests.length, 2); assert.equal(h.button('Suspender servicio').props.disabled, false);
-  assert.match(h.text(), /Elegible para suspensión/); assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 0);
+  assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 0);
   assert.deepEqual(h.writes, []);
 });
 
-test('consulta pendiente y doble clic en reintento: permanece bloqueada y no duplica la consulta', async t => {
+test('consulta pendiente y doble clic en suspender: permanece bloqueada y no abre el modal', async t => {
   const pending = deferred();
-  const h = await setup(t, (request, index) => index === 1 ? Promise.reject(Error('network')) : pending.promise);
+  const h = await setup(t, () => pending.promise);
   await h.click('Elegir 31');
-  const retry = h.button('Reintentar evaluación');
-  await act(async () => { retry.props.onClick(); retry.props.onClick(); });
-  assert.equal(h.requests.length, 2); assert.match(h.text(), /Evaluando suspensión/);
+  await h.click('Suspender servicio'); await h.click('Suspender servicio');
+  assert.equal(h.requests.length, 1); assert.equal(h.modals.length, 0);
   assert.equal(h.button('Suspender servicio').props.disabled, true);
-  assert.equal(h.button('Reintentar evaluación').props.disabled, true);
+  assert.doesNotMatch(h.text(), /Evaluando suspensión/);
   await act(async () => pending.resolve({ data: evaluation() }));
   assert.equal(h.button('Suspender servicio').props.disabled, false); assert.deepEqual(h.writes, []);
 });
@@ -125,7 +138,7 @@ test('respuesta antigua de otro contrato llega después de la nueva: no reemplaz
   await h.click('Elegir 31'); await h.click('Elegir 32');
   assert.equal(h.requests[0].signal.aborted, true);
   await act(async () => old.resolve({ data: evaluation({ idContrato: 31 }) }));
-  assert.match(h.text(), /No elegible para suspensión/); assert.equal(h.button('Suspender servicio').props.disabled, true);
+  assert.equal(h.button('Suspender servicio').props.disabled, true);
   assert.deepEqual(h.writes, []);
 });
 
@@ -136,19 +149,29 @@ for (const change of [{ idEmpresa: 2 }, { idServicio: 42 }, { idCliente: 11 }]) 
     await h.click('Elegir 31'); await h.update({ row: { ...row, ...change } });
     assert.equal(h.requests.length, 2); assert.equal(h.requests[0].signal.aborted, true);
     await act(async () => old.resolve({ data: evaluation() }));
-    assert.match(h.text(), /Evaluando suspensión/); assert.equal(h.button('Suspender servicio').props.disabled, true);
+    assert.equal(h.button('Suspender servicio').props.disabled, true);
     await act(async () => current.resolve({ data: evaluation(h.requests[1]) }));
     assert.equal(h.button('Suspender servicio').props.disabled, false); assert.deepEqual(h.writes, []);
   });
 }
 
 for (const over of [{ idContrato: 99 }, { empresa: { idEmpresa: 2 } }, { cliente: { idCliente: 99 } }, { elegible: 'true' }]) {
-  test(`respuesta incompatible ${Object.keys(over)[0]}: fallo cerrado y mensaje seguro`, async t => {
+  test(`respuesta incompatible ${Object.keys(over)[0]}: nunca habilita suspender`, async t => {
     const h = await setup(t, request => ({ data: evaluation(request, over) })); await h.click('Elegir 31');
-    assert.match(h.text(), /No se pudo/); assert.equal(h.button('Suspender servicio').props.disabled, true);
-    assert(h.button('Reintentar evaluación')); assert.deepEqual(h.writes, []);
+    assert.equal(h.button('Suspender servicio').props.disabled, true);
+    await h.click('Suspender servicio'); assert.equal(h.modals.length, 0);
+    assert.equal(h.button('Reintentar evaluación'), undefined); assert.deepEqual(h.writes, []);
   });
 }
+
+test('servicio suspendido conserva ambos accesos: suspender deshabilitado y baja disponible', async t => {
+  const h = await setup(t, request => ({ data: evaluation(request, { elegible: false, yaSuspendido: true }) }), { row: { ...row, estadoServicio: 'Suspendido' } });
+  await h.click('Elegir 31');
+  assert.equal(h.button('Suspender servicio').props.disabled, true);
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, false);
+  assert.doesNotMatch(h.text(), /No elegible|Reintentar evaluación|Requisito pendiente/);
+  assert.deepEqual(h.writes, []);
+});
 
 test('sin permiso de facturación no se consulta ni se ofrece evaluar/suspender', async t => {
   const h = await setup(t, undefined, { canManagePayments: false }); await h.click('Elegir 31');

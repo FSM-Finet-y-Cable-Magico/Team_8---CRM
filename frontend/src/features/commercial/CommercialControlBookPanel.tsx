@@ -6,7 +6,7 @@ import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { ControlBookDrawer } from './ControlBookDrawer';
 import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
-import { COLUMNS, ControlResponse, ControlRow, type InvoiceFocus, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
+import { COLUMNS, ControlResponse, ControlRow, type InvoiceFocus, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext, controlRowStatus } from './control-book-model';
 import { TablePagination } from '../../shared/components/TablePagination';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { useAutoRefresh } from '../../shared/hooks/useAutoRefresh';
@@ -25,7 +25,9 @@ const QUICK_FILTERS = [
 ] as const;
 
 export function CommercialStatus({ row }: { row: ControlRow }) {
-  return <span className={'control-status status-' + row.estadoComercial.toLowerCase()}>{readable(row.estadoComercial)}</span>;
+  const status = controlRowStatus(row);
+  const description = status.financial ? `Servicio: ${status.label}. Cobranza: ${status.financial}` : undefined;
+  return <span className={'control-status status-' + status.code} title={description} aria-label={description}>{status.label}</span>;
 }
 
 function Cell({ column, row }: { column: string; row: ControlRow }) {
@@ -323,7 +325,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       canManage={permissions.manageCommercialCollections}
       canManagePayments={permissions.manageBilling}
       canViewBilling={permissions.viewBilling} canViewDocuments={permissions.viewBilling && permissions.viewExternalTaxDocuments}
-      onClose={closeRecord} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh(value => value + 1); }}
+      onClose={closeRecord} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh(value => value + 1); onChanged(); }}
       onOpenBilling={setFocusedInvoice} feedback={feedback}
       financialTools={permissions.viewBilling ? (view) => <ControlBookFinancePanel key={selected.idEmpresa + '-' + selected.idCliente} view={view}
         row={selected} scope={String(selected.idEmpresa ?? companyId)} customers={customers} permissions={permissions} revision={refresh}

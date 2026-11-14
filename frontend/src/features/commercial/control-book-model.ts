@@ -46,6 +46,15 @@ const STATUS_LABELS: Record<string, string> = {
   CON_CONVENIO: 'Con convenio', ULTIMO_AVISO_REGISTRADO: 'Último aviso', RETIRO_PENDIENTE: 'Retiro pendiente', SIN_DATOS_FINANCIEROS: 'Sin datos financieros', SIN_FACTURAS: 'Sin facturas',
 };
 export const readable = (value: string | null | undefined) => value ? STATUS_LABELS[value] ?? value.replace(/_/g, ' ').toLocaleLowerCase('es-CL') : '—';
+
+// Collection milestones belong to each invoice; they must not hide a suspended or ended service.
+export function controlRowStatus(row: ControlRow) {
+  const service = row.estadoServicio?.trim().toLocaleLowerCase('es-CL');
+  const financial = readable(row.estadoComercial);
+  if (service === 'baja') return { code: 'servicio_baja', label: 'Baja', financial };
+  if (service === 'suspendido' || row.estadoCorte === 'SUSPENDIDO_COMERCIAL') return { code: 'servicio_suspendido', label: 'Suspendido', financial };
+  return { code: row.estadoComercial.toLowerCase(), label: financial, financial: null };
+}
 export const ACTION_LABELS: Record<ActionName, string> = {
   event: 'Registrar gestión de cobranza', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
@@ -73,7 +82,7 @@ export const COLUMNS: Record<string, Column> = {
   cliente: { label: 'Cliente', fields: ['nombre', 'rut'], group: 'Esenciales', sort: 'nombre' },
   servicio: { label: 'Servicio / documento', fields: ['plan', 'numeroContrato', 'tipoDocumento', 'numeroDocumento'], group: 'Esenciales' },
   deuda: { label: 'Saldo pendiente', fields: ['saldoPendiente'], group: 'Esenciales', sort: 'saldo' },
-  estado: { label: 'Estado / atraso', fields: ['estadoComercial', 'diasAtraso'], group: 'Esenciales', sort: 'diasAtraso' },
+  estado: { label: 'Estado / atraso', fields: ['estadoServicio', 'estadoComercial', 'diasAtraso'], group: 'Esenciales', sort: 'diasAtraso' },
   accion: { label: 'Próxima acción', fields: ['accionSugerida'], group: 'Esenciales' },
   contacto: { label: 'Contacto', fields: ['telefono', 'email'], group: 'Cliente y servicio' },
   direccion: { label: 'Dirección', fields: ['direccion'], group: 'Cliente y servicio' },

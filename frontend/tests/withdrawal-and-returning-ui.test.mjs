@@ -50,11 +50,12 @@ async function drawer(t, services, { canManage = true, canManagePayments = true,
 }
 const suspended = { idServicio: 41, idCliente: 10, idEmpresa: 1, idContrato: 31, tipoServicio: 'Internet', estadoOperativo: 'Suspendido' };
 
-test('la ficha solo ofrece «Dar de baja el servicio» cuando el plan elegido tiene un servicio suspendido', async t => {
+test('la ficha mantiene visible «Dar de baja el servicio» y lo habilita para el plan suspendido elegido', async t => {
   const h = await drawer(t, [suspended]);
-  assert.ok(!h.buttons().includes('Dar de baja el servicio'), 'antes de elegir plan no aparece');
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, true);
   await h.click('Seleccionar plan');
   assert.ok(h.buttons().includes('Dar de baja el servicio'));
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, false);
   await h.click('Dar de baja el servicio');
   assert.ok(textOf(h.tree.toJSON()).includes('MODAL_RETIRO'));
   assert.deepEqual(h.opened.at(-1).services.map(s => s.idServicio), [41]);
@@ -64,30 +65,31 @@ test('sin servicio suspendido (activo o de otra empresa/contrato) la ficha conse
   for (const services of [[{ ...suspended, estadoOperativo: 'Activo' }], [{ ...suspended, idContrato: 99 }], [{ ...suspended, idEmpresa: 2 }]]) {
     const h = await drawer(t, services);
     await h.click('Seleccionar plan');
-    assert.ok(!h.buttons().includes('Dar de baja el servicio'));
-    for (const label of ['Registrar gestión', 'Crear convenio', 'Otorgar prórroga', 'Cambiar día de pago', 'Agregar cargo', 'Pago manual']) assert.ok(h.buttons().includes(label), label);
+    assert.equal(h.button('Dar de baja el servicio').props.disabled, true);
+    await h.click('Dar de baja el servicio'); assert.equal(h.opened.length, 0);
+    for (const label of ['Registrar gestión', 'Convenio / prórroga', 'Cambiar día de pago', 'Agregar cargo', 'Pago manual']) assert.ok(h.buttons().includes(label), label);
   }
 });
 
 test('«Suspender servicio» se habilita solo si el backend calcula que corresponde el corte y abre su propio modal', async t => {
   const h = await drawer(t, [{ ...suspended, estadoOperativo: 'Activo' }]);
-  assert.ok(!h.buttons().includes('Suspender servicio'), 'antes de elegir plan no aparece');
+  assert.equal(h.button('Suspender servicio').props.disabled, true);
   await h.click('Seleccionar plan');
   assert.ok(h.reads.includes('/billing/contracts/31/suspension-eligibility'));
   assert.equal(h.button('Suspender servicio').props.disabled, false);
-  assert.ok(!h.buttons().includes('Dar de baja el servicio'), 'sin servicio suspendido no se ofrece la baja');
+  assert.equal(h.button('Dar de baja el servicio').props.disabled, true);
   await h.click('Suspender servicio');
   assert.ok(textOf(h.tree.toJSON()).includes('MODAL_SUSPENSION'));
   assert.ok(!textOf(h.tree.toJSON()).includes('MODAL_RETIRO'));
   assert.equal(h.suspensions.at(-1).contractId, 31);
 });
 
-test('no elegible para el corte: el botón queda deshabilitado con el motivo del backend', async t => {
+test('no elegible para el corte: el botón queda deshabilitado sin mensajes adicionales', async t => {
   const h = await drawer(t, [{ ...suspended, estadoOperativo: 'Activo' }], { suspension: { idContrato: 31, elegible: false, motivo: { code: 'DEUDA_CUBIERTA_POR_CONVENIO', message: 'La deuda vencida está cubierta por un convenio de pago activo' } } });
   await h.click('Seleccionar plan');
   assert.equal(h.button('Suspender servicio').props.disabled, true);
-  assert.match(h.button('Suspender servicio').props.title, /cubierta por un convenio de pago activo/);
-  assert.match(textOf(h.tree.toJSON()), /Requisito pendiente: La deuda vencida está cubierta por un convenio de pago activo/);
+  assert.equal(h.button('Suspender servicio').props.title, undefined);
+  assert.doesNotMatch(textOf(h.tree.toJSON()), /Requisito pendiente|convenio de pago activo/);
 });
 
 test('una respuesta de elegibilidad de otro contrato no habilita el corte', async t => {

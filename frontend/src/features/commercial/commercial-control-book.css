@@ -92,6 +92,8 @@
 .control-status.status-al_dia, .control-status.status-con_convenio { color: var(--cb-primary); background: var(--cb-accent-surface); }
 .control-status.status-con_prorroga, .control-status.status-saldo_pendiente { color: #8a601f; background: #fbf2e2; }
 .control-status.status-ultimo_aviso_registrado, .control-status.status-retiro_pendiente { color: #9a512d; background: #faede4; }
+.control-status.status-servicio_suspendido { color: #406378; background: #e7f0f4; }
+.control-status.status-servicio_baja { color: #a53942; background: #fbe9eb; }
 .control-book-results .table-pagination { align-items: center; }
 .control-book-results .table-pagination > div { flex-wrap: wrap; justify-content: center; }
 .control-empty { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; min-height: 280px; padding: 30px; text-align: center; color: var(--cb-muted); font-size: .85rem; }
@@ -217,6 +219,34 @@
 .control-action-modal .control-action-form legend { margin-bottom: 14px; color: var(--cb-text); font-size: .86rem; }
 .control-action-modal .control-form-footer { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--cb-line); }
 .control-action-modal .control-form-footer button[type="submit"] { background: var(--cb-primary); color: var(--cb-on-primary); }
+.control-action-modal .control-service-form .control-detail-list { gap: 14px 22px; }
+.control-action-modal .control-service-form textarea { min-height: 100px; }
+.control-action-form .control-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--cb-text);
+  font-size: .8rem;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.control-confirmation input[type="checkbox"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--cb-primary);
+  cursor: pointer;
+}
+.control-confirmation span { min-width: 0; }
+.control-confirmation input[type="checkbox"]:focus-visible { outline: 2px solid var(--cb-primary); outline-offset: 3px; }
 .control-action-modal:has(.control-agreement-form) { height: min(720px, calc(100dvh - 32px)); display: flex; flex-direction: column; overflow: hidden; }
 .control-action-modal:has(.control-agreement-form) > .control-book-modal-header { flex-shrink: 0; }
 .control-action-modal:has(.control-agreement-form) > .control-book-modal-content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
@@ -382,22 +412,28 @@
 .control-current-contract > * { background: transparent; }
 .control-customer-actions { width: 100%; min-width: 0; border-top: 1px solid var(--cb-line); padding-top: 18px; margin-top: auto; }
 .control-customer-actions > p { margin: 6px 0 8px; overflow-wrap: anywhere; }
-.control-customer-action-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.control-customer-action-group { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(max-content, 1fr); gap: 8px; }
 .control-workbook .control-customer-action-group button {
-  flex: 1 1 155px;
-  min-height: 37px;
-  justify-content: flex-start;
-  padding: 10px 12px;
+  min-width: 0;
+  min-height: 40px;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid var(--cb-line);
   border-radius: 6px;
-  text-align: start;
+  text-align: center;
   background: transparent;
   color: var(--cb-text);
+  font-size: .75rem;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 .control-customer-action-group svg { color: var(--cb-primary); flex-shrink: 0; }
-.control-customer-action-group:has(> button:only-child) { justify-content: flex-end; }
-.control-workbook .control-customer-action-group > button:only-child { flex: 0 1 auto; min-width: 160px; }
+.control-customer-action-group:has(> button:only-child) { grid-template-columns: minmax(160px, 200px); justify-content: end; }
 .control-workbook .control-customer-action-group button:not(:disabled):hover { background: var(--cb-subtle); }
+.control-workbook .control-customer-action-group button.control-action-danger { background: #b73b32; color: #fff; border-color: #b73b32; }
+.control-customer-action-group .control-action-danger svg { color: currentColor; }
+.control-workbook .control-customer-action-group button.control-action-danger:not(:disabled):hover { background: #9d3029; }
 .control-invoice-detail { padding: 14px 16px; border: 1px solid var(--cb-line); border-radius: 8px; background: var(--cb-subtle); }
 .control-invoice-detail header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
 .control-invoice-detail header h4, .control-invoice-detail header p { margin: 0; }
@@ -441,8 +477,8 @@
 .control-workbook .control-record-documents thead th { background: var(--cb-accent-surface); color: var(--cb-text); }
 .control-workbook .control-record-documents :is(th, td) + :is(th, td) { border-inline-start: 1px solid var(--cb-line); }
 
-@container controlWorkspace (max-width: 860px) {
-  .control-customer-action-group { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@container controlWorkspace (max-width: 1050px) {
+  .control-customer-action-group { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @container controlWorkspace (max-width: 650px) {
   .control-workbook .control-book-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -459,4 +495,7 @@
   .control-workbook .control-ribbon-command { min-width: 70px; }
   .control-workbook .control-sort { margin-inline-start: 0; }
   .control-customer-action-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container controlWorkspace (max-width: 380px) {
+  .control-customer-action-group { grid-template-columns: minmax(0, 1fr); }
 }

@@ -48,7 +48,7 @@ const ORDER_LABELS: Record<string, string> = {
   COMPLETADA: 'Aprobada por el jefe técnico', CANCELADA: 'Cancelada',
 };
 const REQUEST_LABELS: Record<string, string> = { REGISTRADA: 'Registrada', EN_GESTION: 'En gestión', CANCELADA: 'Cancelada', CERRADA: 'Cerrada' };
-const STEPS = ['Requisitos', 'Datos de la baja', 'Confirmación'] as const;
+const STEPS = ['Resumen', 'Observaciones', 'Confirmación'] as const;
 
 export const MIN_WITHDRAWAL_OBSERVATION = 10;
 
@@ -135,15 +135,11 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
   const debt = context?.deuda;
   const contextRows: Array<[string, string | null]> = context ? [
     ['Empresa', context.empresa.nombre],
-    ['Cliente', [context.cliente.nombre, context.cliente.rut].filter(Boolean).join(' · ') || null],
     ['Contrato', context.contrato ? `#${context.contrato.idContrato}${plan ? ' · ' + plan : ''}` : null],
-    ['Servicio', context.servicio.tipo],
-    ['Estado del servicio', context.servicio.estado],
+    ['Servicio', `${context.servicio.tipo} · ${context.servicio.estado}`],
     ['Deuda vencida', debt && debt.uncoveredCount > 0 ? `${currency.format(debt.totalExigible)} · ${debt.maxDiasAtraso} días` : debt && debt.coveredByAgreementCount > 0 ? 'Con convenio activo' : 'Sin deuda vencida'],
     ['Aviso previo de retiro', context.aviso ? dateLabel(context.aviso.fecha) : 'No registrado'],
     ['Dirección de retiro', [context.direccionRetiro?.direccion, context.direccionRetiro?.comuna].filter(Boolean).join(', ') || null],
-    ['Motivo', 'Morosidad'],
-    ['Responsable', context.responsable.nombre],
   ] : [];
   const details = (rows: Array<[string, string | null | undefined]>, label?: string) => <dl className="control-detail-list" aria-label={label}>
     {rows.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value ?? '—'}</dd></div>)}
@@ -155,7 +151,7 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
 
   return <ControlBookModal title="Dar de baja el servicio" busy={saving} onClose={() => { if (!pending.current) onClose(); }}>
     <div className="control-modal-customer"><strong>{customerName}</strong><span>{plan ?? '—'}</span></div>
-    <form className="control-action-form" onSubmit={event => void submit(event)}>
+    <form className="control-action-form control-service-form" onSubmit={event => void submit(event)}>
       <fieldset disabled={saving}>
         {!followUp && <ol className="control-steps" aria-label="Pasos">
           {STEPS.map((label, index) => <li key={label} className={index === step ? 'active' : undefined} aria-current={index === step ? 'step' : undefined}><span>{index + 1}</span>{label}</li>)}
@@ -165,7 +161,7 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
             <option value="">Seleccionar servicio</option>
             {candidates.map(service => <option key={service.idServicio} value={String(service.idServicio)}>{service.tipoServicio} · {service.estadoOperativo}</option>)}
           </select></label>
-          {loading && <p role="status" className="control-muted">Consultando requisitos…</p>}
+          {loading && <p role="status" className="control-muted">Cargando…</p>}
         </>}
         {context && followUp && <>
           <h3>Seguimiento de la baja</h3>
@@ -178,8 +174,6 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
             ['Baja aplicada', dispatch?.aplicado ? 'Sí' : 'No; el servicio sigue suspendido'],
           ], 'Seguimiento')}
           {!followUp.flujoGuiado && <p role="status" className="control-muted">Esta solicitud no se creó desde el Libro de Control; revísala antes de continuar.</p>}
-          {eligibility?.despachoG3Habilitado === false && <p role="status" className="control-muted">El envío de la orden técnica está deshabilitado en este ambiente: la solicitud queda registrada sin orden.</p>}
-          {eligibility?.bajaAutomaticaHabilitada === false && <p role="status" className="control-muted">La baja efectiva automática está deshabilitada en este ambiente: aunque la orden se apruebe, el servicio seguirá suspendido hasta habilitarla.</p>}
           {dispatch?.estadoOt === 'PENDIENTE_APROBACION' && <p role="status" className="control-muted">El técnico cerró la orden; la baja se aplica cuando el jefe técnico la apruebe.</p>}
           {notice && <p role="status" className="control-muted">{notice}</p>}
           {canManage && canCancel && <label className="control-form-observation">Motivo de cancelación (si corresponde)<textarea maxLength={300} value={cancelReason} onChange={event => setCancelReason(event.target.value)} placeholder="Por ejemplo: el cliente pagó la deuda."/></label>}
@@ -189,22 +183,19 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
             {canCancel && <button type="button" className="control-text-button" onClick={() => void followUpAction('cancel')}>Cancelar retiro</button>}
           </div>}
         </>}
-        {context && !followUp && step === 0 && <>
-          {details(contextRows)}
-          {details(eligibility!.checks.map(item => [item.label, item.ok ? '✓ Cumple' : `✗ ${item.message}`] as [string, string]), 'Requisitos')}
-          {!eligibility!.habilitado && <p role="status" className="control-muted">La baja guiada aún no está habilitada en este ambiente: falta habilitar el registro privado que vincula solicitud, aviso, ticket y retiro técnico. No se registrará nada.</p>}
-        </>}
+        {context && !followUp && step === 0 && details(contextRows)}
         {context && ready && step === 1 && <>
-          <h3 ref={heading} tabIndex={-1}>Datos de la baja</h3>
-          {details(contextRows)}
+          <h3 ref={heading} tabIndex={-1}>Observaciones</h3>
           <label className="control-form-observation">Observaciones de gestión y técnicas<textarea required maxLength={1000} value={observation} onChange={event => setObservation(event.target.value)} placeholder="Gestiones de cobranza realizadas, respuesta del cliente e indicaciones para el retiro."/></label>
         </>}
         {context && ready && step === 2 && <>
           <h3 ref={heading} tabIndex={-1}>Confirmación</h3>
           {details([['Servicio', `${context.servicio.tipo} · ${context.servicio.estado}`], ['Contrato', context.contrato ? `#${context.contrato.idContrato}` : null],
             ['Deuda vencida', debt ? currency.format(debt.totalExigible) : null], ['Observaciones', observation.trim()]])}
-          <label><span><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> Confirmo dar de baja este servicio y solicitar el retiro de sus equipos.</span>
-            <small>Se crean la solicitud de retiro y el ticket «Baja de servicio». El servicio sigue suspendido y la deuda se conserva; la baja se aplica cuando el retiro técnico es aprobado.</small></label>
+          <label className="control-confirmation">
+            <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/>
+            <span>Confirmo solicitar la baja del servicio y el retiro de sus equipos.</span>
+          </label>
         </>}
       </fieldset>
       {error && <p role="alert" className="control-feedback error">{error}</p>}

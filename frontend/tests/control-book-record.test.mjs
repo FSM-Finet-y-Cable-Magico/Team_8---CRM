@@ -112,7 +112,7 @@ test('cambiar día conserva el contrato y valor elegidos, sin modificar facturas
 test('convenio se confirma en dos pasos y usa el plan seleccionado, sin crear pagos', async t => {
   const selected = { ...row, rowId: '10-32-52', idContrato: 32, numeroContrato: 'CT-32', idServicio: 42, idFactura: 52, plan: 'Otro plan' };
   const h = await drawer(t, {}, [selected]);
-  await h.click('Crear convenio');
+  await h.click('Convenio / prórroga');
   await h.change('Condiciones', 'Pago en dos cuotas', 'textarea');
   await h.submit();
   assert.equal(h.posts.length, 0);
@@ -127,11 +127,35 @@ test('convenio se confirma en dos pasos y usa el plan seleccionado, sin crear pa
   assert.equal(h.posts[0][1].cuotas.reduce((sum, item) => sum + item.monto, 0), 19990);
 });
 
+test('convenio y prórroga comparten entrada y mantienen sus operaciones independientes', async t => {
+  const h = await drawer(t, { fechaVencimientoEfectiva: '2026-11-01' });
+  assert.equal(h.tree.root.findAllByType('button').filter(node => textOf(node) === 'Convenio / prórroga').length, 1);
+  assert.ok(!h.tree.root.findAllByType('button').some(node => ['Crear convenio', 'Otorgar prórroga'].includes(textOf(node))));
+  await h.click('Convenio / prórroga');
+  await h.change('Tipo de acuerdo', 'extension', 'select');
+  await h.change('Nueva fecha', '2026-12-01');
+  await h.change('Motivo / observación', 'Fecha acordada con el cliente', 'textarea');
+  await h.submit();
+  assert.deepEqual(h.posts, [['/commercial/extensions', { idFactura: 51, nuevaFecha: '2026-12-01', motivo: 'Fecha acordada con el cliente' }]]);
+});
+
+test('la prórroga del formulario común sigue rechazando una fecha anterior al vencimiento', async t => {
+  const h = await drawer(t, { fechaVencimientoEfectiva: '2026-11-01' });
+  await h.click('Convenio / prórroga');
+  await h.change('Tipo de acuerdo', 'extension', 'select');
+  await h.change('Nueva fecha', '2026-10-31');
+  await h.change('Motivo / observación', 'Solicitud de prueba', 'textarea');
+  await h.submit();
+  assert.deepEqual(h.posts, []);
+  assert.match(textOf(h.tree.toJSON()), /debe ser posterior al vencimiento vigente/);
+});
+
 test('el plan habilita acciones y la factura se elige dentro del modal con su fecha', async t => {
   const h = await drawer(t, {}, [{...row,fechaVencimientoEfectiva:'2026-11-10'}, {...row, rowId: '10-31-52', idFactura: 52,fechaVencimientoEfectiva:'2026-12-10'}]);
-  assert.equal(h.tree.root.findAllByType('button').find(node => textOf(node) === 'Crear convenio').props.disabled, false);
+  assert.equal(h.tree.root.findAllByType('button').find(node => textOf(node) === 'Convenio / prórroga').props.disabled, false);
   assert.equal(h.tree.root.findAllByType('select').length,0);
-  await h.click('Otorgar prórroga');
+  await h.click('Convenio / prórroga');
+  await h.change('Tipo de acuerdo', 'extension', 'select');
   const selector=h.tree.root.findAllByType('label').find(node=>textOf(node).startsWith('Documento')).findByType('select');
   assert.ok(!textOf(selector).includes('·'));
   await h.submit();

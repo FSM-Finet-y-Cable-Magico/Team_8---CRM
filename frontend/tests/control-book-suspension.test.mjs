@@ -42,10 +42,11 @@ async function suspension(t, options = {}) {
   return { tree, reads, patches, saved, text, confirm, observe, submit, submitButton };
 }
 
-test('muestra lo que calcula el backend: empresa, contrato, servicios, saldo, facturas, atraso, umbral y motivo NO PAGO', async t => {
+test('resumen compacto con empresa, contrato, servicios, saldo, atraso y motivo, sin explicaciones de requisitos', async t => {
   const h = await suspension(t);
   assert.deepEqual(h.reads, ['/billing/contracts/31/suspension-eligibility']);
-  for (const value of ['FiNet', '#31 · Moroso', 'Internet, TV', '12 días', '5 días de atraso', 'NO PAGO', 'Factura #80', 'cubierta(s) por un convenio activo']) assert.ok(h.text().includes(value), value);
+  for (const value of ['FiNet', '#31 · Moroso', 'Internet, TV', '12 días', 'NO PAGO']) assert.ok(h.text().includes(value), value);
+  assert.doesNotMatch(h.text(), /Umbral|cubierta\(s\)|No corresponde suspender|Cumple/);
   assert.ok(!/\bG[0-9]\b/.test(h.text()));
 });
 
@@ -57,7 +58,7 @@ test('exige confirmación explícita; la observación es opcional y se envía re
   assert.equal(h.submitButton().props.disabled, false);
   await h.submit();
   assert.deepEqual(h.patches, [['/billing/contracts/31/suspend', { observacion: 'Sin respuesta a tres llamados' }]]);
-  assert.match(h.saved[0], /Servicio suspendido por no pago \(2 servicios\).*dar de baja el servicio/);
+  assert.equal(h.saved[0], 'Servicio suspendido por no pago (2 servicios).');
 });
 
 test('sin observación no envía el campo', async t => {
@@ -66,9 +67,9 @@ test('sin observación no envía el campo', async t => {
   assert.deepEqual(h.patches, [['/billing/contracts/31/suspend', { observacion: undefined }]]);
 });
 
-test('no elegible: muestra el motivo específico y no permite suspender', async t => {
+test('no elegible: no añade el motivo ni permite suspender', async t => {
   const h = await suspension(t, { eligibility: eligibility({ elegible: false, facturas: [], motivo: { code: 'BAJO_UMBRAL_CORTE', message: 'No existen facturas con saldo que cumplan los días de corte (5 días de atraso)' } }) });
-  assert.ok(h.text().includes('No corresponde suspender: No existen facturas con saldo que cumplan los días de corte (5 días de atraso)'));
+  assert.doesNotMatch(h.text(), /No corresponde suspender|No existen facturas/);
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   await h.submit(); assert.equal(h.patches.length, 0);
 });

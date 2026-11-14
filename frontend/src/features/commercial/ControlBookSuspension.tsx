@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage } from '../../api';
 import { ControlBookModal } from './ControlBookModal';
-import { currency, dateLabel } from './control-book-model';
+import { currency } from './control-book-model';
 
 /** Same shape as BillingService.suspensionEligibility() (GET /billing/contracts/:id/suspension-eligibility). */
 export type SuspensionEligibility = {
@@ -56,7 +56,7 @@ export function ControlBookSuspension({ contractId, customerName, plan, canManag
       const count = data.serviciosSuspendidos?.length ?? 0;
       onSaved(data.yaSuspendido
         ? 'El contrato ya estaba suspendido; no se modificó nada.'
-        : `Servicio suspendido por no pago (${count} servicio${count === 1 ? '' : 's'}). Si corresponde, ahora puedes dar de baja el servicio desde esta ficha.`);
+        : `Servicio suspendido por no pago (${count} servicio${count === 1 ? '' : 's'}).`);
     } catch (err) { setError(apiErrorMessage(err)); }
     finally { pending.current = false; setSaving(false); onBusyChange(false); }
   }
@@ -64,9 +64,9 @@ export function ControlBookSuspension({ contractId, customerName, plan, canManag
   const data = eligibility;
   return <ControlBookModal title="Suspender servicio" busy={saving} onClose={() => { if (!pending.current) onClose(); }}>
     <div className="control-modal-customer"><strong>{customerName}</strong><span>{plan ?? '—'}</span></div>
-    <form className="control-action-form" onSubmit={event => void submit(event)}>
+    <form className="control-action-form control-service-form" onSubmit={event => void submit(event)}>
       <fieldset disabled={saving}>
-        {loading && <p role="status" className="control-muted">Calculando si corresponde el corte…</p>}
+        {loading && <p role="status" className="control-muted">Cargando…</p>}
         {data && <>
           <dl className="control-detail-list">
             {([
@@ -75,19 +75,15 @@ export function ControlBookSuspension({ contractId, customerName, plan, canManag
               ['Servicios afectados', data.serviciosAfectados.length ? data.serviciosAfectados.map(item => item.tipoServicio ?? `#${item.idServicio}`).join(', ') : 'Ninguno'],
               ['Saldo exigible vencido', currency.format(data.deuda.totalExigibleSobreUmbral)],
               ['Mayor atraso', `${data.deuda.maxDiasAtraso} días`],
-              ['Umbral de corte vigente', `${data.umbralDias} días de atraso`],
               ['Motivo', data.motivoSuspension],
             ] as Array<[string, string | null]>).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? '—'}</dd></div>)}
           </dl>
-          {data.facturas.length > 0 && <dl className="control-detail-list" aria-label="Facturas que habilitan el corte">
-            {data.facturas.map(item => <div key={item.idFactura}><dt>Factura #{item.idFactura}</dt><dd>{currency.format(item.saldoExigible)} · vence {dateLabel(item.fechaVencimientoEfectiva)} · {item.diasAtraso} días</dd></div>)}
-          </dl>}
-          {data.deuda.cubiertasPorConvenio > 0 && <p className="control-muted">{data.deuda.cubiertasPorConvenio} factura(s) vencida(s) cubierta(s) por un convenio activo no cuentan para el corte.</p>}
-          {!data.elegible && <p role="status" className="control-muted">No corresponde suspender: {data.motivo?.message ?? 'no se cumplen las condiciones de corte.'}</p>}
           {ready && <>
-            <p className="control-muted">Se suspenden el contrato y sus servicios activos de esta empresa. Otros contratos y empresas del cliente no cambian; la deuda se conserva.</p>
             <label className="control-form-observation">Observación (opcional)<textarea maxLength={1000} value={observation} onChange={event => setObservation(event.target.value)} placeholder="Gestión previa o indicación interna."/></label>
-            <label><span><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/> Confirmo suspender el servicio por no pago.</span></label>
+            <label className="control-confirmation">
+              <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/>
+              <span>Confirmo suspender el servicio por no pago.</span>
+            </label>
           </>}
         </>}
       </fieldset>
