@@ -212,10 +212,10 @@ export function CustomerContractWorkflow({
                           <label className="customer-inline-form-wide">Observaciones<textarea value={signatureObservation} onChange={(event) => setSignatureObservation(event.target.value)} /></label>
                           <div className="button-row"><button type="button" className="secondary" onClick={() => setSignatureOpen(false)}>Cancelar</button><button type="submit" disabled={confirmingSignature}>Registrar firma manual</button></div>
                         </form> : <button type="button" className="secondary compact crm-table-action" onClick={() => setSignatureOpen(true)}>Registrar firma manual</button>)}
-                        {(contractSigned || target?.kind === 'service') && target?.kind !== 'loading' && <G3InstallationStatus key={contract.idContrato} contractId={contract.idContrato} compact installationSummary
+                        {(contractSigned || target?.kind === 'service') && target?.kind !== 'loading' && <G3InstallationStatus key={`installation-${contract.idContrato}`} contractId={contract.idContrato} compact installationSummary
                           service={selectedService} canRequest={contractSigned && permissions.createInstallOrders && target?.kind === 'contract'}
                           onChanged={() => void onRefresh(selectedService?.idServicio)} />}
-                        {target?.kind === "service" && selectedService && <CustomerServiceActions key={selectedService.idServicio}
+                        {target?.kind === "service" && selectedService && <CustomerServiceActions key={`service-actions-${selectedService.idServicio}`}
                           contract={contract} service={selectedService} plans={plans} permissions={permissions} onRefresh={onRefresh} />}
                         {pendingSignature && !service && permissions.manageContracts && <div className="customer-contract-cancel-actions"><button type="button" aria-label="Cancelar contrato" disabled={cancellingContract !== null || confirmingSignature} onClick={() => void cancelContract(contract.idContrato)}>{cancellingContract === contract.idContrato ? 'Cancelando…' : 'Cancelar'}</button></div>}
                       </section>

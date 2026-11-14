@@ -45,6 +45,11 @@ function completedFields(tracking: G3InstallationTracking | null, service?: Cust
 }
 
 type InstallationTarget = { contractId: number; prospectId?: never } | { prospectId: number; contractId?: never };
+const isCompleted = (tracking: G3InstallationTracking | null) => tracking?.estadoIntegracion === 'COMPLETADA' || Boolean(tracking?.fechaCierreProcesado);
+function matchesTarget(tracking: G3InstallationTracking | null, contractId?: number, prospectId?: number) {
+  return !tracking || ((contractId == null || tracking.idContrato == null || tracking.idContrato === contractId)
+    && (prospectId == null || tracking.idProspecto == null || tracking.idProspecto === prospectId));
+}
 export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, singleRefresh = false, service }: InstallationTarget & {
   canRequest: boolean; blockedReason?: string; onChanged?: () => void; compact?: boolean;
   installationSummary?: boolean; hideRequest?: boolean; singleRefresh?: boolean; service?: CustomerService;
@@ -72,11 +77,20 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
   }, [compact, tracking, feedback, loading, busy, showMessage, clearMessage]);
   const loadRevision = useRef(0);
   const mutationInFlight = useRef(false);
+  const actionController = useRef<AbortController | null>(null);
   const loadController = useRef<AbortController | null>(null);
   const savedInstallation = service?.instalacion;
   const savedCompletion = Boolean(savedInstallation && (savedInstallation.estado === 'COMPLETADA'
     || savedInstallation.fechaProcesamiento || savedInstallation.fechaCompletada));
   useEffect(() => { setComuna(''); setSameAddress(false); setNotice(''); }, [contractId, prospectId]);
+  useEffect(() => {
+    mutationInFlight.current = false;
+    setBusy(false);
+    return () => {
+      actionController.current?.abort();
+      actionController.current = null;
+    };
+  }, [contractId, prospectId]);
   const load = useCallback(async () => {
     loadController.current?.abort();
     const controller = new AbortController();
@@ -89,6 +103,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       const path = contractId != null ? `/integrations/g3/contracts/${contractId}/installation` : `/integrations/g3/prospects/${prospectId}/installation`;
       const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
       if (revision !== loadRevision.current || controller.signal.aborted) return;
+      if (!matchesTarget(data, contractId, prospectId)) throw new Error('La consulta no corresponde a la instalación seleccionada.');
       setTracking(data);
       if (!data && canRequest && !savedCompletion && !installationSummary) {
         const result = await api.post('/integrations/g3/installation-requirements', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
@@ -112,38 +127,60 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
 
   async function completeData() {
     if (mutationInFlight.current || !canRequest || !requirements || !sameAddress || !comuna.trim()) return;
+    const controller = new AbortController();
+    actionController.current = controller;
+    const current = () => actionController.current === controller && !controller.signal.aborted;
     mutationInFlight.current = true;
     setBusy(true); setError('');
     try {
-      const { data } = await api.patch(`/integrations/g3/contracts/${requirements.idContrato}/installation-data`, { comuna: comuna.trim(), confirmarMismaDireccion: true });
+      const { data } = await api.patch(`/integrations/g3/contracts/${requirements.idContrato}/installation-data`, { comuna: comuna.trim(), confirmarMismaDireccion: true }, { signal: controller.signal });
+      if (!current()) return;
       setRequirements(data); setComuna(''); setSameAddress(false);
       setNotice('Comuna guardada. El contrato firmado y su PDF conservan sus datos.');
       onChanged?.();
-    } catch (cause) { setError(apiErrorMessage(cause)); } finally { mutationInFlight.current = false; setBusy(false); }
+    } catch (cause) { if (current()) setError(apiErrorMessage(cause)); }
+    finally { if (current()) { mutationInFlight.current = false; setBusy(false); actionController.current = null; } }
   }
 
   async function run(action: 'request' | 'retry' | 'detail' | 'reconcile') {
     if (mutationInFlight.current || loading) return;
-    if ((action === 'request' || action === 'retry') && !canRequest) return;
+    if (action !== 'detail' && !canRequest) return;
     if (action === 'request' && (hideRequest || tracking || error || !requirements || requirements.comunaFaltante)) return;
+    if (action !== 'request' && !tracking) return;
+    const controller = new AbortController();
+    actionController.current = controller;
+    const current = () => actionController.current === controller && !controller.signal.aborted;
     mutationInFlight.current = true;
     setBusy(true); setError(''); setNotice('');
     try {
       if (action === 'request') {
-        const { data } = await api.post<G3InstallationTracking>('/integrations/g3/installations', prospectId ? { idProspecto: prospectId } : { idContrato: contractId });
+        const { data } = await api.post<G3InstallationTracking>('/integrations/g3/installations', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
+        if (!current()) return;
+        if (!data || !matchesTarget(data, contractId, prospectId)) throw new Error('La respuesta no corresponde a la instalación solicitada.');
         setTracking(data);
       } else if (tracking) {
         const path = `/integrations/g3/installations/${tracking.idIntegracion}`;
         if (action === 'detail') {
-          const { data } = await api.get<G3InstallationTracking>(path); setTracking(data);
+          const { data } = await api.get<G3InstallationTracking>(path, { signal: controller.signal });
+          if (!current()) return;
+          if (!data || data.idIntegracion !== tracking.idIntegracion || !matchesTarget(data, contractId, prospectId)) {
+            setError('La consulta no corresponde a la instalación seleccionada.');
+            return;
+          }
+          setTracking(data);
+          // A read-only refresh updates this card. Reload the customer only when its operational relationship changed.
+          if (isCompleted(data) !== isCompleted(tracking) || (data.idServicio ?? null) !== (tracking.idServicio ?? null)) onChanged?.();
+          return;
         } else {
-          const { data } = await api.post(`${path}/${action}`);
+          const { data } = await api.post(`${path}/${action}`, undefined, { signal: controller.signal });
+          if (!current()) return;
           if (action === 'reconcile' && data.available === false) setNotice('El cierre técnico aún no está confirmado. La instalación continúa en seguimiento.');
           await load();
         }
       }
-      onChanged?.();
-    } catch (cause) { setError(apiErrorMessage(cause)); } finally { mutationInFlight.current = false; setBusy(false); }
+      if (current()) onChanged?.();
+    } catch (cause) { if (current()) setError(apiErrorMessage(cause)); }
+    finally { if (current()) { mutationInFlight.current = false; setBusy(false); actionController.current = null; } }
   }
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
@@ -168,7 +205,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     {notice && <p role="status">{notice}</p>}
   </div>;
 
-  const completed = tracking.estadoIntegracion === 'COMPLETADA' || Boolean(tracking.fechaCierreProcesado);
+  const completed = isCompleted(tracking);
   const state = completed ? 'Completada' : STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';

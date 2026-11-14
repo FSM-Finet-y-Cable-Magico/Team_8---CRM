@@ -2980,7 +2980,7 @@ button.profile-menu-item.danger:hover {
   background: transparent;
   box-shadow: none;
   font: 400 .8rem / 1.6 var(--font-sans);
-  text-align: left;
+  text-align: center;
 }
 
 
