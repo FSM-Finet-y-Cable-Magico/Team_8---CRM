@@ -84,7 +84,7 @@ test('dashboard solicita por separado agenda técnica y contratos por activar', 
   await render({ pendientesActivacion: 3, instalacionesPendientes: 5 }, async tree => {
     const card = label => tree.root.findByProps({ 'data-label': label });
     assert.equal(card('Pendientes de activación').props['data-value'], 3);
-    assert.equal(card('Instalaciones pendientes').props['data-value'], 3);
+    assert.equal(card('Instalaciones pendientes').props['data-value'], 5);
     await act(async () => card('Instalaciones pendientes').props.onClick());
     await act(async () => card('Pendientes de activación').props.onClick());
     await act(async () => card('Clientes activos').props.onClick());

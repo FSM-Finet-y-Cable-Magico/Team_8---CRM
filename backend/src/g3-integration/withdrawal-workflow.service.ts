@@ -23,10 +23,25 @@ import {
 import { sha256Payload } from './g3-integration.utils';
 import { G3_WITHDRAWAL_CLIENT, G3WithdrawalClient } from './http-g3-withdrawal.client';
 import { evaluateWithdrawalEligibility, WITHDRAWAL_MOTIVE_MOROSITY, WithdrawalFacts } from './withdrawal-eligibility';
-import { postgresWithdrawalStorage, WITHDRAWAL_STORAGE, WithdrawalDispatch, WithdrawalStorage } from './withdrawal.storage';
+import { postgresWithdrawalStorage, ServiceTermination, TERMINATION_CHANNELS, TERMINATION_REQUESTERS, WITHDRAWAL_STORAGE, WithdrawalCause, WithdrawalDispatch,
+  WithdrawalStorage, withdrawalStorageReady } from './withdrawal.storage';
+import { FlowTicketCategory, TERMINATION_TICKET_CATEGORY, WITHDRAWAL_TICKET_CATEGORY } from '../tickets/tickets.service';
+import { validateRut } from '../rut/rut.util';
 
 type Db = Prisma.TransactionClient;
 const CLOSED_REQUEST_STATES = ['CANCELADA', 'CERRADA'];
+/** Voluntary termination requested by the customer (FINET 13-11-2026): same engine, different commercial rules. */
+export const WITHDRAWAL_MOTIVE_VOLUNTARY = 'VOLUNTARIA';
+const ENGINE_MOTIVES: readonly string[] = [WITHDRAWAL_MOTIVE_MOROSITY, WITHDRAWAL_MOTIVE_VOLUNTARY];
+/** Tolerance for the clock of the device that registers the requirement (a requirement is never in the future). */
+const REQUIREMENT_CLOCK_SKEW_MS = 5 * 60_000;
+export type VoluntaryTerminationInput = {
+  rut: string; idServicio: number; idContrato?: number; canal: string; solicitante: string; requerimientoEn: string;
+  evidencia: string; descripcion: string; confirmacionIdentidad: boolean;
+};
+/** Legitimate, auditable system actor of the automatic finalization (no user is impersonated). */
+export const WITHDRAWAL_SYSTEM_ACTOR = 'SISTEMA_G8_SEGUIMIENTO_RETIROS';
+type FinalizationActor = { kind: 'USUARIO'; user: AuthUser } | { kind: 'SISTEMA'; origen: typeof WITHDRAWAL_SYSTEM_ACTOR };
 /**
  * public.solicitud_retiro_servicio.estado_despacho_tecnico only admits this value in the global contract
  * (db/global/init-global.sql, CHECK solicitud_retiro_servicio_despacho_check). G8 never changes it: the technical
@@ -72,6 +87,14 @@ export class WithdrawalWorkflowService {
     return (this.config.get<string>('G3_WITHDRAWAL_DISPATCH_ENABLED') ?? '').trim().toLowerCase() === 'true';
   }
 
+  /**
+   * G3 receives `motivo` but today treats every BAJA request as morosity. A VOLUNTARIA OT is only sent once G3 ratifies
+   * the motive (G3_WITHDRAWAL_VOLUNTARY_ENABLED=true); until then the request waits, it is never sent as MOROSIDAD.
+   */
+  voluntaryDispatchEnabled() {
+    return (this.config.get<string>('G3_WITHDRAWAL_VOLUNTARY_ENABLED') ?? '').trim().toLowerCase() === 'true';
+  }
+
   /** Read-only eligibility; the UI only shows it, initiate() decides again under lock. */
   async eligibility(idServicio: number, currentUser: AuthUser) {
     const db = this.prisma as unknown as Db;
@@ -81,9 +104,18 @@ export class WithdrawalWorkflowService {
     const facts = await this.loadFacts(db, service, currentUser);
     const result = evaluateWithdrawalEligibility(facts);
     const capabilities = await this.storage.capabilities(db);
+    // Existing request: the same access of the Libro de Control follows it (ticket, dispatch, OT, closure) instead of a second one.
+    let seguimiento: Record<string, unknown> | null = null;
+    if (facts.activeRequest && withdrawalStorageReady(capabilities)) {
+      const id = facts.activeRequest.idSolicitudRetiro;
+      const [link, dispatch] = await Promise.all([this.storage.findLinkByRequest(db, id), this.storage.findDispatch(db, id)]);
+      const ticket = link ? await db.ticket.findUnique({ where: { idTicket: link.idTicket }, select: { idTicket: true, codigoSeguimiento: true, estado: true } }) : null;
+      seguimiento = { idSolicitudRetiro: id, estado: facts.activeRequest.estado, flujoGuiado: Boolean(link), ticket, despacho: dispatch ? this.publicDispatch(dispatch) : null };
+    }
     return {
       idServicio, motivo: WITHDRAWAL_MOTIVE_MOROSITY, eligible: result.eligible, checks: result.checks, firstFailure: result.firstFailure,
-      habilitado: capabilities.ticketLink && capabilities.g3Dispatch, despachoG3Habilitado: this.dispatchEnabled(), capabilities,
+      habilitado: withdrawalStorageReady(capabilities), despachoG3Habilitado: this.dispatchEnabled(), capabilities,
+      bajaAutomaticaHabilitada: this.finalizeEnabled(), seguimiento,
       deuda: facts.debt, solicitudActiva: facts.activeRequest,
       // Read-only context preloaded by the Libro de Control form (ported from PR #81 2c5de07d). Display only:
       // initiate() never trusts it and re-reads everything under lock.
@@ -151,7 +183,7 @@ export class WithdrawalWorkflowService {
       });
       if (await this.storage.findLinkByTicket(tx, ticket.idTicket)) throw new ConflictException('El ticket ya está vinculado a otra solicitud');
       await this.storage.insertLink(tx, {
-        idSolicitudRetiro: request.idSolicitudRetiro, idTicket: ticket.idTicket, idAviso: notice.idEvento, idEmpresa: request.idEmpresa,
+        idSolicitudRetiro: request.idSolicitudRetiro, idTicket: ticket.idTicket, idAviso: notice.idEvento, causa: 'MOROSIDAD', idEmpresa: request.idEmpresa,
         idCliente: request.idCliente, idServicio: request.idServicio, idContrato, idUsuarioResponsable: currentUser.idUsuario,
       });
       let snapshot;
@@ -211,12 +243,22 @@ export class WithdrawalWorkflowService {
           throw new ConflictException({ code: 'WITHDRAWAL_DISPATCH_RETRY_TOO_SOON', message: 'Espera antes de reintentar el envío a G3.' });
         }
       }
-      // Payment before dispatch: no OT is requested for a debt that is no longer collectible.
       const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio } });
-      const invoices = await this.overdueInvoices(tx, request.idEmpresa, request.idCliente, request.idContrato!);
-      if (!hasOverdueCollectibleDebt(invoices) || service?.estadoOperativo !== 'Suspendido') {
-        throw new ConflictException({ code: 'WITHDRAWAL_DEBT_REGULARIZED', accion: 'CANCELAR_SOLICITUD',
-          message: 'La deuda ya no es exigible o el servicio no está suspendido: no se envió la orden de retiro. Cancela la solicitud.' });
+      if (request.motivo.toUpperCase() === WITHDRAWAL_MOTIVE_VOLUNTARY && !this.voluntaryDispatchEnabled()) {
+        throw new ConflictException({ code: 'G3_VOLUNTARY_NOT_RATIFIED',
+          message: 'El retiro técnico de un término voluntario espera que el área técnica ratifique ese motivo; la solicitud queda registrada sin orden. El término comercial ya está aplicado.' });
+      }
+      const termination = await this.storage.findTerminationByRequest(tx, idSolicitudRetiro);
+      if (termination) {
+        // Commercially terminated already (voluntary): only the equipment withdrawal remains; debt is not a condition.
+        if (service?.estadoOperativo !== 'Baja') throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: 'El servicio terminado no está en Baja; revisa la solicitud.' });
+      } else {
+        // Payment before dispatch: no OT is requested for a debt that is no longer collectible.
+        const invoices = await this.overdueInvoices(tx, request.idEmpresa, request.idCliente, request.idContrato!);
+        if (!hasOverdueCollectibleDebt(invoices) || service?.estadoOperativo !== 'Suspendido') {
+          throw new ConflictException({ code: 'WITHDRAWAL_DEBT_REGULARIZED', accion: 'CANCELAR_SOLICITUD',
+            message: 'La deuda ya no es exigible o el servicio no está suspendido: no se envió la orden de retiro. Cancela la solicitud.' });
+        }
       }
       const taken = await this.storage.claimDispatch(tx, idSolicitudRetiro, new Date(Date.now() - STALE_SENDING_MS));
       return taken ? { send: true as const, dispatch: taken } : { send: false as const, dispatch };
@@ -258,7 +300,13 @@ export class WithdrawalWorkflowService {
       return { despacho: this.publicDispatch(dispatch), consultado: false };
     }
     if (!this.g3.configured()) throw new ConflictException({ code: 'INTEGRACION_G3_NO_CONFIGURADA', message: 'La integración técnica con G3 no está configurada.' });
-    const outcome = interpretWithdrawalOrderRead(await this.g3.readOrder(dispatch.idOtG3, dispatch.idEmpresa), { idOt: dispatch.idOtG3, idEmpresa: dispatch.idEmpresa });
+    const snapshot = dispatch.payloadSnapshot as Record<string, unknown>;
+    const asNumber = (value: unknown) => typeof value === 'number' ? value : undefined;
+    const outcome = interpretWithdrawalOrderRead(await this.g3.readOrder(dispatch.idOtG3, dispatch.idEmpresa), {
+      idOt: dispatch.idOtG3, idEmpresa: dispatch.idEmpresa, requestId: dispatch.requestId, traceId: dispatch.traceId,
+      idServicio: asNumber(snapshot.id_servicio_externo), idContrato: asNumber(snapshot.id_contrato_externo),
+      idCliente: asNumber(snapshot.id_cliente_externo), idTicket: asNumber(snapshot.id_ticket_externo),
+    });
     if (outcome.kind !== 'LEIDA') throw new ConflictException({ code: outcome.code, message: outcome.message });
     const stored = await this.prisma.$transaction(async tx => {
       const fresh = await this.storage.findDispatch(tx, idSolicitudRetiro, true);
@@ -330,7 +378,7 @@ export class WithdrawalWorkflowService {
   async receiveWithdrawalClosure(closure: G3WithdrawalClosure) {
     const stored = await this.prisma.$transaction(async tx => {
       const capabilities = await this.storage.capabilities(tx);
-      if (!capabilities.g3Dispatch || !capabilities.ticketLink) {
+      if (!withdrawalStorageReady(capabilities)) {
         throw new ServiceUnavailableException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE', message: 'G8 aún no puede registrar cierres de BAJA; reintentar más tarde.' });
       }
       const found = await this.storage.findDispatchByRequestId(tx, closure.requestId);
@@ -427,29 +475,43 @@ export class WithdrawalWorkflowService {
   }
 
   /**
-   * Automatic follow-up of ONE request (WithdrawalTrackingProcessor). Read-only towards G3/G1: a GET of the OT while it is
-   * not final (respecting the read cache) and, once the BAJA closure is in, a GET of the G1 reception whose result is
-   * stored as an immutable version. It never dispatches, cancels, finalizes nor writes to other systems. Idempotent.
+   * Automatic follow-up of ONE request (WithdrawalTrackingProcessor). Towards G3/G1 it only reads: a GET of the OT while it
+   * is not final (respecting the read cache) and, once the BAJA closure is in, a GET of the G1 reception stored as an
+   * immutable version (informative). When WITHDRAWAL_FINALIZE_ENABLED=true, G3 reports COMPLETADA (approved) and the
+   * BAJA closure was received, it applies the baja through finalizeApprovedBySystem() (FINET 13-11-2026), which re-reads
+   * the approval by GET and re-checks everything under locks. It never dispatches, cancels nor writes to other systems.
    */
   async track(idSolicitudRetiro: number) {
     const dispatch = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
       return this.storage.findDispatch(tx, idSolicitudRetiro);
     });
-    if (!dispatch?.idOtG3 || dispatch.aplicadoEn) return { ordenConsultada: false, recepcion: 'NO_APLICA' as const };
+    if (!dispatch?.idOtG3 || dispatch.aplicadoEn) return { ordenConsultada: false, recepcion: 'NO_APLICA' as const, baja: 'NO_APLICA' as const };
     let ordenConsultada = false;
-    if (!['COMPLETADA', 'CANCELADA'].includes(dispatch.estadoOt ?? '')) {
-      ordenConsultada = (await this.refreshOrder(idSolicitudRetiro, null)).consultado;
+    let estadoOt = dispatch.estadoOt;
+    if (!['COMPLETADA', 'CANCELADA'].includes(estadoOt ?? '')) {
+      const read = await this.refreshOrder(idSolicitudRetiro, null);
+      ordenConsultada = read.consultado;
+      estadoOt = read.despacho.estadoOt;
     }
-    if (!dispatch.cierreClave || !this.g1?.configured()) return { ordenConsultada, recepcion: 'NO_APLICA' as const };
-    const reception = await this.syncReception(idSolicitudRetiro, null);
-    return { ordenConsultada, recepcion: reception.estado };
+    let recepcion: 'NO_APLICA' | 'PENDIENTE' | 'SINCRONIZADA' = 'NO_APLICA';
+    let receptionError: unknown = null;
+    if (dispatch.cierreClave && this.g1?.configured()) {
+      try { recepcion = (await this.syncReception(idSolicitudRetiro, null)).estado; } catch (error) { receptionError = error; }
+    }
+    if (estadoOt === 'COMPLETADA' && dispatch.cierreClave && this.finalizeEnabled()) {
+      const applied = await this.finalizeApprovedBySystem(idSolicitudRetiro);
+      return { ordenConsultada, recepcion, baja: applied.aplicado ? 'APLICADA' as const : 'YA_APLICADA' as const };
+    }
+    // A G1 failure never blocks the baja; while nothing was applied it is reported so the follow-up retries it.
+    if (receptionError) throw receptionError;
+    return { ordenConsultada, recepcion, baja: 'PENDIENTE' as const };
   }
 
   trackableRequests(limit: number) {
     return this.prisma.$transaction(async tx => {
       const capabilities = await this.storage.capabilities(tx);
-      if (!capabilities.g3Dispatch || !capabilities.ticketLink) return null;
+      if (!withdrawalStorageReady(capabilities)) return null;
       return this.storage.listTrackable(tx, limit);
     });
   }
@@ -459,41 +521,53 @@ export class WithdrawalWorkflowService {
   }
 
   /**
-   * Effective withdrawal ("baja efectiva") for morosity. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
-   * Outside any transaction: a forced GET of the OT (G3 must report COMPLETADA) and a read of the devices G1
-   * still associates with the service. Then, in ONE transaction under locks: debt and suspension are recomputed,
-   * the evidence is reconciled, and only if everything holds: service -> Baja, contract -> Baja only without other
-   * operational services, customer status recomputed with every service of both companies, request CERRADA,
-   * evidence marked applied and audited. Any failure (write or audit) rolls the whole operation back.
-   * Payments, invoices, signed documents, G1 inventory and G2/G3 records are never written. Idempotent.
+   * Effective withdrawal ("baja efectiva") for morosity requested by an Administrador: reconciliation / authorized retry of
+   * the same operation the follow-up applies automatically. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
    */
-  async finalize(idSolicitudRetiro: number, currentUser: AuthUser) {
+  finalize(idSolicitudRetiro: number, currentUser: AuthUser) {
+    return this.applyFinalization(idSolicitudRetiro, { kind: 'USUARIO', user: currentUser });
+  }
+
+  /**
+   * Internal automatic finalization (FINET 13-11-2026), run ONLY by WithdrawalTrackingProcessor after it reconciled G3's
+   * approval. Same transaction and checks as finalize(); the actor is the G8 system (idUsuario null in the audit plus an
+   * explicit `actor`), never a borrowed Administrador. A raw webhook never reaches this: approval is re-read by GET here.
+   */
+  finalizeApprovedBySystem(idSolicitudRetiro: number) {
+    return this.applyFinalization(idSolicitudRetiro, { kind: 'SISTEMA', origen: WITHDRAWAL_SYSTEM_ACTOR });
+  }
+
+  /**
+   * Outside any transaction: a forced authenticated GET of the OT (G3 must report COMPLETADA = approved by the head
+   * technician) and a best-effort read of the devices G1 still associates with the service (informative only). Then, in
+   * ONE transaction under locks: debt and suspension are recomputed, the evidence is reconciled, and only if everything
+   * holds: service -> Baja, contract -> Baja only without other operational services, customer status recomputed with
+   * every service of both companies, excliente visible in Prospectos when it was the last relationship in the company,
+   * request CERRADA, evidence marked applied, «Baja de servicio» ticket closed and audited (missing devices and G1 notes
+   * included). Any failure (write or audit) rolls the whole operation back. Payments, invoices, debt, signed documents,
+   * G1 inventory and G2/G3 records are never written. Idempotent.
+   */
+  private async applyFinalization(idSolicitudRetiro: number, actor: FinalizationActor) {
+    const user = actor.kind === 'USUARIO' ? actor.user : null;
     if (!this.finalizeEnabled()) {
       throw new ConflictException({ code: 'WITHDRAWAL_FINALIZE_DISABLED', message: 'La baja efectiva por morosidad está deshabilitada en este ambiente; no se modificó nada.' });
     }
     const current = await this.prisma.$transaction(async tx => {
       await this.assertStorage(tx);
-      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, user);
       return { request, dispatch: await this.storage.findDispatch(tx, idSolicitudRetiro) };
     });
     if (current.request.estado === 'CERRADA' && current.dispatch?.aplicadoEn) {
       return { solicitud: current.request, aplicado: false, yaAplicado: true, idServicio: current.request.idServicio };
     }
     if (!current.dispatch?.idOtG3) throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: 'No hay una OT de retiro aceptada por G3', motivos: [{ code: 'SIN_OT' }] });
-    // Fresh approval from G3 (bypasses the read cache) and current G1 association of devices with the service.
-    await this.refreshOrder(idSolicitudRetiro, currentUser, true);
-    if (!this.g1Inventory) throw new ConflictException({ code: 'INTEGRACION_G1_NO_CONFIGURADA', message: 'No se puede verificar el inventario asociado al servicio; no se aplicó la baja.' });
-    let activeEquipment: string[];
-    try {
-      activeEquipment = (await this.g1Inventory.getEquipmentByService(current.request.idServicio, current.request.idEmpresa)).data
-        .map(unit => String(unit.numero_serie).trim().toUpperCase());
-    } catch {
-      throw new ConflictException({ code: 'G1_INVENTARIO_NO_DISPONIBLE', message: 'No fue posible verificar en inventario que el servicio no conserve equipos; no se aplicó la baja.' });
-    }
+    // Fresh approval from G3 (bypasses the read cache). G1 is informative: its absence never blocks a G3-approved baja.
+    await this.refreshOrder(idSolicitudRetiro, user, true);
+    const activeEquipment = await this.readAssociatedEquipment(current.request.idServicio, current.request.idEmpresa);
 
     return this.prisma.$transaction(async tx => {
-      await this.assertStorage(tx);
-      const request = await this.requestForUpdate(tx, idSolicitudRetiro, currentUser);
+      const capabilities = await this.assertStorage(tx);
+      const request = await this.requestForUpdate(tx, idSolicitudRetiro, user);
       const dispatch = (await this.storage.findDispatch(tx, idSolicitudRetiro, true))!;
       const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio }, include: { contrato: true } });
       if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
@@ -502,9 +576,17 @@ export class WithdrawalWorkflowService {
       }
       if (CLOSED_REQUEST_STATES.includes(request.estado)) throw new BadRequestException('La solicitud de retiro ya esta cerrada o cancelada');
       const link = await this.storage.findLinkByRequest(tx, idSolicitudRetiro);
-      if (!link || link.idServicio !== service.idServicio) throw new ConflictException('La solicitud no tiene un ticket «Baja de servicio» vinculado; no se aplicó la baja');
+      if (!link || link.idServicio !== service.idServicio) throw new ConflictException('La solicitud no tiene un ticket de retiro vinculado; no se aplicó nada');
       if (service.idCliente !== request.idCliente || service.idContrato !== request.idContrato || service.idEmpresa !== request.idEmpresa) {
         throw new ConflictException('Las relaciones del servicio cambiaron; vuelve a consultar');
+      }
+      const termination = await this.storage.findTerminationByRequest(tx, idSolicitudRetiro);
+      if (termination) {
+        return this.closeTechnicalAfterTermination(tx, { idSolicitudRetiro, service, link, dispatch, termination, activeEquipment, user, actor,
+          receptions: capabilities.g1Reception ? await this.storage.findReceptions(tx, idSolicitudRetiro) : [] });
+      }
+      if (request.motivo.toUpperCase() !== WITHDRAWAL_MOTIVE_MOROSITY) {
+        throw new ConflictException({ code: 'WITHDRAWAL_TERMINATION_MISSING', message: 'La solicitud voluntaria no tiene su término comercial registrado; no se aplicó nada.' });
       }
       if (service.estadoOperativo !== 'Suspendido') {
         throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: `El servicio está ${service.estadoOperativo}; la baja por morosidad exige que siga suspendido.` });
@@ -518,43 +600,265 @@ export class WithdrawalWorkflowService {
       const assessment = assessWithdrawalClosure({
         evidence: { idOtG3: dispatch.idOtG3, estadoOt: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
           equiposRetirados: dispatch.equiposRetirados, equiposFaltantes: dispatch.equiposFaltantes },
-        idServicio: service.idServicio, receptions: await this.storage.findReceptions(tx, idSolicitudRetiro), activeEquipment,
+        idServicio: service.idServicio, receptions: capabilities.g1Reception ? await this.storage.findReceptions(tx, idSolicitudRetiro) : [], activeEquipment,
       });
       if (assessment.outcome !== 'APLICAR_BAJA') {
-        throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons });
+        throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons, avisos: assessment.avisos });
       }
-      const updated = await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: { estadoOperativo: 'Baja' } });
-      let contratoDeBaja = false;
-      if (service.idContrato) {
-        await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${service.idContrato} FOR UPDATE`;
-        const operational = await tx.servicioContratado.count({ where: { idContrato: service.idContrato, estadoOperativo: { not: 'Baja' } } });
-        if (operational === 0) { await tx.contrato.update({ where: { idContrato: service.idContrato }, data: { estado: 'Baja' } }); contratoDeBaja = true; }
-      }
-      await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${service.idCliente} FOR UPDATE`;
-      const customer = await tx.cliente.findUnique({ where: { idCliente: service.idCliente }, include: { contratos: { select: { estado: true } }, servicios: { select: { estadoOperativo: true } } } });
-      let estadoCliente = customer?.estado ?? null;
-      if (customer) {
-        const next = resolveCustomerLifecycleStatus({ currentStatus: customer.estado, contractStates: customer.contratos.map(c => c.estado), serviceStates: customer.servicios.map(s => s.estadoOperativo) });
-        if (next !== customer.estado) await tx.cliente.update({ where: { idCliente: customer.idCliente }, data: { estado: next } });
-        estadoCliente = next;
-      }
-      // FINET 13-11-2026: if this was the last operational relationship in the company, the person becomes visible as
-      // excliente in that company's Prospects (derived view; identity, history, debt and other companies untouched).
-      const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa, idUsuario: currentUser.idUsuario });
+      const idUsuario = user?.idUsuario ?? null;
+      const { estadoNuevo, contratoDeBaja, estadoCliente, retorno } = await this.applyCommercialTermination(tx, service, idUsuario);
       const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA' } });
       await this.storage.markApplied(tx, idSolicitudRetiro);
       // FINET 13-11-2026: the «Baja de servicio» ticket is closed only here, inside this successful transaction.
       const ticketBaja = await this.tickets.closeWithdrawalTicket(tx, { idTicket: link.idTicket, idEmpresa: service.idEmpresa,
-        idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario: currentUser.idUsuario });
-      await this.audit(tx, currentUser, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
-        idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, recepcionClaveEvento: dispatch.recepcionClaveEvento,
-        estadoAnterior: service.estadoOperativo, estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente,
-        equiposRecibidos: dispatch.equiposRetirados.map(item => item.numeroSerie), ticketBaja: ticketBaja.action,
+        idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario });
+      await this.audit(tx, user, 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'servicio_contratado', service.idServicio, {
+        actor: actor.kind === 'SISTEMA' ? actor.origen : 'USUARIO',
+        idSolicitudRetiro, idTicket: link.idTicket, idOtG3: dispatch.idOtG3, estadoOtG3: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
+        estadoAnterior: service.estadoOperativo, estadoNuevo, contratoDeBaja, estadoCliente,
+        equiposRetiradosDeclarados: dispatch.equiposRetirados.map(item => item.numeroSerie),
+        equiposFaltantes: dispatch.equiposFaltantes.map(item => item.numeroSerie),
+        inventarioG1: { recepcionClaveEvento: dispatch.recepcionClaveEvento, equiposAsociados: activeEquipment?.length ?? null },
+        avisos: assessment.avisos.map(item => item.code), ticketBaja: ticketBaja.action,
         retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}),
       });
       return { solicitud: closed, aplicado: true, yaAplicado: false, idServicio: service.idServicio, contratoDeBaja, estadoCliente, ticketBaja: ticketBaja.action,
-        retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}) };
+        avisos: assessment.avisos, retornoProspectos: retorno.action, ...('idProspecto' in retorno ? { idProspectoExcliente: retorno.idProspecto } : {}) };
     });
+  }
+
+  /**
+   * Commercial end of ONE service, shared by the morosity baja (after G3's approval) and the voluntary termination
+   * (immediately, at registration): service -> Baja; contract -> Baja only without other operational services; customer
+   * status recomputed with every service and company; excliente visible in that company's Prospects when it was the last
+   * operational relationship. Debt, invoices, payments, signed documents and other companies are never written.
+   */
+  private async applyCommercialTermination(tx: Db, service: { idServicio: number; idCliente: number; idEmpresa: number | null; idContrato: number | null },
+    idUsuario: number | null) {
+    const updated = await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: { estadoOperativo: 'Baja' } });
+    let contratoDeBaja = false;
+    if (service.idContrato) {
+      await tx.$queryRaw`SELECT id_contrato FROM contrato WHERE id_contrato = ${service.idContrato} FOR UPDATE`;
+      const operational = await tx.servicioContratado.count({ where: { idContrato: service.idContrato, estadoOperativo: { not: 'Baja' } } });
+      if (operational === 0) { await tx.contrato.update({ where: { idContrato: service.idContrato }, data: { estado: 'Baja' } }); contratoDeBaja = true; }
+    }
+    await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${service.idCliente} FOR UPDATE`;
+    const customer = await tx.cliente.findUnique({ where: { idCliente: service.idCliente }, include: { contratos: { select: { estado: true } }, servicios: { select: { estadoOperativo: true } } } });
+    let estadoCliente = customer?.estado ?? null;
+    if (customer) {
+      const next = resolveCustomerLifecycleStatus({ currentStatus: customer.estado, contractStates: customer.contratos.map(c => c.estado), serviceStates: customer.servicios.map(s => s.estadoOperativo) });
+      if (next !== customer.estado) await tx.cliente.update({ where: { idCliente: customer.idCliente }, data: { estado: next } });
+      estadoCliente = next;
+    }
+    // FINET 13-11-2026: last operational relationship in the company -> excliente in that company's Prospects (derived view).
+    const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa!, idUsuario });
+    return { estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente, retorno };
+  }
+
+  /**
+   * Technical closure of a withdrawal whose service was ALREADY terminated commercially (voluntary termination, including
+   * one that reused an active morosity OT). Same evidence rules as the morosity baja (G3 COMPLETADA + correlated BAJA
+   * closure; G1 informative), but it never touches the service, contract, customer, debt or Prospects again: it closes the
+   * request, the linked ticket(s) and records the technical closure. Idempotent and atomic like finalize().
+   */
+  private async closeTechnicalAfterTermination(tx: Db, input: {
+    idSolicitudRetiro: number; service: { idServicio: number; idCliente: number; idEmpresa: number | null; estadoOperativo: string };
+    link: { idTicket: number; causa: WithdrawalCause }; dispatch: WithdrawalDispatch; termination: ServiceTermination;
+    activeEquipment: string[] | null; receptions: Array<Parameters<typeof assessWithdrawalClosure>[0]['receptions'][number]>;
+    user: AuthUser | null; actor: FinalizationActor;
+  }) {
+    const { idSolicitudRetiro, service, link, dispatch, termination, user } = input;
+    if (service.estadoOperativo !== 'Baja' || termination.idServicio !== service.idServicio) {
+      throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: `El servicio terminado figura ${service.estadoOperativo}; no se cerró el retiro.` });
+    }
+    const assessment = assessWithdrawalClosure({
+      evidence: { idOtG3: dispatch.idOtG3, estadoOt: dispatch.estadoOt, cierreClave: dispatch.cierreClave,
+        equiposRetirados: dispatch.equiposRetirados, equiposFaltantes: dispatch.equiposFaltantes },
+      idServicio: service.idServicio, receptions: input.receptions, activeEquipment: input.activeEquipment,
+    });
+    if (assessment.outcome !== 'APLICAR_BAJA') {
+      throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons, avisos: assessment.avisos });
+    }
+    const idUsuario = user?.idUsuario ?? null;
+    const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA' } });
+    await this.storage.markApplied(tx, idSolicitudRetiro);
+    await this.storage.markTerminationTechnicalClosure(tx, service.idServicio);
+    const base = { idEmpresa: service.idEmpresa!, idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario };
+    const tickets: Array<{ idTicket: number; categoria: FlowTicketCategory }> = [{ idTicket: link.idTicket, categoria: link.causa === 'VOLUNTARIA' ? TERMINATION_TICKET_CATEGORY : WITHDRAWAL_TICKET_CATEGORY }];
+    if (termination.idTicket !== link.idTicket) tickets.push({ idTicket: termination.idTicket, categoria: TERMINATION_TICKET_CATEGORY });
+    const ticketResults: Array<{ idTicket: number; action: string }> = [];
+    // The relationship ended by the customer's voluntary termination: no ticket reports a morosity baja (the historical
+    // motive of a reused request and the category of its ticket are kept as they were).
+    for (const item of tickets) {
+      const closedTicket = await this.tickets.closeWithdrawalTicket(tx, { ...base, idTicket: item.idTicket, categoria: item.categoria, resultado: 'RETIRO_TRAS_TERMINO_VOLUNTARIO' });
+      ticketResults.push({ idTicket: item.idTicket, action: closedTicket.action });
+    }
+    await this.audit(tx, user, 'CERRAR_RETIRO_TECNICO_TRAS_TERMINO', 'solicitud_retiro_servicio', idSolicitudRetiro, {
+      actor: input.actor.kind === 'SISTEMA' ? input.actor.origen : 'USUARIO', idServicio: service.idServicio, idOtG3: dispatch.idOtG3,
+      estadoOtG3: dispatch.estadoOt, cierreClave: dispatch.cierreClave, terminoComercialEn: termination.terminoComercialEn,
+      equiposRetiradosDeclarados: dispatch.equiposRetirados.map(item => item.numeroSerie), equiposFaltantes: dispatch.equiposFaltantes.map(item => item.numeroSerie),
+      inventarioG1: { recepcionClaveEvento: dispatch.recepcionClaveEvento, equiposAsociados: input.activeEquipment?.length ?? null },
+      avisos: assessment.avisos.map(item => item.code), tickets: ticketResults, relacionComercialModificada: false,
+    });
+    return { solicitud: closed, aplicado: true, yaAplicado: false, tipo: 'CIERRE_TECNICO' as const, idServicio: service.idServicio, tickets: ticketResults, avisos: assessment.avisos };
+  }
+
+  /**
+   * Voluntary termination requested by the customer (FINET 13-11-2026), started from Tickets. In ONE transaction under
+   * locks: identity, authorization and relations are validated; the «Término de servicio» ticket, the requirement
+   * date/time and its evidence are recorded; the COMMERCIAL termination is applied right away (it never waits for the
+   * technical visit, G1 or G3); and a technical withdrawal (motivo VOLUNTARIA, OT BAJA) is prepared with the same engine.
+   * No suspension, zero debt, absence of agreements or collection notice is required, and none is fabricated. Debt,
+   * documents, payments, history and the rehire restriction are kept. Repeating it returns the same operation.
+   * An active morosity withdrawal already sent to G3 is reused (no second OT); one never sent is cancelled and replaced.
+   */
+  async terminateVoluntarily(dto: VoluntaryTerminationInput, currentUser: AuthUser) {
+    if (dto.confirmacionIdentidad !== true) throw new BadRequestException({ code: 'TERMINATION_IDENTITY_NOT_CONFIRMED', message: 'Confirma que verificaste la identidad y autorización del titular.' });
+    const rut = validateRut(dto.rut ?? '');
+    if (!rut.valid || !rut.normalized) throw new BadRequestException({ code: 'TERMINATION_RUT_INVALID', message: rut.reason ?? 'RUT inválido' });
+    if (!TERMINATION_CHANNELS.includes(dto.canal as never)) throw new BadRequestException({ code: 'TERMINATION_CHANNEL_INVALID', message: 'Indica el canal por el que el titular pidió el término.' });
+    if (!TERMINATION_REQUESTERS.includes(dto.solicitante as never)) throw new BadRequestException({ code: 'TERMINATION_REQUESTER_INVALID', message: 'Indica si lo pidió el titular o un representante autorizado.' });
+    const requerimientoEn = new Date(dto.requerimientoEn);
+    if (Number.isNaN(requerimientoEn.getTime()) || requerimientoEn.getTime() > Date.now() + REQUIREMENT_CLOCK_SKEW_MS) {
+      throw new BadRequestException({ code: 'TERMINATION_REQUIREMENT_DATE_INVALID', message: 'Indica la fecha y hora reales del requerimiento (no futuras).' });
+    }
+    const evidencia = dto.evidencia?.trim() ?? '';
+    if (evidencia.length < 5 || evidencia.length > 500) throw new BadRequestException({ code: 'TERMINATION_EVIDENCE_REQUIRED', message: 'Registra la evidencia del requerimiento (5 a 500 caracteres).' });
+    const descripcion = dto.descripcion?.trim() ?? '';
+    if (descripcion.length < 10 || descripcion.length > 1000) throw new BadRequestException({ code: 'TERMINATION_DESCRIPTION_REQUIRED', message: 'Describe la solicitud del titular (10 a 1000 caracteres).' });
+    const authorized = await this.prisma.servicioContratado.findUnique({ where: { idServicio: dto.idServicio } });
+    if (!authorized?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+    this.assertCompany(authorized.idEmpresa, currentUser);
+
+    const result = await this.prisma.$transaction(async tx => {
+      await this.assertStorage(tx);
+      await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${dto.idServicio} FOR UPDATE`;
+      const service = await tx.servicioContratado.findUnique({ where: { idServicio: dto.idServicio }, include: SERVICE_INCLUDE });
+      if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
+      this.assertCompany(service.idEmpresa, currentUser);
+      if (dto.idContrato !== undefined && dto.idContrato !== service.idContrato) throw new BadRequestException('El contrato no corresponde al servicio');
+      const contract = service.contrato;
+      if (!service.idContrato || !contract || contract.idCliente !== service.idCliente || contract.idEmpresa !== service.idEmpresa) {
+        throw new BadRequestException({ code: 'TERMINATION_RELATIONS_INVALID', message: 'El servicio no tiene un contrato vigente del mismo cliente y empresa.' });
+      }
+      const customerRut = service.cliente?.rut ? validateRut(service.cliente.rut).normalized : null;
+      if (!customerRut || customerRut !== rut.normalized) {
+        throw new BadRequestException({ code: 'TERMINATION_IDENTITY_MISMATCH', message: 'El RUT indicado no corresponde al titular del servicio; no se registró el término.' });
+      }
+      // Same service terminated before: same operation (double click / retry), never a second ticket or OT.
+      const previous = await this.storage.findTerminationByService(tx, service.idServicio);
+      if (previous) {
+        const ticket = await tx.ticket.findUnique({ where: { idTicket: previous.idTicket } });
+        const solicitud = previous.idSolicitudRetiro ? await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro: previous.idSolicitudRetiro } }) : null;
+        return { repetido: true, ticket, solicitud, termino: previous, retiroTecnico: previous.idSolicitudRetiro ? 'REGISTRADO' : 'DATOS_INCOMPLETOS', comercial: null, enviar: false };
+      }
+      if (service.estadoOperativo === 'Baja') {
+        throw new ConflictException({ code: 'SERVICE_ALREADY_TERMINATED', message: 'El servicio ya está dado de baja; no corresponde un nuevo término.' });
+      }
+      let technicalRequest: number | null = null;
+      let reused = false;
+      const active = await tx.servicioRetiroSolicitud.findFirst({ where: { idEmpresa: service.idEmpresa, idServicio: service.idServicio, estado: { notIn: CLOSED_REQUEST_STATES } } });
+      if (active) {
+        const activeDispatch = await this.storage.findDispatch(tx, active.idSolicitudRetiro, true);
+        const activeLink = await this.storage.findLinkByRequest(tx, active.idSolicitudRetiro);
+        // Only the withdrawal of THIS service and company can be reused (never another service of the same customer).
+        const sameService = activeLink && activeDispatch && activeLink.idServicio === service.idServicio && activeLink.idEmpresa === service.idEmpresa
+          && activeDispatch.idEmpresa === service.idEmpresa && active.idServicio === service.idServicio;
+        if (active.motivo.toUpperCase() !== WITHDRAWAL_MOTIVE_MOROSITY || !activeLink || !activeDispatch || !sameService) {
+          throw new ConflictException({ code: 'WITHDRAWAL_REQUEST_ACTIVE', idSolicitudRetiro: active.idSolicitudRetiro,
+            message: 'El servicio tiene otra solicitud de retiro activa que no pertenece al flujo integrado; revísala antes de registrar el término.' });
+        }
+        const neverCreated = (activeDispatch.intentos === 0 && activeDispatch.estadoDespacho !== 'ENVIANDO')
+          // G3 rejected it as a business decision: no OT exists there either.
+          || (activeDispatch.estadoDespacho === 'RECHAZADA' && activeDispatch.idOtG3 === null);
+        if (neverCreated) {
+          // The morosity request is replaced by the customer's own termination (no OT exists anywhere).
+          await this.closeAsCancelled(tx, active.idSolicitudRetiro, 'Reemplazada por el término voluntario solicitado por el titular', currentUser,
+            { remoto: false, reemplazadaPorTermino: true, estadoDespachoAnterior: activeDispatch.estadoDespacho });
+        } else {
+          // Already sent: the same OT BAJA retires the equipment; no second OT. Its closure will not touch the commercial relation.
+          technicalRequest = active.idSolicitudRetiro; reused = true;
+        }
+      }
+      const requirementText = `Término de servicio solicitado por ${dto.solicitante === 'TITULAR' ? 'el titular' : 'un representante autorizado'} vía ${dto.canal} el ${requerimientoEn.toISOString()}. Evidencia: ${evidencia}.`;
+      let request = reused ? await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro: technicalRequest! } }) : null;
+      if (!reused) {
+        request = await tx.servicioRetiroSolicitud.create({ data: {
+          idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato: service.idContrato,
+          motivo: WITHDRAWAL_MOTIVE_VOLUNTARY, fechaSolicitada: parseDateOnly(requerimientoEn.toISOString().slice(0, 10))!, estado: 'REGISTRADA',
+          estadoDespachoTecnico: PUBLIC_DISPATCH_COLUMN_VALUE, idUsuarioResponsable: currentUser.idUsuario, observaciones: descripcion,
+        } });
+        technicalRequest = request.idSolicitudRetiro;
+      }
+      const ticket = await this.tickets.createWithdrawalTicket(tx, {
+        idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato: service.idContrato,
+        idSolicitudRetiro: technicalRequest, idAviso: null, idUsuario: currentUser.idUsuario, categoria: TERMINATION_TICKET_CATEGORY,
+        descripcion: `${descripcion}\n${requirementText}\nTérmino comercial aplicado al registrar; retiro de equipos pendiente.`,
+      });
+      let retiroTecnico: 'NUEVA_SOLICITUD' | 'REUTILIZA_SOLICITUD_EXISTENTE' | 'DATOS_INCOMPLETOS' = reused ? 'REUTILIZA_SOLICITUD_EXISTENTE' : 'NUEVA_SOLICITUD';
+      let requisito: string | null = null;
+      if (!reused) {
+        await this.storage.insertLink(tx, { idSolicitudRetiro: technicalRequest!, idTicket: ticket.idTicket, idAviso: null, causa: 'VOLUNTARIA',
+          idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato: service.idContrato, idUsuarioResponsable: currentUser.idUsuario });
+        const address = service.direccion
+          ? { direccion: service.direccion.direccionCompleta, comuna: service.direccion.comuna }
+          : { direccion: contract.direccionInstalacion, comuna: contract.comunaInstalacion };
+        try {
+          const snapshot = buildWithdrawalOrderPayload({
+            idEmpresa: service.idEmpresa, idSolicitudRetiro: technicalRequest!, idCliente: service.idCliente, idContrato: service.idContrato,
+            idServicio: service.idServicio, idTicket: ticket.idTicket, traceId: randomUUID(), rut: service.cliente?.rut ?? null,
+            direccion: address.direccion ?? null, comuna: address.comuna ?? null, observaciones: descripcion, motivo: 'VOLUNTARIA',
+          });
+          await this.storage.insertDispatch(tx, { idSolicitudRetiro: technicalRequest!, idEmpresa: service.idEmpresa, requestId: snapshot.request_id,
+            traceId: snapshot.trace_id, payloadSnapshot: snapshot, payloadHash: sha256Payload(snapshot) });
+        } catch (error) {
+          if (!(error instanceof WithdrawalPayloadError)) throw error;
+          // The commercial termination never depends on the technical data: it is applied; the withdrawal waits for the data.
+          retiroTecnico = 'DATOS_INCOMPLETOS'; requisito = error.code;
+        }
+      }
+      const termino = await this.storage.insertTermination(tx, {
+        idServicio: service.idServicio, idEmpresa: service.idEmpresa, idCliente: service.idCliente, idContrato: service.idContrato, idTicket: ticket.idTicket,
+        idSolicitudRetiro: retiroTecnico === 'DATOS_INCOMPLETOS' ? null : technicalRequest, requerimientoEn,
+        canal: dto.canal as ServiceTermination['canal'], solicitante: dto.solicitante as ServiceTermination['solicitante'], evidencia, idUsuarioResponsable: currentUser.idUsuario,
+      });
+      if (retiroTecnico === 'DATOS_INCOMPLETOS' && request) {
+        // Without valid withdrawal data there is no OT to wait for: the request records it and stays REGISTRADA for review.
+        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro: request.idSolicitudRetiro }, data: { observaciones: `${descripcion}\nRetiro técnico pendiente de datos (${requisito}).` } });
+      }
+      const comercial = await this.applyCommercialTermination(tx, service, currentUser.idUsuario);
+      await this.audit(tx, currentUser, 'TERMINO_VOLUNTARIO_SERVICIO', 'servicio_contratado', service.idServicio, {
+        idEmpresa: service.idEmpresa, idCliente: service.idCliente, idContrato: service.idContrato, idTicket: ticket.idTicket,
+        idSolicitudRetiro: termino.idSolicitudRetiro, retiroTecnico, requisitoRetiro: requisito, requerimientoEn: requerimientoEn.toISOString(),
+        canal: dto.canal, solicitante: dto.solicitante, evidencia, estadoAnterior: service.estadoOperativo, estadoNuevo: comercial.estadoNuevo,
+        contratoDeBaja: comercial.contratoDeBaja, estadoCliente: comercial.estadoCliente, retornoProspectos: comercial.retorno.action,
+        deudaConservada: true, esperaG3: false,
+      });
+      return { repetido: false, ticket, solicitud: request, termino, retiroTecnico, requisito,
+        comercial: { contratoDeBaja: comercial.contratoDeBaja, estadoCliente: comercial.estadoCliente, retornoProspectos: comercial.retorno.action },
+        enviar: retiroTecnico === 'NUEVA_SOLICITUD' };
+    });
+
+    const { enviar, ...response } = result;
+    if (enviar && result.solicitud && this.dispatchEnabled() && this.voluntaryDispatchEnabled()) {
+      try {
+        return { ...response, despacho: (await this.dispatch(result.solicitud.idSolicitudRetiro, currentUser)).despacho };
+      } catch (error) {
+        return { ...response, despachoPendiente: error instanceof Error ? error.message : 'Despacho pendiente' };
+      }
+    }
+    return enviar ? { ...response, despachoPendiente: !this.voluntaryDispatchEnabled()
+      ? 'El retiro técnico espera que el área técnica ratifique el motivo voluntario.' : 'El envío de órdenes técnicas está deshabilitado en este ambiente.' } : response;
+  }
+
+  /** Devices G1 still associates with the service (uppercase serials), or null when G1 is not configured or not reachable. */
+  private async readAssociatedEquipment(idServicio: number, idEmpresa: number): Promise<string[] | null> {
+    if (!this.g1Inventory) return null;
+    try {
+      return (await this.g1Inventory.getEquipmentByService(idServicio, idEmpresa)).data.map(unit => String(unit.numero_serie).trim().toUpperCase());
+    } catch {
+      return null;
+    }
   }
 
   // ----- helpers -----
@@ -582,7 +886,7 @@ export class WithdrawalWorkflowService {
     const request = await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } });
     if (!request) throw new NotFoundException('Solicitud de retiro no encontrada');
     if (currentUser) this.assertCompany(request.idEmpresa, currentUser);
-    if (request.motivo.toUpperCase() !== WITHDRAWAL_MOTIVE_MOROSITY) throw new BadRequestException('Esta operación aplica solo a retiros por morosidad');
+    if (!ENGINE_MOTIVES.includes(request.motivo.toUpperCase())) throw new BadRequestException('Esta operación aplica solo a retiros por morosidad o términos voluntarios del flujo integrado');
     await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${request.idServicio} FOR UPDATE`;
     return (await tx.servicioRetiroSolicitud.findUnique({ where: { idSolicitudRetiro } }))!;
   }
@@ -618,9 +922,9 @@ export class WithdrawalWorkflowService {
 
   private async assertStorage(tx: Db) {
     const capabilities = await this.storage.capabilities(tx);
-    if (!capabilities.ticketLink || !capabilities.g3Dispatch) {
+    if (!withdrawalStorageReady(capabilities)) {
       throw new ConflictException({ code: 'WITHDRAWAL_STORAGE_NOT_AVAILABLE',
-        message: 'La baja por morosidad integrada requiere el almacenamiento privado g8_retiros aprobado y aplicado; no se modificó nada.' });
+        message: 'El retiro integrado requiere el almacenamiento privado g8_retiros (migraciones 002 y 003) aprobado y aplicado; no se modificó nada.' });
     }
     return capabilities;
   }

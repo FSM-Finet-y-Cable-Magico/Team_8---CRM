@@ -1,0 +1,16 @@
+.public-signature { max-width: 740px; margin: 0 auto; padding: clamp(24px, 6vh, 72px) 20px; }
+.signature-card { padding: clamp(24px, 5vw, 52px); border: 1px solid #dce7e3; border-radius: 24px; background: #fff; box-shadow: 0 16px 50px #173d3410; text-align: center; color: #233c35; }
+.signature-emblem { display: grid; place-items: center; width: 88px; height: 88px; margin: 0 auto 24px; border-radius: 50%; background: #e9f4f0; color: #227d68; }
+.signature-card--signed .signature-emblem { background: #227d68; color: #fff; box-shadow: 0 0 0 10px #edf7f2; }
+.signature-eyebrow { display: block; margin-bottom: 12px; color: #56736a; font-size: .75rem; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.signature-card h1 { margin: 0 0 20px; font-size: clamp(1.8rem, 4vw, 2.25rem); }
+.signature-intro { margin: 0 0 28px; line-height: 1.75; color: #536960; }
+.signature-download { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; }
+.signature-expiry { color: #6a7c75; font-size: .78rem; margin: 16px 0 0; }
+.public-signature .signature-consent { display: flex; align-items: flex-start; gap: 12px; text-align: left; font-size: .85rem; line-height: 1.6; }
+.signature-consent input[type=checkbox] { flex: 0 0 18px; width: 18px; height: 18px; margin: 4px 0 0; accent-color: #227d68; }
+.signature-footer { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 28px; padding-top: 20px; border-top: 1px solid #e4ece8; color: #6a7c75; font-size: .75rem; overflow-wrap: anywhere; }
+.signature-footer svg { flex-shrink: 0; }
+.signature-notice { padding: 12px 16px; border-radius: 10px; background: #fff3e9; color: #824523; line-height: 1.6; }
+.theme-dark .signature-card { background: #1c2d28; color: #e3eee9; border-color: #3a5148; }
+.theme-dark .signature-intro, .theme-dark .signature-eyebrow, .theme-dark .signature-footer, .theme-dark .signature-expiry { color: #b3c9bf; }

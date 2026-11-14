@@ -21,7 +21,7 @@ describe('contrato G1 de recepción', () => {
       expect(parseG1Reception(g1RealReceptionComplete, real)).toMatchObject({ ok: true, reception: { claveEvento: 'g1-recepcion-1-990-12', estadoRecepcion: 'COMPLETA',
         equipos: [{ numeroSerie: 'ONT-123456', resultado: 'RECIBIDO', estadoG1: 'En revisión', idServicioExterno: 245, fechaRecepcion: new Date('2026-11-12T15:00:03.512Z') }] } });
     });
-    it('PARCIAL: dañado + faltante desconocido para G1 (estado_g1 null) se acepta como evidencia y bloquea la baja', () => {
+    it('PARCIAL: dañado + faltante desconocido para G1 (estado_g1 null) se acepta como evidencia informativa y no bloquea la baja aprobada', () => {
       const parsed = parseG1Reception(g1RealReceptionPartial, real);
       expect(parsed).toMatchObject({ ok: true, reception: { estadoRecepcion: 'PARCIAL', equipos: [
         { numeroSerie: 'ONT-123456', resultado: 'RECIBIDO_CON_DANO', estadoG1: 'En revisión' },
@@ -32,8 +32,9 @@ describe('contrato G1 de recepción', () => {
         idServicio: 245, activeEquipment: [],
         receptions: parsed.reception.equipos.map(item => ({ ...item, idOtG3: 990, claveEvento: parsed.reception.claveEvento, estadoRecepcion: parsed.reception.estadoRecepcion })),
       });
-      expect(assessment.outcome).not.toBe('APLICAR_BAJA');
-      expect(assessment.reasons.map(reason => reason.code)).toContain('EQUIPO_NO_RECIBIDO');
+      // FINET 13-11-2026: G3 approved; what the warehouse received is recorded, it does not block the commercial baja.
+      expect(assessment.outcome).toBe('APLICAR_BAJA');
+      expect(assessment.avisos.map(item => item.code)).toEqual(expect.arrayContaining(['RECEPCION_G1_INCOMPLETA', 'EQUIPO_NO_RECIBIDO']));
     });
     it('discrepancia de G1: NO_RECIBIDO con estado conocido y detalle "codigo: detalle"', () => {
       expect(parseG1Reception(g1RealReceptionDiscrepancy, real)).toMatchObject({ ok: true, reception: { estadoRecepcion: 'NO_RECIBIDA',
@@ -93,36 +94,53 @@ describe('contrato del cierre BAJA de G3', () => {
   });
 });
 
-describe('conciliación de la evidencia (G3 aprobado + G1 recepción + inventario activo)', () => {
+describe('conciliación de la evidencia: G3 aprobado decide; G1 solo informa (FINET 13-11-2026)', () => {
   const evidence = { idOtG3: 930, estadoOt: 'COMPLETADA', cierreClave: 'baja:930', equiposRetirados: [{ numeroSerie: 'QA-1' }, { numeroSerie: 'QA-2' }], equiposFaltantes: [] };
   const row = (numeroSerie: string, over: Record<string, unknown> = {}) => ({ numeroSerie, idOtG3: 930, resultado: 'RECIBIDO', idServicioExterno: 61, estadoRecepcion: 'COMPLETA', ...over });
   const assess = (over: Record<string, unknown> = {}) => assessWithdrawalClosure({ evidence, idServicio: 61, receptions: [row('QA-1'), row('QA-2', { resultado: 'RECIBIDO_CON_DANO' })], activeEquipment: [], ...over } as never);
   const codes = (result: ReturnType<typeof assess>) => result.reasons.map(reason => reason.code);
+  const notices = (result: ReturnType<typeof assess>) => result.avisos.map(item => item.code);
 
-  it('todo conciliado (incluido un equipo dañado) permite aplicar la baja', () => {
-    expect(assess()).toEqual({ outcome: 'APLICAR_BAJA', reasons: [] });
+  it('todo conciliado (incluido un equipo dañado) permite aplicar la baja sin avisos', () => {
+    expect(assess()).toEqual({ outcome: 'APLICAR_BAJA', reasons: [], avisos: [] });
   });
   it.each([
     ['sin OT', { evidence: { ...evidence, idOtG3: null } }, 'SIN_OT'],
-    ['OT pendiente de aprobación', { evidence: { ...evidence, estadoOt: 'PENDIENTE_APROBACION' } }, 'CIERRE_NO_CONFIRMADO'],
+    ['OT cerrada por el técnico, pendiente de aprobación', { evidence: { ...evidence, estadoOt: 'PENDIENTE_APROBACION' } }, 'CIERRE_NO_CONFIRMADO'],
+    ['OT en curso', { evidence: { ...evidence, estadoOt: 'EN_CURSO' } }, 'CIERRE_NO_CONFIRMADO'],
     ['GET aún no consultado', { evidence: { ...evidence, estadoOt: null } }, 'CIERRE_NO_CONFIRMADO'],
     ['OT cancelada', { evidence: { ...evidence, estadoOt: 'CANCELADA' } }, 'OT_CANCELADA'],
-    ['sin cierre BAJA', { evidence: { ...evidence, cierreClave: null } }, 'SIN_CIERRE_TECNICO'],
-    ['sin equipos retirados', { evidence: { ...evidence, equiposRetirados: [] }, receptions: [] }, 'SIN_EQUIPOS_RETIRADOS'],
-    ['equipos faltantes', { evidence: { ...evidence, equiposFaltantes: [{ numeroSerie: 'QA-3' }] } }, 'EQUIPOS_FALTANTES'],
+    ['sin cierre BAJA (webhook)', { evidence: { ...evidence, cierreClave: null } }, 'SIN_CIERRE_TECNICO'],
+    ['cierre de otra OT', { evidence: { ...evidence, cierreClave: 'baja:931' } }, 'SIN_CIERRE_TECNICO'],
     ['serie duplicada en el cierre', { evidence: { ...evidence, equiposRetirados: [{ numeroSerie: 'QA-1' }, { numeroSerie: 'qa-1' }] }, receptions: [row('QA-1')] }, 'SERIE_DUPLICADA'],
-    ['G1 sin recepción', { receptions: [] }, 'RECEPCION_G1_PENDIENTE'],
-    ['G1 parcial', { receptions: [row('QA-1', { estadoRecepcion: 'PARCIAL' }), row('QA-2', { estadoRecepcion: 'PARCIAL' })] }, 'RECEPCION_G1_INCOMPLETA'],
-    ['G1 NO_RECIBIDO', { receptions: [row('QA-1'), row('QA-2', { resultado: 'NO_RECIBIDO' })] }, 'EQUIPO_NO_RECIBIDO'],
-    ['G1 sin una serie retirada', { receptions: [row('QA-1')] }, 'RECEPCION_G1_PENDIENTE'],
-    ['G1 con serie ajena', { receptions: [row('QA-1'), row('QA-2'), row('QA-9')] }, 'SERIE_AJENA'],
-    ['G1 con otro servicio', { receptions: [row('QA-1'), row('QA-2', { idServicioExterno: 62 })] }, 'RECEPCION_G1_INCONSISTENTE'],
-    ['G1 con otra OT', { receptions: [row('QA-1'), row('QA-2', { idOtG3: 931 })] }, 'RECEPCION_G1_INCONSISTENTE'],
-    ['equipo aún asociado al servicio', { activeEquipment: ['QA-7'] }, 'RETIRO_PARCIAL'],
+    ['misma serie retirada y faltante', { evidence: { ...evidence, equiposFaltantes: [{ numeroSerie: ' qa-2 ' }] } }, 'SERIE_RETIRADA_Y_FALTANTE'],
   ])('bloquea: %s', (_name, over, code) => {
     const result = assess(over);
     expect(result.outcome).toBe('BLOQUEADO');
     expect(codes(result)).toContain(code);
+  });
+  it.each([
+    ['G3 aprobada con cero equipos recuperados', { evidence: { ...evidence, equiposRetirados: [], equiposFaltantes: [{ numeroSerie: 'QA-1' }, { numeroSerie: 'QA-2' }] }, receptions: [] }, ['SIN_EQUIPOS_RETIRADOS', 'EQUIPOS_FALTANTES']],
+    ['equipos faltantes', { evidence: { ...evidence, equiposFaltantes: [{ numeroSerie: 'QA-3' }] } }, ['EQUIPOS_FALTANTES']],
+    ['G1 sin recepción (pendiente o ausente)', { receptions: [] }, ['RECEPCION_G1_PENDIENTE']],
+    ['G1 parcial', { receptions: [row('QA-1', { estadoRecepcion: 'PARCIAL' }), row('QA-2', { estadoRecepcion: 'PARCIAL' })] }, ['RECEPCION_G1_INCOMPLETA']],
+    ['G1 NO_RECIBIDO', { receptions: [row('QA-1'), row('QA-2', { resultado: 'NO_RECIBIDO' })] }, ['EQUIPO_NO_RECIBIDO']],
+    ['G1 sin una serie retirada', { receptions: [row('QA-1')] }, ['RECEPCION_G1_PENDIENTE']],
+    ['G1 con serie ajena', { receptions: [row('QA-1'), row('QA-2'), row('QA-9')] }, ['SERIE_AJENA']],
+    ['G1 con otro servicio', { receptions: [row('QA-1'), row('QA-2', { idServicioExterno: 62 })] }, ['RECEPCION_G1_INCONSISTENTE']],
+    ['G1 con otra OT', { receptions: [row('QA-1'), row('QA-2', { idOtG3: 931 })] }, ['RECEPCION_G1_INCONSISTENTE']],
+    ['equipo aún asociado al servicio en inventario', { activeEquipment: ['QA-7'] }, ['EQUIPOS_ASOCIADOS_EN_INVENTARIO']],
+    ['inventario no disponible', { activeEquipment: null }, ['INVENTARIO_NO_CONSULTADO']],
+  ])('no bloquea y lo registra como aviso: %s', (_name, over, expected) => {
+    const result = assess(over);
+    expect(result.outcome).toBe('APLICAR_BAJA');
+    expect(result.reasons).toEqual([]);
+    expect(notices(result)).toEqual(expect.arrayContaining(expected));
+  });
+  it('una inconsistencia de identidad bloquea aunque haya avisos de inventario', () => {
+    const result = assess({ evidence: { ...evidence, estadoOt: 'PENDIENTE_APROBACION' }, activeEquipment: null });
+    expect(result.outcome).toBe('BLOQUEADO');
+    expect(notices(result)).toContain('INVENTARIO_NO_CONSULTADO');
   });
   it('pago durante el retiro: acción según la etapa, nunca baja ni reactivación automática', () => {
     expect(paymentDuringWithdrawal('EN_EJECUCION', true).accion).toBe('CONTINUAR');

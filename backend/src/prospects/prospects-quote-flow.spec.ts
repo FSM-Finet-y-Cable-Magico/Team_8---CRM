@@ -35,6 +35,16 @@ function setup() {
   return { service, prisma, tx, prospect, coverage, audit, registerDocument };
 }
 describe('cotizacion persistida y confirmacion segura', () => {
+  it('al volver a contratar selecciona solo contratos vigentes y crea otro conservando el anulado', async () => {
+    const c = setup();
+    const oldContract = Object.freeze({ idContrato: 5, estado: 'Anulado' });
+    c.tx.contrato.findFirst.mockImplementation(async ({ where }) => where.estado?.notIn?.includes(oldContract.estado) ? null : oldContract);
+    await c.service.contractPlan(1, { planId: 1 }, user);
+    expect(c.tx.contrato.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { idProspecto: 1, idEmpresa: 1, estado: { notIn: ['Baja', 'Anulado'] } } }));
+    expect(c.tx.contrato.create).toHaveBeenCalledTimes(1);
+    expect(c.tx.contrato.update).not.toHaveBeenCalled();
+    expect(oldContract.estado).toBe('Anulado');
+  });
   it('un prospecto con RUT historico endeudado no crea contrato ni mueve pipeline', async () => {
     const c = setup();
     c.tx.factura.findMany.mockResolvedValue([{ monto: 7000, pagos: [], estado: 'Pendiente', fechaLimitePago: new Date('2026-01-01') }]);

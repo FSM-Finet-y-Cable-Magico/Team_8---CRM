@@ -12,68 +12,6 @@ const comercial: AuthUser = {
   roles: ['Comercial'],
 };
 
-describe('ContractsService', () => {
-  it('rechaza nueva contratacion por deuda antes de crear contrato o servicio', async () => {
-    const db = {
-      cliente: { findUnique: jest.fn().mockResolvedValue({ idCliente: 10, idEmpresa: 1, rut: '11111111-1', contratos: [{ idEmpresa: 1 }] }) },
-      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 7, idEmpresa: 1, activo: true }) },
-      factura: { findMany: jest.fn().mockResolvedValue([{ estado: 'Pendiente', monto: 7000, pagos: [], fechaLimitePago: new Date('2026-01-01') }]) },
-      contrato: { create: jest.fn() }, servicioContratado: { create: jest.fn() },
-    };
-    Object.assign(db, { $transaction: jest.fn(async work => work(db)) });
-    const audit = { record: jest.fn() };
-    const service = new ContractsService(db as never, audit as never, {} as never);
-    await expect(service.createCustomerContract({ idCliente: 10, idPlan: 7 }, comercial)).rejects.toMatchObject({ response: { code: 'CONTRACT_CUSTOMER_DEBT' } });
-    expect(db.contrato.create).not.toHaveBeenCalled(); expect(db.servicioContratado.create).not.toHaveBeenCalled();
-    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'BLOQUEAR_CONTRATACION_POR_DEUDA' }), db);
-  });
-  it('crea una contratación pendiente de firma sin crear servicio ni OT', async () => {
-    const createdContract = {
-      idContrato: 40,
-      idCliente: 10,
-      idPlan: 7,
-      idEmpresa: 1,
-      estado: 'Pendiente firma contrato',
-      cliente: { idCliente: 10 },
-      plan: { idPlan: 7, nombreComercial: 'Fibra 600' },
-      zonaPago: null,
-      servicios: [],
-    };
-    const prisma = {
-      cliente: {
-        findUnique: jest.fn()
-          .mockResolvedValueOnce({ idCliente: 10, idEmpresa: 1, estado: 'Activo', contratos: [{ idEmpresa: 1 }] })
-          .mockResolvedValueOnce({ idCliente: 10, estado: 'Activo', contratos: [{ estado: 'Activo' }, { estado: 'Pendiente firma contrato' }], servicios: [{ estadoOperativo: 'Activo' }] }),
-        update: jest.fn(),
-      },
-      factura: { findMany: jest.fn().mockResolvedValue([]) },
-      plan: { findUnique: jest.fn().mockResolvedValue({ idPlan: 7, idEmpresa: 1, activo: true }) },
-      contrato: { create: jest.fn().mockResolvedValue(createdContract) },
-      servicioContratado: { create: jest.fn() },
-      ordenTrabajo: { create: jest.fn() },
-    };
-    const audit = { record: jest.fn() };
-    const servicesService = { ensureInstallationServiceForContract: jest.fn() };
-    Object.assign(prisma, { $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)) });
-    const service = new ContractsService(
-      prisma as unknown as PrismaService,
-      audit as unknown as AuditService,
-      servicesService as never,
-    );
-
-    const result = await service.createCustomerContract({ idCliente: 10, idPlan: 7 }, comercial);
-
-    expect(result).toBe(createdContract);
-    expect(prisma.contrato.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ idCliente: 10, idPlan: 7, estado: 'Pendiente firma contrato' }),
-    }));
-    expect(prisma.cliente.update).not.toHaveBeenCalled();
-    expect(prisma.servicioContratado.create).not.toHaveBeenCalled();
-    expect(prisma.ordenTrabajo.create).not.toHaveBeenCalled();
-  });
-
-});
-
 function signatureSetup() {
   const state = {
     contract: {

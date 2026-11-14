@@ -478,7 +478,7 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
       expect(store.state.logAuditoria).toHaveLength(1);
     });
 
-    it.each([0, 700])('catálogo global real (IDs desplazados +%i): siete altas comerciales por su ID real y ninguna técnica ni interna', async offset => {
+    it.each([0, 700])('catálogo global real (IDs desplazados +%i): seis altas comerciales por su ID real, Baja de servicio reservada y ninguna técnica ni interna', async offset => {
       await start();
       prepare();
       store.state.categoriaFalla = globalCatalog(offset);
@@ -488,13 +488,19 @@ describe('P0-02 HTTP: Tickets, autoridad G3 y persistencia financiera', () => {
         .toEqual(attentionNames.map((nombre, i) => [offset + 8 + i, nombre]));
       expect(body).toHaveLength(16);
       for (let i = 0; i < attentionNames.length; i++) {
+        if (attentionNames[i] === 'Baja de servicio') {
+          // FINET 13-11-2026: listed in the catalogue, but reserved to the guided withdrawal of the Libro de Control.
+          const rejected = await send('post', 'tickets', 1, { ...attentionBody(), idCategoria: offset + 8 + i }).expect(400);
+          expect(rejected.body.code).toBe('WITHDRAWAL_TICKET_CATEGORY_RESERVED');
+          continue;
+        }
         const created = await send('post', 'tickets', 1, { ...attentionBody(), idCategoria: offset + 8 + i }).expect(201);
         expect(created.body.idCategoria).toBe(offset + 8 + i);
       }
       const forbidden = [...Array(7).keys()].map(i => offset + 1 + i).concat([offset + 15, offset + 16]);
       for (const idCategoria of forbidden) await send('post', 'tickets', 1, { ...attentionBody(), idCategoria }).expect(400);
       expect(store.state.categoriaFalla).toEqual(catalogBefore);
-      expect(store.writes.filter(name => name === 'ticket.create')).toHaveLength(7);
+      expect(store.writes.filter(name => name === 'ticket.create')).toHaveLength(6);
     });
 
     it.each(['PORTAL', 'ASISTENTE'])('ticket creado desde G2 (origen %s): se lee legible y no se edita desde G8', async origen => {

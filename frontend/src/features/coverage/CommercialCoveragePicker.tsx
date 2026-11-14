@@ -39,7 +39,15 @@ export type CoverageResult = {
 const PROVIDER_OFF_REASONS = new Set(['PROVEEDOR_DESHABILITADO', 'CONFIGURACION_INVALIDA']);
 let automaticGeocodingOff = false;
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false }: {
+function zonePositions(zone: CoverageZone): L.LatLngTuple[] {
+  const ring = zone.poligonoGeojson?.coordinates?.[0];
+  if (zone.poligonoGeojson?.type !== 'Polygon' || !Array.isArray(ring) || ring.length < 4
+    || ring.some(point => !Array.isArray(point) || !Number.isFinite(point[0]) || !Number.isFinite(point[1])
+      || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90)) return [];
+  return ring.map(point => [point[1], point[0]]);
+}
+
+export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false, simpleSummary = false, companyName }: {
   idEmpresa: number;
   direccion: string;
   value: CoverageLocation | null;
@@ -54,26 +62,30 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   showAddressRetry?: boolean;
   // Summary only: lets the user mark the map or type coordinates when the address cannot be located automatically.
   allowManualLocation?: boolean;
+  simpleSummary?: boolean;
+  companyName?: string;
 }) {
   const [connection, setConnection] = useState<{ configurado: boolean; mensaje: string } | null>(null);
   const [coverage, setResult] = useState<(CoverageResult & { queryKey: string }) | null>(null);
-  const [zones, setZones] = useState<Array<CoverageZone & { idEmpresa: number; activo: boolean; fechaInicio?: string | null; fechaFin?: string | null }>>([]);
+  const [zones, setZones] = useState<Array<CoverageZone & { idEmpresa: number; activo: boolean | null; fechaInicio?: string | null; fechaFin?: string | null }>>([]);
   const [zonesError, setZonesError] = useState('');
   const { message: mapWarning, showMessage: setMapWarning } = useTransientMessage();
   const today = new Date().toISOString().slice(0, 10);
-  const visibleZones = useMemo(() => zones.filter(zone => zone.idEmpresa === idEmpresa && zone.activo === true && zone.poligonoGeojson
+  const visibleZones = useMemo(() => zones.filter(zone => zone.idEmpresa === idEmpresa && zone.activo !== false && zonePositions(zone).length
     && (!zone.fechaInicio || zone.fechaInicio.slice(0, 10) <= today) && (!zone.fechaFin || zone.fechaFin.slice(0, 10) >= today)), [zones, idEmpresa, today]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [providerOff, setProviderOff] = useState(automaticGeocodingOff);
   const { message: geocodeMessage, showMessage: setGeocodeMessage } = useTransientMessage();
+  const [geocodeIssue, setGeocodeIssue] = useState('');
   const [retry, setRetry] = useState(0);
   const [backgroundRetry, setBackgroundRetry] = useState(0);
   const [coordinates, setCoordinates] = useState({ latitud: '', longitud: '' });
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layers = useRef<L.LayerGroup | null>(null);
+  const fittedZones = useRef('');
   const version = JSON.stringify([idEmpresa, direccion.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CL')]);
   const queryKey = JSON.stringify([version, value?.latitud, value?.longitud, retry]);
   const result = coverage?.queryKey === queryKey ? coverage : null;
@@ -95,6 +107,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     geocodeController.current?.abort();
     setGeocoding(false);
     setGeocodeMessage('');
+    setGeocodeIssue('');
     current.current.onChange(location);
   }, [rememberAttempt, setGeocodeMessage]);
   const manualLocation = presentation === 'summary' && allowManualLocation && !disabled;
@@ -157,7 +170,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     if (!idEmpresa) return;
     void api.get('/coverage/zones', { params: { idEmpresa }, signal: controller.signal })
       .then(({ data }) => { if (!controller.signal.aborted) setZones(data); })
-      .catch(() => { if (!controller.signal.aborted) setZonesError('No se pudieron consultar las zonas comerciales de esta empresa.'); });
+      .catch(() => { if (!controller.signal.aborted) { setZones([]); setZonesError('No se pudieron consultar las zonas comerciales de esta empresa.'); } });
     return () => controller.abort();
   }, [idEmpresa, retry, backgroundRetry]);
 
@@ -212,12 +225,13 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     if (!group) return;
     group.clearLayers();
     const drawZone = (zone: CoverageZone, options: L.PolylineOptions, label: string) => {
-      const positions = zone.poligonoGeojson.coordinates[0].map(position => [position[1], position[0]] as L.LatLngTuple);
+      const positions = zonePositions(zone);
+      if (!positions.length) return;
       const tooltip = document.createElement('span');
       tooltip.textContent = `${label}: ${zone.nombreZona}`;
       L.polygon(positions, options).bindTooltip(tooltip).addTo(group);
     };
-    for (const zone of visibleZones) drawZone(zone, { color: '#567873', weight: 2, fillOpacity: 0.05,
+    for (const zone of visibleZones) drawZone(zone, { color: '#237b65', weight: 2, fillOpacity: 0.12,
       dashArray: zone.tipoZona === 'MICROZONA_COMERCIAL' ? '8 5' : undefined }, 'Zona disponible');
     if (result?.zona) drawZone(result.zona, { color: '#315ea8', weight: 3, fillOpacity: 0.08 }, 'Cobertura general');
     if (result?.microzona) drawZone(result.microzona, { color: '#9a5b13', weight: 3, dashArray: '8 5', fillOpacity: 0.14 }, 'Microzona comercial');
@@ -233,11 +247,20 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   }, [value?.latitud, value?.longitud, result, visibleZones, presentation]);
 
   useEffect(() => {
+    if (value) { fittedZones.current = ''; return; }
+    const positions = visibleZones.flatMap(zonePositions);
+    const key = JSON.stringify([idEmpresa, positions]);
+    if (!map.current || !positions.length || fittedZones.current === key) return;
+    map.current.fitBounds(L.latLngBounds(positions), { padding: [20, 20], maxZoom: 14 });
+    fittedZones.current = key;
+  }, [idEmpresa, visibleZones, value?.latitud, value?.longitud]);
+
+  useEffect(() => {
     if (value) map.current?.setView([value.latitud, value.longitud], Math.max(map.current.getZoom(), 15));
   }, [value?.latitud, value?.longitud]);
 
   function showZones() {
-    const points = visibleZones.flatMap(zone => zone.poligonoGeojson.coordinates[0].map(position => [position[1], position[0]] as L.LatLngTuple));
+    const points = visibleZones.flatMap(zonePositions);
     if (points.length) map.current?.fitBounds(L.latLngBounds(points), { padding: [30, 30], maxZoom: 15 });
   }
 
@@ -258,25 +281,31 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       return;
     }
     if (current.current.disabled) return;
+    const requestedLocation = current.current.value;
     rememberAttempt(version);
     geocodeController.current?.abort();
     const controller = new AbortController();
     geocodeController.current = controller;
     setGeocoding(true);
     setGeocodeMessage('');
+    setGeocodeIssue('');
     try {
       const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; motivo?: string; mensaje: string | null }>('/coverage/geocode', { direccion }, { signal: controller.signal });
-      if (controller.signal.aborted || current.current.version !== version || current.current.disabled) return;
+      if (controller.signal.aborted || current.current.version !== version || current.current.disabled || current.current.value !== requestedLocation) return;
       const off = Boolean(data.motivo && PROVIDER_OFF_REASONS.has(data.motivo));
       if (off) { automaticGeocodingOff = true; setProviderOff(true); }
       const first = data.candidatos[0];
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
-      else setGeocodeMessage(presentation === 'editor' || manualLocation
+      else {
+        setGeocodeIssue(off ? 'Ubicación automática no disponible' : data.motivo === 'SIN_RESULTADOS' ? 'Dirección no encontrada' : 'No se pudo ubicar la dirección');
+        setGeocodeMessage(presentation === 'editor' || manualLocation
         ? userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.')
         : off ? 'La ubicación automática no está habilitada. Registra el prospecto y marca el punto en su ficha.'
         : 'No pudimos ubicar esta dirección. Revisa la calle, el número y la comuna.');
+      }
     } catch {
-      if (!controller.signal.aborted && current.current.version === version) {
+      if (!controller.signal.aborted && current.current.version === version && current.current.value === requestedLocation) {
+        setGeocodeIssue('No se pudo ubicar la dirección');
         setGeocodeMessage(presentation === 'editor' || manualLocation
           ? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'
           : 'No pudimos ubicar esta dirección. Puedes reintentar o registrar el prospecto para revisarlo después.');
@@ -287,8 +316,11 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   }, [direccion, version, rememberAttempt, presentation, manualLocation, setGeocodeMessage]);
 
   useEffect(() => {
+    // A saved address selected again must be located again if the parent has no saved point.
+    attempted.current.delete(version);
     setGeocoding(false);
     setGeocodeMessage('');
+    setGeocodeIssue('');
     return () => { geocodeController.current?.abort(); };
   }, [version, disabled, setGeocodeMessage]);
 
@@ -319,19 +351,22 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   </section>;
 
   if (presentation !== 'editor') {
-    const showStatus = Boolean(value || autoGeocode);
+    const showStatus = Boolean(value || autoGeocode || simpleSummary);
     if (presentation === 'status' && !showStatus) return null;
     const tone = checking ? 'pending' : result?.coberturaComercial ? 'success'
       : result?.estado === 'NO_FACTIBLE' ? 'negative' : 'pending';
     const Icon = tone === 'success' ? CheckCircle2 : tone === 'negative' ? XCircle : CircleHelp;
     const title = checking ? (geocoding || waitingForAddress ? 'Ubicando dirección…' : 'Consultando cobertura…')
       : error ? 'Cobertura sin verificar'
+      : zonesError ? 'No se pudieron actualizar las zonas'
+      : !value && autoGeocode && providerOff ? 'Ubicación automática no disponible'
+      : !value && geocodeIssue ? geocodeIssue
       : geocodeMessage ? 'No se pudo ubicar la dirección'
-      : result?.coberturaComercial ? 'Cobertura factible'
-      : result?.estado === 'NO_FACTIBLE' ? 'Sin cobertura comercial'
+      : result?.coberturaComercial ? `Cobertura factible${companyName ? ' · ' + companyName : ''}`
+      : result?.estado === 'NO_FACTIBLE' ? `Sin cobertura comercial${companyName ? ' · ' + companyName : ''}`
       : value ? 'Cobertura pendiente' : 'Ubicación pendiente';
     return <section className={`coverage-simple coverage-simple-${presentation}`} aria-label="Consulta de cobertura comercial">
-      {presentation === 'summary' && <div className="coverage-heading"><strong>Cobertura comercial</strong>
+      {presentation === 'summary' && !simpleSummary && <div className="coverage-heading"><strong>Cobertura comercial</strong>
         {showAddressRetry && !disabled && autoGeocode && !providerOff && !checking && !value &&
           <button type="button" className="secondary compact" onClick={() => void geocodeAddress()}>Reintentar dirección</button>}
       </div>}
@@ -341,8 +376,8 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       </div>}
       {presentation === 'summary' && <>
         <div ref={container} className="coverage-map" aria-label="Mapa de ubicación del prospecto" />
-        {mapWarning && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base. La consulta de cobertura sigue disponible.</p>}
-        {manualLocation && <>
+        {mapWarning && !simpleSummary && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base. La consulta de cobertura sigue disponible.</p>}
+        {manualLocation && !simpleSummary && <>
           {geocodeMessage && <p role="status">{geocodeMessage}</p>}
           {error && <p role="alert">{error}</p>}
           {!value && <p className="coverage-note">Marca el domicilio en el mapa o ingresa sus coordenadas para verificar la cobertura.</p>}
@@ -384,7 +419,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
         <strong>{result.estado.replace(/_/g, ' ')}</strong><p>{result.motivo}</p>
         {result.zona && <p><b>Cobertura:</b> {result.zona.nombreZona}{result.microzona ? ` - Microzona: ${result.microzona.nombreZona}` : ''}</p>}
         {result.planes.length > 0 && <><b>Planes disponibles</b><ul>{result.planes.map(plan => <li key={plan.idPlan}>{plan.nombre}: ${plan.precioAplicable.toLocaleString('es-CL')} ({plan.origenPrecio})</li>)}</ul></>}
-        {result.coberturaComercial && result.planes.length === 0 && <p>No hay planes activos configurados para esta ubicacion.</p>}
+        {result.coberturaComercial && result.planes.length === 0 && <p className="empty-state">No hay planes activos configurados para esta ubicacion.</p>}
         {result.cajas.length > 0 && <ul>{result.cajas.map(box => <li key={box.id}>{box.nombre}: {box.puertosLibres} puertos libres</li>)}</ul>}
         <small>Consulta de cobertura comercial: {new Date(result.consultadoEn).toLocaleString('es-CL')}</small>
       </> : <p>{userFacingMessage(connection?.mensaje, connection ? 'La consulta de cobertura no está disponible en este momento.' : 'Comprobando la conexión de cobertura…')}</p>}

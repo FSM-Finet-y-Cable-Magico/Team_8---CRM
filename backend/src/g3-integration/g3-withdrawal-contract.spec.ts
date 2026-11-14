@@ -107,6 +107,19 @@ describe('contrato G3 de OT de BAJA (G3 main 8a8e5dd0)', () => {
     ])('inconsistente: %s', (_name, over) => {
       expect(interpretWithdrawalOrderRead(order(over), { idOt: 930, idEmpresa: 1 }).kind).toBe('INCONSISTENTE');
     });
+    // FINET 13-11-2026: identifiers G3 may include in the GET must match the persisted request (absent ones are not required).
+    const full = { idOt: 930, idEmpresa: 1, requestId: 'g8-retiro-1-15', traceId: '0F8FAD5B-D9CB-469F-A165-70867728950E', idServicio: 61, idContrato: 20, idCliente: 33, idTicket: 77 };
+    it('acepta identificadores presentes que coinciden (trace_id sin distinguir mayúsculas) y no exige los ausentes', () => {
+      expect(interpretWithdrawalOrderRead(order({ request_id: 'g8-retiro-1-15', trace_id: '0f8fad5b-d9cb-469f-a165-70867728950e', id_servicio_externo: 61,
+        id_contrato_externo: 20, id_cliente_externo: 33, id_ticket_externo: 77 }), full).kind).toBe('LEIDA');
+      expect(interpretWithdrawalOrderRead(order({ request_id: null }), full).kind).toBe('LEIDA');
+    });
+    it.each([
+      ['request_id', { request_id: 'g8-retiro-1-16' }], ['trace_id', { trace_id: '11111111-1111-4111-8111-111111111111' }],
+      ['servicio', { id_servicio_externo: 62 }], ['contrato', { id_contrato_externo: 21 }], ['cliente', { id_cliente_externo: 34 }], ['ticket', { id_ticket_externo: 78 }],
+    ])('inconsistente si G3 informa otro %s', (_name, over) => {
+      expect(interpretWithdrawalOrderRead(order(over), full)).toMatchObject({ kind: 'INCONSISTENTE', code: 'G3_CORRELACION_INVALIDA' });
+    });
     it('404/5xx/red no acreditan nada', () => {
       for (const status of [404, 500, null]) expect(interpretWithdrawalOrderRead({ status, body: null }, { idOt: 930, idEmpresa: 1 }).kind).toBe('NO_DISPONIBLE');
     });

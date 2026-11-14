@@ -108,16 +108,11 @@ export function UsersPanel({
   }
 
   async function toggleUser(row: UserRow) {
-    const roleId = row.roles[0]?.idRol;
-    if (!roleId || rowBusy !== null || row.idUsuario === currentUserId) return;
+    if (rowBusy !== null || row.idUsuario === currentUserId) return;
     setRowBusy(row.idUsuario);
     clearStatus();
     try {
-      await api.patch(`/users/${row.idUsuario}`, {
-        nombreCompleto: row.nombreCompleto,
-        email: row.email ?? '',
-        idEmpresa: row.idEmpresa ?? undefined,
-        roleId,
+      await api.patch(`/users/${row.idUsuario}/status`, {
         activo: row.activo === false,
       });
       setStatus(row.activo === false ? 'Usuario activado.' : 'Usuario desactivado.');
@@ -204,6 +199,7 @@ export function UsersPanel({
             </tbody>
           </table>
         </div>
+        {!users.some(row => !deletedIds.includes(row.idUsuario)) && <p className="empty-state">No hay usuarios registrados para mostrar.</p>}
       </section>
 
       <Modal title={editing === 'new' ? 'Crear usuario' : 'Editar usuario'} open={editing !== null} onClose={closeEditor}>

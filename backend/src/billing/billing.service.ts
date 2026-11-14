@@ -20,8 +20,17 @@ import { SendBillingNotificationDto } from './dto/send-billing-notification.dto'
 import { UpdatePaymentZoneDto } from './dto/update-payment-zone.dto';
 
 import { APPROVED_EXTENSIONS, CLOSED_INVOICE_STATES, invoiceBalance } from './invoice-balance';
+import { evaluateSuspension, SUSPENSION_REASON } from './suspension-eligibility';
+import { ACTIVE_AGREEMENT_STATES } from '../common/overdue-debt';
 import { prepareAgreementPayment, prepareInstallmentPayment, recordInstallmentPayment } from './installment-payment';
 const CRM_ACTIVATION_FLOW_START = new Date('2026-09-12T15:00:00.000Z');
+
+/** Same reads as invoiceBalance()/overdueDebtSummary(): payments, APPROVED extensions and ACTIVE agreements. */
+const SUSPENSION_CONTRACT_INCLUDE = {
+  cliente: true,
+  facturas: { include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS, conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } }, select: { estado: true } } } },
+  servicios: { select: { idServicio: true, idEmpresa: true, estadoOperativo: true, tipoServicio: true } },
+} satisfies Prisma.ContratoInclude;
 
 @Injectable()
 export class BillingService {
@@ -36,7 +45,8 @@ export class BillingService {
   async overview(currentUser: AuthUser, scope = 'consolidado') {
     const rows = await this.overdueInvoiceRows(currentUser, scope);
     const cutDays = this.cutDays();
-    const scheduledCuts = rows.filter((row) => row.diasAtraso >= cutDays);
+    // Same rule as the suspension: an invoice covered by an active agreement is not a scheduled cut.
+    const scheduledCuts = rows.filter((row) => row.diasAtraso >= cutDays && !row.cubiertaPorConvenio);
     const companyFilter = this.companyScope(currentUser, scope);
     const notifications = await this.prisma.logNotificacion.findMany({
       select: {idNotificacion:true,idCliente:true,idPlantilla:true,canal:true,fechaEnvio:true,estadoEnvio:true},
@@ -153,26 +163,63 @@ export class BillingService {
     return result;
   }
 
-  async suspendContract(idContrato: number, currentUser: AuthUser) {
+  /**
+   * Read-only suspension eligibility for the «Suspender servicio» button and modal of the Libro de Control (CU-30).
+   * Same pure rule as suspendContract(); the modal only shows it, the write evaluates it again under its transaction.
+   */
+  async suspensionEligibility(idContrato: number, currentUser: AuthUser) {
     this.assertBillingWriter(currentUser);
+    const contract = await this.prisma.contrato.findUnique({ where: { idContrato }, include: SUSPENSION_CONTRACT_INCLUDE });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+    this.assertCompanyAccess(contract.idEmpresa, currentUser);
+    const evaluation = this.evaluateSuspension(contract);
+    const company = contract.idEmpresa ? await this.prisma.empresa.findUnique({ where: { idEmpresa: contract.idEmpresa }, select: { nombre: true } }) : null;
+    return {
+      idContrato, ...evaluation,
+      empresa: { idEmpresa: contract.idEmpresa, nombre: company?.nombre ?? null },
+      contrato: { idContrato: contract.idContrato, estado: contract.estado },
+      cliente: contract.cliente ? { idCliente: contract.cliente.idCliente, nombre: contract.cliente.nombreCompleto } : null,
+    };
+  }
+
+  /**
+   * Manual suspension for non-payment with automatic eligibility (CU-30). Eligibility is evaluated again INSIDE the
+   * Serializable transaction (a concurrent payment, extension or agreement aborts it and the retry re-reads), and the
+   * contract, the ACTIVE services of this contract and company, the customer (only when no other company is involved)
+   * and the audit are written together or not at all. Idempotent: an already suspended contract is not written again.
+   */
+  async suspendContract(idContrato: number, currentUser: AuthUser, dto: { observacion?: string } = {}) {
+    this.assertBillingWriter(currentUser);
+    const observacion = dto.observacion?.trim() || null;
     return this.billingTransaction(async tx => {
-      const contract = await tx.contrato.findUnique({ where: { idContrato }, include: {
-        cliente: true, facturas: { include: { pagos: true, prorrogasPago: APPROVED_EXTENSIONS } },
-      } });
+      const contract = await tx.contrato.findUnique({ where: { idContrato }, include: SUSPENSION_CONTRACT_INCLUDE });
       if (!contract?.cliente) throw new NotFoundException('Contrato no encontrado');
       this.assertCompanyAccess(contract.idEmpresa, currentUser);
-      if (!contract.idEmpresa || contract.cliente.idCliente !== contract.idCliente) throw new BadRequestException('Cliente y contrato no corresponden');
-      if (!['Activo', 'Moroso', 'Suspendido'].includes(contract.estado)) throw new BadRequestException('El estado del contrato no permite suspensión comercial');
-      const overdue = contract.facturas.filter(invoice => invoiceBalance(invoice).diasAtraso >= this.cutDays());
-      if (!overdue.length) throw new BadRequestException('No existen facturas con saldo que cumplan los días de corte');
+      const evaluation = this.evaluateSuspension(contract);
+      if (evaluation.yaSuspendido) return { ...contract, yaSuspendido: true, serviciosSuspendidos: [] as number[] };
+      if (!evaluation.elegible) {
+        throw new BadRequestException({ code: 'SUSPENSION_NOT_ELIGIBLE', requisito: evaluation.motivo!.code, message: evaluation.motivo!.message });
+      }
+      const idEmpresa = contract.idEmpresa!;
+      const serviceIds = evaluation.serviciosAfectados.map(service => service.idServicio);
       const result = await tx.contrato.update({ where: { idContrato }, data: { estado: 'Suspendido', fechaSuspension: this.todayDate() } });
-      if (await this.canUpdateGlobalCustomer(tx, contract.cliente, contract.idEmpresa)) await tx.cliente.updateMany({ where: { idCliente: contract.cliente.idCliente, idEmpresa: contract.idEmpresa, estado: { not: 'Baja' } }, data: { estado: 'Suspendido' } });
-      await tx.servicioContratado.updateMany({ where: { idContrato, idEmpresa: contract.idEmpresa, estadoOperativo: 'Activo' }, data: { estadoOperativo: 'Suspendido' } });
+      if (await this.canUpdateGlobalCustomer(tx, contract.cliente, idEmpresa)) await tx.cliente.updateMany({ where: { idCliente: contract.cliente.idCliente, idEmpresa, estado: { not: 'Baja' } }, data: { estado: 'Suspendido' } });
+      await tx.servicioContratado.updateMany({ where: { idServicio: { in: serviceIds }, idContrato, idEmpresa, estadoOperativo: 'Activo' }, data: { estadoOperativo: 'Suspendido' } });
       await this.auditService.record({
         idUsuario: currentUser.idUsuario, accion: 'SUSPENDER_SERVICIO_NO_PAGO', entidadAfectada: 'contrato', idEntidadAfectada: idContrato,
-        valorAnterior: { estado: contract.estado }, valorNuevo: { idEmpresa: contract.idEmpresa, estado: 'Suspendido', facturasVencidas: overdue.map(i => i.idFactura) },
+        valorAnterior: { estado: contract.estado },
+        valorNuevo: { idEmpresa, estado: 'Suspendido', motivo: SUSPENSION_REASON, observacion, umbralDias: evaluation.umbralDias,
+          facturasVencidas: evaluation.facturas.map(i => i.idFactura), serviciosSuspendidos: serviceIds },
       }, tx);
-      return result;
+      return { ...result, yaSuspendido: false, serviciosSuspendidos: serviceIds };
+    });
+  }
+
+  private evaluateSuspension(contract: Prisma.ContratoGetPayload<{ include: typeof SUSPENSION_CONTRACT_INCLUDE }>) {
+    return evaluateSuspension({
+      contrato: { idContrato: contract.idContrato, idEmpresa: contract.idEmpresa, idCliente: contract.idCliente, estado: contract.estado },
+      cliente: contract.cliente ? { idCliente: contract.cliente.idCliente } : null,
+      facturas: contract.facturas ?? [], servicios: contract.servicios ?? [], cutDays: this.cutDays(),
     });
   }
 
@@ -564,6 +611,7 @@ export class BillingService {
       include: {
         pagos: true,
         prorrogasPago: APPROVED_EXTENSIONS,
+        conveniosPago: { where: { estado: { in: ACTIVE_AGREEMENT_STATES } }, select: { estado: true } },
         contrato: {
           include: {
             cliente: { include: { empresa: true } },
@@ -593,6 +641,7 @@ export class BillingService {
           fechaLimitePago: invoice.fechaLimitePago.toISOString().slice(0, 10),
           diasAtraso: invoiceBalance(invoice).diasAtraso,
           fechaVencimientoEfectiva: invoiceBalance(invoice).fechaVencimientoEfectiva,
+          cubiertaPorConvenio: (invoice.conveniosPago ?? []).length > 0,
           estadoFactura: invoice.estado,
           cliente: {
             idCliente: cliente.idCliente,

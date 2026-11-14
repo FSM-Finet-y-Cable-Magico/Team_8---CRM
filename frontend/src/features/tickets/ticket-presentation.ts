@@ -1,5 +1,26 @@
 import type { Ticket, TicketCategory } from '../../api';
 
+const searchText = (value: string | number | null | undefined) => String(value ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-CL').replace(/[_#]/g, ' ').trim();
+const compactSearchText = (value: string) => value.replace(/[^a-z0-9]/g, '');
+
+export function ticketMatchesSearch(ticket: Ticket, query: string) {
+  const terms = searchText(query).split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const fields = [
+    ticket.idTicket, ticket.codigoSeguimiento, ticket.descripcion, ticket.idServicio,
+    ticket.idServicio ? `Servicio ${ticket.idServicio}` : null,
+    ticket.cliente?.nombreCompleto, ticket.cliente?.rut, ticket.cliente?.email, ticket.cliente?.telefono,
+    ticket.idCategoria, ticket.categoria?.nombre, ticket.categoria?.nombreAtencion,
+    ticket.prioridad, ticket.estado, ticket.estadoPresentacion,
+    ...(ticket.workOrders ?? []).flatMap(order => [
+      `OT ${order.idOt}`, `Orden de trabajo ${order.idOt}`, order.codigoSeguimiento, order.tipoOt, order.estado,
+    ]),
+  ].map(searchText);
+  return terms.every(term => fields.some(field => field.includes(term)
+    || Boolean(compactSearchText(term) && compactSearchText(field).includes(compactSearchText(term)))));
+}
+
 // Documento 0 / Tabla 11.9. IDs and eligibility still come from the backend.
 export const TICKET_ATTENTION_LABELS = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanza',
   'Facturación y cobro', 'Consulta general', 'Baja de servicio'] as const;
@@ -26,6 +47,33 @@ export function ticketAttentionAvailability(categories: TicketCategory[]) {
     else options.push(row);
   }
   return { options, issues, complete: issues.length === 0 };
+}
+
+/** FINET 13-11-2026: «Baja de servicio» is only created by the guided withdrawal of the Libro de Control. It stays in the
+ * catalogue (history, filters, existing tickets) but is never offered for manual creation or reclassification. */
+export const WITHDRAWAL_TICKET_CATEGORY = 'Baja de servicio';
+export function isWithdrawalTicketCategory(category: Pick<TicketCategory, 'nombre'>) {
+  return officialName(category.nombre) === WITHDRAWAL_TICKET_CATEGORY;
+}
+
+/** G8-only category (FINET 13-11-2026): the customer's voluntary termination, registered from Tickets with its own form. */
+export const TERMINATION_TICKET_CATEGORY = 'Término de servicio';
+export function isTerminationTicketCategory(category: Pick<TicketCategory, 'nombre'>) {
+  return categoryKey(category.nombre) === categoryKey(TERMINATION_TICKET_CATEGORY);
+}
+
+/**
+ * Categories offered in the «Nuevo ticket» form: server-enabled attention categories except the reserved «Baja de
+ * servicio», plus «Término de servicio» only when the server enables it unambiguously (after the authorized catalogue
+ * insertion). Selecting it switches the form to the termination requirement.
+ */
+export function manualTicketCategories(categories: TicketCategory[]) {
+  const options = ticketAttentionAvailability(categories).options.filter(category => !isWithdrawalTicketCategory(category));
+  const termination = categories.filter(isTerminationTicketCategory);
+  const row = termination[0];
+  if (termination.length === 1 && row.nombreAtencion === TERMINATION_TICKET_CATEGORY && Number.isInteger(row.idCategoria) && row.idCategoria > 0
+    && (row.tipo === 'ATENCION' || (row.tipo == null && row.tipoDisponible !== true))) options.push(row);
+  return options;
 }
 
 export function isGeneralTicketCategory(category: TicketCategory) {

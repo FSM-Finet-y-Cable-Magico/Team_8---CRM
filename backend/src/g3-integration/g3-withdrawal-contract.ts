@@ -12,6 +12,13 @@ import { validateRut } from '../rut/rut.util';
  */
 export const G3_WITHDRAWAL_TYPE = 'BAJA';
 export const G3_WITHDRAWAL_MOTIVE = 'MOROSIDAD';
+/**
+ * Causes G8 sends in `motivo` (FINET 13-11-2026). G3's S2S endpoint receives `motivo` but today handles the request as
+ * morosity: VOLUNTARIA is only dispatched once G3 ratifies it (G3_WITHDRAWAL_VOLUNTARY_ENABLED=true in G8). G8 never
+ * sends a voluntary termination disguised as MOROSIDAD. tipo_ot stays BAJA and G3's states are unchanged.
+ */
+export const G3_WITHDRAWAL_MOTIVES = ['MOROSIDAD', 'VOLUNTARIA'] as const;
+export type G3WithdrawalMotive = (typeof G3_WITHDRAWAL_MOTIVES)[number];
 export const G3_OT_STATES = ['PENDIENTE', 'ASIGNADA', 'EN_CURSO', 'PENDIENTE_CLIENTE_AUSENTE', 'PENDIENTE_APROBACION', 'COMPLETADA', 'CANCELADA'] as const;
 export type G3OtState = (typeof G3_OT_STATES)[number];
 /** G3 ESTADOS_CANCELABLES: from PENDIENTE_APROBACION on, the devices already left the customer's home. */
@@ -32,7 +39,7 @@ export function parseWithdrawalRequestId(requestId: unknown) {
 }
 
 export type G3WithdrawalOrderPayload = {
-  request_id: string; trace_id: string; tipo_ot: typeof G3_WITHDRAWAL_TYPE; motivo: typeof G3_WITHDRAWAL_MOTIVE;
+  request_id: string; trace_id: string; tipo_ot: typeof G3_WITHDRAWAL_TYPE; motivo: G3WithdrawalMotive;
   id_empresa: number; id_cliente_externo: number; id_contrato_externo: number; id_servicio_externo: number;
   id_solicitud_retiro_externa: number; id_ticket_externo: number;
   rut_cliente: string; direccion_retiro: string; comuna_retiro: string; observaciones?: string;
@@ -46,7 +53,10 @@ export class WithdrawalPayloadError extends Error {
 export function buildWithdrawalOrderPayload(input: {
   idEmpresa: number; idSolicitudRetiro: number; idCliente: number; idContrato: number; idServicio: number; idTicket: number;
   traceId: string; rut: string | null; direccion: string | null; comuna: string | null; observaciones?: string | null;
+  motivo?: G3WithdrawalMotive;
 }): G3WithdrawalOrderPayload {
+  const motivo = input.motivo ?? G3_WITHDRAWAL_MOTIVE;
+  if (!G3_WITHDRAWAL_MOTIVES.includes(motivo)) throw new WithdrawalPayloadError('MOTIVO_INVALIDO', 'Motivo de retiro no soportado');
   for (const [field, value] of Object.entries({ idEmpresa: input.idEmpresa, idSolicitudRetiro: input.idSolicitudRetiro, idCliente: input.idCliente,
     idContrato: input.idContrato, idServicio: input.idServicio, idTicket: input.idTicket })) {
     if (!positiveId(value)) throw new WithdrawalPayloadError('ID_INVALIDO', `${field} debe ser un entero positivo`);
@@ -64,7 +74,7 @@ export function buildWithdrawalOrderPayload(input: {
     request_id: withdrawalRequestId(input.idEmpresa, input.idSolicitudRetiro),
     trace_id: input.traceId.toLowerCase(),
     tipo_ot: G3_WITHDRAWAL_TYPE,
-    motivo: G3_WITHDRAWAL_MOTIVE,
+    motivo,
     id_empresa: input.idEmpresa,
     id_cliente_externo: input.idCliente,
     id_contrato_externo: input.idContrato,
@@ -172,9 +182,15 @@ export type OrderReadOutcome =
 
 /**
  * GET of a BAJA OT. `origen_integracion` only describes installation requests, so it is null for a
- * BAJA: correlation is the persisted id_ot + id_empresa, never a request_id in that response.
+ * BAJA: correlation is the persisted id_ot + id_empresa + tipo BAJA (the request_id/trace_id/customer/contract/service/
+ * ticket were correlated when the OT was accepted and when the BAJA closure was stored). FINET 13-11-2026: if G3 does
+ * include any of those identifiers in the GET, each one present must match too (stricter, never a contract change).
  */
-export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: { idOt: number; idEmpresa: number }): OrderReadOutcome {
+export type OrderReadExpectation = {
+  idOt: number; idEmpresa: number;
+  requestId?: string; traceId?: string; idServicio?: number; idContrato?: number; idCliente?: number; idTicket?: number;
+};
+export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: OrderReadExpectation): OrderReadOutcome {
   if (reply.status === null || reply.status === 408 || reply.status === 429 || (reply.status ?? 0) >= 500 || reply.status === 404) {
     return { kind: 'NO_DISPONIBLE', status: reply.status, code: errorCode(reply.body, reply.status ? `G3_HTTP_${reply.status}` : 'G3_NO_DISPONIBLE'), message: 'No fue posible consultar la OT en G3' };
   }
@@ -186,6 +202,16 @@ export function interpretWithdrawalOrderRead(reply: G3HttpReply, expected: { idO
   if (envelope?.success !== true || !data) return bad('G3_RESPUESTA_INVALIDA', 'G3 respondió sin la envoltura { success, data }');
   if (data.id_ot !== expected.idOt || data.id_empresa !== expected.idEmpresa) return bad('G3_CORRELACION_INVALIDA', 'La OT consultada no corresponde a la solicitud');
   if (data.tipo_ot !== G3_WITHDRAWAL_TYPE) return bad('G3_TIPO_OT_INVALIDO', 'La OT consultada no es de BAJA');
+  const optional: Array<[string, unknown]> = [
+    ['request_id', expected.requestId], ['trace_id', expected.traceId?.toLowerCase()], ['id_servicio_externo', expected.idServicio],
+    ['id_contrato_externo', expected.idContrato], ['id_cliente_externo', expected.idCliente], ['id_ticket_externo', expected.idTicket],
+  ];
+  for (const [field, value] of optional) {
+    const reported = data[field];
+    if (value === undefined || reported === undefined || reported === null) continue;
+    const normalized = field === 'trace_id' && typeof reported === 'string' ? reported.toLowerCase() : reported;
+    if (normalized !== value) return bad('G3_CORRELACION_INVALIDA', `La OT consultada informa otro ${field}; no corresponde a la solicitud`);
+  }
   if (data.origen_integracion !== undefined && data.origen_integracion !== null) {
     return bad('G3_CORRELACION_INVALIDA', 'La OT consultada declara un origen de instalación');
   }

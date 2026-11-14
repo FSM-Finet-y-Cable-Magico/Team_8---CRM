@@ -49,6 +49,12 @@ export class ContractsController {
     return this.contractsService.confirmManualSignature(idContrato, dto, user);
   }
 
+  @Post(':id/cancel')
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  cancelPending(@Param('id', ParseIntPipe) idContrato: number, @CurrentUser() user: AuthUser) {
+    return this.contractsService.cancelPendingContract(idContrato, user);
+  }
+
   @Post(':id/prepare-installation')
   @Roles(...ACCESS_ROLES.MANAGE_SERVICES)
   prepareInstallation(

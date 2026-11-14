@@ -25,14 +25,16 @@ const text = node => typeof node === 'string' ? node : (node.children ?? []).map
 
 async function harness(t, post = async () => ({ data: { idProspecto: 101 } })) {
   const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
   const previousStorage = globalThis.localStorage;
   const storage = new Map([['finet_user', JSON.stringify(user)], ['finet_token', 'test-only']]);
   const listeners = new Map();
   globalThis.window = {
-    setTimeout, clearTimeout,
+    setTimeout, clearTimeout, setInterval, clearInterval,
     addEventListener: (name, callback) => listeners.set(name, callback),
     removeEventListener: name => listeners.delete(name),
   };
+  globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} };
   globalThis.localStorage = {
     getItem: key => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value),
@@ -84,6 +86,7 @@ async function harness(t, post = async () => ({ data: { idProspecto: 101 } })) {
   t.after(async () => {
     await act(async () => tree.unmount());
     globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
     globalThis.localStorage = previousStorage;
   });
   const button = label => tree.root.findAllByType('button').find(node => text(node).trim() === label);

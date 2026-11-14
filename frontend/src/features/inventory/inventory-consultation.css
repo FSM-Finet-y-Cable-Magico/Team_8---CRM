@@ -110,10 +110,7 @@
   .inventory-catalog-table td::before { content: attr(data-label); color: var(--inventory-muted); text-align: left; font-size: .71rem; }
   .inventory-catalog-table td > small { grid-column: 2; margin-top: -4px; }
 }
-/* TK-08/TK-09: catalog heading and unit record inside the serial lookup panel. */
-.inventory-catalog > .inventory-serial-heading { align-items: flex-start; }
-.inventory-catalog > .inventory-serial-heading > svg { margin-top: 2px; }
-.inventory-section-note { margin-top: 6px; color: var(--inventory-muted); font-size: .76rem; line-height: 1.6; }
+/* Unit record inside the serial lookup panel. */
 .inventory-serial-panel .inventory-unit-result { grid-column: 1 / -1; margin-top: 20px; }
 .inventory-serial-panel .inventory-unit-heading { flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; }
 .inventory-serial-panel .inventory-unit-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 16px; }

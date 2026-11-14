@@ -3,7 +3,7 @@ import { formatDateTime, userFacingMessage } from '../../lib';
 
 export function MonitoringStatusView({ status }: { status: MonitoringStatus | null }) {
   if (!status) {
-    return <p className="inline-status">Sin datos de monitoreo cargados.</p>;
+    return <p className="empty-state">Sin datos de monitoreo cargados.</p>;
   }
 
   return (

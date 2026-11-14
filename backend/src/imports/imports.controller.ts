@@ -43,7 +43,9 @@ export class ImportsController {
     @CurrentUser() user: AuthUser,
     @Query('idEmpresa') idEmpresa?: string,
     @Query('sheet') sheet?: string,
+    @Query('review') review?: string,
   ) {
+    if (review === 'clients') return this.importsService.previewClients(file, user, idEmpresa ? Number(idEmpresa) : undefined, sheet);
     return this.controlBookPreview.preview(file, user, idEmpresa ? Number(idEmpresa) : undefined, sheet);
   }
 }

@@ -67,7 +67,7 @@ export function InstallationsPanel({
           </tr>;
         })}</tbody>
       </table></div>
-      {!filtered.length && <p className="installation-empty">{query.trim() ? 'No hay instalaciones que coincidan con la búsqueda.' : 'No hay contrataciones pendientes de instalación.'}</p>}
+      {!filtered.length && <p className="empty-state">{query.trim() ? 'No hay instalaciones que coincidan con la búsqueda.' : 'No hay contrataciones pendientes de instalación.'}</p>}
       <TablePagination currentPage={page} totalItems={filtered.length} pageSize={pageSize} onPageChange={setPage} />
     </section>
     <Modal key={selected ? `${scope}:${selected.idProspecto}:${selection?.contractId ?? ''}` : 'closed'} title="Instalación técnica" open={Boolean(selected)} onClose={() => setSelection(null)} focusClose>

@@ -133,6 +133,8 @@ G8 valida empresa en usuario, tracking, Prospecto, Contrato, Plan, Servicio y re
 
 ## CU-84: retiro de servicio
 
+> **Actualizado 13-11-2026:** la baja por morosidad usa la OT de BAJA de G3 y se inicia solo desde el Libro de Control (`POST /service-withdrawals/initiate`). `POST /service-withdrawals` rechaza la morosidad y los servicios suspendidos. Ver `docs/g8-baja-morosidad/flujo-suspension-baja-20261113.md`. Lo siguiente es el estado histórico del Incremento 3.
+
 `ServicioRetiroSolicitud` implementa persistencia real en G8 con motivo, fecha, estado, responsable, Servicio obligatorio, Contrato opcional validado y auditoría. Registrar la solicitud no elimina ni da de baja el servicio.
 
 La gestión usa `GET /api/service-withdrawals`, `POST /api/service-withdrawals` y `PATCH /api/service-withdrawals/:id`, protegidos por JWT, roles de solicitudes y scope de empresa. La ficha de solicitudes registra el retiro estructurado con servicio, fecha y motivo.

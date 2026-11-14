@@ -110,12 +110,21 @@ describe('seguimiento automático de retiros (flujo con dobles)', () => {
     return { ...h, service, g1 };
   }
 
+  it('la consulta del Libro de Control muestra el seguimiento real de la solicitud existente (no permite otra alta)', async () => {
+    const h = await accepted();
+    const view = await h.service.eligibility(61, comercial());
+    expect(view.seguimiento).toMatchObject({ idSolicitudRetiro: 15, flujoGuiado: true, ticket: { idTicket: 77, estado: 'Abierto' },
+      despacho: { estadoDespacho: 'ACEPTADA', idOtG3: 930, cierreRecibido: false, aplicado: false } });
+    expect(view.bajaAutomaticaHabilitada).toBe(true);
+    expect(view.checks.find(check => !check.ok)).toBeTruthy(); // active request: initiate would replay, never create a second one
+  });
+
   it('solo lee: GET de la OT (respetando la caché), nunca envía, cancela ni aplica la baja', async () => {
     const h = await accepted();
     expect(await h.service.trackableRequests(50)).toEqual([15]);
     h.g3Replies.push(orderRead('EN_CURSO'));
-    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: true, recepcion: 'NO_APLICA' });
-    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'NO_APLICA' });
+    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: true, recepcion: 'NO_APLICA', baja: 'PENDIENTE' });
+    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'NO_APLICA', baja: 'PENDIENTE' });
     expect(h.g3Calls.map(call => call.op)).toEqual(['create', 'read']);
     expect(h.state.dispatches[0].estadoOt).toBe('EN_CURSO');
     expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
@@ -123,15 +132,75 @@ describe('seguimiento automático de retiros (flujo con dobles)', () => {
     expect(h.state.tickets[0].estado).toBe('Abierto');
   });
 
-  it('con el cierre BAJA recibido sincroniza la recepción G1 de forma idempotente y no vuelve a leer una OT COMPLETADA', async () => {
-    const h = await accepted();
+  it('finalización apagada: con el cierre BAJA sincroniza la recepción G1 (informativa) de forma idempotente y no aplica la baja', async () => {
+    const h = await accepted({ finalize: false });
     h.g3Replies.push(orderRead('COMPLETADA'));
     await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { trace_id: h.state.dispatches[0].traceId })));
-    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'SINCRONIZADA' });
-    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'SINCRONIZADA' });
+    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'SINCRONIZADA', baja: 'PENDIENTE' });
+    await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'SINCRONIZADA', baja: 'PENDIENTE' });
     expect(h.state.audits.filter(a => a.accion === 'REGISTRAR_RECEPCION_G1_RETIRO')).toHaveLength(1);
     expect(h.g3Calls.filter(call => call.op === 'read')).toHaveLength(1);
     expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
+    expect(h.state.tickets[0].estado).toBe('Abierto');
+  });
+
+  describe('finalización automática tras la aprobación de G3 (FINET 13-11-2026)', () => {
+    async function approved(options: Parameters<typeof withdrawalHarness>[0] = { finalize: true }) {
+      const h = await accepted(options);
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { trace_id: h.state.dispatches[0].traceId })));
+      return h;
+    }
+
+    it('G3 COMPLETADA + cierre BAJA: el seguimiento aplica la baja con actor de sistema auditable, sin suplantar a un usuario', async () => {
+      const h = await approved();
+      h.g3Replies.push(orderRead('COMPLETADA')); // forced GET inside the finalization
+      await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'SINCRONIZADA', baja: 'APLICADA' });
+      expect(h.state.services[0].estadoOperativo).toBe('Baja');
+      expect(h.state.requests[0].estado).toBe('CERRADA');
+      expect(h.state.tickets[0].estado).toBe('Cerrado');
+      const applied = h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD');
+      expect(applied).toMatchObject({ idUsuario: null, valorNuevo: expect.objectContaining({ actor: 'SISTEMA_G8_SEGUIMIENTO_RETIROS' }) });
+      expect(h.state.audits.find(a => a.accion === 'CERRAR_TICKET_BAJA_SERVICIO')).toMatchObject({ idUsuario: null });
+      expect(h.g3Calls.filter(call => call.op === 'read')).toHaveLength(2);
+      expect(h.g3Calls.map(call => call.op)).not.toContain('cancel');
+      // Applied: it leaves the follow-up and a repeated cycle does nothing.
+      expect(await h.service.trackableRequests(50)).toEqual([]);
+      await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: false, recepcion: 'NO_APLICA', baja: 'NO_APLICA' });
+      expect(h.state.audits.filter(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toHaveLength(1);
+    });
+
+    it('G1 sin recepción o caído no impide la baja aprobada por G3 (queda como aviso en la auditoría)', async () => {
+      const h = await approved();
+      h.g1.getReceptions.mockRejectedValue(new Error('G1 down'));
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.service.track(15)).resolves.toMatchObject({ baja: 'APLICADA', recepcion: 'NO_APLICA' });
+      expect(h.state.services[0].estadoOperativo).toBe('Baja');
+      expect(h.state.audits.find(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD').valorNuevo.avisos).toContain('RECEPCION_G1_PENDIENTE');
+    });
+
+    it('si la aprobación ya no se confirma en el GET final (vuelve a PENDIENTE_APROBACION) no aplica y reintenta después', async () => {
+      const h = await approved();
+      h.g3Replies.push(orderRead('PENDIENTE_APROBACION'));
+      await expect(h.service.track(15)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_CLOSURE_BLOCKED' } });
+      expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
+      expect(h.state.tickets[0].estado).toBe('Abierto');
+    });
+
+    it('sin cierre BAJA (solo GET COMPLETADA) no aplica: el webhook correlacionado es evidencia obligatoria', async () => {
+      const h = await accepted();
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.service.track(15)).resolves.toEqual({ ordenConsultada: true, recepcion: 'NO_APLICA', baja: 'PENDIENTE' });
+      expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
+    });
+
+    it('pago completo antes de la aprobación: no aplica la baja ni reactiva; pide decisión comercial', async () => {
+      const h = await approved();
+      h.state.invoices[0].pagos = [{ monto: 20000 }];
+      h.g3Replies.push(orderRead('COMPLETADA'));
+      await expect(h.service.track(15)).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_DEBT_REGULARIZED', accion: 'DECISION_COMERCIAL_REQUERIDA' } });
+      expect(h.state.services[0].estadoOperativo).toBe('Suspendido');
+    });
   });
 
   it('estados terminales salen del seguimiento: cancelada, OT cancelada, cerrada o aplicada', async () => {

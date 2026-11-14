@@ -24,7 +24,7 @@ function component(api, form = false) {
   new Function('require', 'exports', code)(name => name === './G3InstallationStatus' ? exports : require(name), formExports);
   return formExports.InstallOrderForm;
 }
-async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false, installationSummary = false, service } = {}) {
+async function mount({ missing = true, error = false, tracking = null, mayComplete = true, compact = false, installationSummary = false, singleRefresh = false, service } = {}) {
   const calls = [];
   const api = {
     get: async path => { calls.push(['GET', path]); return { data: tracking }; },
@@ -38,7 +38,7 @@ async function mount({ missing = true, error = false, tracking = null, mayComple
     },
     patch: async (path, body) => { calls.push(['PATCH', path, body]); return { data: { idContrato: 4, comunaFaltante: false } }; },
   };
-  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true, compact, installationSummary, service })); });
+  let tree; await act(async () => { tree = create(React.createElement(component(api), { prospectId: 2, canRequest: true, compact, installationSummary, singleRefresh, service })); });
   const button = label => tree.root.findAllByType('button').find(b => b.props.children === label);
   return { tree, calls, button, close: async () => act(async () => tree.unmount()) };
 }
@@ -62,6 +62,16 @@ test('failed preflight does not enable installation', async () => {
   const h = await mount({ error: true });
   try { assert.equal(h.button('Generar instalación').props.disabled, true); assert.ok(JSON.stringify(h.tree.toJSON()).includes('Factibilidad requerida')); }
   finally { await h.close(); }
+});
+test('ficha de cliente sin orden muestra solamente la nota pequeña centrada', async () => {
+  const h = await mount({ installationSummary: true, compact: true });
+  try {
+    const note = h.tree.root.findByProps({ className: 'customer-contract-note customer-installation-empty' });
+    assert.equal(note.props.children, 'Sin orden de instalación registrada.');
+    assert.equal(h.tree.root.findAllByType('button').length, 0);
+    assert.equal(h.tree.root.findAllByProps({ role: 'alert' }).length, 0);
+    assert.deepEqual(h.calls.map(call => call[0]), ['GET']);
+  } finally { await h.close(); }
 });
 test('support must ask an authorized commercial role to complete missing data', async () => {
   const h = await mount({ mayComplete: false });
@@ -103,8 +113,8 @@ test('seguimiento presenta estados y fallas remotas con mensajes de producción'
   } finally { await h.close(); }
 });
 
-test('el refresco compacto consulta el estado y el cierre sigue siendo una acción explícita', async () => {
-  const h = await mount({ compact: true, tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'ASIGNADA',
+test('el refresco compacto consulta el cierre sin mostrar una acción adicional', async () => {
+  const h = await mount({ compact: true, singleRefresh: true, tracking: { idIntegracion: 2, idOtG3: '9700002', estadoPresentacion: 'ASIGNADA',
     estadoIntegracion: 'ENVIADA', ultimoErrorSanitizado: 'INTEGRACION_G3_NO_CONFIGURADA' } });
   try {
     const toast = () => h.tree.root.findByType(ToastNotice);
@@ -115,15 +125,12 @@ test('el refresco compacto consulta el estado y el cierre sigue siendo una acci�
 
     const refresh = h.tree.root.findByProps({ 'aria-label': 'Actualizar estado de instalación' });
     await act(async () => refresh.props.onClick());
-    assert.deepEqual(h.calls.slice(1), [['GET', '/integrations/g3/installations/2']]);
+    assert.deepEqual(h.calls.slice(1).map(([method, path]) => [method, path]), [['POST', '/integrations/g3/installations/2/reconcile'], ['GET', '/integrations/g3/prospects/2/installation']]);
     assert.equal(h.button('Detalle'), undefined);
 
     assert.equal(h.tree.root.findAllByType('details').length, 0);
     assert.doesNotMatch(JSON.stringify(h.tree.toJSON()), /Opciones de instalación/);
-    assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path.endsWith('/reconcile')).length, 0);
-    const closure = h.button('Consultar cierre');
-    assert.ok(closure, 'la conciliación de cierre sigue disponible como acción explícita');
-    await act(async () => closure.props.onClick());
+    assert.equal(h.button('Consultar cierre'), undefined);
     assert.equal(h.calls.filter(([method, path]) => method === 'POST' && path === '/integrations/g3/installations/2/reconcile').length, 1);
     assert.match(toast().props.message, /cierre técnico aún no está confirmado/);
     assert.equal(toast().props.tone, 'info');
@@ -232,7 +239,8 @@ test('sin permiso de gestionar instalaciones no se ofrece conciliar el cierre', 
   assert.equal(h.calls.some(([method]) => method === 'POST'), false);
 });
 
-test('la solicitud indica que genera la orden y que no activa el servicio', async t => {
+test('la solicitud conserva generar instalación sin el texto explicativo eliminado', async t => {
   const h = await workflow(t);
-  assert.match(JSON.stringify(h.tree.toJSON()), /No activa el servicio/);
+  assert.doesNotMatch(JSON.stringify(h.tree.toJSON()), /No activa el servicio|Genera la orden de instalación para coordinar/);
+  assert.match(JSON.stringify(h.tree.toJSON()), /Generar instalación/);
 });

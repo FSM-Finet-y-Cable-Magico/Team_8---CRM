@@ -91,6 +91,28 @@ export class UsersService {
     }
   }
 
+  async setActive(id: number, activo: boolean, currentUser: AuthUser) {
+    if (id === currentUser.idUsuario && !activo) throw new BadRequestException('No puedes desactivar tu propia cuenta');
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1::int AS locked FROM (SELECT pg_advisory_xact_lock(8044)) AS advisory_lock`;
+      const target = await tx.usuario.findUnique({ where: { idUsuario: id }, include: { usuarioRoles: { include: { rol: true } } } });
+      if (!target || target.fechaEliminacion != null) throw new NotFoundException('Usuario no encontrado');
+      if ((target.activo !== false) === activo) return { idUsuario: id, activo, sesionesRevocadas: false };
+      const roles = target.usuarioRoles.map(item => item.rol.nombreRol);
+      if (!activo && isAdministrator(roles)) {
+        const others = await tx.usuario.findMany({ where: { idUsuario: { not: id }, OR: [{ activo: true }, { activo: null }], fechaEliminacion: null }, include: { usuarioRoles: { include: { rol: true } } } });
+        if (!others.some(user => isAdministrator(user.usuarioRoles.map(item => item.rol.nombreRol)))) {
+          throw new BadRequestException('Debe quedar al menos un administrador activo');
+        }
+      }
+      if (target.versionSesion === null) await tx.usuario.updateMany({ where: { idUsuario: id, versionSesion: null }, data: { versionSesion: 0 } });
+      await tx.usuario.update({ where: { idUsuario: id }, data: { activo, versionSesion: { increment: 1 } } });
+      await tx.logAuditoria.create({ data: { idUsuario: currentUser.idUsuario, accion: activo ? 'ACTIVAR_USUARIO' : 'DESACTIVAR_USUARIO', entidadAfectada: 'usuario', idEntidadAfectada: id,
+        valorAnterior: { activo: target.activo, roles }, valorNuevo: { activo, sesionesRevocadas: true } } });
+      return { idUsuario: id, activo, sesionesRevocadas: true };
+    });
+  }
+
   async resetPassword(id: number, password: string, currentUser: AuthUser) {
     const hash = await this.passwordHash(password);
     await this.prisma.$transaction(async tx => {

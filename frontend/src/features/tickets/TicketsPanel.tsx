@@ -1,12 +1,17 @@
 ﻿import { useState } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory, type UserRow } from '../../api';
 import { rutPattern } from '../../constants';
-import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
+import { canonicalRut, formatWorkOrderValue } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { StatusBadge } from '../../shared/components';
+import { StatusBadge, ToastNotice } from '../../shared/components';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { TicketManagementModal } from './TicketManagementModal';
-import { ticketAttentionAvailability } from './ticket-presentation';
+import { isTerminationTicketCategory, manualTicketCategories, ticketAttentionAvailability, ticketMatchesSearch } from './ticket-presentation';
+import { contactDateTimeInput, contactDateTimeISO } from '../commercial/control-book-contact-time';
+
+const TERMINATION_CHANNELS = [['TELEFONO', 'Teléfono'], ['PRESENCIAL', 'Presencial'], ['CORREO', 'Correo'], ['WHATSAPP', 'WhatsApp'], ['PORTAL', 'Portal de clientes'], ['OTRO', 'Otro']] as const;
+type TerminationResult = { repetido: boolean; ticket: { idTicket: number; codigoSeguimiento: string | null } | null; retiroTecnico: string; despacho?: { idOtG3: number | null } | null; despachoPendiente?: string };
 
 export function TicketsPanel({
   tickets,
@@ -29,9 +34,16 @@ export function TicketsPanel({
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
-  const [customerLookupStatus, setCustomerLookupStatus] = useState('');
+  const { message: customerLookupMessage, showMessage, clearMessage } = useTransientMessage(3000);
+  const [lookupTone, setLookupTone] = useState<'success' | 'error'>('success');
+  const lookupRevision = useRef(0);
   const [managementOpen, setManagementOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  // FINET 13-11-2026: «Término de servicio» registers the customer's requirement (identity, date/time, evidence).
+  const [termination, setTermination] = useState({ canal: 'TELEFONO', solicitante: 'TITULAR', requerimientoEn: contactDateTimeInput(), evidencia: '', identidad: false });
+  const [terminating, setTerminating] = useState(false);
 
+  const visibleTickets = tickets.filter(ticket => ticketMatchesSearch(ticket, query));
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
   useEffect(() => {
     if (!focusedTicketId || !tickets.some(ticket => ticket.idTicket === focusedTicketId)) return;
@@ -39,8 +51,39 @@ export function TicketsPanel({
     setManagementOpen(true);
     onFocusConsumed?.();
   }, [focusedTicketId, tickets, onFocusConsumed]);
-  // Solo se ofrecen las categorías de atención que el servidor habilita; no se muestra aviso de catálogo.
-  const attentionCategories = ticketAttentionAvailability(categories).options;
+  // Solo se ofrecen las categorías de atención que el servidor habilita; se informa si el catálogo no puede verificarse.
+  // «Baja de servicio» no se ofrece: se genera solo al iniciar la baja desde el Libro de Control.
+  const attentionCategories = manualTicketCategories(categories);
+  const attentionCatalog = ticketAttentionAvailability(categories);
+  const selectedCategory = attentionCategories.find(category => String(category.idCategoria) === createForm.idCategoria);
+  const terminationSelected = Boolean(selectedCategory && isTerminationTicketCategory(selectedCategory));
+
+  /** Voluntary termination: commercial termination now; the technical withdrawal follows (it never waits for it). */
+  async function registerTermination(rut: string) {
+    if (terminating) return;
+    if (!createForm.idServicio) { setStatus('Selecciona el servicio que el titular pide terminar.'); return; }
+    const requerimientoEn = contactDateTimeISO(termination.requerimientoEn);
+    if (!requerimientoEn) { setStatus('Indica la fecha y hora del requerimiento.'); return; }
+    if (termination.evidencia.trim().length < 5) { setStatus('Registra la evidencia del requerimiento (grabación, correo, folio u otro respaldo).'); return; }
+    if (!termination.identidad) { setStatus('Confirma que verificaste la identidad y autorización del solicitante.'); return; }
+    setTerminating(true);
+    try {
+      const { data } = await api.post<TerminationResult>('/service-withdrawals/voluntary', {
+        rut, idServicio: Number(createForm.idServicio), canal: termination.canal, solicitante: termination.solicitante, requerimientoEn,
+        evidencia: termination.evidencia.trim(), descripcion: createForm.descripcion.trim(), confirmacionIdentidad: true,
+      });
+      const ticket = data.ticket ? data.ticket.codigoSeguimiento ?? `#${data.ticket.idTicket}` : '';
+      const technical = data.retiroTecnico === 'DATOS_INCOMPLETOS' ? 'El retiro de equipos queda pendiente: faltan datos de dirección o identificación.'
+        : data.despacho?.idOtG3 ? `Orden de retiro N° ${data.despacho.idOtG3} creada.` : 'El retiro de equipos queda pendiente de envío.';
+      setStatus(data.repetido ? `El término ya estaba registrado (ticket ${ticket}).` : `Término registrado y aplicado (ticket ${ticket}). ${technical} La deuda existente se conserva.`);
+      setTermination(current => ({ ...current, evidencia: '', identidad: false }));
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    } finally {
+      setTerminating(false);
+    }
+  }
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -52,39 +95,54 @@ export function TicketsPanel({
     }
   }
 
-  async function lookupTicketCustomer() {
-    const rut = normalizeRutInput(createForm.rut);
-
-    if (!rutPattern.test(rut)) {
-      setCustomerPreview(null);
-      setTicketServices([]);
-      setCustomerLookupStatus('Ingresa un RUT válido para consultar al cliente.');
-      return;
-    }
-
-    try {
-      const { data } = await api.get<Customer>('/customers/search', { params: { term: rut } });
-      setCreateForm((current) => ({ ...current, rut }));
-      setCustomerPreview(data);
-      const servicesResult = await api.get<CustomerService[]>(`/services/customer/${data.idCliente}`);
-      setTicketServices(servicesResult.data);
-      setCustomerLookupStatus('Cliente encontrado');
-    } catch (err) {
-      setCustomerPreview(null);
-      setTicketServices([]);
-      setCustomerLookupStatus(apiErrorMessage(err));
-    }
-  }
+  useEffect(() => {
+    if (!permissions.createTickets || !createForm.rut.trim()) return;
+    const revision = ++lookupRevision.current;
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && revision === lookupRevision.current;
+    const timer = window.setTimeout(async () => {
+      const input = createForm.rut.trim();
+      const term = canonicalRut(input);
+      if (!term) { setLookupTone('error'); showMessage('Cliente no encontrado'); return; }
+      let customer: Customer;
+      try {
+        const { data } = await api.get<Customer>('/customers/search', { params: { term }, signal: controller.signal });
+        if (!current()) return;
+        customer = data;
+        setCustomerPreview(data);
+        setLookupTone('success'); showMessage('Cliente encontrado');
+      } catch (err) {
+        if (current()) { setLookupTone('error'); showMessage(apiErrorMessage(err)); }
+        return;
+      }
+      try {
+        const { data } = await api.get<CustomerService[]>(`/services/customer/${customer.idCliente}`, { signal: controller.signal });
+        if (current()) setTicketServices(data);
+      } catch {
+        if (current()) { setLookupTone('error'); showMessage('No se pudieron cargar los servicios del cliente. Inténtalo nuevamente.'); }
+      }
+    }, 500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [createForm.rut, permissions.createTickets, showMessage]);
 
   return (
-    <section className="workspace-grid">
+    <section className={`tickets-workspace${permissions.createTickets ? '' : ' tickets-workspace--readonly'}`}>
+      <div className="tickets-workspace-heading">
+        <h2>{permissions.createTickets ? 'Registrar ticket' : 'Tickets'}</h2>
+        <div className="tickets-search" role="search" aria-label="Buscar tickets">
+          <input type="search" className="tickets-search-input" aria-label="Buscar ticket"
+            placeholder="Buscar por código, cliente, RUT, categoría, servicio u OT" maxLength={120}
+            value={query} onChange={event => setQuery(event.target.value)} />
+        </div>
+      </div>
+      <div className="workspace-grid">
       {permissions.createTickets && <form
         className="ticket-create-form stack"
         onSubmit={(event) => {
           event.preventDefault();
-          const rut = normalizeRutInput(createForm.rut);
+          const rut = canonicalRut(customerPreview?.rut ?? createForm.rut);
 
-          if (!rutPattern.test(rut)) {
+          if (!rut || !rutPattern.test(rut)) {
             setStatus('Ingresa el RUT del cliente con guion, por ejemplo 11111111-1.');
             return;
           }
@@ -96,6 +154,11 @@ export function TicketsPanel({
 
           if (createForm.descripcion.trim().length < 10) {
             setStatus('Describe brevemente el problema reportado por el cliente.');
+            return;
+          }
+
+          if (terminationSelected) {
+            void registerTermination(rut);
             return;
           }
 
@@ -112,30 +175,21 @@ export function TicketsPanel({
           );
         }}
       >
-        <h2>Registrando ticket de soporte</h2>
         <label>
           RUT cliente
           <input
             value={createForm.rut}
             onChange={(event) => {
-              setCreateForm({ ...createForm, rut: event.target.value, idServicio: '' });
+              lookupRevision.current++;
+              setCreateForm(current => ({ ...current, rut: event.target.value, idServicio: '' }));
               setCustomerPreview(null);
               setTicketServices([]);
-              setCustomerLookupStatus('');
-            }}
-            onBlur={() => {
-              if (createForm.rut.trim()) {
-                void lookupTicketCustomer();
-              }
+              clearMessage();
             }}
             placeholder="11111111-1"
             required
           />
         </label>
-        <button type="button" className="secondary" onClick={() => void lookupTicketCustomer()}>
-          Buscar datos del cliente
-        </button>
-        {customerLookupStatus && <p className="inline-status">{customerLookupStatus}</p>}
         {customerPreview && (
           <section className="customer-preview">
             <h3>{customerPreview.nombreCompleto}</h3>
@@ -152,7 +206,7 @@ export function TicketsPanel({
               value={createForm.idServicio}
               onChange={(event) => setCreateForm({ ...createForm, idServicio: event.target.value })}
             >
-              <option value="">Ticket general del cliente</option>
+              <option value="">{terminationSelected ? 'Seleccionar servicio a terminar' : 'Ticket general del cliente'}</option>
               {ticketServices.map((service) => (
                 <option key={service.idServicio} value={service.idServicio}>
                   Servicio {service.idServicio} - {service.tipoServicio} - {service.estadoOperativo}
@@ -172,6 +226,33 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
+        {terminationSelected && <>
+          <label>
+            Canal del requerimiento
+            <select value={termination.canal} onChange={(event) => setTermination({ ...termination, canal: event.target.value })}>
+              {TERMINATION_CHANNELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label>
+            Fecha y hora del requerimiento
+            <input type="datetime-local" required value={termination.requerimientoEn} onChange={(event) => setTermination({ ...termination, requerimientoEn: event.target.value })} />
+          </label>
+          <label>
+            Solicitante
+            <select value={termination.solicitante} onChange={(event) => setTermination({ ...termination, solicitante: event.target.value })}>
+              <option value="TITULAR">Titular del servicio</option>
+              <option value="REPRESENTANTE">Representante autorizado</option>
+            </select>
+          </label>
+          <label>
+            Evidencia del requerimiento
+            <input required maxLength={500} value={termination.evidencia} onChange={(event) => setTermination({ ...termination, evidencia: event.target.value })} placeholder="N° de grabación, correo recibido, folio u otro respaldo" />
+          </label>
+          <label>
+            <span><input type="checkbox" checked={termination.identidad} onChange={(event) => setTermination({ ...termination, identidad: event.target.checked })} /> Verifiqué la identidad del titular (o la autorización del representante).</span>
+          </label>
+          <p className="inline-status">El término comercial se aplica al registrar, sin esperar la visita técnica. La deuda existente se conserva y el retiro de equipos sigue su curso.</p>
+        </>}
         <label>
           Prioridad
           <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>
@@ -189,12 +270,11 @@ export function TicketsPanel({
             required
           />
         </label>
-        <button disabled={!attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)}>Crear ticket</button>
+        <button disabled={terminating || !attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)}>{terminationSelected ? (terminating ? 'Registrando…' : 'Registrar término') : 'Crear ticket'}</button>
         {status && <p className="inline-status">{status}</p>}
       </form>}
 
-      <section className="tickets-list-section">
-        <h2>Tickets</h2>
+      <section className="tickets-list-section" aria-label="Listado de tickets">
         <div className="table-wrap tickets-table-wrap">
           <table className="tickets-table operational-table">
             <thead>
@@ -210,7 +290,7 @@ export function TicketsPanel({
               </tr>
             </thead>
             <tbody>
-              {tickets.map((ticket) => (
+              {visibleTickets.map((ticket) => (
                 <tr key={ticket.idTicket}>
                   <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
                   <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
@@ -236,6 +316,11 @@ export function TicketsPanel({
                   </td>
                 </tr>
               ))}
+              {visibleTickets.length === 0 && <tr>
+                <td colSpan={8} className="empty-state" role="status">
+                  {query.trim() ? 'No se encontraron tickets que coincidan con la búsqueda.' : 'No hay tickets registrados.'}
+                </td>
+              </tr>}
             </tbody>
           </table>
         </div>
@@ -249,6 +334,8 @@ export function TicketsPanel({
           onChanged={onChanged}
         />}
       </section>
+      </div>
+      <ToastNotice message={customerLookupMessage} tone={lookupTone} onDismiss={clearMessage} />
     </section>
   );
 }

@@ -4,7 +4,7 @@ import { api, apiErrorMessage, type Ticket, type TicketCategory } from '../../ap
 import { formatDateTime, formatWorkOrderValue } from '../../lib';
 import type { DashboardPermissions } from '../../permissions';
 import { Modal, StatusBadge } from '../../shared/components';
-import { isCompletedTicketWorkOrder, isGeneralTicketCategory, isTechnicalTicketReadOnly, PENDING_ORDER_MESSAGE, ticketContent, ticketErrorMessage } from './ticket-presentation';
+import { isCompletedTicketWorkOrder, isGeneralTicketCategory, isTechnicalTicketReadOnly, isTerminationTicketCategory, isWithdrawalTicketCategory, PENDING_ORDER_MESSAGE, ticketAttentionAvailability, ticketContent, ticketErrorMessage } from './ticket-presentation';
 import './ticket-management.css';
 
 type Tab = 'management' | 'activity' | 'resolution';
@@ -41,7 +41,11 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
   const statusChanged = permissions.updateTicketStatus && draft.status !== saved.status;
   const hasChanges = categoryChanged || priorityChanged || statusChanged;
   const canManage = !technicalReadOnly && (permissions.classifyTickets || permissions.updateTicketStatus);
-  const generalCategories = categories.filter(isGeneralTicketCategory);
+  // The reserved «Baja de servicio» is never a reclassification target (the current one is still shown, disabled).
+  const generalCategories = categories.filter(category => isGeneralTicketCategory(category) && !isWithdrawalTicketCategory(category) && !isTerminationTicketCategory(category));
+  const attentionIds = new Set(ticketAttentionAvailability(categories).options.map(category => category.idCategoria));
+  const attentionCategories = generalCategories.filter(category => attentionIds.has(category.idCategoria));
+  const historicalCategories = generalCategories.filter(category => !attentionIds.has(category.idCategoria));
   const resolved = ['Resuelto', 'Cerrado'].includes(saved.status);
   const { report, activities } = ticketContent(ticket);
   const tabs = [
@@ -165,7 +169,12 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
             {permissions.classifyTickets ? <>
               <label>Categoría<select value={draft.category} onChange={event => setDraft({ ...draft, category: event.target.value })}>
                 {!generalCategories.some(category => String(category.idCategoria) === draft.category) && <option value={draft.category} disabled>{ticket.categoria?.nombre ?? 'Categoría actual'}</option>}
-                {generalCategories.map(category => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+                {attentionCategories.length > 0 && <optgroup label="Atención comercial">
+                  {attentionCategories.map(category => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+                </optgroup>}
+                {historicalCategories.length > 0 && <optgroup label="Técnicas y otras categorías históricas">
+                  {historicalCategories.map(category => <option key={category.idCategoria} value={category.idCategoria}>{category.nombre}</option>)}
+                </optgroup>}
               </select></label>
               <label>Prioridad<select value={draft.priority} onChange={event => setDraft({ ...draft, priority: event.target.value })}>{['Alta', 'Media', 'Baja'].map(value => <option key={value}>{value}</option>)}</select></label>
             </> : <div className="ticket-readonly ticket-field-wide"><span>Categoría: <strong>{ticket.categoria?.nombre ?? 'Sin categoría'}</strong></span><span>Prioridad: <StatusBadge value={formatWorkOrderValue(saved.priority)} /></span></div>}
@@ -191,7 +200,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
           {activities.length ? <ol className="ticket-activity-list">{activities.map((entry, index) => <li key={`${entry.kind}-${index}`}>
             <span className="ticket-activity-dot" aria-hidden="true">{entry.kind === 'diagnosis' ? <CheckCircle2 size={16} /> : <MessageSquare size={16} />}</span>
             <article><header><strong>{entry.kind === 'diagnosis' ? 'Diagnóstico registrado' : entry.kind === 'status' ? 'Comentario de seguimiento' : 'Observación técnica'}</strong>{entry.date && <time dateTime={entry.date}>{formatDateTime(entry.date)}</time>}</header>{entry.author && <small>{entry.author}</small>}<p>{entry.text.replace(/^Causa raiz:/m, 'Causa raíz:').replace(/^Estado final:/m, 'Estado observado:')}</p></article>
-          </li>)}</ol> : <div className="ticket-empty"><MessageSquare size={24} aria-hidden="true" /><strong>Aún no hay seguimiento registrado</strong><p>Los comentarios, observaciones y diagnósticos aparecerán aquí.</p></div>}
+          </li>)}</ol> : <p className="empty-state">Aún no hay seguimiento registrado.</p>}
         </div>{footer()}
       </div>}
 

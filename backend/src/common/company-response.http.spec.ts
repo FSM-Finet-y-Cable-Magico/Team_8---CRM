@@ -325,8 +325,14 @@ describe('P0-01 aislamiento de respuestas HTTP', () => {
   it('rechaza baja de servicio con contrato cruzado sin iniciar transaccion ni auditoria', async () => {
     await start();
     data.services[0].contrato = data.contracts[1];
+    const body = { motivoAdministrativo: 'ERROR_DE_REGISTRO', observacion: 'Servicio registrado por error en QA' };
+    // FINET 13-11-2026: the administrative baja is Administrador-only (Soporte/Comercial get 403) and needs a closed reason.
     await request(app.getHttpServer()).patch('/api/services/1/deactivate')
-      .set('x-test-company', '1').send({}).expect(400);
+      .set('x-test-company', '1').send(body).expect(403);
+    await request(app.getHttpServer()).patch('/api/services/1/deactivate')
+      .set('x-test-company', '1').set('x-test-role', 'Administrador').send({}).expect(400);
+    await request(app.getHttpServer()).patch('/api/services/1/deactivate')
+      .set('x-test-company', '1').set('x-test-role', 'Administrador').send(body).expect(400);
     // The mock intentionally has no $transaction: entering it would fail with 500.
     expect(data.db.servicioContratado.update).not.toHaveBeenCalled();
     expect(data.db.contrato.update).not.toHaveBeenCalled();

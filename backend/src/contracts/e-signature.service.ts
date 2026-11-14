@@ -5,7 +5,7 @@ import { assignAutomatic, assertPendingSignature, resolveSignatureMode } from '.
 import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser } from '../common/auth.types';
@@ -57,6 +57,10 @@ export class ESignatureService implements OnModuleInit {
       const storage = await inspectPrivateSignatureSchema(this.db);
       if (!storage.ready) throw new Error('PRIVATE_SIGNATURE_SCHEMA_NOT_READY');
     } catch { throw new Error('CONTRACT_SIGNATURE_SCHEMA_NOT_READY'); }
+    this.contracts.setAutomaticSignatureDelivery(async (id, actor) => {
+      const state = await this.status(id, actor);
+      if (state.enabled && state.sendAllowed && state.policy.mode === 'automatic') await this.create(id, actor);
+    });
   }
 
   async status(idContrato: number, actor: AuthUser) {
@@ -257,6 +261,7 @@ export class ESignatureService implements OnModuleInit {
       await this.lock(tx, found.idContrato);
       const row = await signatureRepository(tx).findUnique({ where: { idSolicitud: found.idSolicitud } });
       if (!row || !settings.companies.includes(row.idEmpresa) || row.tokenHash !== digest(token) || !await this.validReferences(tx, row)) return failure('Enlace no disponible');
+      if (row.estado === 'ANULADA' && row.motivoAnulacion === 'CONTRATO_CANCELADO') return failure('Este contrato fue cancelado. El enlace de firma ya no está disponible.');
       if (row.estado !== 'FIRMADA' && row.estado !== 'PENDIENTE') return failure('Solicitud no vigente. Contacta a la empresa');
       if (row.fechaExpiracion.getTime() <= Date.now()) {
         if (row.estado === 'PENDIENTE') await this.invalidate(tx, row, 'PLAZO_CUMPLIDO', true);
@@ -356,9 +361,9 @@ export class ESignatureService implements OnModuleInit {
     const { demo } = settings;
     const expectedConsent = demo ? DEMO_SIGNATURE_CONSENT_VERSION : SIGNATURE_CONSENT_VERSION;
     if (consent !== true || consentVersion !== expectedConsent || !/^[a-f0-9]{64}$/.test(hashOriginal)
-        || (demo ? code !== undefined : typeof code !== 'string' || !/^\d{6}$/.test(code))) {
+        || (demo && code !== undefined && code !== '')) {
       throw new BadRequestException(demo ? 'Revisa el documento y acepta las condiciones de la demostración'
-        : 'Revisa el documento, acepta sus condiciones e introduce el código');
+        : 'Revisa el documento y acepta sus condiciones');
     }
     const result = await this.withToken(token, async (tx, row) => {
       if (demo !== (row.consentimientoVersion === DEMO_SIGNATURE_CONSENT_VERSION)) {
@@ -369,14 +374,8 @@ export class ESignatureService implements OnModuleInit {
       if (demo) {
         if (!row.pdfVisto) return failure('Revisa el PDF antes de aceptar la demostración');
       } else {
-        if (!row.pdfVisto || !row.otpHash || !row.otpExpiracion || row.otpExpiracion.getTime() <= Date.now()
-            || !(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && settings.test) || row.otpIntentos >= 5) return failure('Código no vigente');
-        const expected = Buffer.from(row.otpHash, 'hex'), supplied = Buffer.from(this.otpHash(row.idSolicitud, code!), 'hex');
-        if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
-          await signatureRepository(tx).update({ where: { idSolicitud: row.idSolicitud }, data: { otpIntentos: { increment: 1 } } });
-          if (row.otpIntentos >= 4) await this.invalidate(tx, row, 'INTENTOS_AGOTADOS');
-          return failure('Código incorrecto');
-        }
+        if (!row.pdfVisto) return failure('Revisa el contrato antes de firmar');
+        if (!(row.correoEstado === 'ENVIADO' || row.correoEstado === 'SIMULADO' && settings.test)) return failure('La entrega del enlace personal no está confirmada');
       }
       const signedAt = new Date();
       const pdf = await this.seal(row, signedAt);
@@ -411,7 +410,7 @@ export class ESignatureService implements OnModuleInit {
       try { font.encodeText(character); return character; } catch { return '?'; }
     }).join('');
     const lines = [demo ? 'Constancia de aceptación de demostración' : 'Constancia de firma electrónica simple',
-      demo ? 'Aceptación mediante enlace de prueba.' : 'Aceptación mediante código enviado al correo registrado.',
+      demo ? 'Aceptación mediante enlace de prueba.' : 'Aceptación mediante enlace personal enviado al correo registrado.',
       'Solicitud: ' + row.idSolicitud, 'Fecha UTC: ' + when.toISOString(),
       'Correo: ' + row.destinatario, 'SHA-256 del PDF original:', row.hashOriginal,
       'SHA-256 de los datos congelados:', digest(canonicalSnapshot(row.datosSnapshot)),

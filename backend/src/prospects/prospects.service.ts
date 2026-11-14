@@ -1,5 +1,6 @@
 import { ContractsService } from '../contracts/contracts.service';
 import { effectiveSignatureDates } from '../contracts/signature.repository';
+import { CustomerPlanQuoteDto } from './dto/customer-plan-quote.dto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Prospecto } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -107,7 +108,6 @@ export class ProspectsService {
     const prospects = await this.prisma.prospecto.findMany({
       where: activeProspectWhere(companyScope),
       orderBy: { fechaCreacion: 'desc' },
-      take: 100,
       include: prospectListInclude(companyScope),
     });
     return this.projectProspectRows(prospects);
@@ -259,7 +259,6 @@ export class ProspectsService {
     const prospects = await this.prisma.prospecto.findMany({
       where: { OR: companies.map(({ idEmpresa }) => pendingActivationWhere({ idEmpresa })) },
       orderBy: { fechaCreacion: 'desc' },
-      take: 100,
       include: {
         empresa: true,
         contratos: {
@@ -446,28 +445,39 @@ export class ProspectsService {
     await this.assertManualCommercialChange(prospect);
 
     const isReactivation = currentStatus === LOST_PIPELINE_STATUS;
-    const updated = await this.prisma.prospecto.update({
-      where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
-      data: {
-        estadoPipeline: nextStatus,
-        motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
-      },
-      include: { empresa: true },
-    }).catch((error: unknown) => this.rethrowConcurrentChange(error));
+    const save = async (db: PrismaService | Prisma.TransactionClient) => {
+      const updated = await db.prospecto.update({
+        where: this.manualChangeWhere(idProspecto, prospect.estadoPipeline, prospect.idEmpresa),
+        data: {
+          estadoPipeline: nextStatus,
+          motivoPerdida: isReactivation ? null : prospect.motivoPerdida,
+          ...(isReactivation ? { observacionPerdida: null, fechaPerdida: null, idUsuarioPerdida: null, idZonaPago: null } : {}),
+        },
+        include: { empresa: true },
+      }).catch((error: unknown) => this.rethrowConcurrentChange(error));
 
-    await this.auditService.record({
-      idUsuario: currentUser.idUsuario,
-      accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
-      entidadAfectada: 'prospecto',
-      idEntidadAfectada: idProspecto,
-      valorAnterior: {
-        estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
-        ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
-      },
-      valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
+      const auditEntry = {
+        idUsuario: currentUser.idUsuario,
+        accion: isReactivation ? 'REACTIVAR_PROSPECTO' : 'ACTUALIZAR_PIPELINE_PROSPECTO',
+        entidadAfectada: 'prospecto',
+        idEntidadAfectada: idProspecto,
+        valorAnterior: {
+          estadoPipeline: currentStatus, motivoPerdida: prospect.motivoPerdida,
+          ...(isReactivation ? { observacionPerdida: prospect.observacionPerdida, fechaPerdida: prospect.fechaPerdida, idUsuarioPerdida: prospect.idUsuarioPerdida } : {}),
+        },
+        valorNuevo: { estadoPipeline: nextStatus, motivoPerdida: isReactivation ? null : prospect.motivoPerdida },
+      };
+      if (isReactivation) await this.auditService.record(auditEntry, db as Prisma.TransactionClient);
+      else await this.auditService.record(auditEntry);
+
+      return updated;
+    };
+    if (!isReactivation) return save(this.prisma);
+    return this.prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT id_prospecto FROM public.prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
+      await tx.cotizacion.updateMany({ where: { idProspecto }, data: { factibilidadVerificada: false } });
+      return save(tx);
     });
-
-    return updated;
   }
 
   async verifyFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser) {
@@ -521,10 +531,11 @@ export class ProspectsService {
   async update(idProspecto: number, dto: UpdateProspectDto, currentUser: AuthUser) {
     const prospect = await this.getProspectOrThrow(idProspecto, currentUser);
     const wasQuoted = prospect.estadoPipeline === QUOTE_SENT_PIPELINE_STATUS;
+    const wasLost = prospect.estadoPipeline === LOST_PIPELINE_STATUS;
     if (prospect.estadoPipeline === 'NUEVO') {
       throw new BadRequestException('Revisa y aprueba la solicitud G2 antes de actualizar su ubicación');
     }
-    if (!wasQuoted) this.assertFeasibilityStage(prospect.estadoPipeline);
+    if (!wasQuoted && !wasLost) this.assertFeasibilityStage(prospect.estadoPipeline);
     if (wasQuoted && !dto.ubicacion) {
       throw new BadRequestException('Vuelve a comprobar la ubicación y cobertura antes de emitir otra cotización');
     }
@@ -542,12 +553,12 @@ export class ProspectsService {
     const cobertura = dto.ubicacion
       ? await this.coverageService.check(prospect.idEmpresa ?? 0, dto.ubicacion, currentUser)
       : null;
-    const refreshFeasibility = Boolean(cobertura && (restartQuoteFlow || addressChanged
+    const refreshFeasibility = !wasLost && Boolean(cobertura && (restartQuoteFlow || addressChanged
       || dto.ubicacion?.latitud !== prospect.latitud || dto.ubicacion?.longitud !== prospect.longitud));
     return this.prisma.$transaction(async tx => {
       // Same row lock as contractPlan: do not race the creation of a contract.
       await tx.$executeRaw`SELECT id_prospecto FROM prospecto WHERE id_prospecto = ${idProspecto} FOR UPDATE`;
-      if (await tx.contrato.findFirst({ where: { idProspecto } })) {
+      if (await tx.contrato.findFirst({ where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } } })) {
         throw new BadRequestException('La ubicacion contratada requiere revision contractual. Para una comuna ausente utiliza Completar datos de instalacion.');
       }
       const previous = await tx.prospecto.findUniqueOrThrow({ where: { idProspecto } });
@@ -632,7 +643,7 @@ export class ProspectsService {
         || current.latitud !== prospect.latitud || current.longitud !== prospect.longitud) {
         throw new ConflictException('El prospecto cambió durante la consulta de cobertura; vuelve a consultar');
       }
-      if (current.idCliente != null || await tx.contrato.findFirst({ where: { idProspecto } })) {
+      if (current.idCliente != null || await tx.contrato.findFirst({ where: { idProspecto, estado: { notIn: ['Baja', 'Anulado'] } } })) {
         throw new BadRequestException('La factibilidad contratada requiere su flujo autorizado; no se modificó la ubicación');
       }
       // A negative recheck invalidates previous positive checks used by installation scheduling.
@@ -672,6 +683,62 @@ export class ProspectsService {
       return result;
     });
     return updated;
+  }
+
+  async customerQuotes(idCliente: number, idEmpresa: number, user: AuthUser) {
+    if (!Number.isSafeInteger(idCliente) || idCliente < 1 || !Number.isSafeInteger(idEmpresa) || idEmpresa < 1) {
+      throw new BadRequestException('Cliente o empresa inválidos');
+    }
+    if (!isAdministrator(user.roles) && idEmpresa !== user.idEmpresa) throw new NotFoundException('Cliente no encontrado en tu empresa');
+    const customer = await this.prisma.cliente.findUnique({ where: { idCliente }, include: { contratos: { select: { idEmpresa: true } } } });
+    if (!customer || (!isAdministrator(user.roles) && customer.idEmpresa !== idEmpresa
+      && !customer.contratos.some(contract => contract.idEmpresa === idEmpresa))) throw new NotFoundException('Cliente no encontrado en tu empresa');
+    const quotes = await this.prisma.cotizacion.findMany({
+      where: { fechaEnvio: { not: null }, prospecto: { idCliente, idEmpresa, origenContacto: 'Plan adicional' } },
+      include: { plan: true, prospecto: { include: { contratos: { where: { idCliente, idEmpresa, estado: { notIn: ['Baja', 'Anulado'] } },
+        select: { idContrato: true, estado: true }, orderBy: { idContrato: 'desc' } } } } },
+      orderBy: { idCotizacion: 'desc' },
+    });
+    return quotes.map(quote => ({ idCotizacion: quote.idCotizacion, idProspecto: quote.idProspecto,
+      idPlan: quote.idPlan, idEmpresa, codigo: quote.codigo, fechaEnvio: quote.fechaEnvio,
+      planNombre: quote.plan?.idEmpresa === idEmpresa ? quote.plan.nombreComercial : 'Plan no disponible',
+      vigente: quote.factibilidadVerificada === true && quote.plan?.activo !== false && quote.plan?.idEmpresa === idEmpresa,
+      direccion: quote.prospecto?.direccion ?? '', comuna: quote.prospecto?.comuna ?? '', region: quote.prospecto?.region ?? '',
+      latitud: quote.prospecto?.latitud ?? null, longitud: quote.prospecto?.longitud ?? null,
+      contrato: quote.prospecto?.contratos[0] ?? null,
+    }));
+  }
+
+  async quoteCustomerPlan(dto: CustomerPlanQuoteDto, user: AuthUser) {
+    const plan = await this.prisma.plan.findUnique({ where: { idPlan: dto.planId } });
+    if (!plan?.idEmpresa || plan.activo === false) throw new BadRequestException('Plan inexistente o inactivo');
+    if (!isAdministrator(user.roles) && plan.idEmpresa !== user.idEmpresa) throw new BadRequestException('El plan no pertenece a tu empresa');
+    const customer = await this.prisma.cliente.findUnique({ where: { idCliente: dto.idCliente },
+      include: { contratos: { select: { idEmpresa: true } } } });
+    if (!customer || (!isAdministrator(user.roles) && customer.idEmpresa !== plan.idEmpresa
+      && !customer.contratos.some(contract => contract.idEmpresa === plan.idEmpresa))) throw new NotFoundException('Cliente no encontrado en tu empresa');
+    if (!customer.rut || !customer.nombreCompleto || !customer.telefono || !customer.email
+      || !validateRut(customer.rut).valid || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) {
+      throw new BadRequestException('Completa el RUT, nombre, teléfono y correo del cliente antes de cotizar');
+    }
+    const commercial = await this.coverageService.plansForLocation(plan.idEmpresa, dto, user);
+    if (!commercial.coberturaComercial || !commercial.planes.some(item => item.idPlan === plan.idPlan)) {
+      throw new BadRequestException('El plan no está disponible para la dirección seleccionada');
+    }
+    const available = commercial.planes.find(item => item.idPlan === plan.idPlan)!;
+    const zoneId = available.origenPrecio === 'ZONA_PADRE' ? commercial.zona?.idZonaPago
+      : commercial.microzona?.idZonaPago ?? commercial.zona?.idZonaPago;
+    // Each quotation owns an immutable location. A linked commercial record is not a new lead
+    // and cannot appear in the active-prospect list or overwrite the customer's address.
+    const opportunity = await this.prisma.prospecto.create({ data: {
+      idCliente: customer.idCliente, idEmpresa: plan.idEmpresa, idUsuarioComercial: user.idUsuario,
+      rut: customer.rut, nombreCompleto: customer.nombreCompleto, email: customer.email, telefono: customer.telefono,
+      direccion: dto.direccion.trim(), comuna: dto.comuna.trim(), region: dto.region?.trim(),
+      latitud: dto.latitud, longitud: dto.longitud, idPlanInteres: plan.idPlan,
+      idZonaPago: zoneId,
+      clasificacionComercial: 'CLIENTE', estadoPipeline: 'Factible', origenContacto: 'Plan adicional', fechaCreacion: new Date(),
+    } });
+    return this.generateQuote(opportunity.idProspecto, { planId: plan.idPlan }, user);
   }
 
   async generateQuote(idProspecto: number, dto: GenerateQuoteDto, currentUser: AuthUser) {
@@ -982,6 +1049,7 @@ export class ProspectsService {
         where: {
           idProspecto,
           idEmpresa: prospect.idEmpresa,
+          estado: { notIn: ['Baja', 'Anulado'] },
         },
         orderBy: { idContrato: 'desc' },
       });
@@ -1519,9 +1587,15 @@ export class ProspectsService {
     return this.renderQuotePdfBuffer(quote);
   }
 
-  private renderQuotePdfBuffer(quote: Parameters<typeof renderQuotePdfDocument>[0]) {
+  private async renderQuotePdfBuffer(quote: Parameters<typeof renderQuotePdfDocument>[0]) {
     if (!quote.prospecto || !quote.plan) {
       throw new NotFoundException('Cotizacion no encontrada');
+    }
+    const source = quote.prospecto as typeof quote.prospecto & { idCliente?: number | null; idZonaPago?: number | null };
+    if (source.idCliente && source.idZonaPago) {
+      const price = await this.prisma.planZonaPrecio.findFirst({ where: { idPlan: (quote.plan as typeof quote.plan & { idPlan: number }).idPlan,
+        idZonaPago: source.idZonaPago, activo: true }, orderBy: { idPlanZonaPrecio: 'desc' } });
+      if (price) return renderQuotePdfDocument({ ...quote, plan: { ...quote.plan, precioMensual: price.precioMensual } });
     }
     return renderQuotePdfDocument(quote);
   }

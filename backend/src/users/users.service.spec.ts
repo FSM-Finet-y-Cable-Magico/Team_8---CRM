@@ -1,5 +1,8 @@
 import { UsersService } from './users.service';
 import * as bcrypt from 'bcryptjs';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { UserStatusDto } from './dto/save-user.dto';
 const admin = { idUsuario: 1, idEmpresa: null, email: 'admin@test.local', nombreCompleto: 'Admin', roles: ['Administrador'] };
 const dto = { nombreCompleto: 'Usuario', email: 'USER@test.local', roleId: 2, idEmpresa: 1, activo: true };
 function setup() {
@@ -10,6 +13,43 @@ function setup() {
   return { db, target, service: new UsersService(db as never, { record: jest.fn() } as never) };
 }
 describe('Usuarios internos', () => {
+  it('el cambio de estado valida solo un booleano y no exige correo, empresa o perfil', async () => {
+    expect(await validate(plainToInstance(UserStatusDto, { activo: false }))).toEqual([]);
+    expect(await validate(plainToInstance(UserStatusDto, { activo: 'false' }))).not.toEqual([]);
+  });
+  it('desactiva un usuario sin correo sin cambiar datos, empresa ni sus múltiples perfiles', async () => {
+    const { service, db, target } = setup();
+    Object.assign(target, { email: null, idEmpresa: null, versionSesion: null, usuarioRoles: [{ rol: { nombreRol: 'SUPERUSUARIO' } }, { rol: { nombreRol: 'Inventario' } }] });
+    db.usuario.findMany.mockResolvedValue([{ usuarioRoles: [{ rol: { nombreRol: 'Administrador' } }] }]);
+    await expect(service.setActive(2, false, admin)).resolves.toMatchObject({ activo: false, sesionesRevocadas: true });
+    expect(db.usuario.update).toHaveBeenCalledWith({ where: { idUsuario: 2 }, data: { activo: false, versionSesion: { increment: 1 } } });
+    expect(db.usuario.updateMany).toHaveBeenCalledWith({ where: { idUsuario: 2, versionSesion: null }, data: { versionSesion: 0 } });
+    expect(db.usuarioRol.deleteMany).not.toHaveBeenCalled();
+    expect(db.usuarioRol.create).not.toHaveBeenCalled();
+    expect(db.rol.findUnique).not.toHaveBeenCalled();
+    expect(db.logAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accion: 'DESACTIVAR_USUARIO' }) }));
+  });
+  it('el cambio de estado conserva la protección de la propia cuenta y del último administrador', async () => {
+    const { service, db } = setup();
+    await expect(service.setActive(1, false, admin)).rejects.toThrow('propia');
+    await expect(service.setActive(2, false, admin)).rejects.toThrow('administrador activo');
+    expect(db.usuario.update).not.toHaveBeenCalled();
+    expect(db.usuario.findMany.mock.calls[0][0].where.OR).toEqual([{ activo: true }, { activo: null }]);
+  });
+  it('reactiva cuentas sin correo o perfiles y no permite reactivar las eliminadas', async () => {
+    const { service, target, db } = setup();
+    Object.assign(target, { activo: false, email: null, usuarioRoles: [] });
+    await expect(service.setActive(2, true, admin)).resolves.toMatchObject({ activo: true });
+    expect(db.usuarioRol.deleteMany).not.toHaveBeenCalled();
+    Object.assign(target, { fechaEliminacion: new Date() });
+    await expect(service.setActive(2, true, admin)).rejects.toThrow('Usuario no encontrado');
+  });
+  it('un cambio de estado repetido no revoca sesiones ni repite auditoría', async () => {
+    const { service, db } = setup();
+    await expect(service.setActive(2, true, admin)).resolves.toMatchObject({ sesionesRevocadas: false });
+    expect(db.usuario.update).not.toHaveBeenCalled();
+    expect(db.logAuditoria.create).not.toHaveBeenCalled();
+  });
   it('normaliza version NULL antes de revocar sin reiniciar versiones concurrentes', async () => {
     const {service,db,target}=setup();
     Object.assign(target,{versionSesion:null});

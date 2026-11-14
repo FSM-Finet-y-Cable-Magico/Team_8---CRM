@@ -34,7 +34,11 @@ describe('ProspectsService', () => {
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
       },
       contrato: { findFirst: jest.fn().mockResolvedValue(contract) },
+      cotizacion: { updateMany: jest.fn() },
+      $executeRaw: jest.fn(),
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(callback => callback(prisma));
     const audit = { record: jest.fn() };
     const service = new ProspectsService(prisma as unknown as PrismaService, audit as unknown as AuditService,
       {} as MailService, {} as CoverageDomainService, {} as never);
@@ -229,11 +233,15 @@ describe('ProspectsService', () => {
     };
     const prisma = {
       contrato: { findFirst: jest.fn().mockResolvedValue(null) },
+      cotizacion: { updateMany: jest.fn() },
+      $executeRaw: jest.fn(),
+      $transaction: jest.fn(),
       prospecto: {
         findUnique: jest.fn().mockResolvedValue(prospect),
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...prospect, ...data })),
       },
     };
+    prisma.$transaction.mockImplementation(callback => callback(prisma));
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
     const service = new ProspectsService(
       prisma as unknown as PrismaService,
@@ -257,6 +265,7 @@ describe('ProspectsService', () => {
     );
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'REACTIVAR_PROSPECTO' }),
+      prisma,
     );
   });
 
@@ -440,14 +449,16 @@ describe('ProspectsService', () => {
 
   it('la reactivación conserva en auditoría el motivo, observación, fecha y autor de la pérdida', async () => {
     const fechaPerdida = new Date('2026-10-01T10:00:00Z');
-    const { service, audit } = manualFixture({
+    const { service, audit, prisma } = manualFixture({
       estadoPipeline: 'Perdido', motivoPerdida: 'Precio elevado', observacionPerdida: 'Dijo que muy caro', fechaPerdida, idUsuarioPerdida: 7,
     });
     await service.updatePipeline(10, { estadoPipeline: 'Prospecto Nuevo' }, admin);
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
       accion: 'REACTIVAR_PROSPECTO',
       valorAnterior: expect.objectContaining({ motivoPerdida: 'Precio elevado', observacionPerdida: 'Dijo que muy caro', fechaPerdida, idUsuarioPerdida: 7 }),
-    }));
+    }), prisma);
+    expect(prisma.cotizacion.updateMany).toHaveBeenCalledWith({ where: { idProspecto: 10 }, data: { factibilidadVerificada: false } });
+    expect(prisma.prospecto.update.mock.calls[0][0].data).toMatchObject({ estadoPipeline: 'Prospecto Nuevo', motivoPerdida: null, fechaPerdida: null, observacionPerdida: null, idUsuarioPerdida: null, idZonaPago: null });
   });
 
   it('no reactiva un Perdido con relaciones comerciales vigentes', async () => {

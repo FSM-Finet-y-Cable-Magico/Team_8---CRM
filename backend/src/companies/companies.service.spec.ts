@@ -37,6 +37,15 @@ describe('CompaniesService CU47 integrado', () => {
     const { service } = fixture('2026-11-02T12:00:00Z');
     expect((await service.summary(commercial)).metricas.instalacionesMensuales).toBe(1);
   });
+  it('separa personas pendientes de activación de órdenes técnicas pendientes', async () => {
+    const { service, prisma } = fixture(null);
+    prisma.prospecto.count.mockResolvedValueOnce(4).mockResolvedValueOnce(2);
+    prisma.ordenTrabajo.count.mockResolvedValue(7);
+    prisma.cliente.count.mockResolvedValueOnce(9).mockResolvedValueOnce(15).mockResolvedValueOnce(28);
+    const { metricas } = await service.summary(commercial);
+    expect(metricas).toMatchObject({ clientes: 15, clientesRegistrados: 28, prospectos: 4,
+      pendientesActivacion: 2, instalacionesPendientes: 2, ordenesInstalacionPendientes: 7 });
+  });
   it.each([0, 1, 5])('no publica churn ni bajas con %i estados actuales sin historia fiable', async currentCount => {
     const { service, prisma } = fixture(null);
     prisma.contrato.count.mockResolvedValue(currentCount);
@@ -126,7 +135,7 @@ describe('CompaniesService', () => {
         },
       }),
     );
-    expect(prisma.cliente.count).toHaveBeenLastCalledWith({
+    expect(prisma.cliente.count).toHaveBeenNthCalledWith(2, {
       where: {
         AND: [
           {
@@ -176,7 +185,7 @@ describe('CompaniesService', () => {
     };
     const service = new CompaniesService(prisma as unknown as PrismaService);
     await service.summary(user, scope);
-    expect(prisma.cliente.count).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(prisma.cliente.count).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: { AND: expect.arrayContaining([
         { servicios: { some: { ...expected, estadoOperativo: 'Activo' } } },
       ]) },

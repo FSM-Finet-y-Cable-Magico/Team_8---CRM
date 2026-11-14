@@ -87,8 +87,8 @@ Estas obligaciones fueron acordadas despues del alcance original de 23 CU. Deben
 | CU-13 Morosidad automatica | Existe calculo bajo accion; falta ejecucion programada | Integrarlo con la cadena de cobranza del Incremento 2. |
 | CU-14 Historial del cliente | El servidor y la interfaz existen en el codigo actual; falta verificar que toda la cronologia se muestre correctamente | Corregir como continuidad del Incremento 1. |
 | CU-16 Churn mensual | La definicion y base temporal aun son debiles | Acordar formula antes de cambiar el codigo. |
-| CU-30 Suspension por no pago | Existe cambio local manual; falta automatizacion y accion real de red | G8 decide comercialmente y llama a la integracion acordada. |
-| CU-31 Reactivacion por pago | Existe cambio local; falta integracion de red y proteccion de servicios dados de baja | Completar junto con el webhook de pagos. |
+| CU-30 Suspension por no pago | Elegibilidad automatica con ejecucion manual desde el Libro de Control (13-11-2026): misma regla para boton, modal y escritura (`BILLING_CUT_DAYS`, convenios, prorrogas, saldo exigible); sin cron | Ver `docs/g8-baja-morosidad/flujo-suspension-baja-20261113.md`. La accion de red sigue fuera de G8. |
+| CU-31 Reactivacion por pago | Reactiva al regularizar, salvo servicios con retiro por morosidad activo (tambien bloqueada la reactivacion manual y por reparacion) | Integracion de red pendiente. Ver `docs/g8-baja-morosidad/flujo-suspension-baja-20261113.md`. |
 | CU-44 Usuarios y roles | Solo permite listar y asignar un rol | Es mejora necesaria del CRM: crear, editar, desactivar/reactivar y restablecer acceso. Evitar borrado fisico por auditoria. |
 
 ## Linea de trabajo propuesta

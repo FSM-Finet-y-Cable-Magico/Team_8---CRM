@@ -6,7 +6,7 @@ import { api, apiErrorMessage } from '../../api';
 import { DashboardPermissions } from '../../permissions';
 import { ControlBookDrawer } from './ControlBookDrawer';
 import { ControlBookFilters, FILTER_LABELS, filterDescription } from './ControlBookFilters';
-import { COLUMNS, ControlResponse, ControlRow, type InvoiceFocus, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext } from './control-book-model';
+import { COLUMNS, ControlResponse, ControlRow, type InvoiceFocus, EMPTY_FILTERS, Filters, ESSENTIAL, currency, dateLabel, exportColumns, readable, recordContext, controlRowStatus } from './control-book-model';
 import { TablePagination } from '../../shared/components/TablePagination';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { useAutoRefresh } from '../../shared/hooks/useAutoRefresh';
@@ -25,7 +25,9 @@ const QUICK_FILTERS = [
 ] as const;
 
 export function CommercialStatus({ row }: { row: ControlRow }) {
-  return <span className={'control-status status-' + row.estadoComercial.toLowerCase()}>{readable(row.estadoComercial)}</span>;
+  const status = controlRowStatus(row);
+  const description = status.financial ? `Servicio: ${status.label}. Cobranza: ${status.financial}` : undefined;
+  return <span className={'control-status status-' + status.code} title={description} aria-label={description}>{status.label}</span>;
 }
 
 function Cell({ column, row }: { column: string; row: ControlRow }) {
@@ -283,7 +285,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
 
     <div className="control-list">
       <div className="control-table-shell" role="region" aria-label="Tabla de cartera desplazable" tabIndex={data?.items.length && !loading ? 0 : undefined} aria-busy={loading}>
-        {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="control-empty"><Search size={24}/><strong>No hay resultados</strong><span>Prueba con otra búsqueda o ajusta los filtros.</span>{(activeFilters.length > 0 || search) && <button className="control-outline" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
+        {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="empty-state" role="status"><p>{activeFilters.length > 0 || search ? 'No hay registros que coincidan con la búsqueda o los filtros.' : 'No hay registros en el libro de control.'}</p>{(activeFilters.length > 0 || search) && <button className="control-text-button" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
           <caption className="control-sr-only">Cartera por contrato. Selecciona un registro para abrir la ficha del cliente.</caption>
           <colgroup><col className="control-sheet-index"/>{tableColumns.map(key => <col key={key} className={`control-col-${key}`}/>)}</colgroup>
           <thead>
@@ -323,7 +325,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       canManage={permissions.manageCommercialCollections}
       canManagePayments={permissions.manageBilling}
       canViewBilling={permissions.viewBilling} canViewDocuments={permissions.viewBilling && permissions.viewExternalTaxDocuments}
-      onClose={closeRecord} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh(value => value + 1); }}
+      onClose={closeRecord} onBusyChange={setDrawerBusy} onSaved={(notice) => { setMessage(notice); setRefresh(value => value + 1); onChanged(); }}
       onOpenBilling={setFocusedInvoice} feedback={feedback}
       financialTools={permissions.viewBilling ? (view) => <ControlBookFinancePanel key={selected.idEmpresa + '-' + selected.idCliente} view={view}
         row={selected} scope={String(selected.idEmpresa ?? companyId)} customers={customers} permissions={permissions} revision={refresh}

@@ -75,8 +75,7 @@ const fullUnit = {
 test('el catálogo se presenta como tipos de equipo, distinto de la consulta de unidad física', async t => {
   const h = await setup(t, {});
   const text = h.text();
-  assert.match(text, /Catálogo de tipos de equipo/);
-  assert.match(text, /No es un listado de existencias ni de unidades físicas/);
+  assert.doesNotMatch(text, /Catálogo de tipos de equipo|No es un listado de existencias ni de unidades físicas/);
   assert.match(text, /Consultar unidad física/);
   assert.deepEqual(h.tree.root.findAllByType('th').map(textOf), ['Tipo de equipo', 'Categoría', 'Marca / modelo', 'Identificación', 'Garantía estándar']);
   assert.doesNotMatch(text, /Equipo consultado|cantidad disponible|stock/i);

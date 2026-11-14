@@ -13,7 +13,7 @@ const text = n => typeof n === 'string' ? n : (n.children ?? []).map(text).join(
 async function harness(t, { invalid = false, tampered = false, demo = false } = {}) {
   const token = randomBytes(32).toString('base64url'), pdf = Buffer.from('%PDF-fixture-only');
   const hash = createHash('sha256').update(pdf).digest('hex');
-  let signed = false; const calls = [], downloads = [], historyCalls = [];
+  let signed = false, cancelled=false; const calls = [], downloads = [], historyCalls = [];
   const old = Object.fromEntries(['window','location','history','document','fetch'].map(k => [k, globalThis[k]]));
   const location = { hash: invalid ? '#bad' : '#' + token, pathname: '/firmar' };
   globalThis.window = { location }; globalThis.location = location;
@@ -21,6 +21,7 @@ async function harness(t, { invalid = false, tampered = false, demo = false } = 
   globalThis.document = { createElement: () => ({ click() { downloads.push(this.download); } }) };
   globalThis.fetch = async (url, options) => {
     const body = JSON.parse(options.body); calls.push({ url, options, body });
+    if(cancelled)return new Response(JSON.stringify({message:'Este contrato fue cancelado. El enlace de firma ya no está disponible.'}),{status:409,headers:{'Content-Type':'application/json'}});
     if (url.endsWith('/pdf')) return new Response(tampered ? Buffer.from('%PDF-wrong') : pdf);
     if (url.endsWith('/sign')) signed = true;
     return new Response(JSON.stringify(url.endsWith('/view') ? { estado: signed ? 'FIRMADA' : 'PENDIENTE',
@@ -30,30 +31,38 @@ async function harness(t, { invalid = false, tampered = false, demo = false } = 
       { headers: { 'Content-Type': 'application/json' } });
   };
   const exports = {};
-  new Function('require','exports',output)(name => name === '../../api' ? { api: { defaults: { baseURL: '/api' } } } : require(name), exports);
+  new Function('require','exports',output)(name => name.endsWith('.css') ? {} : name === '../../api' ? { api: { defaults: { baseURL: '/api' } } } : require(name), exports);
   let tree; await act(async () => { tree = create(React.createElement(exports.PublicSignaturePage)); });
   t.after(async () => { await act(async () => tree.unmount()); for (const [k,v] of Object.entries(old)) {
     if (v === undefined) delete globalThis[k]; else globalThis[k] = v;
   } });
   const button = label => tree.root.findAllByType('button').find(n => text(n).includes(label));
   const click = async label => { await act(async () => { await button(label).props.onClick(); }); };
-  return { tree, calls, button, click, token, hash, downloads, historyCalls };
+  return { tree, calls, button, click, token, hash, downloads, historyCalls, cancel:()=>{cancelled=true;} };
 }
 test('enlace inválido no hace llamadas públicas', async t => {
   const h = await harness(t, { invalid: true }); assert.equal(h.calls.length, 0);
   assert.match(JSON.stringify(h.tree.toJSON()), /Enlace inválido/);
 });
-test('token solo en memoria y cuerpo; PDF verificado antes de código y aceptación', async t => {
+
+test('un enlace cancelado retira la aceptación y muestra el motivo al intentar usarlo',async t=>{
+  const h=await harness(t);
+  h.cancel();
+  await h.click('Descargar contrato');
+  assert.match(JSON.stringify(h.tree.toJSON()),/Este contrato fue cancelado/);
+  assert.equal(h.tree.root.findAllByType('input').length,0);
+  assert.equal(h.button('Aceptar y firmar'),undefined);
+  assert.equal(h.downloads.length,0);
+});
+test('enlace personal permite firmar sin código después de revisar y aceptar el PDF', async t => {
   const h = await harness(t);
-  assert.equal(h.button('Enviar código').props.disabled, true);
+  assert.equal(h.button('Aceptar y firmar').props.disabled, true);
   assert.equal(h.historyCalls[0][2], '/firmar');
   await h.click('Descargar');
   assert.deepEqual(h.downloads, ['contrato-para-revisar.pdf']);
-  assert.equal(h.button('Enviar código').props.disabled, false);
-  await h.click('Enviar código');
+  assert.equal(h.button('Aceptar y firmar').props.disabled, true);
   const inputs = h.tree.root.findAllByType('input');
   await act(async () => {
-    inputs.find(i => i.props.type !== 'checkbox').props.onChange({ target: { value: '123456' } });
     inputs.find(i => i.props.type === 'checkbox').props.onChange({ target: { checked: true } });
   });
   assert.equal(h.button('Aceptar y firmar').props.disabled, false);
@@ -61,11 +70,14 @@ test('token solo en memoria y cuerpo; PDF verificado antes de código y aceptaci
   assert.ok(h.button('Descargar contrato firmado'));
   const sign = h.calls.find(c => c.url.endsWith('/sign'));
   assert.equal(sign.body.hashOriginal, h.hash); assert.equal(sign.body.consent, true);
+  assert.equal(sign.body.code, undefined);
+  assert.ok(h.calls.every(c => !c.url.endsWith('/code')));
+  assert.doesNotMatch(JSON.stringify(h.tree.toJSON()), /Huella del documento|Código de seis/);
   assert.ok(h.calls.every(c => !c.url.includes(h.token) && c.options.credentials === 'omit' && c.options.referrerPolicy === 'no-referrer'));
 });
-test('PDF alterado no habilita código ni firma', async t => {
+test('PDF alterado no habilita firma', async t => {
   const h = await harness(t, { tampered: true }); await h.click('Descargar');
-  assert.equal(h.downloads.length, 0); assert.equal(h.button('Enviar código').props.disabled, true);
+  assert.equal(h.downloads.length, 0); assert.equal(h.button('Aceptar y firmar').props.disabled, true);
   assert.match(JSON.stringify(h.tree.toJSON()), /huella del PDF no coincide/);
 });
 test('la demostración solo firma al aceptar el PDF y omite el código', async t => {
@@ -73,7 +85,7 @@ test('la demostración solo firma al aceptar el PDF y omite el código', async t
   assert.equal(h.button('Enviar código'), undefined);
   assert.equal(h.button('Aceptar y firmar').props.disabled, true);
   assert.deepEqual(h.calls.map(c => c.url.split('/').at(-1)), ['view']);
-  await h.click('Descargar PDF');
+  await h.click('Descargar contrato');
   assert.equal(h.button('Aceptar y firmar').props.disabled, true);
   await act(async () => h.tree.root.findByType('input').props.onChange({ target: { checked: true } }));
   assert.equal(h.button('Aceptar y firmar').props.disabled, false);

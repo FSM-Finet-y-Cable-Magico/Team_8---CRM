@@ -12,7 +12,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
 } }).outputText;
 
-async function setup(t, fail = false) {
+async function setup(t, fail = false, overrides = {}) {
   const calls = [];
   const api = {
     delete: async path => { calls.push(['delete', path]); if (fail) throw Error('No se pudo eliminar'); },
@@ -33,7 +33,7 @@ async function setup(t, fail = false) {
   new Function('require', 'exports', compiled)(name => mocks[name] ?? require(name), exports);
   const tree = create(React.createElement(exports.UsersPanel, {
     users: [{ idUsuario: 2, nombreCompleto: 'Usuario de prueba', email: 'qa@example.invalid',
-      activo: true, idEmpresa: 1, roles: [{ idRol: 2, nombreRol: 'Comercial' }] }],
+      activo: true, idEmpresa: 1, roles: [{ idRol: 2, nombreRol: 'Comercial' }], ...overrides }],
     roles: [], companies: [], currentUserId: 1, onUpdated() {},
   }));
   t.after(() => act(() => tree.unmount()));
@@ -60,7 +60,18 @@ test('un fallo de eliminación conserva la fila y muestra el error', async t => 
 test('el toggle desactiva al usuario y conserva su fila', async t => {
   const { tree, calls } = await setup(t);
   await act(async () => tree.root.findByProps({ role: 'switch' }).props.onClick());
-  assert.equal(calls[0][0], 'patch');
-  assert.equal(calls[0][2].activo, false);
+  assert.deepEqual(calls, [['patch', '/users/2/status', { activo: false }]]);
   assert.equal(tree.root.findAllByType('tbody')[0].findAllByType('tr').length, 1);
+});
+
+test('desactiva una cuenta histórica sin correo y sin reenviar o sustituir sus perfiles', async t => {
+  const { tree, calls } = await setup(t, false, { email: null, idEmpresa: null, roles: [{ idRol: 8, nombreRol: 'SUPERUSUARIO' }, { idRol: 9, nombreRol: 'ADMIN_BODEGA' }] });
+  await act(async () => tree.root.findByProps({ role: 'switch' }).props.onClick());
+  assert.deepEqual(calls, [['patch', '/users/2/status', { activo: false }]]);
+});
+
+test('permite reactivar una cuenta aunque no tenga perfiles asignados', async t => {
+  const { tree, calls } = await setup(t, false, { activo: false, email: null, roles: [] });
+  await act(async () => tree.root.findByProps({ role: 'switch' }).props.onClick());
+  assert.deepEqual(calls, [['patch', '/users/2/status', { activo: true }]]);
 });

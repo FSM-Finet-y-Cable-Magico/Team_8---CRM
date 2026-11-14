@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/features/commercial/control-book-model.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
-const { actionDisabledReason, buildInstallments, COLUMNS, ESSENTIAL, exportColumns, managementRelations, recordContext, readable, OPERATIONAL, CONTROL_ACTIONS } = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'));
+const { actionDisabledReason, buildInstallments, COLUMNS, ESSENTIAL, exportColumns, managementRelations, recordContext, readable, controlRowStatus, OPERATIONAL, CONTROL_ACTIONS } = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'));
 
 test('bitácora se presenta como gestión de cobranza sin cambiar la acción API', () => {
   assert.match(source, /event: 'Registrar gestión de cobranza'/);
@@ -33,12 +33,28 @@ test('formularios incompletos no generan cuotas inválidas ni montos cero', () =
 
 test('exportación expande las celdas agrupadas sin perder identidad ni duplicar columnas', () => {
   const essential = exportColumns(ESSENTIAL);
-  for (const key of ['rut', 'nombre', 'plan', 'numeroContrato', 'tipoDocumento', 'numeroDocumento', 'saldoPendiente', 'estadoComercial', 'diasAtraso']) assert.ok(essential.includes(key));
+  for (const key of ['rut', 'nombre', 'plan', 'numeroContrato', 'tipoDocumento', 'numeroDocumento', 'saldoPendiente', 'estadoServicio', 'estadoComercial', 'diasAtraso']) assert.ok(essential.includes(key));
   assert.ok(exportColumns([...ESSENTIAL, 'accion']).includes('accionSugerida'));
   const all = exportColumns(Object.keys(COLUMNS));
   assert.equal(new Set(all).size, all.length);
   assert.ok(exportColumns(OPERATIONAL).includes('fechaUltimaGestion'));
   assert.ok(exportColumns(OPERATIONAL).includes('responsableUltimaGestion'));
+});
+
+test('todas las boletas de un servicio suspendido reflejan la suspensión y conservan su estado de cobranza', () => {
+  for (const estadoComercial of ['ULTIMO_AVISO_REGISTRADO', 'RETIRO_PENDIENTE', 'DEUDA_VENCIDA', 'CON_CONVENIO', 'AL_DIA']) {
+    const row = { estadoComercial, estadoServicio: 'Suspendido', estadoCorte: 'SUSPENDIDO_COMERCIAL' };
+    assert.deepEqual(controlRowStatus(row), { code: 'servicio_suspendido', label: 'Suspendido', financial: readable(estadoComercial) });
+    assert.equal(row.estadoComercial, estadoComercial);
+  }
+});
+
+test('contrato suspendido con varios servicios, baja y reactivación muestran su estado vigente', () => {
+  const row = { estadoComercial: 'DEUDA_VENCIDA', estadoServicio: 'Múltiples servicios', estadoCorte: 'SUSPENDIDO_COMERCIAL' };
+  assert.equal(controlRowStatus(row).label, 'Suspendido');
+  assert.equal(controlRowStatus({ ...row, estadoServicio: 'Baja' }).label, 'Baja');
+  assert.deepEqual(controlRowStatus({ ...row, estadoServicio: 'Activo', estadoCorte: null }), { code: 'deuda_vencida', label: 'Deuda vencida', financial: null });
+  assert.equal(controlRowStatus({ ...row, estadoServicio: null, estadoCorte: null }).label, 'Deuda vencida');
 });
 
 test('gestiones respetan deuda, atraso y servicio requerido', () => {

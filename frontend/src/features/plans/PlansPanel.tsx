@@ -237,6 +237,7 @@ export function PlansPanel({ plans, companies, writeCompanyId, onChanged, scope,
             </tbody>
           </table>
         </div>
+        {!plans.length && <p className="empty-state">No hay planes comerciales registrados.</p>}
         <TablePagination currentPage={page} totalItems={plans.length} onPageChange={setPage} />
       </section>
 

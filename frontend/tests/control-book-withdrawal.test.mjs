@@ -47,24 +47,36 @@ async function withdrawal(t, options = {}) {
   const confirm = () => act(async () => tree.root.findAllByType('input').find(n => n.props.type === 'checkbox').props.onChange({ target: { checked: true } }));
   const submit = () => act(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
   const submitButton = () => tree.root.findAllByType('button').find(n => n.props.type === 'submit');
-  return { tree, posts, saved, reads, text, observe, confirm, submit, submitButton };
+  // FINET 13-11-2026: three steps (requirements -> data -> confirmation); «Continuar» submits the form to advance.
+  const next = submit;
+  const toConfirmation = async (value = 'Cliente notificado tres veces sin pago') => { await next(); await observe(value); await next(); await confirm(); };
+  const button = label => tree.root.findAllByType('button').find(n => textOf(n) === label);
+  return { tree, posts, saved, reads, text, observe, confirm, submit, submitButton, next, toConfirmation, button };
 }
 
-test('consulta los requisitos del servicio suspendido y precarga empresa, cliente, contrato, deuda, aviso y responsable', async t => {
+test('consulta el servicio suspendido y muestra un resumen sin listas de requisitos', async t => {
   const h = await withdrawal(t);
   assert.deepEqual(h.reads, ['/service-withdrawals/eligibility/50']);
-  for (const value of ['FiNet', 'Cliente Moroso · 12345678-5', '#20 · Fibra 300 Hogar', 'Internet', 'Suspendido', '41 días', 'Calle QA 123, Ñuñoa', 'Morosidad', 'Comercial FiNet']) assert.ok(h.text().includes(value), value);
-  assert.ok(h.text().includes('Requisito AVISO_PREVIO✓ Cumple'));
+  for (const value of ['FiNet', 'Cliente Moroso', '#20 · Fibra 300 Hogar', 'Internet', 'Suspendido', '41 días', 'Calle QA 123, Ñuñoa']) assert.ok(h.text().includes(value), value);
+  assert.doesNotMatch(h.text(), /Requisito|Cumple|ambiente|habilitada/);
   assert.ok(!h.text().includes('TV · Baja'), 'un servicio ya dado de baja no se ofrece');
 });
 
-test('solo registra con observación suficiente y confirmación explícita; envía lo que el backend necesita', async t => {
+test('tres pasos: resumen, observación suficiente y confirmación explícita; conserva el contrato del backend', async t => {
   const h = await withdrawal(t);
-  assert.equal(h.submitButton().props.disabled, true);
-  await h.submit(); assert.equal(h.posts.length, 0);
-  await h.observe('corto'); await h.confirm(); await h.submit();
+  assert.ok(h.text().includes('Resumen') && h.text().includes('Observaciones') && h.text().includes('Confirmación'));
+  assert.equal(h.tree.root.findAllByType('textarea').length, 0, 'paso 1: solo resumen');
+  assert.equal(textOf(h.submitButton()), 'Continuar');
+  await h.next();
+  assert.equal(h.posts.length, 0);
+  assert.equal(h.submitButton().props.disabled, true, 'paso 2 sin observación');
+  await h.observe('corto'); await h.next();
   assert.equal(h.posts.length, 0); assert.ok(h.text().includes('mínimo 10 caracteres'));
-  await h.observe('  Cliente notificado tres veces sin pago  ');
+  await h.observe('  Cliente notificado tres veces sin pago  '); await h.next();
+  assert.equal(textOf(h.submitButton()), 'Crear solicitud y ticket');
+  assert.equal(h.submitButton().props.disabled, true, 'paso 3 sin confirmar');
+  await h.submit(); assert.equal(h.posts.length, 0);
+  await h.confirm();
   assert.equal(h.submitButton().props.disabled, false);
   await h.submit();
   assert.deepEqual(h.posts, [['/service-withdrawals/initiate', { idServicio: 50, idContrato: 20, observaciones: 'Cliente notificado tres veces sin pago', confirmacion: true }]]);
@@ -72,52 +84,61 @@ test('solo registra con observación suficiente y confirmación explícita; env�
   assert.match(h.saved[0], /Solicitud de retiro N° 1000 y ticket TK-BAJA01.*pendiente de envío.*sigue suspendido/);
 });
 
+test('«Atrás» vuelve al paso anterior conservando la observación', async t => {
+  const h = await withdrawal(t);
+  await h.next(); await h.observe('Cliente notificado tres veces sin pago'); await h.next();
+  await act(async () => h.button('Atrás').props.onClick());
+  assert.equal(h.tree.root.findByType('textarea').props.value, 'Cliente notificado tres veces sin pago');
+});
+
 test('con la orden técnica aceptada informa su número sin nombrar sistemas internos', async t => {
   const h = await withdrawal(t, { post: () => ({ data: { solicitud: { idSolicitudRetiro: 1000 }, ticket: { idTicket: 1001, codigoSeguimiento: 'TK' }, repetido: false,
     despacho: { estadoDespacho: 'ACEPTADA', idOtG3: 930 } } }) });
-  await h.observe('Cliente notificado tres veces sin pago'); await h.confirm(); await h.submit();
+  await h.toConfirmation(); await h.submit();
   assert.match(h.saved[0], /Orden de retiro técnico N° 930 creada\..*sigue suspendido/);
   assert.ok(!/\bG[0-9]\b/.test(h.saved[0]));
 });
 
-test('requisitos de identificación y dirección para el retiro técnico se muestran como cualquier otro requisito', async t => {
+test('sin dirección elegible no muestra comprobaciones ni habilita el retiro', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ eligible: false, checks: checks('DIRECCION_RETIRO'),
     firstFailure: { code: 'DIRECCION_RETIRO', label: 'Dirección', ok: false, message: 'Falla DIRECCION_RETIRO' } }) });
-  assert.ok(h.text().includes('Requisito DIRECCION_RETIRO✗ Falla DIRECCION_RETIRO'));
+  assert.doesNotMatch(h.text(), /Requisito|Falla DIRECCION_RETIRO|Cumple/);
   assert.equal(h.submitButton().props.disabled, true);
+  await h.submit(); assert.equal(h.posts.length, 0);
 });
 
 test('un reintento devuelto por el backend informa que la baja ya estaba iniciada', async t => {
   const h = await withdrawal(t, { post: () => ({ data: { solicitud: { idSolicitudRetiro: 1000 }, ticket: { idTicket: 1001, codigoSeguimiento: null }, repetido: true } }) });
-  await h.observe('Cliente notificado tres veces sin pago'); await h.confirm(); await h.submit();
+  await h.toConfirmation(); await h.submit();
   assert.match(h.saved[0], /ya estaba iniciada.*#1001/);
 });
 
-test('requisito incumplido: muestra el motivo y no ofrece registrar', async t => {
+test('requisito incumplido: sin mensajes adicionales ni registro', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ eligible: false, checks: checks('AVISO_PREVIO'), firstFailure: { code: 'AVISO_PREVIO', label: 'Aviso', ok: false, message: 'Falla AVISO_PREVIO' } }) });
-  assert.ok(h.text().includes('Requisito AVISO_PREVIO✗ Falla AVISO_PREVIO'));
+  assert.doesNotMatch(h.text(), /Requisito|Falla AVISO_PREVIO|Cumple/);
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   assert.equal(h.submitButton().props.disabled, true);
   await h.submit(); assert.equal(h.posts.length, 0);
 });
 
-test('sin el registro del vínculo habilitado lo explica y no permite registrar nada', async t => {
+test('sin el registro del vínculo habilitado no muestra mensajes del ambiente ni permite registrar', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ habilitado: false }) });
-  assert.ok(h.text().includes('aún no está habilitada'));
+  assert.doesNotMatch(h.text(), /habilitada|ambiente|registro privado/);
+  assert.equal(h.submitButton().props.disabled, true);
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   await h.submit(); assert.equal(h.posts.length, 0);
 });
 
 test('error del backend se muestra y conserva el borrador; doble clic en curso registra una sola vez', async t => {
   const failing = await withdrawal(t, { post: () => Promise.reject(new Error('Ya existe una solicitud de retiro activa')) });
-  await failing.observe('Cliente notificado tres veces sin pago'); await failing.confirm(); await failing.submit();
+  await failing.toConfirmation(); await failing.submit();
   assert.ok(failing.text().includes('Ya existe una solicitud de retiro activa'));
   assert.equal(failing.saved.length, 0);
-  assert.equal(failing.tree.root.findByType('textarea').props.value, 'Cliente notificado tres veces sin pago');
+  assert.ok(failing.text().includes('Cliente notificado tres veces sin pago'), 'el borrador se conserva en la confirmación');
 
   let release; const pending = new Promise(resolve => { release = resolve; });
   const h = await withdrawal(t, { post: () => pending.then(() => ({ data: { solicitud: { idSolicitudRetiro: 1000 }, ticket: { idTicket: 1001, codigoSeguimiento: 'TK' }, repetido: false } })) });
-  await h.observe('Cliente notificado tres veces sin pago'); await h.confirm();
+  await h.toConfirmation();
   let first; act(() => { first = h.tree.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
   await h.submit();
   assert.equal(h.posts.length, 1);
@@ -138,11 +159,50 @@ test('con varios servicios suspendidos exige elegir el servicio antes de consult
   assert.deepEqual(h.reads, ['/service-withdrawals/eligibility/51']);
 });
 
-test('no introduce estilos nuevos: solo clases ya existentes del Libro de Control', () => {
-  const source = readFileSync(new URL('../src/features/commercial/ControlBookWithdrawal.tsx', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../src/features/commercial/commercial-control-book.css', import.meta.url), 'utf8');
-  const classes = [...source.matchAll(/className="([^"]+)"/g)].flatMap(match => match[1].split(/\s+/));
-  for (const name of new Set(classes)) assert.ok(css.includes('.' + name), 'clase sin estilo previo: ' + name);
-  assert.ok(!/style=\{/.test(source), 'sin estilos en línea');
-  assert.ok(!/import .*\.css/.test(source), 'sin hojas de estilo nuevas');
+// Existing request: the same access follows it (no second registration) with the real states and possible actions.
+const followUp = (over = {}) => eligibility({ eligible: false, checks: checks('SIN_SOLICITUD_ACTIVA'), bajaAutomaticaHabilitada: false, despachoG3Habilitado: true,
+  seguimiento: { idSolicitudRetiro: 44, estado: 'EN_GESTION', flujoGuiado: true, ticket: { idTicket: 77, codigoSeguimiento: 'TK-BAJA77', estado: 'Abierto' },
+    despacho: { estadoDespacho: 'ACEPTADA', idOtG3: 930, estadoOt: 'PENDIENTE_APROBACION', cancelable: false, cierreRecibido: true, aplicado: false } }, ...over });
+
+test('solicitud existente: muestra su seguimiento real sin pasos ni nueva alta', async t => {
+  const h = await withdrawal(t, { eligibility: followUp() });
+  for (const value of ['N° 44 · En gestión', 'TK-BAJA77 · Abierto', 'Orden aceptada · N° 930', 'Cerrada por el técnico; pendiente de aprobación', 'pendiente de aprobación']) assert.ok(h.text().includes(value), value);
+  assert.doesNotMatch(h.text(), /ambiente|automática está deshabilitada/);
+  assert.equal(h.submitButton(), undefined, 'no ofrece crear otra solicitud');
+  assert.equal(h.button('Cancelar retiro'), undefined, 'una orden ya cerrada por el técnico no se cancela');
+  assert.ok(!/\bG[0-9]\b/.test(h.text()));
+  await act(async () => h.button('Consultar estado de la orden').props.onClick());
+  assert.deepEqual(h.posts, [['/service-withdrawals/44/order-status', {}]]);
+  assert.equal(h.reads.length, 2, 'vuelve a leer el estado verdadero');
 });
+
+test('seguimiento: envío pendiente se puede reintentar y la cancelación exige motivo', async t => {
+  const h = await withdrawal(t, { eligibility: followUp({ seguimiento: { idSolicitudRetiro: 44, estado: 'REGISTRADA', flujoGuiado: true, ticket: null,
+    despacho: { estadoDespacho: 'REINTENTABLE', idOtG3: null, estadoOt: null, cancelable: true, cierreRecibido: false, aplicado: false } } }) });
+  await act(async () => h.button('Enviar orden de retiro').props.onClick());
+  assert.deepEqual(h.posts.at(-1), ['/service-withdrawals/44/dispatch', {}]);
+  await act(async () => h.button('Cancelar retiro').props.onClick());
+  assert.equal(h.posts.length, 1); assert.ok(h.text().includes('motivo de la cancelación'));
+  await h.observe('Cliente pagó la deuda');
+  await act(async () => h.button('Cancelar retiro').props.onClick());
+  assert.deepEqual(h.posts.at(-1), ['/service-withdrawals/44/cancel', { motivo: 'Cliente pagó la deuda' }]);
+  assert.match(h.saved.at(-1), /Retiro cancelado: solicitud N° 44.*sigue suspendido/);
+});
+
+test('seguimiento con el envío deshabilitado no muestra mensajes del ambiente ni permite enviar', async t => {
+  const h = await withdrawal(t, { eligibility: followUp({ despachoG3Habilitado: false, seguimiento: { idSolicitudRetiro: 44, estado: 'REGISTRADA', flujoGuiado: true, ticket: null,
+    despacho: { estadoDespacho: 'PENDIENTE', idOtG3: null, estadoOt: null, cancelable: true, cierreRecibido: false, aplicado: false } } }) });
+  assert.doesNotMatch(h.text(), /ambiente|envío de la orden técnica está deshabilitado/);
+  assert.equal(h.button('Enviar orden de retiro'), undefined);
+});
+
+for (const file of ['ControlBookWithdrawal.tsx', 'ControlBookSuspension.tsx']) {
+  test(`no introduce estilos nuevos (${file}): solo clases ya existentes del Libro de Control`, () => {
+    const source = readFileSync(new URL('../src/features/commercial/' + file, import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../src/features/commercial/commercial-control-book.css', import.meta.url), 'utf8');
+    const classes = [...source.matchAll(/className="([^"]+)"/g)].flatMap(match => match[1].split(/\s+/));
+    for (const name of new Set(classes)) assert.ok(css.includes('.' + name), 'clase sin estilo previo: ' + name);
+    assert.ok(!/style=\{/.test(source), 'sin estilos en línea');
+    assert.ok(!/import .*\.css/.test(source), 'sin hojas de estilo nuevas');
+  });
+}
