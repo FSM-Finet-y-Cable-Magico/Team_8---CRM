@@ -473,7 +473,7 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             />
           )}
           {activeTab === 'coverage' && permissions.managePaymentZones && (
-            <CoverageZonesPanel idEmpresa={writeCompanyId} canManage={permissions.managePaymentZones} />
+            <CoverageZonesPanel idEmpresa={writeCompanyId} scope={scope} companies={companies} canManage={permissions.managePaymentZones} />
           )}
           {activeTab === 'installations' && canViewInstallations && (
             <InstallationsPanel

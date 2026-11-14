@@ -11,10 +11,14 @@ export function ControlBookCustomerContracts({ row, contracts, services, loading
   selectedContractId?: number | null; onSelect?: (id: number | null) => void;
 }) {
   const byId = new Map(contracts.map(contract => [contract.idContrato, contract]));
+  const related = new Map((row.resumenCliente?.contratosRelacionados ?? []).map(contract => [contract.idContrato, contract]));
   for (const service of services) {
     if (service.contrato && !byId.has(service.contrato.idContrato)) {
       byId.set(service.contrato.idContrato, { ...service.contrato, idEmpresa: service.idEmpresa });
     }
+  }
+  for (const contract of related.values()) {
+    if (!byId.has(contract.idContrato)) byId.set(contract.idContrato, { idContrato: contract.idContrato, idEmpresa: row.idEmpresa, numeroContratoExterno: contract.numeroContrato });
   }
   if (row.idContrato !== null && !byId.has(row.idContrato)) {
     byId.set(row.idContrato, { idContrato: row.idContrato, idEmpresa: row.idEmpresa, numeroContratoExterno: row.numeroContrato });
@@ -33,13 +37,14 @@ export function ControlBookCustomerContracts({ row, contracts, services, loading
         <thead><tr>{onSelect && <th scope="col"><span className="control-sr-only">Seleccionar plan</span></th>}<th scope="col">Plan</th><th scope="col">Contrato</th><th scope="col">Servicio</th><th scope="col">Dirección de instalación</th><th scope="col">Estado</th></tr></thead>
         <tbody>
           {[...byId.values()].map(contract => {
+            const planName = contract.plan?.nombreComercial ?? related.get(contract.idContrato)?.plan;
             const linked = services.filter(service => service.idContrato === contract.idContrato);
             const selected = contract.idContrato === row.idContrato;
             const toggle = () => onSelect?.(selectedContractId === contract.idContrato ? null : contract.idContrato);
             return <tr key={contract.idContrato} className={selectedContractId === contract.idContrato ? 'control-current-contract' : undefined}
               onClick={onSelect ? toggle : undefined}>
-              {onSelect && <td><input type="checkbox" name="control-plan" aria-label={`Seleccionar ${contract.plan?.nombreComercial ?? 'plan'} · ${contract.numeroContratoExterno ?? '#' + contract.idContrato}`} checked={selectedContractId === contract.idContrato} onClick={event => event.stopPropagation()} onChange={toggle}/></td>}
-              <th scope="row">{contract.plan?.nombreComercial ?? (selected ? row.plan : null) ?? 'Sin plan asociado'}</th>
+              {onSelect && <td><input type="checkbox" name="control-plan" aria-label={`Seleccionar ${planName ?? 'plan'} · ${contract.numeroContratoExterno ?? '#' + contract.idContrato}`} checked={selectedContractId === contract.idContrato} onClick={event => event.stopPropagation()} onChange={toggle}/></td>}
+              <th scope="row">{planName ?? (selected ? row.plan : null) ?? 'Sin plan asociado'}</th>
               <td><span>{contract.numeroContratoExterno ?? (selected ? row.numeroContrato : null) ?? `#${contract.idContrato}`}</span>
                 {(contract.fechaFirmaEfectiva || contract.fechaFirmaManual) && <small>Firma {dateLabel(contract.fechaFirmaEfectiva ?? contract.fechaFirmaManual)}</small>}
               </td>

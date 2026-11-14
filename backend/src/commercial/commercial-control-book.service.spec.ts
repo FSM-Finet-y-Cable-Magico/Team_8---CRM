@@ -65,6 +65,92 @@ function customerFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('Libro resumido por cliente', () => {
+  function portfolio() {
+    const h = harness();
+    const invoices = [1, 2, 3, 4].map(idFactura => invoiceFixture({ idFactura, folioExterno: `B-${idFactura}`,
+      monto: new Prisma.Decimal(19990), estado: idFactura < 3 ? 'Pagada' : 'Pendiente',
+      pagos: idFactura < 3 ? [{ monto: new Prisma.Decimal(19990), fechaPago: new Date('2026-09-05') }] : [] }));
+    const contract = { ...invoices[0].contrato, facturas: invoices };
+    h.prisma.cliente.findMany.mockResolvedValue([customerFixture({ contratos: [contract], servicios: contract.servicios.map(service => ({ ...service, idContrato: 20 })) })]);
+    return { ...h, invoices, contract };
+  }
+
+  it('cuatro boletas producen un cliente con saldo total, sin identificadores de una factura representativa', async () => {
+    const { service } = portfolio();
+    const result = await service.list({ groupBy: 'customer', page: 1, pageSize: 20 }, commercial);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ rowId: 'customer-1-10', idCliente: 10, idContrato: null, idFactura: null, idServicio: null,
+      saldoPendiente: 39980, totalPagado: 39980, montoDocumento: 79960, resumenCliente: { contratos: 1, facturas: 4, planes: ['Plan Prueba'] } });
+    expect(result.dashboard).toMatchObject({ customerCount: 1, overdueCustomerCount: 1, overdueInvoiceCount: 2, totalDebt: 39980 });
+    expect(result.summary).toMatchObject({ totalRows: 1, totalDebt: 39980, overdueCount: 2 });
+  });
+
+  it('el detalle por contrato conserva todas las boletas con sus saldos individuales', async () => {
+    const { service } = portfolio();
+    const result = await service.list({ idCliente: 10, idContrato: 20, page: 1, pageSize: 100 }, commercial);
+    expect(result.items).toHaveLength(4);
+    expect(result.items.filter(row => row.saldoPendiente === 19990)).toHaveLength(2);
+    expect(result.items.every(row => row.idContrato === 20 && row.idFactura !== null)).toBe(true);
+    expect((await service.reportRows({ page: 1, pageSize: 20 }, commercial))).toHaveLength(4);
+  });
+
+  it('agrupa antes de paginar, incluyendo clientes sin facturas', async () => {
+    const { service, prisma, contract } = portfolio();
+    prisma.cliente.findMany.mockResolvedValue([customerFixture({ contratos: [contract] }), customerFixture({ idCliente: 11, nombreCompleto: 'Sin documentos' })]);
+    const first = await service.list({ groupBy: 'customer', page: 1, pageSize: 1 }, commercial);
+    const second = await service.list({ groupBy: 'customer', page: 2, pageSize: 1 }, commercial);
+    expect(first.pagination).toMatchObject({ totalRows: 2, totalPages: 2 });
+    expect(first.items[0]).toMatchObject({ idCliente: 10, saldoPendiente: 39980 });
+    expect(second.items[0]).toMatchObject({ idCliente: 11, saldoPendiente: null, estadoComercial: 'SIN_FACTURAS' });
+  });
+
+  it('buscar una boleta o filtrar vencidas selecciona al cliente sin recortar su resumen financiero', async () => {
+    const { service } = portfolio();
+    for (const filters of [{ search: 'B-3' }, { vencido: true }, { conDeuda: true }]) {
+      const result = await service.list({ groupBy: 'customer', page: 1, pageSize: 20, ...filters }, commercial);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({ saldoPendiente: 39980, totalPagado: 39980, resumenCliente: { facturas: 4 } });
+    }
+  });
+
+  it('exporta un resumen por cliente y conserva los filtros y el saldo total', async () => {
+    const { service } = portfolio();
+    const result = await service.export({ groupBy: 'customer', search: 'B-3', page: 1, pageSize: 20, columns: 'nombre,saldoPendiente' }, 'csv', commercial);
+    const lines = result.buffer.toString('utf8').trim().split(/\r?\n/);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('39980');
+  });
+
+  it('las boletas pagadas no hacen que un cliente moroso coincida con filtros sin deuda o sin atraso', async () => {
+    const { service } = portfolio();
+    for (const filters of [{ conDeuda: false }, { vencido: false }, { diasAtrasoMax: 0 }]) {
+      const result = await service.list({ groupBy: 'customer', page: 1, pageSize: 20, ...filters }, commercial);
+      expect(result.items).toHaveLength(0);
+      expect(result.summary.totalDebt).toBe(0);
+    }
+  });
+
+  it('mantiene la autorización por empresa al solicitar el resumen', async () => {
+    const { service, prisma } = portfolio();
+    await expect(service.list({ groupBy: 'customer', idEmpresa: 2, page: 1, pageSize: 20 }, commercial)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.cliente.findMany).not.toHaveBeenCalled();
+  });
+
+  it('varios contratos siguen siendo un cliente y los cargos no se multiplican por el número de boletas', async () => {
+    const { service, prisma, contract } = portfolio();
+    const extraInvoice = invoiceFixture({ idFactura: 5, idContrato: 21, monto: new Prisma.Decimal(10000), pagos: [] });
+    const extraContract = { ...extraInvoice.contrato, idContrato: 21, idPlan: 6, numeroContratoExterno: 'C-21', estado: 'Suspendido', plan: { nombreComercial: 'Plan Adicional' }, facturas: [extraInvoice] };
+    prisma.cliente.findMany.mockResolvedValue([customerFixture({ contratos: [contract, extraContract],
+      servicios: [{ ...contract.servicios[0], idContrato: 20 }, { ...contract.servicios[0], idContrato: 21, idServicio: 41, estadoOperativo: 'Suspendido' }],
+      cargosAdicionales: [{ idContrato: 20, monto: new Prisma.Decimal(1000) }, { idContrato: 21, monto: new Prisma.Decimal(2000) }] })]);
+    const result = await service.list({ groupBy: 'customer', page: 1, pageSize: 20 }, commercial);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ saldoPendiente: 49980, cargosPendientes: 3000, estadoServicio: 'Múltiples estados', estadoCorte: null,
+      resumenCliente: { contratos: 2, facturas: 5, planes: ['Plan Prueba', 'Plan Adicional'] } });
+  });
+});
+
 describe('P0-03 gestiones sobre identidad compartida', () => {
   it('evento de cobranza y auditoria comparten transaccion; fallo no retorna exito', async () => {
     const { service, prisma, audit } = harness();

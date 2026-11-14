@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Crosshair, Layers, MapPin, Pencil, Plus, RotateCcw, Save, Trash2, Undo2, Wifi, X } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { api, apiErrorMessage } from '../../api';
+import { api, apiErrorMessage, type Company } from '../../api';
 import { Modal } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './coverage.css';
@@ -26,11 +26,15 @@ const zoneColor = (zone: Zone) => zone.tipoZona === 'MICROZONA_COMERCIAL' ? '#b8
 const assignedPlans = (zone: Zone) => [...new Map((zone.precios ?? []).filter(price => price.activo !== false && price.plan.activo !== false).map(price => [price.plan.idPlan, price])).values()];
 const formatPrice = (value: string) => Number(value).toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
 
-export function CoverageZonesPanel(props: { idEmpresa: number; canManage?: boolean }) {
-  return <CoverageWorkspace key={props.idEmpresa} {...props}/>;
+type CoverageWorkspaceProps = { idEmpresa: number; scope?: string; companies?: Company[]; canManage?: boolean };
+export function CoverageZonesPanel(props: CoverageWorkspaceProps) {
+  return <CoverageWorkspace key={props.scope ?? props.idEmpresa} {...props}/>;
 }
 
-function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number; canManage?: boolean }) {
+function CoverageWorkspace({ idEmpresa, scope, companies = [], canManage = true }: CoverageWorkspaceProps) {
+  const consolidated = scope === 'consolidado';
+  const readCompanyIds = [...new Set(consolidated && companies.length ? companies.map(company => company.idEmpresa) : [scope && !consolidated ? Number(scope) : idEmpresa])]
+    .filter(id => Number.isInteger(id) && id > 0).sort((a, b) => a - b).join(',');
   const [zones, setZones] = useState<Zone[]>([]);
   const [editor, setEditor] = useState(emptyEditor);
   const [editing, setEditing] = useState(false);
@@ -62,17 +66,17 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const loadZones = useCallback(async (signal?: AbortSignal) => {
-    if (!idEmpresa) { setLoading(false); return; }
+    if (!readCompanyIds) { setLoading(false); return; }
     setLoading(true); setError('');
     try {
-      const { data } = await api.get<Zone[]>('/coverage/zones', { params: { idEmpresa }, signal });
-      if (mounted.current && !signal?.aborted) setZones(data);
+      const responses = await Promise.all(readCompanyIds.split(',').map(id => api.get<Zone[]>('/coverage/zones', { params: { idEmpresa: Number(id) }, signal })));
+      if (mounted.current && !signal?.aborted) setZones([...new Map(responses.flatMap(response => response.data).map(zone => [zone.idZonaPago, zone])).values()]);
     } catch (err) {
       if (mounted.current && !signal?.aborted) setError(apiErrorMessage(err));
     } finally {
       if (mounted.current && !signal?.aborted) setLoading(false);
     }
-  }, [idEmpresa]);
+  }, [readCompanyIds]);
   useEffect(() => { const controller = new AbortController(); void loadZones(controller.signal); return () => controller.abort(); }, [loadZones]);
 
   useEffect(() => {
@@ -182,7 +186,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     try {
       if (editor.id) await api.patch('/coverage/zones/' + editor.id, payload);
       else await api.post('/coverage/zones', payload);
-      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa: editor.id ? zones.find(zone => zone.idZonaPago === editor.id)?.idEmpresa ?? idEmpresa : idEmpresa } }));
       if (!mounted.current) return;
       setEditing(false); setEditor(emptyEditor); setMessage('Zona guardada correctamente.');
       await loadZones();
@@ -195,7 +199,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     try {
       if (zone.activo === false) await api.patch('/coverage/zones/' + zone.idZonaPago, { activo: true });
       else await api.post('/coverage/zones/' + zone.idZonaPago + '/deactivate');
-      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa: zone.idEmpresa } }));
       if (!mounted.current) return;
       setMessage(zone.nombreZona + (zone.activo === false ? ' fue activada.' : ' fue desactivada.'));
       await loadZones();
@@ -212,7 +216,7 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     deletePending.current = true; setDeleting(true); setDeleteError(''); clearMessage();
     try {
       await api.delete('/coverage/zones/' + deletingZone.idZonaPago);
-      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa } }));
+      window.dispatchEvent(new CustomEvent('finet:coverage-updated', { detail: { idEmpresa: deletingZone.idEmpresa } }));
       if (!mounted.current) return;
       setZones(current => current.filter(zone => zone.idZonaPago !== deletingZone.idZonaPago));
       setSelected(current => current === deletingZone.idZonaPago ? null : current);
@@ -222,9 +226,10 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
     finally { deletePending.current = false; if (mounted.current) setDeleting(false); }
   }
 
-  const parents = zones.filter(zone => zone.tipoZona === 'COBERTURA_GENERAL' && zone.activo !== false && zone.poligonoGeojson);
+  const editingCompanyId = editor.id ? zones.find(zone => zone.idZonaPago === editor.id)?.idEmpresa ?? idEmpresa : idEmpresa;
+  const parents = zones.filter(zone => zone.idEmpresa === editingCompanyId && zone.tipoZona === 'COBERTURA_GENERAL' && zone.activo !== false && zone.poligonoGeojson);
   const availableParents = editor.idZonaPadre && !parents.some(zone => String(zone.idZonaPago) === editor.idZonaPadre)
-    ? [...parents, ...zones.filter(zone => String(zone.idZonaPago) === editor.idZonaPadre)] : parents;
+    ? [...parents, ...zones.filter(zone => zone.idEmpresa === editingCompanyId && String(zone.idZonaPago) === editor.idZonaPadre)] : parents;
   const filteredZones = zones.filter(zone => zone.nombreZona.toLocaleLowerCase('es-CL').includes(search.toLocaleLowerCase('es-CL'))
     && (zoneFilter === 'all' || zoneFilter === 'general' && zone.tipoZona !== 'MICROZONA_COMERCIAL' || zoneFilter === 'micro' && zone.tipoZona === 'MICROZONA_COMERCIAL'));
   return <section className="coverage-admin">
@@ -271,7 +276,8 @@ function CoverageWorkspace({ idEmpresa, canManage = true }: { idEmpresa: number;
         {loading ? <p className="coverage-empty" role="status">Cargando zonas…</p> : filteredZones.length === 0 && <p className="empty-state">{zones.length ? 'No hay zonas para esta búsqueda.' : 'No hay coberturas registradas.'}</p>}
         {!loading && filteredZones.map(zone => <article key={zone.idZonaPago} className={'coverage-zone-card ' + (selected === zone.idZonaPago ? 'is-selected ' : '') + (zone.activo === false ? 'is-inactive' : '')}>
           <button type="button" className="coverage-zone-name" aria-expanded={selected === zone.idZonaPago} aria-controls={`coverage-plans-${zone.idZonaPago}`} onClick={() => { if (selected === zone.idZonaPago) setSelected(null); else locateZone(zone); }}>{zone.nombreZona}<ChevronDown size={16}/></button>
-          <span>{zoneName(zone.tipoZona)}{zone.zonaPadre ? ' · ' + zone.zonaPadre.nombreZona : ''}</span>
+          <span>{zoneName(zone.tipoZona)}{consolidated && companies.find(company => company.idEmpresa === zone.idEmpresa)?.nombre
+            ? ' · ' + companies.find(company => company.idEmpresa === zone.idEmpresa)!.nombre : ''}{zone.zonaPadre ? ' · ' + zone.zonaPadre.nombreZona : ''}</span>
           {canManage && <div className="coverage-zone-actions">
             <button type="button" className={'coverage-zone-toggle ' + (zone.activo !== false ? 'active' : '')} role="switch" aria-checked={zone.activo !== false} aria-label={`Cambiar estado de ${zone.nombreZona}`} aria-busy={changingStatus === zone.idZonaPago} disabled={changingStatus !== null || saving} onClick={() => void changeStatus(zone)}><span/></button>
             <button type="button" className="coverage-icon" aria-label={`Editar ${zone.nombreZona}`} title="Editar zona" disabled={changingStatus !== null || saving} onClick={() => beginEdit(zone)}><Pencil size={15}/></button>

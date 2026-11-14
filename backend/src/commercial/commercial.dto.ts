@@ -25,6 +25,7 @@ const optionalBoolean = ({ value }: { value: unknown }) => {
 };
 
 export class ControlBookQueryDto {
+  @IsOptional() @IsIn(['customer', 'document']) groupBy?: 'customer' | 'document';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idEmpresa?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idCliente?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
