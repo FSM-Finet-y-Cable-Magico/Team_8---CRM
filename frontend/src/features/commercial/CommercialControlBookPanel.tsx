@@ -14,10 +14,10 @@ import { ControlBookExternalDocuments } from './ControlBookExternalDocuments';
 import './commercial-control-book.css';
 
 const SPLIT_COLUMNS: Partial<Record<string, string[]>> = {
-  cliente: ['cliente', 'rut'], servicio: ['servicio', 'documento'], estado: ['estado', 'dias'],
+  cliente: ['cliente', 'rut'], servicio: ['servicio'], estado: ['estado', 'dias'],
 };
 const TABLE_LABELS: Partial<Record<string, string>> = {
-  rut: 'RUT', servicio: 'Servicio', documento: 'Documento', estado: 'Estado', dias: 'Días de atraso',
+  rut: 'RUT', servicio: 'Planes / contratos', documento: 'Documento', estado: 'Estado', dias: 'Días de atraso',
 };
 const QUICK_FILTERS = [
   ['conDeuda', 'Con saldo pendiente'], ['vencido', 'Vencidas'], ['conConvenio', 'Con convenio'],
@@ -32,7 +32,9 @@ export function CommercialStatus({ row }: { row: ControlRow }) {
 
 function Cell({ column, row }: { column: string; row: ControlRow }) {
   if (column === 'rut') return <>{row.rut ?? '—'}</>;
-  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span>{row.numeroContrato && <small>{row.numeroContrato}</small>}</>;
+  if (column === 'servicio') return <><span>{row.plan ?? 'Sin plan'}</span>{row.resumenCliente
+    ? <small>{row.resumenCliente.contratos} {row.resumenCliente.contratos === 1 ? 'contrato' : 'contratos'}</small>
+    : row.numeroContrato && <small>{row.numeroContrato}</small>}</>;
   if (column === 'documento') return <>{row.idFactura ? row.numeroDocumento ?? `Factura ${row.idFactura}` : 'Sin facturas'}{row.idFactura && row.tipoDocumento && <small>{readable(row.tipoDocumento)}</small>}</>;
   if (column === 'deuda') return <strong>{row.saldoPendiente === null ? '—' : currency.format(row.saldoPendiente)}</strong>;
   if (column === 'estado') return <CommercialStatus row={row}/>;
@@ -83,7 +85,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   const openerId = useRef<string | null>(null);
   const companyId = scope !== 'consolidado' ? scope : String(writeCompanyId);
   const previousCompany = useRef(companyId);
-  const params = useMemo(() => ({ idEmpresa: companyId, ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 20 }), [companyId, filters, page]);
+  const params = useMemo(() => ({ idEmpresa: companyId, groupBy: 'customer', ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 20 }), [companyId, filters, page]);
 
   useAutoRefresh(() => {
     if (!loading && !requestPending.current) { backgroundRefresh.current = true; setRefresh(value => value + 1); }
@@ -149,11 +151,10 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
       const visibleRecord = result.items.find(row => row.rowId === record.rowId);
       if (visibleRecord) { setSelected(visibleRecord); return; }
 
-      // A payment can move the open invoice out of a filtered portfolio.
+      // Keep the customer sheet open even when a payment moves it out of the current filter.
       try {
         const { data: exact } = await api.get<ControlResponse>('/commercial/control-book', { signal: controller.signal, params: {
-          idEmpresa: record.idEmpresa, idCliente: record.idCliente, idContrato: record.idContrato ?? undefined,
-          idFactura: record.idFactura ?? undefined, page: 1, pageSize: record.idFactura === null ? 100 : 1,
+          idEmpresa: record.idEmpresa, idCliente: record.idCliente, groupBy: 'customer', page: 1, pageSize: 1,
         } });
         if (controller.signal.aborted || tableRecord.current !== record) return;
         const updated = exact.items.find(row => row.rowId === record.rowId);
@@ -286,7 +287,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
     <div className="control-list">
       <div className="control-table-shell" role="region" aria-label="Tabla de cartera desplazable" tabIndex={data?.items.length && !loading ? 0 : undefined} aria-busy={loading}>
         {loading ? <div className="control-empty" role="status"><RefreshCw size={22} className="control-spinning"/>Cargando libro de control…</div> : error && !data ? <div className="control-empty"><span>No se pudo cargar el libro de control.</span><button className="control-outline" onClick={() => setRefresh((value) => value + 1)}>Reintentar</button></div> : !data?.items.length ? <div className="empty-state" role="status"><p>{activeFilters.length > 0 || search ? 'No hay registros que coincidan con la búsqueda o los filtros.' : 'No hay registros en el libro de control.'}</p>{(activeFilters.length > 0 || search) && <button className="control-text-button" onClick={() => { setSearch(''); applyFilters(EMPTY_FILTERS); }}>Limpiar búsqueda y filtros</button>}</div> : <table className="control-table">
-          <caption className="control-sr-only">Cartera por contrato. Selecciona un registro para abrir la ficha del cliente.</caption>
+          <caption className="control-sr-only">Cartera por cliente. Selecciona un registro para abrir su ficha.</caption>
           <colgroup><col className="control-sheet-index"/>{tableColumns.map(key => <col key={key} className={`control-col-${key}`}/>)}</colgroup>
           <thead>
             <tr className="control-sheet-letters" aria-hidden="true"><td className="control-sheet-index"/>{tableColumns.map((key, index) => <td key={key}>{String.fromCharCode(65 + index)}</td>)}</tr>

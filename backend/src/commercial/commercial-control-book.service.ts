@@ -110,7 +110,9 @@ export class CommercialControlBookService {
   async list(query: ControlBookQueryDto, user: AuthUser) {
     this.assertViewer(user);
     const allRows = await this.loadRows({ idEmpresa: query.idEmpresa, page: 1, pageSize: 30 }, user);
-    const rows = this.filterRows(allRows, query);
+    const rows = query.groupBy === 'customer' ? this.customerViewRows(allRows, query) : this.filterRows(allRows, query);
+    const matchingCustomers = new Set(rows.map(row => row.idCliente));
+    const financialRows = query.groupBy === 'customer' ? allRows.filter(row => matchingCustomers.has(row.idCliente)) : rows;
     this.sortRows(rows, query.sort ?? 'diasAtraso', query.order ?? 'desc');
     const page = query.page || 1;
     const pageSize = query.pageSize || 30;
@@ -118,7 +120,7 @@ export class CommercialControlBookService {
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
     const items = rows.slice((page - 1) * pageSize, page * pageSize);
     const invoiceSummary = new Map<number, { saldo: number; vencida: boolean; convenio: boolean; prorroga: boolean }>();
-    rows.forEach((row) => {
+    financialRows.forEach((row) => {
       if (row.idFactura === null) return;
       invoiceSummary.set(row.idFactura, {
         saldo: row.saldoPendiente ?? 0,
@@ -145,10 +147,10 @@ export class CommercialControlBookService {
         extensionsCount: [...invoiceSummary.values()].filter((row) => row.prorroga).length,
       },
       filterOptions: {
-        plans: this.uniqueOptions(rows, 'idPlan', 'plan'),
-        zones: this.uniqueOptions(rows, 'idZona', 'zona'),
-        commercialStatuses: [...new Set(rows.map((row) => row.estadoComercial))].sort(),
-        serviceStatuses: [...new Set(rows.map((row) => row.estadoServicio).filter(Boolean))].sort(),
+        plans: this.uniqueOptions(financialRows, 'idPlan', 'plan'),
+        zones: this.uniqueOptions(financialRows, 'idZona', 'zona'),
+        commercialStatuses: [...new Set(financialRows.map((row) => row.estadoComercial))].sort(),
+        serviceStatuses: [...new Set(financialRows.map((row) => row.estadoServicio).filter(Boolean))].sort(),
       },
       filtersApplied: this.appliedFilters(query),
     };
@@ -162,7 +164,9 @@ export class CommercialControlBookService {
   async export(query: ControlBookQueryDto, format: 'csv' | 'xlsx', user: AuthUser) {
     this.assertViewer(user);
     if (!['csv', 'xlsx'].includes(format)) throw new BadRequestException('Formato de exportación no soportado');
-    const rows = await this.loadRows(query, user);
+    const detailedRows = await this.loadRows(query.groupBy === 'customer' ? { idEmpresa: query.idEmpresa, page: 1, pageSize: 30 } : query, user);
+    const rows = query.groupBy === 'customer' ? this.customerViewRows(detailedRows, query) : detailedRows;
+    this.sortRows(rows, query.sort ?? 'diasAtraso', query.order ?? 'desc');
     const columns = this.exportColumns(query.columns);
     const exportRows = rows.map((row) => Object.fromEntries(columns.map((key) => [EXPORT_COLUMNS[key], row[key]])));
     let buffer: Buffer;
@@ -463,6 +467,7 @@ export class CommercialControlBookService {
       const charges = customer.cargosAdicionales.filter((charge) => contract ? charge.idContrato === contract.idContrato : service ? charge.idContrato === null && charge.idServicio === service.idServicio : charge.idContrato === null && charge.idServicio === null);
       return {
         rowId: invoice ? `${customer.idCliente}-${contract!.idContrato}-${invoice.idFactura}` : `${customer.idCliente}-${contract?.idContrato ?? 'sin-contrato'}-${service?.idServicio ?? 'sin-servicio'}-sin-factura`,
+        resumenCliente: undefined as { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null }> } | undefined,
         idEmpresa: company, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
         telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract?.direccionInstalacion ?? null,
         idServicio: service?.idServicio ?? null, serviciosRelacionados: services.map((item) => item.idServicio), estadoServicio: service?.estadoOperativo ?? (services.length > 1 ? 'Múltiples servicios' : null),
@@ -498,6 +503,64 @@ export class CommercialControlBookService {
     rows = this.filterRows(rows, query);
     this.sortRows(rows, query.sort ?? 'diasAtraso', query.order ?? 'desc');
     return rows;
+  }
+
+  private customerViewRows(rows: Awaited<ReturnType<CommercialControlBookService['loadRows']>>, query: ControlBookQueryDto) {
+    const detailQuery = { ...query };
+    const customerQuery: ControlBookQueryDto = { page: query.page, pageSize: query.pageSize };
+    // A paid invoice must not make a customer with other debts match "without debt".
+    for (const key of ['conDeuda', 'vencido', 'conConvenio', 'conProrroga', 'conUltimoAviso', 'retiroPendiente', 'diasAtrasoMin', 'diasAtrasoMax'] as const) {
+      Object.assign(customerQuery, { [key]: query[key] });
+      delete detailQuery[key];
+    }
+    const customers = new Set(this.filterRows(rows, detailQuery).map(row => row.idCliente));
+    return this.filterRows(this.customerRows(rows.filter(row => customers.has(row.idCliente))), customerQuery);
+  }
+
+  private customerRows(rows: Awaited<ReturnType<CommercialControlBookService['loadRows']>>) {
+    type Row = (typeof rows)[number];
+    const customers = new Map<number, Row[]>();
+    rows.forEach(row => {
+      const records = customers.get(row.idCliente);
+      if (records) records.push(row); else customers.set(row.idCliente, [row]);
+    });
+    const priority = ['RETIRO_PENDIENTE', 'ULTIMO_AVISO_REGISTRADO', 'DEUDA_VENCIDA', 'CON_CONVENIO', 'CON_PRORROGA', 'SALDO_PENDIENTE', 'AL_DIA', 'SIN_DATOS_FINANCIEROS', 'SIN_FACTURAS'];
+    return [...customers.values()].map(records => {
+      const ranked = [...records].sort((a, b) => {
+        const rank = (row: Row) => { const index = priority.indexOf(row.estadoComercial); return index < 0 ? priority.length : index; };
+        return rank(a) - rank(b) || (b.diasAtraso ?? 0) - (a.diasAtraso ?? 0);
+      });
+      const representative = ranked[0];
+      const invoices = [...new Map(records.filter(row => row.idFactura !== null).map(row => [row.idFactura, row])).values()];
+      const contracts = [...new Map(records.filter(row => row.idContrato !== null).map(row => [row.idContrato, row])).values()];
+      const serviceStates = [...new Set(records.map(row => row.estadoServicio).filter(Boolean))];
+      const plans = [...new Set(records.map(row => row.plan).filter((plan): plan is string => Boolean(plan)))];
+      const dates = records.map(row => row.diasAtraso).filter((value): value is number => value !== null);
+      const sum = (field: 'montoDocumento' | 'totalPagado' | 'saldoPendiente' | 'saldoFavor') => !invoices.length || invoices.some(row => row[field] === null)
+        ? null : this.money(invoices.reduce((total, row) => total + (row[field] ?? 0), 0));
+      const latest = [...records].sort((a, b) => String(b.fechaUltimaGestion ?? '').localeCompare(String(a.fechaUltimaGestion ?? '')))[0];
+      const chargeContexts = new Map(records.map(row => [row.idContrato !== null ? `contract-${row.idContrato}` : `service-${row.idServicio ?? 'none'}`, row.cargosPendientes]));
+      return {
+        ...representative,
+        rowId: `customer-${representative.idEmpresa}-${representative.idCliente}`,
+        resumenCliente: { contratos: contracts.length, facturas: invoices.length, planes: plans,
+          contratosRelacionados: contracts.map(row => ({ idContrato: row.idContrato!, numeroContrato: row.numeroContrato, plan: row.plan })) },
+        // Customer totals must never be used as if they belonged to one invoice, contract or service.
+        idContrato: null, idServicio: null, idFactura: null, idPlan: null, idZona: null,
+        serviciosRelacionados: [...new Set(records.flatMap(row => row.serviciosRelacionados))],
+        plan: plans.join(' · ') || null,
+        numeroContrato: contracts.map(row => row.numeroContrato).filter(Boolean).join(' · ') || null,
+        numeroDocumento: null, tipoDocumento: null,
+        estadoServicio: serviceStates.length === 1 ? serviceStates[0] : serviceStates.length ? 'Múltiples estados' : null,
+        estadoCorte: contracts.length > 0 && contracts.every(row => row.estadoCorte === 'SUSPENDIDO_COMERCIAL') ? 'SUSPENDIDO_COMERCIAL' : null,
+        montoDocumento: sum('montoDocumento'), totalPagado: sum('totalPagado'), saldoPendiente: sum('saldoPendiente'), saldoFavor: sum('saldoFavor'),
+        diasAtraso: dates.length ? Math.max(...dates) : null,
+        convenioActivo: records.some(row => row.convenioActivo), prorrogaActiva: records.some(row => row.prorrogaActiva),
+        ultimoAviso: records.some(row => row.ultimoAviso), avisoRetiro: records.some(row => row.avisoRetiro), retiroPendiente: records.some(row => row.retiroPendiente),
+        ultimaGestion: latest.ultimaGestion, fechaUltimaGestion: latest.fechaUltimaGestion, responsableUltimaGestion: latest.responsableUltimaGestion,
+        cargosPendientes: this.money([...chargeContexts.values()].reduce((total, amount) => total + amount, 0)),
+      };
+    });
   }
 
   private filterRows<T extends Record<string, unknown>>(rows: T[], query: ControlBookQueryDto) {

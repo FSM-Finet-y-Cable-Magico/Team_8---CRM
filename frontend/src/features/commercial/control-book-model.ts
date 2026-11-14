@@ -1,4 +1,5 @@
 export type ControlRow = {
+  resumenCliente?: { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null }> };
   rowId: string; idEmpresa: number | null; idCliente: number; rut: string | null; nombre: string; telefono: string | null; email: string | null; direccion: string | null;
   idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number | null; numeroContrato: string | null; idPlan: number | null; plan: string | null;
   idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number | null; numeroDocumento: string | null; fechaEmision: string | null; fechaVencimiento: string | null;
@@ -73,6 +74,7 @@ export function managementRelations(row: ControlRow) {
 }
 
 export function recordContext(row: ControlRow) {
+  if (row.resumenCliente) return [row.plan ?? 'Sin plan', `${row.resumenCliente.contratos} contrato(s)`].join(' · ');
   return [row.plan ?? 'Sin plan', row.estadoServicio ? readable(row.estadoServicio) : null,
     row.idFactura ? 'Vence ' + dateLabel(row.fechaVencimientoEfectiva) : 'Sin facturas'].filter(Boolean).join(' · ');
 }
@@ -80,7 +82,7 @@ export function recordContext(row: ControlRow) {
 type Column = { label: string; fields: (keyof ControlRow)[]; group: string; sort?: string };
 export const COLUMNS: Record<string, Column> = {
   cliente: { label: 'Cliente', fields: ['nombre', 'rut'], group: 'Esenciales', sort: 'nombre' },
-  servicio: { label: 'Servicio / documento', fields: ['plan', 'numeroContrato', 'tipoDocumento', 'numeroDocumento'], group: 'Esenciales' },
+  servicio: { label: 'Planes / contratos', fields: ['plan', 'numeroContrato', 'tipoDocumento', 'numeroDocumento'], group: 'Esenciales' },
   deuda: { label: 'Saldo pendiente', fields: ['saldoPendiente'], group: 'Esenciales', sort: 'saldo' },
   estado: { label: 'Estado / atraso', fields: ['estadoServicio', 'estadoComercial', 'diasAtraso'], group: 'Esenciales', sort: 'diasAtraso' },
   accion: { label: 'Próxima acción', fields: ['accionSugerida'], group: 'Esenciales' },

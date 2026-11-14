@@ -33,6 +33,23 @@ test('toda la fila selecciona y deselecciona el plan', async t => {
   assert.deepEqual(selected,[31,null]);
 });
 
+test('el resumen permite seleccionar cada contrato aunque aún no tenga servicios o no esté en el catálogo de clientes', async t => {
+  const selected = [];
+  const { ControlBookCustomerContracts } = compile('ControlBookCustomerContracts.tsx', {
+    '../../lib': { formatWorkOrderValue: String }, '../../shared/components': { StatusBadge: ({ value }) => value }, './control-book-model': model,
+  });
+  let tree;
+  await act(async () => { tree = create(React.createElement(ControlBookCustomerContracts, {
+    row: { ...row, idContrato: null, idServicio: null, resumenCliente: { contratos: 2, facturas: 4, planes: ['Plan Uno', 'Plan Dos'],
+      contratosRelacionados: [{ idContrato: 31, numeroContrato: 'CT-31', plan: 'Plan Uno' }, { idContrato: 32, numeroContrato: 'CT-32', plan: 'Plan Dos' }] } },
+    contracts: [], services: [], loading: false, error: false, selectedContractId: null, onSelect: id => selected.push(id), onRetry() {},
+  })); });
+  t.after(async () => { await act(async () => tree.unmount()); });
+  assert.match(textOf(tree.toJSON()), /Plan Uno/); assert.match(textOf(tree.toJSON()), /Plan Dos/);
+  await act(async () => tree.root.findByProps({ 'aria-label': 'Seleccionar Plan Dos · CT-32' }).props.onChange());
+  assert.deepEqual(selected, [32]);
+});
+
 async function drawer(t, changes = {}, portfolioRows) {
   const posts = [], saved = [];
   const { ControlBookDrawer } = compile('ControlBookDrawer.tsx', {
