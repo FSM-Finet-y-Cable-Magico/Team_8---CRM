@@ -25,7 +25,9 @@ const Modal = ({ title, headerDetails, navigation, children }) => React.createEl
 async function drawer(t, services, { canManage = true, canManagePayments = true, suspension = { idContrato: 31, elegible: true, motivo: null } } = {}) {
   const opened = [], suspensions = [], reads = [];
   const { ControlBookDrawer } = transpile('features/commercial/ControlBookDrawer.tsx', {
-    '../../api': { api: { get: async path => { reads.push(path); return { data: path === '/commercial/control-book' ? { items: [row], pagination: { totalPages: 1 } } : path.startsWith('/services/customer/') ? services : path.endsWith('/suspension-eligibility') ? suspension : [] }; }, post: async () => ({}) }, apiErrorMessage: () => 'Error' },
+    '../../api': { api: { get: async path => { reads.push(path); return { data: path === '/commercial/control-book' ? { items: [row], pagination: { totalPages: 1 } } : path.startsWith('/services/customer/') ? services : path.endsWith('/suspension-eligibility') ? {
+      umbralDias: 5, empresa: { idEmpresa: row.idEmpresa }, cliente: { idCliente: row.idCliente }, contrato: { idContrato: row.idContrato }, ...suspension,
+    } : [] }; }, post: async () => ({}) }, apiErrorMessage: () => 'Error' },
     '../customers/CustomerStatusBadge': { CustomerStatusSummary: () => null },
     './ControlBookCustomerContracts': { ControlBookCustomerContracts: ({ onSelect }) => React.createElement('button', { onClick: () => onSelect(31) }, 'Seleccionar plan') },
     './ControlBookHistory': { ControlBookHistory: () => null },
@@ -84,7 +86,8 @@ test('no elegible para el corte: el botón queda deshabilitado con el motivo del
   const h = await drawer(t, [{ ...suspended, estadoOperativo: 'Activo' }], { suspension: { idContrato: 31, elegible: false, motivo: { code: 'DEUDA_CUBIERTA_POR_CONVENIO', message: 'La deuda vencida está cubierta por un convenio de pago activo' } } });
   await h.click('Seleccionar plan');
   assert.equal(h.button('Suspender servicio').props.disabled, true);
-  assert.equal(h.button('Suspender servicio').props.title, 'La deuda vencida está cubierta por un convenio de pago activo');
+  assert.match(h.button('Suspender servicio').props.title, /cubierta por un convenio de pago activo/);
+  assert.match(textOf(h.tree.toJSON()), /Requisito pendiente: La deuda vencida está cubierta por un convenio de pago activo/);
 });
 
 test('una respuesta de elegibilidad de otro contrato no habilita el corte', async t => {

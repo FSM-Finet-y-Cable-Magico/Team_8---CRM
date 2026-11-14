@@ -16,7 +16,7 @@ function load(path, mocks = {}) {
   return exports;
 }
 const customer = { idCliente: 7, rut: '11111111-1', nombreCompleto: 'Cliente QA', email: 'qa@example.cl', estado: 'Activo' };
-const category = { idCategoria: 10, nombreAtencion: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true };
+const category = { idCategoria: 10, nombre: 'Consulta', nombreAtencion: 'Consulta general', tipo: 'ATENCION', tipoDisponible: true };
 
 async function harness(t, get = async path => ({ data: path === '/customers/search' ? customer : [{ idServicio: 8, tipoServicio: 'Internet', estadoOperativo: 'Activo' }] })) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -33,7 +33,7 @@ async function harness(t, get = async path => ({ data: path === '/customers/sear
     '../../shared/components': { ToastNotice, StatusBadge: () => null },
     '../../shared/hooks/useTransientMessage': load('../src/shared/hooks/useTransientMessage.ts'),
     './TicketManagementModal': { TicketManagementModal: () => null },
-    './ticket-presentation': { ticketMatchesSearch: () => true, manualTicketCategories: () => [category], isTerminationTicketCategory: () => false },
+    './ticket-presentation': load('../src/features/tickets/ticket-presentation.ts'),
     '../commercial/control-book-contact-time': load('../src/features/commercial/control-book-contact-time.ts'),
   });
   let tree;

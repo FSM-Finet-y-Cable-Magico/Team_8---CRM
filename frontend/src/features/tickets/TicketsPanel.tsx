@@ -7,7 +7,7 @@ import { type DashboardPermissions } from '../../permissions';
 import { StatusBadge, ToastNotice } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { TicketManagementModal } from './TicketManagementModal';
-import { isTerminationTicketCategory, manualTicketCategories, ticketMatchesSearch } from './ticket-presentation';
+import { isTerminationTicketCategory, manualTicketCategories, ticketAttentionAvailability, ticketMatchesSearch } from './ticket-presentation';
 import { contactDateTimeInput, contactDateTimeISO } from '../commercial/control-book-contact-time';
 
 const TERMINATION_CHANNELS = [['TELEFONO', 'Teléfono'], ['PRESENCIAL', 'Presencial'], ['CORREO', 'Correo'], ['WHATSAPP', 'WhatsApp'], ['PORTAL', 'Portal de clientes'], ['OTRO', 'Otro']] as const;
@@ -51,9 +51,10 @@ export function TicketsPanel({
     setManagementOpen(true);
     onFocusConsumed?.();
   }, [focusedTicketId, tickets, onFocusConsumed]);
-  // Solo se ofrecen las categorías de atención que el servidor habilita; no se muestra aviso de catálogo.
+  // Solo se ofrecen las categorías de atención que el servidor habilita; se informa si el catálogo no puede verificarse.
   // «Baja de servicio» no se ofrece: se genera solo al iniciar la baja desde el Libro de Control.
   const attentionCategories = manualTicketCategories(categories);
+  const attentionCatalog = ticketAttentionAvailability(categories);
   const selectedCategory = attentionCategories.find(category => String(category.idCategoria) === createForm.idCategoria);
   const terminationSelected = Boolean(selectedCategory && isTerminationTicketCategory(selectedCategory));
 
@@ -214,6 +215,14 @@ export function TicketsPanel({
             </select>
           </label>
         )}
+        {!attentionCatalog.complete && <div className="ticket-notice" role="status" aria-label="Estado del catálogo de atención">
+          <strong>Catálogo de atención incompleto o no verificado.</strong>
+          <p>{attentionCatalog.options.length} de 7 categorías oficiales verificadas. Solo se ofrecen las categorías habilitadas por el servidor.</p>
+          <details><summary>Revisar categorías pendientes ({attentionCatalog.issues.length})</summary>
+            <ul>{attentionCatalog.issues.map(issue => <li key={issue.name}>{issue.name}: {issue.reason}</li>)}</ul>
+          </details>
+          <p>Solicita al administrador revisar el catálogo de este entorno. No se modifica ninguna categoría automáticamente.</p>
+        </div>}
         <label>
           Categoría
           <select value={createForm.idCategoria} onChange={(event) => setCreateForm({ ...createForm, idCategoria: event.target.value })}>
@@ -225,6 +234,7 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
+        <p className="ticket-muted">El alta general utiliza categorías de atención comercial. «Baja de servicio» se inicia desde el Libro de Control; «Término de servicio» utiliza su formulario propio. Las categorías técnicas e históricas se conservan en la gestión.</p>
         {terminationSelected && <>
           <label>
             Canal del requerimiento

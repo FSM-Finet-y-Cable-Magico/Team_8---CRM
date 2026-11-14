@@ -20,6 +20,38 @@ const VISIBLE_ACTIONS = ['event', 'agreement', 'extension', 'paymentDay', 'charg
 const CONTACT_REASONS = [['event', 'Contacto de cobranza'], ['lastNotice', 'Último aviso'], ['withdrawal', 'Aviso de retiro']] as const;
 const SAVE_LABELS: Record<ActionName, string> = { event: 'Guardar contacto', lastNotice: 'Guardar último aviso', withdrawal: 'Guardar aviso de retiro', agreement: 'Crear convenio', extension: 'Guardar prórroga', paymentDay: 'Guardar día de pago', charge: 'Guardar cargo' };
 
+type SuspensionCheck = Pick<SuspensionEligibility, 'idContrato' | 'elegible' | 'motivo' | 'umbralDias' | 'empresa' | 'contrato' | 'cliente'>;
+type SuspensionQuery = { key: string } & (
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; check: SuspensionCheck }
+);
+
+function suspensionQueryMessage(error: unknown) {
+  // Never echo the response body, URL or an internal server/network error.
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  if (status === 403) return 'No tienes autorización para evaluar la suspensión de este contrato.';
+  if (status === 401) return 'No se pudo consultar la suspensión. Revisa tu sesión antes de reintentar.';
+  if (status === 400) return 'No se pudo evaluar la suspensión con los datos actuales del contrato. Revisa la selección y reintenta.';
+  if (status === 404) return 'No se pudo encontrar la evaluación de este contrato. Reintenta; si persiste, solicita revisión al administrador.';
+  if (status && status >= 500) return 'No se pudo consultar la evaluación de suspensión. El servicio no está disponible; reintenta más tarde.';
+  return 'No se pudo consultar la evaluación de suspensión. Revisa tu conexión y reintenta.';
+}
+
+function suspensionBlockMessage(check: SuspensionCheck) {
+  // Presentation of known backend requirements only: no local financial decision.
+  switch (check.motivo?.code) {
+    case 'CONTRATO_INCONSISTENTE': return 'Cliente y contrato no corresponden. Solicita revisión de sus relaciones.';
+    case 'ESTADO_CONTRATO': return 'El estado del contrato no permite suspensión comercial.';
+    case 'YA_SUSPENDIDO': return 'El contrato y sus servicios ya están suspendidos.';
+    case 'SIN_DEUDA_VENCIDA': return 'No existen facturas con saldo que cumplan los días de corte.';
+    case 'DEUDA_CUBIERTA_POR_CONVENIO': return 'La deuda vencida está cubierta por un convenio de pago activo; no corresponde suspender.';
+    case 'BAJO_UMBRAL_CORTE': return `No existen facturas con saldo que cumplan el umbral vigente de ${check.umbralDias} días de atraso; se respeta el vencimiento efectivo, incluidas las prórrogas aprobadas.`;
+    case 'SIN_SERVICIOS_ACTIVOS': return 'El contrato no tiene servicios activos en esta empresa que suspender.';
+    default: return 'No se cumplen los requisitos de suspensión informados por el servidor. Solicita revisión antes de continuar.';
+  }
+}
+
 export type ControlBookRecordView = 'profile' | 'invoices' | 'activity' | 'documents';
 
 export function ControlBookDrawer({ row: sourceRow, customer, companyName, revision, canManage, canManagePayments = false, canViewBilling, canViewDocuments, onClose, onSaved, onBusyChange, onOpenBilling, financialTools, feedback }: {
@@ -45,7 +77,14 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
   // FINET 13-11-2026: two successive, independent modals. «Suspender servicio» (automatic eligibility, manual execution)
   // and, only once a service is suspended, «Dar de baja el servicio». Opening one closes the other: never nested.
   const [suspensionOpen, setSuspensionOpen] = useState(false);
-  const [suspensionCheck, setSuspensionCheck] = useState<Pick<SuspensionEligibility, 'idContrato' | 'elegible' | 'motivo'> | null>(null);
+  const [suspensionQuery, setSuspensionQuery] = useState<SuspensionQuery | null>(null);
+  const [suspensionReload, setSuspensionReload] = useState(0);
+  const suspensionPending = useRef(false);
+  const suspensionKey = [sourceRow.idEmpresa, sourceRow.idCliente, sourceRow.idServicio, selectedContractId, revision, suspensionReload, canManagePayments].join(':');
+  const currentSuspension = suspensionQuery?.key === suspensionKey ? suspensionQuery : null;
+  const suspensionCheck = currentSuspension?.status === 'ready' ? currentSuspension.check : null;
+  const suspensionLoading = !currentSuspension || currentSuspension.status === 'loading';
+  const suspensionReason = suspensionCheck && !suspensionCheck.elegible ? suspensionBlockMessage(suspensionCheck) : undefined;
   useEffect(() => {
     setContexts([]); setContextError('');
     if (!selectedContractId) { setContextLoading(false); return; }
@@ -99,14 +138,28 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
   }, [row.idCliente, row.idEmpresa, revision, servicesReload]);
   const closeAction = useCallback(() => { if (!pending.current) { setAction(null); setError(''); } }, []);
   useEffect(() => {
-    setSuspensionCheck(null);
+    setSuspensionOpen(false);
+    setSuspensionQuery(null);
     if (!canManagePayments || !selectedContractId) return;
     const controller = new AbortController();
+    suspensionPending.current = true;
+    setSuspensionQuery({ key: suspensionKey, status: 'loading' });
     void api.get<SuspensionEligibility>(`/billing/contracts/${selectedContractId}/suspension-eligibility`, { signal: controller.signal })
-      .then(({ data }) => { if (!controller.signal.aborted && data.idContrato === selectedContractId) setSuspensionCheck(data); })
-      .catch(() => { if (!controller.signal.aborted) setSuspensionCheck(null); });
-    return () => controller.abort();
-  }, [canManagePayments, selectedContractId, revision]);
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        if (!data || data.idContrato !== selectedContractId || data.contrato?.idContrato !== selectedContractId
+          || data.empresa?.idEmpresa !== sourceRow.idEmpresa || typeof data.elegible !== 'boolean'
+          || !Number.isInteger(data.umbralDias) || data.umbralDias < 1
+          || (data.cliente && data.cliente.idCliente !== sourceRow.idCliente) || (data.elegible && !data.cliente)) {
+          setSuspensionQuery({ key: suspensionKey, status: 'error', message: 'No se pudo validar la evaluación para el cliente, contrato y empresa seleccionados. Reintenta la evaluación.' });
+          return;
+        }
+        setSuspensionQuery({ key: suspensionKey, status: 'ready', check: data });
+      })
+      .catch(err => { if (!controller.signal.aborted) setSuspensionQuery({ key: suspensionKey, status: 'error', message: suspensionQueryMessage(err) }); })
+      .finally(() => { if (!controller.signal.aborted) suspensionPending.current = false; });
+    return () => { controller.abort(); suspensionPending.current = false; };
+  }, [canManagePayments, selectedContractId, sourceRow.idEmpresa, sourceRow.idCliente, suspensionKey]);
 
   const contracts = customer?.contratos?.filter(contract => contract.idEmpresa === row.idEmpresa) ?? [];
   // La baja por morosidad solo aparece cuando el plan seleccionado tiene un servicio suspendido.
@@ -200,7 +253,20 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
           return <button type="button" key={value} disabled={!selectedContractId || contextLoading || !contexts.some(item => !actionDisabledReason(value, item)) || saving} onClick={() => openAction(value)}>
             <Icon size={16} aria-hidden="true"/>{value === 'event' ? 'Registrar gestión' : ACTION_LABELS[value]}
           </button>;
-        })}{canViewBilling && canManagePayments && <button type="button" disabled={!selectedContractId || contextLoading || !contexts.some(item => item.idFactura && Number(item.saldoPendiente) > 0) || saving} onClick={() => setPaymentOpen(true)}><CreditCard size={16} aria-hidden="true"/>Pago manual</button>}{canManagePayments && Boolean(selectedContractId) && <button type="button" disabled={contextLoading || saving || !suspensionCheck?.elegible} title={suspensionCheck && !suspensionCheck.elegible ? suspensionCheck.motivo?.message : undefined} onClick={() => { setWithdrawalOpen(false); setSuspensionOpen(true); }}><Pause size={16} aria-hidden="true"/>Suspender servicio</button>}{canStartWithdrawal && <button type="button" disabled={contextLoading || saving} onClick={() => { setSuspensionOpen(false); setWithdrawalOpen(true); }}><Unplug size={16} aria-hidden="true"/>Dar de baja el servicio</button>}</div>
+        })}{canViewBilling && canManagePayments && <button type="button" disabled={!selectedContractId || contextLoading || !contexts.some(item => item.idFactura && Number(item.saldoPendiente) > 0) || saving} onClick={() => setPaymentOpen(true)}><CreditCard size={16} aria-hidden="true"/>Pago manual</button>}{canManagePayments && Boolean(selectedContractId) && <button type="button" disabled={contextLoading || saving || !suspensionCheck?.elegible} title={suspensionReason} onClick={() => { if (!suspensionCheck?.elegible) return; setWithdrawalOpen(false); setSuspensionOpen(true); }}><Pause size={16} aria-hidden="true"/>Suspender servicio</button>}{canStartWithdrawal && <button type="button" disabled={contextLoading || saving} onClick={() => { setSuspensionOpen(false); setWithdrawalOpen(true); }}><Unplug size={16} aria-hidden="true"/>Dar de baja el servicio</button>}</div>
+        {canManagePayments && selectedContractId && <div role="group" aria-label="Evaluación de suspensión" aria-busy={suspensionLoading}>
+          {suspensionLoading && <p role="status" className="control-muted">Evaluando suspensión… La acción permanecerá bloqueada hasta recibir el resultado.</p>}
+          {currentSuspension?.status === 'error' && <p role="alert" className="control-feedback error">{currentSuspension.message}</p>}
+          {suspensionCheck && <>
+            <p role="status" className="control-muted">{suspensionCheck.elegible ? 'Elegible para suspensión. Se requiere confirmación manual.' : 'No elegible para suspensión.'} Umbral vigente: {suspensionCheck.umbralDias} días de atraso.</p>
+            {suspensionReason && <p className="control-muted">Requisito pendiente: {suspensionReason}</p>}
+          </>}
+          <button type="button" className="control-text-button" disabled={suspensionLoading || saving} onClick={() => {
+            if (suspensionPending.current || saving) return;
+            suspensionPending.current = true;
+            setSuspensionReload(value => value + 1);
+          }}>Reintentar evaluación</button>
+        </div>}
       </section>}
     </div>
     {action && <ControlBookModal title={isContactAction ? 'Registrar gestión' : ACTION_LABELS[action]} busy={saving} onClose={closeAction}>
@@ -243,7 +309,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
       {error && <p className="control-feedback error" role="alert">{error}</p>}
       <footer className="control-form-footer"><button type="button" className="control-text-button" disabled={saving} onClick={() => { if (action === 'agreement' && step > 0) setStep(step - 1); else closeAction(); setError(''); }}>{action === 'agreement' && step > 0 ? 'Atrás' : 'Cancelar'}</button><button type="submit" disabled={saving || !target || contextLoading}>{saving ? 'Guardando…' : action === 'agreement' ? step === 1 ? 'Crear convenio' : 'Continuar' : SAVE_LABELS[action]}</button></footer>
     </form></ControlBookModal>}
-    {suspensionOpen && !withdrawalOpen && selectedContractId && <ControlBookSuspension contractId={selectedContractId} customerName={row.nombre} plan={row.plan} canManage={canManagePayments}
+    {suspensionOpen && !withdrawalOpen && selectedContractId && canManagePayments && suspensionCheck?.elegible && <ControlBookSuspension contractId={selectedContractId} customerName={row.nombre} plan={row.plan} canManage={canManagePayments}
       onBusyChange={setSaving} onClose={() => setSuspensionOpen(false)} onSaved={message => { setSuspensionOpen(false); onSaved(message); }}/>}
     {withdrawalOpen && !suspensionOpen && selectedContractId && <ControlBookWithdrawal services={contractServices} customerName={row.nombre} plan={row.plan} canManage={canManage}
       onBusyChange={setSaving} onClose={() => setWithdrawalOpen(false)} onSaved={message => { setWithdrawalOpen(false); onSaved(message); }}/>}
