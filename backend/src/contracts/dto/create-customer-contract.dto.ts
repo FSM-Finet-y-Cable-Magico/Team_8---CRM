@@ -2,6 +2,8 @@ import { Type } from 'class-transformer';
 import { IsDateString, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateCustomerContractDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  idCotizacion?: number;
   @Type(() => Number)
   @IsInt()
   @Min(1)

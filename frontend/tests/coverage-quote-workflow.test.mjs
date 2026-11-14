@@ -34,7 +34,7 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
   let persisted={idProspecto:10,idCliente:null,nombreCompleto:'QA',empresa:{idEmpresa:company},estadoPipeline:g2?(requiresReview?'NUEVO':'Prospecto Nuevo'):state,
     requiereRevisionComercial:requiresReview,revisionOrigenG2Disponible:g2&&requiresReview&&reviewAvailable,origenContacto:null,
     direccion:g2||noLocation?'Calle QA':null,comuna:noLocation?'La Florida':null,region:noLocation?'Metropolitana de Santiago':null,
-    latitud:g2||noLocation?null:outside?-35:-33.475,longitud:g2||noLocation?null:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:existingContract?[{idContrato:20,estado:'Firmado'}]:[]};
+    latitud:g2||noLocation?null:outside?-35:-33.475,longitud:g2||noLocation?null:company===1?-70.675:-70.475,cotizaciones:quoted?[{idCotizacion:1,idPlan:company,fechaEnvio:'2026-10-28'}]:[],contratos:existingContract?[{idContrato:20,estado:typeof existingContract==='string'?existingContract:'Firmado'}]:[]};
   const api={get:async(path,options)=>{calls.push({path,options});
     if(path==='/coverage/status')return {data:{configurado:true}};
     if(path==='/coverage/zones')return {data:[zone(1),zone(2),{...zone(1),idZonaPago:3,activo:false}]};
@@ -55,11 +55,15 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
       if(path.endsWith('/quotes')){persisted={...persisted,estadoPipeline:'Cotizacion Enviada',cotizaciones:[{idCotizacion:1,idPlan:body.planId,fechaEnvio:'2026-10-28'}]};return {data:{pdfUrl:'/qa.pdf',envioEmail:emailDelivery}};}
       if(path.endsWith('/contracts'))return {data:{contrato:{idContrato:20,estado:'Pendiente firma contrato'}}};throw Error(path);
     },patch:async(path,body)=>{calls.push({path,body});
+      if(path.endsWith('/pipeline')){
+        persisted={...persisted,estadoPipeline:'Prospecto Nuevo',motivoPerdida:null,idZonaPago:null,cotizaciones:persisted.cotizaciones.map(quote=>({...quote,vigente:false}))};
+        return {data:persisted};
+      }
       if(locationFailure)throw Error('QA location conflict');
       if(!path.endsWith('/location') && !/^\/prospects\/\d+$/.test(path))throw Error(path);
       const wasQuoted=persisted.estadoPipeline==='Cotizacion Enviada';
       persisted={...persisted,...body.ubicacion,...Object.fromEntries(Object.entries(body).filter(([key])=>key!=='ubicacion')),
-        ...(body.ubicacion ? {estadoPipeline:coverageOutside?'No Factible':'Factible'} : {}),
+        ...(body.ubicacion && persisted.estadoPipeline!=='Perdido' ? {estadoPipeline:coverageOutside?'No Factible':'Factible'} : {}),
         ...(wasQuoted ? {cotizaciones:persisted.cotizaciones.map(quote=>({...quote,vigente:false}))} : {})};
       return {data:{...persisted,...(wasQuoted?{cobertura:{coberturaComercial:!coverageOutside,planes:coverageOutside?[]:[{idPlan:company,precioAplicable:19990}]}}:{})}};
     }};
@@ -96,6 +100,46 @@ async function harness(t,{company=1,state='Factible',quoted=false,outside=false,
       await act(async()=>field.props.onChange({target:{value}}));},
     confirmOrigin:async()=>{await act(async()=>tree.root.findByProps({type:'checkbox'}).props.onChange({target:{checked:true}}));}};
 }
+
+test('Perdido mantiene el mismo editor con lápiz y guarda sin reactivarse', async t => {
+  const h = await harness(t, { state: 'Perdido', canEdit: true, existingContract: 'Anulado' });
+  await act(async () => h.button('Editar prospecto').props.onClick());
+  assert.equal(h.tree.root.findAllByProps({ className: 'prospect-edit-form' }).length, 1);
+  await h.changeField('Nombre completo', 'Persona actualizada');
+  await h.save();
+  assert.equal(h.persisted().nombreCompleto, 'Persona actualizada');
+  assert.equal(h.persisted().estadoPipeline, 'Perdido');
+  assert.equal(h.button('Generar cotización'), undefined);
+  assert.equal(h.calls.some(call => call.path.endsWith('/feasibility/tomodat')), false);
+});
+
+test('reactivar con contrato anulado recorre de nuevo cobertura, cotización y contratación', async t => {
+  const h = await harness(t, { state: 'Perdido', canEdit: true, quoted: true, existingContract: 'Anulado' });
+  assert.equal(h.button('Generar cotización'), undefined);
+  const reactivate = h.button('Reactivar prospecto');
+  await act(async () => { reactivate.props.onClick(); reactivate.props.onClick(); });
+  assert.equal(h.calls.filter(call => call.path.endsWith('/pipeline')).length, 1);
+  assert.ok(h.persisted().cotizaciones.every(quote => quote.vigente === false));
+  await h.tick();
+  assert.equal(h.persisted().estadoPipeline, 'Factible');
+  assert.ok(h.calls.some(call => call.path.endsWith('/feasibility/tomodat')));
+  assert.equal(h.button('Confirmar contratación'), undefined);
+  await h.select(0, 1);
+  await act(async () => h.button('Generar cotización').props.onClick());
+  await h.tick();
+  assert.equal(h.persisted().estadoPipeline, 'Cotizacion Enviada');
+  await h.select(1, 1);
+  await act(async () => h.button('Confirmar contratación').props.onClick());
+  assert.equal(h.calls.filter(call => call.path.endsWith('/contracts')).length, 1);
+  assert.equal(h.persisted().contratos[0].estado, 'Anulado');
+});
+
+test('el prospecto con contrato vigente conserva el bloqueo de edición y reactivación', async t => {
+  const h = await harness(t, { state: 'Perdido', canEdit: true, existingContract: 'Firmado' });
+  assert.equal(h.button('Editar prospecto'), undefined);
+  assert.equal(h.button('Reactivar prospecto'), undefined);
+  assert.equal(h.button('Generar cotización'), undefined);
+});
 
 test('el lápiz edita los datos del prospecto y los conserva al reabrir', async t => {
   const h = await harness(t, { g2: true, requiresReview: false });
@@ -189,13 +233,13 @@ for(const options of [{outside:true},{noPlans:true},{locationFailure:true}])test
   if(options.locationFailure)assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
 });
 
-test('geocodificación fallida deja reintentar, quita el aviso a los tres segundos y conserva la dirección',async t=>{
+test('geocodificación fallida deja reintentar y conserva el motivo sin inventar una ubicación',async t=>{
   const h=await harness(t,{g2:true,requiresReview:false,geocodeFailure:true});
   await act(async()=>h.button('Editar prospecto').props.onClick());await h.address();await h.tick();
   assert.ok(h.text().includes('No se pudo ubicar la dirección'));
   assert.ok(h.button('Reintentar dirección'));
   await h.advance(3000);
-  assert.ok(!h.text().includes('No se pudo ubicar la dirección'));
+  assert.ok(h.text().includes('No se pudo ubicar la dirección'));
   assert.equal(h.persisted().latitud,null); assert.equal(h.persisted().comuna,null);
 });
 test('Factible heredado sin coordenadas: no habilita cotizar; ubicación manual persiste el punto y recalcula la factibilidad',async t=>{

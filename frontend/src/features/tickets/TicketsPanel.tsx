@@ -1,12 +1,13 @@
 ﻿import { useState } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { api, apiErrorMessage, type Customer, type CustomerService, type Ticket, type TicketCategory, type UserRow } from '../../api';
 import { rutPattern } from '../../constants';
-import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
+import { canonicalRut, formatWorkOrderValue } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
-import { StatusBadge } from '../../shared/components';
+import { StatusBadge, ToastNotice } from '../../shared/components';
+import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import { TicketManagementModal } from './TicketManagementModal';
-import { isTerminationTicketCategory, manualTicketCategories } from './ticket-presentation';
+import { isTerminationTicketCategory, manualTicketCategories, ticketMatchesSearch } from './ticket-presentation';
 import { contactDateTimeInput, contactDateTimeISO } from '../commercial/control-book-contact-time';
 
 const TERMINATION_CHANNELS = [['TELEFONO', 'Teléfono'], ['PRESENCIAL', 'Presencial'], ['CORREO', 'Correo'], ['WHATSAPP', 'WhatsApp'], ['PORTAL', 'Portal de clientes'], ['OTRO', 'Otro']] as const;
@@ -33,12 +34,16 @@ export function TicketsPanel({
   const [status, setStatus] = useState('');
   const [customerPreview, setCustomerPreview] = useState<Customer | null>(null);
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
-  const [customerLookupStatus, setCustomerLookupStatus] = useState('');
+  const { message: customerLookupMessage, showMessage, clearMessage } = useTransientMessage(3000);
+  const [lookupTone, setLookupTone] = useState<'success' | 'error'>('success');
+  const lookupRevision = useRef(0);
   const [managementOpen, setManagementOpen] = useState(false);
+  const [query, setQuery] = useState('');
   // FINET 13-11-2026: «Término de servicio» registers the customer's requirement (identity, date/time, evidence).
   const [termination, setTermination] = useState({ canal: 'TELEFONO', solicitante: 'TITULAR', requerimientoEn: contactDateTimeInput(), evidencia: '', identidad: false });
   const [terminating, setTerminating] = useState(false);
 
+  const visibleTickets = tickets.filter(ticket => ticketMatchesSearch(ticket, query));
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
   useEffect(() => {
     if (!focusedTicketId || !tickets.some(ticket => ticket.idTicket === focusedTicketId)) return;
@@ -89,39 +94,54 @@ export function TicketsPanel({
     }
   }
 
-  async function lookupTicketCustomer() {
-    const rut = normalizeRutInput(createForm.rut);
-
-    if (!rutPattern.test(rut)) {
-      setCustomerPreview(null);
-      setTicketServices([]);
-      setCustomerLookupStatus('Ingresa un RUT válido para consultar al cliente.');
-      return;
-    }
-
-    try {
-      const { data } = await api.get<Customer>('/customers/search', { params: { term: rut } });
-      setCreateForm((current) => ({ ...current, rut }));
-      setCustomerPreview(data);
-      const servicesResult = await api.get<CustomerService[]>(`/services/customer/${data.idCliente}`);
-      setTicketServices(servicesResult.data);
-      setCustomerLookupStatus('Cliente encontrado');
-    } catch (err) {
-      setCustomerPreview(null);
-      setTicketServices([]);
-      setCustomerLookupStatus(apiErrorMessage(err));
-    }
-  }
+  useEffect(() => {
+    if (!permissions.createTickets || !createForm.rut.trim()) return;
+    const revision = ++lookupRevision.current;
+    const controller = new AbortController();
+    const current = () => !controller.signal.aborted && revision === lookupRevision.current;
+    const timer = window.setTimeout(async () => {
+      const input = createForm.rut.trim();
+      const term = canonicalRut(input);
+      if (!term) { setLookupTone('error'); showMessage('Cliente no encontrado'); return; }
+      let customer: Customer;
+      try {
+        const { data } = await api.get<Customer>('/customers/search', { params: { term }, signal: controller.signal });
+        if (!current()) return;
+        customer = data;
+        setCustomerPreview(data);
+        setLookupTone('success'); showMessage('Cliente encontrado');
+      } catch (err) {
+        if (current()) { setLookupTone('error'); showMessage(apiErrorMessage(err)); }
+        return;
+      }
+      try {
+        const { data } = await api.get<CustomerService[]>(`/services/customer/${customer.idCliente}`, { signal: controller.signal });
+        if (current()) setTicketServices(data);
+      } catch {
+        if (current()) { setLookupTone('error'); showMessage('No se pudieron cargar los servicios del cliente. Inténtalo nuevamente.'); }
+      }
+    }, 500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [createForm.rut, permissions.createTickets, showMessage]);
 
   return (
-    <section className="workspace-grid">
+    <section className={`tickets-workspace${permissions.createTickets ? '' : ' tickets-workspace--readonly'}`}>
+      <div className="tickets-workspace-heading">
+        <h2>{permissions.createTickets ? 'Registrar ticket' : 'Tickets'}</h2>
+        <div className="tickets-search" role="search" aria-label="Buscar tickets">
+          <input type="search" className="tickets-search-input" aria-label="Buscar ticket"
+            placeholder="Buscar por código, cliente, RUT, categoría, servicio u OT" maxLength={120}
+            value={query} onChange={event => setQuery(event.target.value)} />
+        </div>
+      </div>
+      <div className="workspace-grid">
       {permissions.createTickets && <form
         className="ticket-create-form stack"
         onSubmit={(event) => {
           event.preventDefault();
-          const rut = normalizeRutInput(createForm.rut);
+          const rut = canonicalRut(customerPreview?.rut ?? createForm.rut);
 
-          if (!rutPattern.test(rut)) {
+          if (!rut || !rutPattern.test(rut)) {
             setStatus('Ingresa el RUT del cliente con guion, por ejemplo 11111111-1.');
             return;
           }
@@ -154,30 +174,21 @@ export function TicketsPanel({
           );
         }}
       >
-        <h2>Registrando ticket de soporte</h2>
         <label>
           RUT cliente
           <input
             value={createForm.rut}
             onChange={(event) => {
-              setCreateForm({ ...createForm, rut: event.target.value, idServicio: '' });
+              lookupRevision.current++;
+              setCreateForm(current => ({ ...current, rut: event.target.value, idServicio: '' }));
               setCustomerPreview(null);
               setTicketServices([]);
-              setCustomerLookupStatus('');
-            }}
-            onBlur={() => {
-              if (createForm.rut.trim()) {
-                void lookupTicketCustomer();
-              }
+              clearMessage();
             }}
             placeholder="11111111-1"
             required
           />
         </label>
-        <button type="button" className="secondary" onClick={() => void lookupTicketCustomer()}>
-          Buscar datos del cliente
-        </button>
-        {customerLookupStatus && <p className="inline-status">{customerLookupStatus}</p>}
         {customerPreview && (
           <section className="customer-preview">
             <h3>{customerPreview.nombreCompleto}</h3>
@@ -262,8 +273,7 @@ export function TicketsPanel({
         {status && <p className="inline-status">{status}</p>}
       </form>}
 
-      <section className="tickets-list-section">
-        <h2>Tickets</h2>
+      <section className="tickets-list-section" aria-label="Listado de tickets">
         <div className="table-wrap tickets-table-wrap">
           <table className="tickets-table operational-table">
             <thead>
@@ -279,7 +289,7 @@ export function TicketsPanel({
               </tr>
             </thead>
             <tbody>
-              {tickets.map((ticket) => (
+              {visibleTickets.map((ticket) => (
                 <tr key={ticket.idTicket}>
                   <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
                   <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
@@ -305,6 +315,11 @@ export function TicketsPanel({
                   </td>
                 </tr>
               ))}
+              {visibleTickets.length === 0 && <tr>
+                <td colSpan={8} className="empty-state" role="status">
+                  {query.trim() ? 'No se encontraron tickets que coincidan con la búsqueda.' : 'No hay tickets registrados.'}
+                </td>
+              </tr>}
             </tbody>
           </table>
         </div>
@@ -318,6 +333,8 @@ export function TicketsPanel({
           onChanged={onChanged}
         />}
       </section>
+      </div>
+      <ToastNotice message={customerLookupMessage} tone={lookupTone} onDismiss={clearMessage} />
     </section>
   );
 }

@@ -10,6 +10,9 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const formatting = {};
+const rutFormatting = {};
+new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/rut.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(rutFormatting);
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/formatting.ts', import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(formatting);
 const textOf = node => typeof node === 'string' ? node : (node.children ?? []).map(textOf).join('');
@@ -18,7 +21,36 @@ const ticket = { idTicket: 1, idEmpresa: 2, idCliente: 100, idServicio: 2, idCat
   codigoSeguimiento: 'TK-QA', prioridad: 'Media', estado: 'En progreso', cliente: { nombreCompleto: 'QA' },
   categoria: { nombre: 'Soporte QA' }, workOrders: [], observacionesTecnicas: [{ metadata: 'QA', texto: 'Nota historica' }] };
 
+test('buscador de tickets combina campos y encuentra RUT, códigos y cualquier OT sin alterar el listado original', async t => {
+  const target = { ...ticket, idTicket: 15, codigoSeguimiento: 'FIN-2026-000015', prioridad: 'Crítica',
+    descripcion: 'Internet intermitente', cliente: { nombreCompleto: 'José Muñoz', rut: '12345678-5', email: 'jose@example.cl', telefono: '+56912345678' },
+    categoria: { nombre: 'Facturación y cobro' }, workOrders: [{ idOt: 14, codigoSeguimiento: 'OT-REP-000014', estado: 'COMPLETADA' }, { idOt: 27, estado: 'PENDIENTE' }] };
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [target, { ...ticket, idTicket: 16 }], categories: [], permissions }, { openManually: false });
+  const search = ctx.tree.root.findByProps({ 'aria-label': 'Buscar ticket' });
+  const rows = () => ctx.tree.root.findByType('tbody').findAllByType('tr');
+  for (const query of ['jose facturacion', '12.345.678-5', 'FIN2026000015', 'ot 27', 'OT-REP-000014', 'critica', 'intermitente', 'jose@example.cl', '+56 9 1234 5678']) {
+    await ctx.change(search, query);
+    assert.equal(rows().length, 1, query);
+    assert.match(textOf(rows()[0]), /FIN-2026-000015/, query);
+  }
+  await ctx.change(search, 'sin coincidencias');
+  assert.match(textOf(rows()[0]), /No se encontraron tickets/);
+  await ctx.change(search, '');
+  assert.equal(rows().length, 2);
+  assert.deepEqual(ctx.calls, []);
+});
+
+test('búsqueda disponible en modo de consulta, con datos incompletos y sin formulario de registro', async t => {
+  const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, cliente: null, categoria: null, workOrders: null }], categories: [], permissions: {} }, { openManually: false });
+  assert.equal(ctx.tree.root.findAllByType('form').length, 0);
+  await ctx.change(ctx.tree.root.findByProps({ 'aria-label': 'Buscar ticket' }), 'en progreso');
+  assert.match(textOf(ctx.tree.root.findByType('tbody')), /TK-QA/);
+  assert.deepEqual(ctx.calls, []);
+});
+
 async function harness(t, name, props, { openManually = true } = {}) {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
   t.mock.method(globalThis, 'fetch', () => { throw new Error('External traffic prohibited'); });
   const calls = [];
   let refreshed = 0;
@@ -31,12 +63,13 @@ async function harness(t, name, props, { openManually = true } = {}) {
   const mocks = {
     '../../api': { api, apiErrorMessage: error => error.message },
     '../../constants': { rutPattern: /^[0-9]+-[0-9kK]$/ },
-    '../../lib': { ...formatting, normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
+    '../../lib': { ...formatting, ...rutFormatting, normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-',
       normalizeWorkOrderValue: value => (value ?? '').toLowerCase(), formatDateTime: value => value ?? '-',
       formatDateOnly: value => value ?? '-', formatConnectionType: value => value ?? '-' },
     '../../shared/components': {
       Modal: ({ open, children }) => open ? React.createElement('section', {}, children) : null,
       StatusBadge: ({ value }) => React.createElement('span', {}, value),
+      ToastNotice: () => null,
       HistoryBox: ({ title, value }) => React.createElement('div', {}, `${title}: ${value}`),
     },
   };
@@ -57,7 +90,7 @@ async function harness(t, name, props, { openManually = true } = {}) {
   const exports = load(fileURLToPath(new URL(`../src/features/${name === 'TicketsPanel' ? 'tickets' : 'work-orders'}/${name}.tsx`, import.meta.url)));
   let tree;
   await act(async () => { tree = create(React.createElement(exports[name], { ...props, onChanged: () => { refreshed++; } })); });
-  t.after(async () => { await act(async () => tree.unmount()); });
+  t.after(async () => { await act(async () => tree.unmount()); globalThis.window = originalWindow; });
   const button = label => tree.root.findAllByType('button').find(node => textOf(node) === label);
   const click = async label => { await act(async () => { button(label).props.onClick(); }); };
   const field = label => tree.root.findAllByType('label').find(node => textOf(node).startsWith(label)).findAll(node => ['input', 'select', 'textarea'].includes(node.type))[0];

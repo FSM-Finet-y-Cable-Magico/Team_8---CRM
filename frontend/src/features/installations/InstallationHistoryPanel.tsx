@@ -95,7 +95,7 @@ export function InstallationHistoryPanel({ scope, revision, localOrders = [], co
           <td><span className={row.clasificacionFecha !== 'FECHA_TECNICA_CONFIRMADA' ? 'installation-date-warning' : ''}>{dateLabel(row)}</span></td>
           <td><button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedKey(row.key)}>Detalle</button></td>
         </tr>)}</tbody></table></div>
-      {!items.length && <p className="installation-empty">No hay instalaciones completadas que coincidan con el filtro.</p>}
+      {!items.length && <p className="empty-state">No hay instalaciones completadas que coincidan con el filtro.</p>}
       <TablePagination currentPage={page} totalItems={items.length} pageSize={pageSize} onPageChange={setPage} />
     </>}
     </>}

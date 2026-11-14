@@ -101,7 +101,7 @@ export function InstallmentAllocationsPanel({ idConvenio, idEmpresa, onChanged }
           <button type="button" disabled={busy} onClick={() => { setCommand(null); setReload(v => v + 1); }}>Volver a consultar antes de otra operación</button>
         </div>}
         <h4>Historial de imputaciones y compensaciones</h4>
-        {detail.operaciones.length === 0 && <p>Sin imputaciones registradas. El saldo de la factura no modifica las cuotas automáticamente.</p>}
+        {detail.operaciones.length === 0 && <p className="empty-state">Sin imputaciones registradas. El saldo de la factura no modifica las cuotas automáticamente.</p>}
         {detail.operaciones.map(op => <article key={op.idOperacion}><p>{op.tipo} · {dateLabel(op.fecha)} · Operador {op.idUsuario} · Auditoría {op.idAuditoria} · {op.motivo}</p>
           {op.detalles.map(line => <p key={line.idImputacion}>Cuota {detail.cuotas.find(q => q.idCuota === line.idCuota)?.numero} · {line.monto}{line.idOriginal != null && ` · Compensa imputación ${line.idOriginal}`}
             {detail.puedeImputar && op.tipo === 'APLICAR' && (cents(line.reversible) ?? 0n) > 0n && <button type="button" disabled={busy || !!command} onClick={() => { setReverse(line); setReverseAmount(''); setReason(''); setError(''); }}>Preparar reversa</button>}

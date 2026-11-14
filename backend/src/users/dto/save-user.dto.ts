@@ -11,3 +11,7 @@ export class SaveUserDto {
 export class ResetPasswordDto {
   @IsString() @MinLength(12) @MaxLength(72) password!: string;
 }
+
+export class UserStatusDto {
+  @IsBoolean() activo!: boolean;
+}

@@ -26,6 +26,7 @@ export function AuditPanel({ audit }: { audit: AuditLog[] }) {
           </tbody>
         </table>
       </div>
+      {!audit.length && <p className="empty-state">No hay registros de auditoría.</p>}
     </section>
   );
 }

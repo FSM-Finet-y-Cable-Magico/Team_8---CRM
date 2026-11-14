@@ -211,6 +211,17 @@ describe('Contenido y conservación de contratos PDF', () => {
     expect(pdfText(writes.mock.calls[1][0] as Buffer)).toContain('Versión: 5');
   });
 
+  it('envía automáticamente después de confirmar la transacción del PDF', async () => {
+    const ctx = setup(); mockFiles();
+    const deliver = jest.fn().mockImplementation(async () => {
+      expect(ctx.tx.contratoDigital.create).toHaveBeenCalledTimes(1);
+      expect(ctx.prisma.$transaction.mock.results[0].value).toBeDefined();
+    });
+    ctx.service.setAutomaticSignatureDelivery(deliver);
+    await ctx.service.generateDigitalContract(ctx.contract.idContrato, user);
+    expect(deliver).toHaveBeenCalledWith(ctx.contract.idContrato, user);
+  });
+
   it('genera el primer PDF del prospecto dentro de la transacción y lo reutiliza al volver a confirmar', async () => {
     const ctx = setup(false);
     const files = mockFiles();

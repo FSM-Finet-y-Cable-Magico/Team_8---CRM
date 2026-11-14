@@ -16,6 +16,7 @@ export function ContractSignatureActions({ idContrato, canSend, revision, onChan
     }
   }, [state?.solicitud?.estado, state?.solicitud?.idSolicitud, onChanged]);
   useEffect(() => { setBusy(false); setMessage(''); }, [idContrato]);
+  if (prospectList) return null;
   if (!state) return error ? <section><p role="status">{error}</p>
     <button className="secondary compact" onClick={() => void refresh()}>Consultar estado de firma</button></section> : null;
   if (state.policy.mode !== 'automatic' && !state.signedDownloadAvailable) return !prospectList && state.policy.reason

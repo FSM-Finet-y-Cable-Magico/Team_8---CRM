@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api';
+import { Check, Download, FileText, ShieldCheck } from 'lucide-react';
+import './public-signature.css';
 
 type View = { estado: string; hashOriginal: string; hashFirmado: string | null; vence: string;
   firmado: string | null; correo: string; consentimiento: string; consentimientoVersion: string; demo?: boolean };
@@ -10,7 +12,6 @@ export function PublicSignaturePage() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [reviewed, setReviewed] = useState('');
-  const [code, setCode] = useState('');
   const [consent, setConsent] = useState(false);
 
   async function call(path: string, extra = {}, signal?: AbortSignal) {
@@ -20,6 +21,9 @@ export function PublicSignaturePage() {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
+      if (typeof data.message === 'string' && /contrato fue cancelado|solicitud no vigente|enlace no disponible|enlace expiró/i.test(data.message)) {
+        setView(null); setReviewed(''); setConsent(false);
+      }
       throw new Error(typeof data.message === 'string' ? data.message : 'No se pudo continuar. Contacta a la empresa.');
     }
     return response;
@@ -55,32 +59,28 @@ export function PublicSignaturePage() {
       setReviewed(view.hashOriginal);
     });
   }
-  return <main className="public-signature"><section className="workflow-panel">
-    <h1>Firma de contrato</h1>
-    {message && <p role="status" className="inline-status">{message}</p>}
+  const signed = view?.estado === 'FIRMADA';
+  return <main className="public-signature"><section className={`signature-card${signed ? ' signature-card--signed' : ''}`}>
+    <div className="signature-emblem" aria-hidden="true">{signed ? <Check size={44} strokeWidth={2.5} /> : <FileText size={36} />}</div>
+    <span className="signature-eyebrow">{signed ? 'Proceso completado' : 'Documento para su revisión'}</span>
+    <h1>{signed ? 'Contrato firmado' : 'Firma de contrato'}</h1>
+    {message && <p role="status" className="signature-notice">{message}</p>}
     {!view ? <p>Abre el enlace personal recibido por correo para revisar tu documento.</p> : <>
-      <p>{view.demo ? 'Firma de demostración' : 'Correo de verificación: ' + view.correo}</p>
-      <p>{view.estado === 'FIRMADA' ? 'Tu aceptación quedó registrada. Puedes descargar el PDF con su constancia.'
-        : view.demo ? 'Descarga y revisa el contrato. Luego marca la aceptación y firma en esta página.'
-          : 'Descarga y revisa el contrato. Después solicita el código que enviaremos a tu correo.'}</p>
-      <button disabled={busy} onClick={download}>Descargar {view.estado === 'FIRMADA' ? 'contrato firmado' : 'PDF para revisar'}</button>
-      <details><summary>Huella del documento original</summary><p className="signature-hash">{view.hashOriginal}</p></details>
+      {view.demo && <p>Firma de demostración</p>}
+      <p className="signature-intro">{signed ? 'Su firma se ha registrado correctamente. Descargue su contrato junto con la constancia de aceptación y conserve una copia.'
+        : 'Descargue y lea su contrato. Cuando haya revisado sus condiciones, podrá aceptarlo y firmarlo desde esta página.'}</p>
+      <button className="signature-download" disabled={busy} onClick={download}><Download size={18} />{signed ? 'Descargar contrato firmado' : 'Descargar contrato para revisar'}</button>
       {view.estado !== 'FIRMADA' && <>
-        <p>El enlace vence el {new Date(view.vence).toLocaleString('es-CL')}.</p>
-        {!view.demo && <button className="secondary" disabled={busy || !reviewed} onClick={() => operation(async () => {
-          await call('code'); setMessage('Código enviado. Vence en 10 minutos. Espera 60 segundos para solicitar otro.');
-        })}>Enviar código a mi correo</button>}
+        <p className="signature-expiry">Disponible hasta el {new Date(view.vence).toLocaleString('es-CL')}.</p>
         <form onSubmit={e => { e.preventDefault(); return operation(async () => {
-          await call('sign', { ...(view.demo ? {} : { code }), hashOriginal: reviewed, consent, consentVersion: view.consentimientoVersion });
-          setView(await (await call('view')).json()); setCode(''); setConsent(false);
-          setMessage('Firma registrada. El documento con su constancia está disponible para descargar.');
+          await call('sign', { hashOriginal: reviewed, consent, consentVersion: view.consentimientoVersion });
+          setView(await (await call('view')).json()); setConsent(false); setMessage('');
         }); }}>
-          {!view.demo && <label>Código de seis dígitos<input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required maxLength={6} /></label>}
-          <label><input type="checkbox" checked={consent} required onChange={e => setConsent(e.target.checked)} /> {view.consentimiento}</label>
-          <button disabled={busy || !reviewed || !consent || (!view.demo && code.length !== 6)} type="submit">Aceptar y firmar el contrato</button>
+          <label className="signature-consent"><input type="checkbox" checked={consent} required onChange={e => setConsent(e.target.checked)} /><span>{view.consentimiento}</span></label>
+          <button disabled={busy || !reviewed || !consent} type="submit">{busy ? 'Procesando…' : 'Aceptar y firmar el contrato'}</button>
         </form>
       </>}
+      <footer className="signature-footer"><ShieldCheck size={17} /><span>Enlace personal enviado a {view.correo}</span></footer>
     </>}
   </section></main>;
 }

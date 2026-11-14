@@ -79,7 +79,7 @@ export function ContractDocuments({ idContrato, fechaInicio, fechaConfirmacion, 
   if (compact) {
     return <section className="customer-contract-documents">
       <h4>Documentos</h4>
-      {loading ? <span role="status">Cargando…</span> : !documents.length && !quotes.length ? <p className="customer-contract-note">No hay documentos disponibles.</p> : <ul className="customer-document-list">
+      {loading ? <span role="status">Cargando…</span> : !documents.length && !quotes.length ? <p className="empty-state">No hay documentos disponibles.</p> : <ul className="customer-document-list">
         {quotes.map(quote => <li key={quote.idCotizacion}><div><strong>{quote.codigo ?? 'COT-' + quote.idCotizacion}</strong><small>{quote.fechaEnvio ? formatDateTime(quote.fechaEnvio) : ''}</small></div><button type="button" aria-label={`Descargar cotización ${quote.codigo ?? quote.idCotizacion}`} title="Descargar cotización" disabled={busy} onClick={() => void downloadQuote(quote)}><Download size={17} aria-hidden="true" /></button></li>)}
         {documents.map(row => <li key={row.idContratoDigital}><div><strong>Contrato{documents.length > 1 ? ' · Versión ' + row.version : ''}</strong><small>{formatDateTime(row.fechaGeneracion)}</small></div><button type="button" aria-label={`Descargar contrato, versión ${row.version}`} title="Descargar contrato" disabled={busy} onClick={() => void download(row)}><Download size={17} aria-hidden="true" /></button></li>)}
       </ul>}

@@ -92,7 +92,7 @@ export function ControlBookHistory({ row, contracts = [], revision, view, onOpen
     {error && <p role="alert" className="control-feedback error">{error}</p>}
     {history && <>
       <div hidden={view !== 'invoices'} className="control-record-layout">
-      {invoices.length === 0 ? <p className="control-muted">Sin facturas.</p> : <>
+      {invoices.length === 0 ? <p className="empty-state">Sin facturas.</p> : <>
         <div className="control-history-table control-invoice-table" role="region" aria-label="Facturas del cliente" tabIndex={0}><table><caption className="control-sr-only">Facturas y pagos por mes</caption><thead><tr>
           {['Mes', 'Documento', 'Servicio', 'Contrato', 'Monto', 'Pagado', 'Pendiente', 'Estado', 'Vencimiento'].map(label => <th key={label} scope="col" className={['Monto', 'Pagado', 'Pendiente'].includes(label) ? 'control-money-cell' : undefined}>{label}</th>)}
           {onOpenInvoice && <th scope="col" className="control-invoice-action-cell"><span className="control-sr-only">Documento tributario</span></th>}
@@ -111,7 +111,7 @@ export function ControlBookHistory({ row, contracts = [], revision, view, onOpen
       </>}
       </div>
       <div hidden={view !== 'activity'}>
-      {movements.length === 0 ? <p className="control-muted">Sin gestiones registradas.</p> : <div className="control-history-table">
+      {movements.length === 0 ? <p className="empty-state">Sin gestiones registradas.</p> : <div className="control-history-table">
         <table>
           <caption className="control-sr-only">Contactos, avisos y acuerdos del cliente</caption>
           <thead><tr>{['Fecha', 'Hora', 'Gestión', 'Canal', 'Responsable', 'Estado'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>

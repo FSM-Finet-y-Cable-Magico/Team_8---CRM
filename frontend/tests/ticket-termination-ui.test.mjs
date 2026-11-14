@@ -15,8 +15,15 @@ const attention = ['Falla de Internet', 'Falla de TV', 'Cambio de plan', 'Mudanz
   .map((nombre, i) => ({ idCategoria: 10 + i, nombre, nombreAtencion: nombre, tipo: 'ATENCION', tipoDisponible: true }));
 const termination = { idCategoria: 40, nombre: 'Término de servicio', nombreAtencion: 'Término de servicio', tipo: 'ATENCION', tipoDisponible: true };
 const services = [{ idServicio: 62, idCliente: 33, idEmpresa: 1, idContrato: 20, tipoServicio: 'TV', estadoOperativo: 'Activo' }];
+const timerContexts = new WeakMap();
 
 async function panel(t, { categories = [...attention, termination], post } = {}) {
+  if (!timerContexts.has(t)) {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    timerContexts.set(t, { originalWindow: globalThis.window });
+  }
+  const { originalWindow } = timerContexts.get(t);
+  globalThis.window = { setTimeout: (...args) => setTimeout(...args), clearTimeout: id => clearTimeout(id) };
   const calls = [];
   const api = {
     get: async path => { calls.push(['get', path]); return { data: path === '/customers/search' ? { idCliente: 33, nombreCompleto: 'Cliente QA', rut: '12345678-5', estado: 'Moroso' } : services }; },
@@ -25,10 +32,13 @@ async function panel(t, { categories = [...attention, termination], post } = {})
   const mocks = {
     '../../api': { api, apiErrorMessage: error => error.message },
     '../../constants': { rutPattern: /^[0-9]+-[0-9kK]$/ },
-    '../../lib': { normalizeRutInput: value => value, formatWorkOrderValue: value => value ?? '-' },
-    '../../shared/components': { StatusBadge: ({ value }) => React.createElement('span', {}, value) },
+    '../../lib': { canonicalRut: value => value, formatWorkOrderValue: value => value ?? '-' },
+    '../../shared/components': { StatusBadge: ({ value }) => React.createElement('span', {}, value), ToastNotice: () => null },
+    '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage, clearMessage }) },
     './TicketManagementModal': { TicketManagementModal: () => null },
   };
+  function showMessage() {}
+  function clearMessage() {}
   function load(file) {
     const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } });
     const exports = {};
@@ -42,12 +52,12 @@ async function panel(t, { categories = [...attention, termination], post } = {})
   const { TicketsPanel } = load(fileURLToPath(new URL('../src/features/tickets/TicketsPanel.tsx', import.meta.url)));
   let tree;
   await act(async () => { tree = create(React.createElement(TicketsPanel, { tickets: [], categories, permissions: { createTickets: true }, onChanged() {} })); });
-  t.after(async () => { await act(async () => tree.unmount()); });
+  t.after(async () => { await act(async () => tree.unmount()); globalThis.window = originalWindow; });
   const form = () => tree.root.findByProps({ className: 'ticket-create-form stack' });
   const field = label => tree.root.findAllByType('label').find(node => textOf(node).startsWith(label))?.findAll(node => ['input', 'select', 'textarea'].includes(node.type))[0];
   const change = async (node, value) => { await act(async () => node.props.onChange({ target: { value, checked: value } })); };
   const submit = async () => { await act(async () => { await form().props.onSubmit({ preventDefault() {} }); }); };
-  const lookup = async () => { await change(field('RUT cliente'), '12345678-5'); await act(async () => { await tree.root.findAllByType('button').find(n => textOf(n) === 'Buscar datos del cliente').props.onClick(); }); };
+  const lookup = async () => { await change(field('RUT cliente'), '12345678-5'); await act(async () => t.mock.timers.tick(500)); };
   return { tree, calls, field, change, submit, lookup, text: () => textOf(tree.toJSON()) };
 }
 const optionsOf = select => select.findAllByType('option').map(textOf);

@@ -20,6 +20,7 @@ import { UpdateProspectLocationDto } from './dto/update-prospect-location.dto';
 import { UpdateProspectDto } from './dto/update-prospect.dto';
 import { ReviewG2ProspectDto } from './dto/review-g2-prospect.dto';
 import { ProspectsService } from './prospects.service';
+import { CustomerPlanQuoteDto } from './dto/customer-plan-quote.dto';
 import { CoverageLocationDto } from '../coverage/coverage.dto';
 import { InstallationIntegrationService } from '../g3-integration/installation-integration.service';
 
@@ -43,6 +44,19 @@ export class ProspectsController {
   @Roles(...ACCESS_ROLES.VIEW_CORE_DATA)
   listPendingActivation(@CurrentUser() user: AuthUser, @Query('scope') scope?: string) {
     return this.prospectsService.listPendingActivation(user, scope ?? 'consolidado');
+  }
+
+  @Post('customer-quotes')
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  customerQuote(@Body() dto: CustomerPlanQuoteDto, @CurrentUser() user: AuthUser) {
+    return this.prospectsService.quoteCustomerPlan(dto, user);
+  }
+
+  @Get('customer-quotes')
+  @Roles(...ACCESS_ROLES.MANAGE_CONTRACTS)
+  customerQuotes(@Query('idCliente', ParseIntPipe) customer: number, @Query('idEmpresa', ParseIntPipe) company: number,
+    @CurrentUser() user: AuthUser) {
+    return this.prospectsService.customerQuotes(customer, company, user);
   }
 
   @Post()

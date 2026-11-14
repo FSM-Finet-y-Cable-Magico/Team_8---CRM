@@ -65,7 +65,7 @@ export function CustomerServiceActions({ contract, service, plans, permissions, 
     <form id={"service-change-plan-" + service.idServicio} className="workflow-grid service-inline-form service-action-modal" onSubmit={savePlanChange}>
       <label>Nuevo plan<select required disabled={savingPlan} value={newPlanId} onChange={event => setNewPlanId(event.target.value)}><option value="">Seleccionar plan</option>{activePlans.map(plan => <option key={plan.idPlan} value={plan.idPlan}>{plan.nombreComercial} - {plan.empresa?.nombre ?? 'Sin empresa'}</option>)}</select></label>
       <label>Fecha efectiva<input type="date" required disabled={savingPlan} min={dateInputValue(new Date())} value={fechaEfectiva} onChange={event => setFechaEfectiva(event.target.value)} /></label>
-      {!activePlans.length && <p className="service-form-wide service-muted">No hay otros planes disponibles para esta empresa.</p>}
+      {!activePlans.length && <p className="service-form-wide empty-state">No hay otros planes disponibles para esta empresa.</p>}
       {nextPlan && <p className="service-form-wide service-new-plan">{nextPlan.tipoPlan} · {nextPlan.velocidadMbps ? nextPlan.velocidadMbps + ' Mbps' : 'Sin velocidad'} · {formatCurrency(nextPlan.precioMensual)} al mes</p>}
       <label className="service-form-wide">Observaciones <span className="service-optional">Opcional</span><textarea disabled={savingPlan} value={planObservation} onChange={event => setPlanObservation(event.target.value)} /></label>
       {message && <p role="status" className="inline-status service-form-wide">{message}</p>}

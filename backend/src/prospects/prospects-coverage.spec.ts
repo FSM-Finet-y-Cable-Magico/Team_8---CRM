@@ -49,6 +49,22 @@ describe('Factibilidad geografica en prospectos', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ accion: 'ACTUALIZAR_DATOS_PROSPECTO' }), prisma);
   });
 
+  it('edita un perdido conservando el estado y admite contratos anulados como historial', async () => {
+    const { service, prisma } = setup(true, 'Perdido');
+    const result = await service.update(7, { nombreCompleto: 'Contacto actualizado', ubicacion: location }, user);
+    expect(result).toMatchObject({ nombreCompleto: 'Contacto actualizado', estadoPipeline: 'Perdido' });
+    expect(prisma.contrato.findFirst).toHaveBeenCalledWith({ where: { idProspecto: 7, estado: { notIn: ['Baja', 'Anulado'] } } });
+    expect(prisma.prospecto.update.mock.calls[0][0].data).not.toHaveProperty('estadoPipeline');
+  });
+
+  it('la cobertura de un prospecto reactivado ignora contratos cerrados y exige una nueva comprobación', async () => {
+    const { service, prisma } = setup();
+    const result = await service.verifyTomodat(7, location, user);
+    expect(result.estadoPipeline).toBe('Factible');
+    expect(prisma.contrato.findFirst).toHaveBeenCalledWith({ where: { idProspecto: 7, estado: { notIn: ['Baja', 'Anulado'] } } });
+    expect(prisma.cotizacion.updateMany).toHaveBeenCalled();
+  });
+
   it('editar un prospecto cotizado invalida la cotización anterior y reinicia en Factible', async () => {
     const { service, prisma, coverage, audit } = setup(true, 'Cotizacion Enviada');
     const original = { ...await prisma.prospecto.findUnique(), latitud: location.latitud, longitud: location.longitud,

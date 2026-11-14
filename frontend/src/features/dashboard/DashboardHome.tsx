@@ -51,6 +51,7 @@ const clpFormatter = new Intl.NumberFormat('es-CL', {
 type Summary = {
   metricas: {
     clientes: number;
+    clientesRegistrados?: number;
     prospectos: number;
     pendientesActivacion?: number;
     solicitudesAbiertas?: number;
@@ -107,20 +108,19 @@ export function DashboardHome({
   const pendingInstallations = workOrders.filter(
     (order) => isInstallationWorkOrder(order.tipoOt) && !isTerminalWorkOrder(order.estado),
   ).length;
-  const openTickets = tickets.filter((ticket) => !['Resuelto', 'Cerrado'].includes(ticket.estado)).length;
   const overdueBalance = billingOverview?.morosos.reduce((total, invoice) => total + Number(invoice.saldo ?? 0), 0) ?? 0;
   const stats = [
     {
       label: 'Prospectos activos',
-      value: summary?.metricas.prospectos ?? 0,
-      description: 'Oportunidades registradas',
+      value: summary?.metricas.prospectos ?? '—',
+      description: 'Sin perder, convertir ni contrato firmado',
       icon: UserRoundPlus,
       tone: 'mint' as const,
       tab: 'prospects' as Tab,
     },
     {
       label: 'Pendientes de activación',
-      value: summary?.metricas.pendientesActivacion ?? 0,
+      value: summary?.metricas.pendientesActivacion ?? '—',
       description: 'Contratos firmados sin servicio activo',
       icon: CalendarPlus,
       tone: 'blue' as const,
@@ -129,16 +129,17 @@ export function DashboardHome({
     },
     {
       label: 'Clientes activos',
-      value: summary?.metricas.clientes ?? 0,
-      description: 'Con al menos un servicio activo',
+      value: summary?.metricas.clientes ?? '—',
+      description: summary?.metricas.clientesRegistrados == null ? 'Con al menos un servicio activo'
+        : `Con servicio activo · ${summary.metricas.clientesRegistrados} registrados en total`,
       icon: Users,
       tone: 'teal' as const,
       tab: 'customers' as Tab,
     },
     {
       label: 'Instalaciones pendientes',
-      value: summary?.metricas.pendientesActivacion ?? pendingInstallations,
-      description: 'Contrataciones pendientes de activación',
+      value: summary?.metricas.instalacionesPendientes ?? summary?.metricas.pendientesActivacion ?? '—',
+      description: 'Personas en Instalaciones en proceso',
       icon: Wrench,
       tone: 'blue' as const,
       tab: 'installations' as Tab,
@@ -146,7 +147,7 @@ export function DashboardHome({
     },
     {
       label: 'Tickets abiertos',
-      value: summary?.metricas.ticketsAbiertos ?? openTickets,
+      value: summary?.metricas.ticketsAbiertos ?? '—',
       description: 'Casos todavía en atención',
       icon: TicketIcon,
       tone: 'orange' as const,
@@ -154,7 +155,7 @@ export function DashboardHome({
     },
     {
       label: 'Clientes morosos',
-      value: summary?.metricas.clientesMorosos ?? 0,
+      value: summary?.metricas.clientesMorosos ?? '—',
       description: 'Con deuda o suspensión',
       icon: HandCoins,
       tone: 'rose' as const,
@@ -307,7 +308,7 @@ export function DashboardHome({
                 ))}
               </div>
             </div>
-          ) : <p className="dashboard-chart-empty">Aún no hay prospectos con origen de captación registrado.</p>}
+          ) : <p className="empty-state">Aún no hay prospectos con origen de captación registrado.</p>}
         </article>
 
         <article className="dashboard-installation-panel">

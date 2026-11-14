@@ -32,9 +32,11 @@
 .customer-contract-table > table > thead th:nth-child(2) { width: 16%; }
 .customer-contract-table > table > thead th:nth-child(3) { width: 13%; }
 .customer-contract-table > table > thead th:nth-child(4) { width: 17%; }
-.customer-contract-table > table > thead th:nth-child(5) { width: 25%; }
-.customer-contract-table > table > thead th.customer-contract-status-heading { width: 12%; }
+.customer-contract-table > table > thead th:nth-child(5) { width: 22%; }
+.customer-contract-table > table > thead th.customer-contract-status-heading { width: 15%; }
 .customer-contract-table th.customer-contract-status-heading, .customer-contract-table td.customer-contract-status { text-align: left; }
+.customer-contract-row > td { vertical-align: middle; }
+.customer-contract-status .status-badge { white-space: nowrap; width: max-content; max-width: none; text-align: center; }
 .customer-contract-row { cursor: pointer; }
 .customer-contract-row-toggle { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; box-shadow: none; }
 .customer-contract-row-toggle:hover { background: transparent; color: inherit; box-shadow: none; transform: none; }
@@ -72,6 +74,42 @@
 
 .customer-contract-facts dd { margin: 4px 0 0; font-size: .88rem; font-weight: 650; overflow-wrap: anywhere; }
 .customer-contract-note { margin: 0; }
+.customer-installation-empty { padding: 14px 0; text-align: center; }
+.customer-plan-acquisition { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .85fr); gap: 20px 28px; padding: 0; border: 0; background: transparent; margin-bottom: 24px; }
+.customer-plan-fields { display: grid; gap: 14px; padding: 0; border: 0; min-width: 0; }
+.customer-plan-title { grid-column: 1 / -1; margin: 0; font-size: .9rem; font-weight: 650; color: var(--contract-ink); }
+.customer-plan-fields label { display: grid; gap: 6px; font-size: .8rem; line-height: 1.4; }
+.customer-plan-fields input, .customer-plan-fields select, .customer-plan-fields textarea { width: 100%; box-sizing: border-box; font-size: .83rem; }
+.customer-plan-address-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.customer-plan-address-choice { position: relative; display: grid; gap: 6px; min-width: 0; }
+.customer-plan-address-choice > span { font-size: .8rem; line-height: 1.4; }
+.customer-plan-address-choice button.customer-address-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid #ccd9d2; border-radius: 8px; color: var(--contract-ink); background: #fff; font-size: .83rem; font-weight: 500; text-align: left; box-shadow: none; }
+.customer-address-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customer-address-trigger > svg { flex-shrink: 0; }
+.customer-address-options { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 50; max-height: 250px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--contract-line); border-radius: 8px; background: #fff; box-shadow: 0 6px 18px #17392b1a; }
+.customer-address-options > li { display: flex; align-items: center; gap: 4px; }
+.customer-address-options button.customer-address-option { flex: 1; min-width: 0; min-height: 34px; padding: 8px; border: 0; border-radius: 5px; color: var(--contract-ink); background: transparent; font-size: .8rem; font-weight: 400; text-align: left; box-shadow: none; overflow-wrap: anywhere; }
+.customer-address-options button.customer-address-option:hover, .customer-address-options button.customer-address-option[aria-current="true"] { background: var(--contract-highlight); }
+.customer-address-options button.customer-address-add { color: var(--contract-accent); }
+.customer-plan-address-choice button.customer-address-remove { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; min-height: 30px; padding: 0; border: 0; border-radius: 5px; color: var(--contract-muted); background: transparent; box-shadow: none; }
+.customer-plan-address-choice button.customer-address-remove:hover:not(:disabled) { color: #a6342c; background: #fff0ec; }
+.theme-dark .customer-address-options, .theme-dark .customer-plan-address-choice button.customer-address-trigger { background: var(--contract-surface); }
+.customer-contract-cancel-actions { display: flex; justify-content: flex-end; padding-top: 6px; }
+.customer-contract-cancel-actions button { min-height: 28px; padding: 4px 8px; border: 0; border-radius: 5px; color: #a43d35; background: transparent; font-size: .75rem; font-weight: 500; box-shadow: none; }
+.customer-contract-cancel-actions button:hover:not(:disabled) { background: #fff0ec; }
+.customer-plan-map { min-width: 0; padding-top: calc(.8rem * 1.4 + 6px); }
+.customer-plan-map .coverage-map { height: 240px; min-height: 240px; border-radius: 10px; }
+.customer-plan-map .coverage-summary { padding: 12px; font-size: .8rem; margin-bottom: 12px; }
+.customer-plan-commercial, .customer-plan-documents { grid-column: 1 / -1; }
+.customer-quote-choice { min-height: 0; padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; text-align: left; box-shadow: none; }
+.customer-quote-choice:hover:not(:disabled) { color: var(--contract-accent); background: transparent; text-decoration: underline; }
+.customer-plan-message, .customer-plan-actions { grid-column: 1 / -1; }
+.customer-plan-actions { justify-content: flex-end; }
+.customer-plan-acquisition button.customer-plan-primary { background: #237b65; color: #fff; }
+.customer-plan-acquisition button.customer-plan-primary:hover:not(:disabled) { background: #1d6755; }
+.customer-plan-acquisition button.customer-plan-primary:disabled { background: #e7ece9; color: #65766e; opacity: 1; cursor: not-allowed; }
+.theme-dark .customer-plan-acquisition button.customer-plan-primary:disabled { background: #2b4139; color: #a8b9b1; }
+@media (max-width: 760px) { .customer-plan-acquisition { grid-template-columns: minmax(0, 1fr); } .customer-plan-map { padding-top: 0; } }
 .customer-add-plan { padding: 14px; border: 1px solid var(--contract-line); border-radius: 8px; background: var(--contract-surface); }
 .customer-contract-documents, .customer-installation-summary, .customer-service-options {
   display: grid;

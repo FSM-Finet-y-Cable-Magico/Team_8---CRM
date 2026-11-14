@@ -54,6 +54,7 @@ export class CompaniesService {
       solicitudesNoFactibles,
       cambiosPlanRecientes,
       origenCaptacion,
+      clientesRegistrados,
     ] = await Promise.all([
       this.prisma.prospecto.count({ where: activeProspectFilter }),
       this.prisma.prospecto.count({ where: pendingActivationFilter }),
@@ -146,6 +147,7 @@ export class CompaniesService {
         orderBy: { _count: { origenContacto: 'desc' } },
         take: 8,
       }),
+      this.prisma.cliente.count({ where: customerFilter }),
     ]);
     const categoryCounts = ticketsCerrados.reduce<Record<number, number>>((accumulator, ticket) => {
       accumulator[ticket.idCategoria] = (accumulator[ticket.idCategoria] ?? 0) + 1;
@@ -197,9 +199,11 @@ export class CompaniesService {
       empresas,
       metricas: {
         clientes: clientesActivos,
+        clientesRegistrados,
         prospectos,
         pendientesActivacion,
-        instalacionesPendientes,
+        instalacionesPendientes: pendientesActivacion,
+        ordenesInstalacionPendientes: instalacionesPendientes,
         ticketsAbiertos,
         clientesMorosos,
         inventarioDisponible,

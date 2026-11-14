@@ -12,6 +12,16 @@ const admin: AuthUser = {
 };
 
 describe('ImportsService importacion historica', () => {
+  it.each(['', 'cliente', 'prospecto'])('solo crea prospectos con tipo explícito (tipo: %s)', async tipo => {
+    const tx = { cliente: { create: jest.fn(async () => ({ idCliente: 10 })) }, prospecto: { create: jest.fn() }, direccionServicio: { create: jest.fn() } };
+    const prisma = { cliente: { findUnique: jest.fn(async () => null) }, prospecto: { findFirst: jest.fn(async () => null) }, $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx) };
+    const service = new ImportsService(prisma as unknown as PrismaService, { record: jest.fn() } as unknown as AuditService);
+    const result = await service.importClients({ originalname: 'clientes.csv', buffer: Buffer.from(`rut,nombre_completo,telefono,direccion,tipo_registro\n25307395-0,Persona QA,+56912345678,Calle QA 100,${tipo}`) } as Express.Multer.File, admin, 1);
+    expect(result.importedRows).toBe(1);
+    expect(tx.cliente.create).toHaveBeenCalledTimes(tipo === 'prospecto' ? 0 : 1);
+    expect(tx.prospecto.create).toHaveBeenCalledTimes(tipo === 'prospecto' ? 1 : 0);
+  });
+
   it('registra Cliente, direccion y Servicio preexistente de forma auditable sin crear una OT falsa', async () => {
     const tx = {
       cliente: { create: jest.fn().mockResolvedValue({ idCliente: 81 }) },

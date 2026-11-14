@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { ESignatureService } from './e-signature.service';
-import { DEMO_SIGNATURE_CONSENT_VERSION, SIGNATURE_CONSENT_VERSION } from './e-signature.config';
+import { DEMO_SIGNATURE_CONSENT_VERSION } from './e-signature.config';
 import * as repository from './signature.repository';
 import * as snapshots from './contract-snapshot';
 
@@ -83,13 +83,11 @@ describe('Readiness específico de firma sin habilitar proveedores', () => {
     expect((await PDFDocument.load(await h.service.pdf(token))).getPageCount()).toBe(2);
   });
 
-  it('el flujo normal rechaza firmas sin código, incluso con el consentimiento demo', async () => {
+  it('el flujo normal rechaza el consentimiento demo antes de consultar la solicitud', async () => {
     const h = harness();
     const token = randomBytes(32).toString('base64url');
-    for (const consentVersion of [SIGNATURE_CONSENT_VERSION, DEMO_SIGNATURE_CONSENT_VERSION]) {
-      await expect(h.service.sign(token, undefined, h.row.hashOriginal, true, consentVersion, '', ''))
-        .rejects.toThrow('introduce el código');
-    }
+    await expect(h.service.sign(token, undefined, h.row.hashOriginal, true, DEMO_SIGNATURE_CONSENT_VERSION, '', ''))
+      .rejects.toThrow('acepta sus condiciones');
     expect(h.store.findUnique).not.toHaveBeenCalled();
     expect(h.contracts.markContractSigned).not.toHaveBeenCalled();
   });

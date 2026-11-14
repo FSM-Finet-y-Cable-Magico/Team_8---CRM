@@ -4,6 +4,7 @@ import {
   api,
   apiErrorMessage,
   Customer,
+  Company,
   CustomerRequest,
   CustomerService,
   DigitalContract,
@@ -105,6 +106,7 @@ function formatServiceWorkOrderCode(order?: CustomerServiceWorkOrder | null) {
 }
 
 function customerAddressLabel(customer: Customer) {
+  if (customer.direccionActual?.direccion.trim()) return customer.direccionActual.direccion.trim();
   const technicalAddress = customer.datosTecnicos?.direccion;
 
   if (typeof technicalAddress === 'string' && technicalAddress.trim()) {
@@ -126,8 +128,12 @@ export function CustomersPanel({
   onProfileUpdated,
   pendingInstallationsView,
   onPendingInstallationsViewConsumed,
+  writeCompanyId,
+  companies = [],
 }: {
   active?: boolean;
+  writeCompanyId?: number;
+  companies?: Company[];
   customers: Customer[];
   plans: Plan[];
   scope: string;
@@ -967,6 +973,8 @@ export function CustomersPanel({
 
             <CustomerContractWorkflow
               key={`contract-workflow-${selectedCustomer.idCliente}`}
+              initialCompanyId={writeCompanyId ?? (scope !== 'consolidado' ? Number(scope) : undefined)}
+              companies={scope === 'consolidado' ? companies : companies.filter(company => company.idEmpresa === Number(scope))}
               customer={selectedCustomer}
               services={services}
               servicesLoad={servicesLoad.customerId === selectedCustomer.idCliente
@@ -974,6 +982,10 @@ export function CustomersPanel({
                 : { customerId: selectedCustomer.idCliente, status: 'loading', error: '' }}
               plans={plans}
               permissions={permissions}
+              onProfileUpdated={profile => {
+                setProfileOverrides(current => ({ ...current, [selectedCustomer.idCliente]: profile }));
+                onProfileUpdated?.(profile);
+              }}
               onRefresh={async (preferredServiceId) => {
                 await loadServicesForCustomer(selectedCustomer.idCliente, true, preferredServiceId);
                 onChanged();
