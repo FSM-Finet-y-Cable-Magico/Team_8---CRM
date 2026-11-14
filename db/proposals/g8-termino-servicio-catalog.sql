@@ -1,44 +1,77 @@
--- PROPOSAL (FINET 13-11-2026): additive insertion of the G8 attention category «Término de servicio» in the existing
--- public.categoria_falla catalogue. NOT a migration and NOT part of any seed. DO NOT RUN without explicit authorization
--- of the catalogue owner (shared with G2/G3) and a prior backup; same review procedure as c2-tk-01-attention-categories-qa.sql.
---
--- * Structure is not changed: only one row, using the table's own serial (no fixed ID).
--- * «Baja de servicio» is NOT renamed and its ID is NOT reused: it stays as the morosity category.
--- * SLA: copied from the existing «Baja de servicio» row (no invented value); the owner may adjust it before running.
--- * tipo: 'ATENCION' only when the column exists (finet_global_validacion: tipo VARCHAR(20) NOT NULL DEFAULT 'INTERNA').
--- * Idempotent: if an equivalent name already exists (any capitalization/spaces), nothing is inserted; if it exists with
---   another type, it aborts so the owner reviews it (G8 never picks among duplicates).
--- Usage (owner only): SET finet.catalog_termino_reviewed = 'on'; \i g8-termino-servicio-catalog.sql
+-- PROPOSAL ONLY, revised 14-11-2026. NOT a seed/migration; requires owner approval and backup.
+-- Separate G8 flow, NOT an eighth generic G2/G8 category. Preserve Baja, technical IDs and historical SLA.
+-- Four-column shared catalog only; explicit ATENCION and existing ID sequence/default. No public DDL.
+-- Owner input: finet.catalog_termino_reviewed='on'.
+-- If finet.catalog_termino_sla is absent, copy ONLY from one valid ATENCION Baja de servicio.
+-- Approval of that copy includes preserving source NULL as unknown, never inventing a numeric SLA.
+-- Alternatively supply {"sla_horas": <approved SMALLINT or explicit null>, "fuente": <approval reference>}.
+-- No missing/duplicate/technical Baja is silently selected. No ORDER BY/LIMIT fallback.
+-- Execute with ON_ERROR_STOP in an approved transaction with lock_timeout/statement_timeout.
 DO $catalog$
 DECLARE
-  has_type boolean;
   existing_count integer;
   attention_count integer;
   base_sla smallint;
+  existing_sla smallint;
+  approval jsonb;
+  id_sequence text;
+  space_pattern text := '[[:space:]' || chr(160) || chr(5760)
+    || chr(8192) || chr(8193) || chr(8194) || chr(8195) || chr(8196)
+    || chr(8197) || chr(8198) || chr(8199) || chr(8200) || chr(8201)
+    || chr(8202) || chr(8232) || chr(8233) || chr(8239) || chr(8287)
+    || chr(12288) || chr(65279) || ']+';
 BEGIN
-  IF current_setting('finet.catalog_termino_reviewed', true) IS DISTINCT FROM 'on' THEN
-    RAISE EXCEPTION 'El catálogo requiere revisión y autorización explícitas antes de agregar «Término de servicio»';
+  IF current_setting('transaction_isolation')<>'read committed' THEN
+    RAISE EXCEPTION 'CATALOG_REQUIRES_READ_COMMITTED_FRESH_SNAPSHOT';
   END IF;
+  IF current_setting('finet.catalog_termino_reviewed',true) IS DISTINCT FROM 'on' THEN
+    RAISE EXCEPTION 'TERMINATION_CATALOG_APPROVAL_REQUIRED';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('public.categoria_falla')
+    AND attname='tipo' AND NOT attisdropped) THEN RAISE EXCEPTION 'SHARED_CATEGORY_TYPE_COLUMN_REQUIRED'; END IF;
   LOCK TABLE public.categoria_falla IN SHARE ROW EXCLUSIVE MODE;
-  SELECT EXISTS (SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'categoria_falla' AND column_name = 'tipo') INTO has_type;
-  SELECT count(*), count(*) FILTER (WHERE NOT has_type OR to_jsonb(c)->>'tipo' = 'ATENCION')
-    INTO existing_count, attention_count
-    FROM public.categoria_falla c
-    WHERE lower(btrim(regexp_replace(normalize(c.nombre, NFC), '[[:space:]]+', ' ', 'g'))) = lower('Término de servicio');
-  IF existing_count > 0 THEN
-    IF existing_count <> 1 OR attention_count <> 1 THEN
-      RAISE EXCEPTION '«Término de servicio» ya existe duplicada o con otro tipo; requiere revisión del propietario';
+  id_sequence := pg_get_serial_sequence('public.categoria_falla','id_categoria');
+  IF id_sequence IS NULL THEN RAISE EXCEPTION 'EXISTING_CATEGORY_ID_SEQUENCE_REQUIRED'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid='public.categoria_falla'::regclass
+    AND a.attname='id_categoria' AND (a.attidentity IN ('a','d') OR EXISTS (
+      SELECT 1 FROM pg_attrdef ad JOIN pg_depend d ON d.classid='pg_attrdef'::regclass AND d.objid=ad.oid
+      WHERE ad.adrelid=a.attrelid AND ad.adnum=a.attnum AND d.refclassid='pg_class'::regclass
+        AND d.refobjid=to_regclass(id_sequence)))) THEN RAISE EXCEPTION 'CATEGORY_DEFAULT_SEQUENCE_MISMATCH'; END IF;
+  approval := NULLIF(current_setting('finet.catalog_termino_sla',true),'')::jsonb;
+  IF approval IS NOT NULL THEN
+    IF jsonb_typeof(approval)<>'object' OR NOT (approval ? 'sla_horas')
+      OR jsonb_typeof(approval->'fuente') IS DISTINCT FROM 'string' OR length(btrim(approval->>'fuente'))<5
+      OR approval - ARRAY['sla_horas','fuente']::text[] <> '{}'::jsonb THEN
+      RAISE EXCEPTION 'EXPLICIT_APPROVED_TERMINATION_SLA_AND_SOURCE_REQUIRED';
     END IF;
-    RAISE NOTICE '«Término de servicio» ya existe como ATENCION; no se modifica nada';
+    IF approval->'sla_horas'<>'null'::jsonb THEN
+      IF jsonb_typeof(approval->'sla_horas')<>'number' OR (approval->>'sla_horas') !~ '^-?[0-9]+$' THEN
+        RAISE EXCEPTION 'TERMINATION_SLA_MUST_BE_APPROVED_SMALLINT_OR_EXPLICIT_NULL';
+      END IF;
+    END IF;
+    base_sla := (approval->>'sla_horas')::smallint;
+  ELSE
+    SELECT count(*),count(*) FILTER (WHERE c.tipo='ATENCION' AND c.id_categoria>0),min(c.sla_horas)
+      INTO existing_count,attention_count,base_sla FROM public.categoria_falla c
+    WHERE lower(btrim(regexp_replace(normalize(c.nombre,NFC),space_pattern,' ','g')))=lower('Baja de servicio');
+    IF existing_count<>1 OR attention_count<>1 THEN
+      RAISE EXCEPTION 'UNIQUE_ATTENTION_BAJA_OR_EXPLICIT_APPROVED_SLA_REQUIRED';
+    END IF;
+  END IF;
+  SELECT count(*),count(*) FILTER (WHERE c.tipo='ATENCION' AND c.id_categoria>0),min(c.sla_horas)
+    INTO existing_count,attention_count,existing_sla FROM public.categoria_falla c
+  WHERE lower(btrim(regexp_replace(normalize(c.nombre,NFC),space_pattern,' ','g')))=lower('Término de servicio');
+  IF existing_count>1 OR (existing_count=1 AND attention_count<>1) THEN
+    RAISE EXCEPTION 'TERMINATION_CATEGORY_AMBIGUOUS_OR_INCOMPATIBLE';
+  END IF;
+  IF existing_count=1 THEN
+    IF existing_sla IS DISTINCT FROM base_sla THEN
+      RAISE EXCEPTION 'EXISTING_TERMINATION_SLA_DIFFERS_PRESERVE_AND_REVIEW';
+    END IF;
+    RAISE NOTICE 'TERMINATION_CATALOG_INSERTED=0';
     RETURN;
   END IF;
-  SELECT c.sla_horas INTO base_sla FROM public.categoria_falla c
-    WHERE lower(btrim(normalize(c.nombre, NFC))) = lower('Baja de servicio') ORDER BY c.id_categoria LIMIT 1;
-  IF has_type THEN
-    EXECUTE 'INSERT INTO public.categoria_falla (nombre, sla_horas, tipo) VALUES ($1, $2, ''ATENCION'')' USING 'Término de servicio', base_sla;
-  ELSE
-    INSERT INTO public.categoria_falla (nombre, sla_horas) VALUES ('Término de servicio', base_sla);
-  END IF;
-END
+  INSERT INTO public.categoria_falla (nombre,sla_horas,tipo) VALUES ('Término de servicio',base_sla,'ATENCION');
+  RAISE NOTICE 'TERMINATION_CATALOG_INSERTED=1';
+END;
 $catalog$;

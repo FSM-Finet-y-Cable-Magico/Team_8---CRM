@@ -18,8 +18,17 @@ FROM pg_constraint WHERE conname = 'solicitud_g3_aplicado_check' AND connamespac
 SELECT conrelid::regclass AS tabla, conname, contype FROM pg_constraint WHERE connamespace = to_regnamespace('g8_retiros') ORDER BY 1, 2;
 SELECT count(*) AS claves_foraneas FROM pg_constraint WHERE connamespace = to_regnamespace('g8_retiros') AND contype = 'f';
 
--- W5. Existing links keep a valid cause (after: 0 rows violating it; all historical links are MOROSIDAD with a notice).
-SELECT count(*) AS vinculos_sin_aviso_morosidad FROM g8_retiros.solicitud_ticket WHERE to_regclass('g8_retiros.termino_servicio') IS NOT NULL AND id_aviso IS NULL;
+-- W5. Before 003, causa is absent: report NOT_APPLIED instead of certifying an empty result.
+-- JSON projection preserves pre/post compatibility with 002. After 003 all invalid counts must be 0.
+-- VOLUNTARIA with no notice is valid; historical 002 links become MOROSIDAD with their original notice.
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_attribute
+         WHERE attrelid=to_regclass('g8_retiros.solicitud_ticket') AND attname='causa' AND NOT attisdropped)
+       THEN 'READY_FOR_CAUSE_CHECK' ELSE 'NOT_APPLIED_CAUSE_COLUMN_MISSING' END AS verificacion_causa,
+       count(*) FILTER (WHERE to_jsonb(s)->>'causa'='MOROSIDAD' AND s.id_aviso IS NULL) AS vinculos_sin_aviso_morosidad,
+       count(*) FILTER (WHERE to_jsonb(s)->>'causa'='VOLUNTARIA' AND s.id_aviso IS NOT NULL) AS voluntarios_con_aviso_invalido,
+       count(*) FILTER (WHERE to_jsonb(s)->>'causa' IS NULL OR to_jsonb(s)->>'causa' NOT IN ('MOROSIDAD','VOLUNTARIA')) AS causas_ausentes_o_invalidas,
+       count(*) FILTER (WHERE s.id_aviso IS NOT NULL AND s.id_aviso<=0) AS avisos_no_positivos
+FROM g8_retiros.solicitud_ticket s;
 
 -- W6. Nothing granted to PUBLIC.
 SELECT table_name, privilege_type FROM information_schema.role_table_grants WHERE table_schema = 'g8_retiros' AND grantee = 'PUBLIC';
