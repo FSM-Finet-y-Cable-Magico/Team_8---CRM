@@ -35,9 +35,24 @@ export function isWithdrawalTicketCategory(category: Pick<TicketCategory, 'nombr
   return officialName(category.nombre) === WITHDRAWAL_TICKET_CATEGORY;
 }
 
-/** Categories offered in the manual «Nuevo ticket» form: server-enabled attention categories except the reserved one. */
+/** G8-only category (FINET 13-11-2026): the customer's voluntary termination, registered from Tickets with its own form. */
+export const TERMINATION_TICKET_CATEGORY = 'Término de servicio';
+export function isTerminationTicketCategory(category: Pick<TicketCategory, 'nombre'>) {
+  return categoryKey(category.nombre) === categoryKey(TERMINATION_TICKET_CATEGORY);
+}
+
+/**
+ * Categories offered in the «Nuevo ticket» form: server-enabled attention categories except the reserved «Baja de
+ * servicio», plus «Término de servicio» only when the server enables it unambiguously (after the authorized catalogue
+ * insertion). Selecting it switches the form to the termination requirement.
+ */
 export function manualTicketCategories(categories: TicketCategory[]) {
-  return ticketAttentionAvailability(categories).options.filter(category => !isWithdrawalTicketCategory(category));
+  const options = ticketAttentionAvailability(categories).options.filter(category => !isWithdrawalTicketCategory(category));
+  const termination = categories.filter(isTerminationTicketCategory);
+  const row = termination[0];
+  if (termination.length === 1 && row.nombreAtencion === TERMINATION_TICKET_CATEGORY && Number.isInteger(row.idCategoria) && row.idCategoria > 0
+    && (row.tipo === 'ATENCION' || (row.tipo == null && row.tipoDisponible !== true))) options.push(row);
+  return options;
 }
 
 export function isGeneralTicketCategory(category: TicketCategory) {

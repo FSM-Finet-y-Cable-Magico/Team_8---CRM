@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +49,7 @@ async function harness(t, name, props, { openManually = true } = {}) {
     new Function('require', 'exports', outputText)(name => {
       if (name.endsWith('.css')) return {};
       if (mocks[name]) return mocks[name];
-      if (name.startsWith('.')) return load(resolve(dirname(file), name + (name.endsWith('ticket-presentation') ? '.ts' : '.tsx')));
+      if (name.startsWith('.')) { const base = resolve(dirname(file), name); return load(existsSync(base + '.ts') ? base + '.ts' : base + '.tsx'); }
       return require(name);
     }, exports);
     return exports;

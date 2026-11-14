@@ -11,7 +11,8 @@ const hints: Record<string, string> = {
   'Cambio de plan': 'Indica el plan o la velocidad que solicita el cliente.',
   'Consulta comercial': 'Describe la consulta y la información que necesita el cliente.',
   'Actualización de datos': 'Indica qué datos solicita actualizar el cliente.',
-  'Retiro de servicio': 'Describe el motivo del retiro y cualquier indicación para la atención.',
+  // FINET 13-11-2026: a customer's voluntary termination is registered in Tickets («Término de servicio»), which applies it.
+  'Retiro de servicio': 'Describe el motivo del retiro y cualquier indicación para la atención. Si el titular pide terminar el servicio, regístralo en Tickets con «Término de servicio».',
   Otro: 'Describe la solicitud y el resultado que espera el cliente.',
 };
 

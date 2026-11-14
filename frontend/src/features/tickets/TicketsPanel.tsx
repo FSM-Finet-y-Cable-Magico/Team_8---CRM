@@ -6,7 +6,11 @@ import { formatWorkOrderValue, normalizeRutInput } from '../../lib';
 import { type DashboardPermissions } from '../../permissions';
 import { StatusBadge } from '../../shared/components';
 import { TicketManagementModal } from './TicketManagementModal';
-import { manualTicketCategories } from './ticket-presentation';
+import { isTerminationTicketCategory, manualTicketCategories } from './ticket-presentation';
+import { contactDateTimeInput, contactDateTimeISO } from '../commercial/control-book-contact-time';
+
+const TERMINATION_CHANNELS = [['TELEFONO', 'Teléfono'], ['PRESENCIAL', 'Presencial'], ['CORREO', 'Correo'], ['WHATSAPP', 'WhatsApp'], ['PORTAL', 'Portal de clientes'], ['OTRO', 'Otro']] as const;
+type TerminationResult = { repetido: boolean; ticket: { idTicket: number; codigoSeguimiento: string | null } | null; retiroTecnico: string; despacho?: { idOtG3: number | null } | null; despachoPendiente?: string };
 
 export function TicketsPanel({
   tickets,
@@ -31,6 +35,9 @@ export function TicketsPanel({
   const [ticketServices, setTicketServices] = useState<CustomerService[]>([]);
   const [customerLookupStatus, setCustomerLookupStatus] = useState('');
   const [managementOpen, setManagementOpen] = useState(false);
+  // FINET 13-11-2026: «Término de servicio» registers the customer's requirement (identity, date/time, evidence).
+  const [termination, setTermination] = useState({ canal: 'TELEFONO', solicitante: 'TITULAR', requerimientoEn: contactDateTimeInput(), evidencia: '', identidad: false });
+  const [terminating, setTerminating] = useState(false);
 
   const selectedTicket = tickets.find((ticket) => ticket.idTicket === selectedId) ?? null;
   useEffect(() => {
@@ -42,6 +49,35 @@ export function TicketsPanel({
   // Solo se ofrecen las categorías de atención que el servidor habilita; no se muestra aviso de catálogo.
   // «Baja de servicio» no se ofrece: se genera solo al iniciar la baja desde el Libro de Control.
   const attentionCategories = manualTicketCategories(categories);
+  const selectedCategory = attentionCategories.find(category => String(category.idCategoria) === createForm.idCategoria);
+  const terminationSelected = Boolean(selectedCategory && isTerminationTicketCategory(selectedCategory));
+
+  /** Voluntary termination: commercial termination now; the technical withdrawal follows (it never waits for it). */
+  async function registerTermination(rut: string) {
+    if (terminating) return;
+    if (!createForm.idServicio) { setStatus('Selecciona el servicio que el titular pide terminar.'); return; }
+    const requerimientoEn = contactDateTimeISO(termination.requerimientoEn);
+    if (!requerimientoEn) { setStatus('Indica la fecha y hora del requerimiento.'); return; }
+    if (termination.evidencia.trim().length < 5) { setStatus('Registra la evidencia del requerimiento (grabación, correo, folio u otro respaldo).'); return; }
+    if (!termination.identidad) { setStatus('Confirma que verificaste la identidad y autorización del solicitante.'); return; }
+    setTerminating(true);
+    try {
+      const { data } = await api.post<TerminationResult>('/service-withdrawals/voluntary', {
+        rut, idServicio: Number(createForm.idServicio), canal: termination.canal, solicitante: termination.solicitante, requerimientoEn,
+        evidencia: termination.evidencia.trim(), descripcion: createForm.descripcion.trim(), confirmacionIdentidad: true,
+      });
+      const ticket = data.ticket ? data.ticket.codigoSeguimiento ?? `#${data.ticket.idTicket}` : '';
+      const technical = data.retiroTecnico === 'DATOS_INCOMPLETOS' ? 'El retiro de equipos queda pendiente: faltan datos de dirección o identificación.'
+        : data.despacho?.idOtG3 ? `Orden de retiro N° ${data.despacho.idOtG3} creada.` : 'El retiro de equipos queda pendiente de envío.';
+      setStatus(data.repetido ? `El término ya estaba registrado (ticket ${ticket}).` : `Término registrado y aplicado (ticket ${ticket}). ${technical} La deuda existente se conserva.`);
+      setTermination(current => ({ ...current, evidencia: '', identidad: false }));
+      onChanged();
+    } catch (err) {
+      setStatus(apiErrorMessage(err));
+    } finally {
+      setTerminating(false);
+    }
+  }
 
   async function run(action: () => Promise<unknown>, success: string) {
     try {
@@ -100,6 +136,11 @@ export function TicketsPanel({
             return;
           }
 
+          if (terminationSelected) {
+            void registerTermination(rut);
+            return;
+          }
+
           void run(
             () =>
               api.post('/tickets', {
@@ -153,7 +194,7 @@ export function TicketsPanel({
               value={createForm.idServicio}
               onChange={(event) => setCreateForm({ ...createForm, idServicio: event.target.value })}
             >
-              <option value="">Ticket general del cliente</option>
+              <option value="">{terminationSelected ? 'Seleccionar servicio a terminar' : 'Ticket general del cliente'}</option>
               {ticketServices.map((service) => (
                 <option key={service.idServicio} value={service.idServicio}>
                   Servicio {service.idServicio} - {service.tipoServicio} - {service.estadoOperativo}
@@ -173,6 +214,33 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
+        {terminationSelected && <>
+          <label>
+            Canal del requerimiento
+            <select value={termination.canal} onChange={(event) => setTermination({ ...termination, canal: event.target.value })}>
+              {TERMINATION_CHANNELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label>
+            Fecha y hora del requerimiento
+            <input type="datetime-local" required value={termination.requerimientoEn} onChange={(event) => setTermination({ ...termination, requerimientoEn: event.target.value })} />
+          </label>
+          <label>
+            Solicitante
+            <select value={termination.solicitante} onChange={(event) => setTermination({ ...termination, solicitante: event.target.value })}>
+              <option value="TITULAR">Titular del servicio</option>
+              <option value="REPRESENTANTE">Representante autorizado</option>
+            </select>
+          </label>
+          <label>
+            Evidencia del requerimiento
+            <input required maxLength={500} value={termination.evidencia} onChange={(event) => setTermination({ ...termination, evidencia: event.target.value })} placeholder="N° de grabación, correo recibido, folio u otro respaldo" />
+          </label>
+          <label>
+            <span><input type="checkbox" checked={termination.identidad} onChange={(event) => setTermination({ ...termination, identidad: event.target.checked })} /> Verifiqué la identidad del titular (o la autorización del representante).</span>
+          </label>
+          <p className="inline-status">El término comercial se aplica al registrar, sin esperar la visita técnica. La deuda existente se conserva y el retiro de equipos sigue su curso.</p>
+        </>}
         <label>
           Prioridad
           <select value={createForm.prioridad} onChange={(event) => setCreateForm({ ...createForm, prioridad: event.target.value })}>
@@ -190,7 +258,7 @@ export function TicketsPanel({
             required
           />
         </label>
-        <button disabled={!attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)}>Crear ticket</button>
+        <button disabled={terminating || !attentionCategories.some(category => String(category.idCategoria) === createForm.idCategoria)}>{terminationSelected ? (terminating ? 'Registrando…' : 'Registrar término') : 'Crear ticket'}</button>
         {status && <p className="inline-status">{status}</p>}
       </form>}
 
