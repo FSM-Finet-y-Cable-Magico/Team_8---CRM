@@ -98,6 +98,12 @@ describe('Etapa 3 - CU-84 solicitud de retiro', () => {
       expect(isMorosityReason(motivo)).toBe(false);
     });
 
+  it.each(['VOLUNTARIA', ' voluntaria '])('el motivo %p es del término integrado desde Tickets: la solicitud genérica lo rechaza', async motivo => {
+    const c = setup();
+    await expect(c.service.create({ ...dto, motivo }, user)).rejects.toMatchObject({ response: { code: 'TERMINATION_FLOW_REQUIRED' } });
+    expect(c.rows()).toHaveLength(0);
+  });
+
   it('rechaza contrato distinto aunque sea del mismo cliente sin consultas cruzadas', async () => {
     const c = setup();
     await expect(c.service.create({ ...dto, idContrato: 21 }, user)).rejects.toBeInstanceOf(BadRequestException);

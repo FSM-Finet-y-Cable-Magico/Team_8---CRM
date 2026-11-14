@@ -9,7 +9,7 @@ import { ACCESS_ROLES } from '../common/permissions';
 import { IntegrationApiKeyGuard } from '../integration-auth/integration-api-key.guard';
 import { IntegrationCompanyScope, IntegrationGroups } from '../integration-auth/integration-auth.types';
 import { G3ClosureProcessor } from './g3-closure.processor';
-import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto, InitiateServiceWithdrawalDto, CancelServiceWithdrawalDto } from './g3-integration.dto';
+import { CompleteG3InstallationDataDto, CreateServiceWithdrawalDto, G3ClosureDto, RequestG3InstallationDto, UpdateServiceWithdrawalDto, InitiateServiceWithdrawalDto, CancelServiceWithdrawalDto, VoluntaryTerminationDto } from './g3-integration.dto';
 import { InstallationIntegrationService } from './installation-integration.service';
 import { ServiceWithdrawalService } from './service-withdrawal.service';
 import { WithdrawalWorkflowService } from './withdrawal-workflow.service';
@@ -148,6 +148,13 @@ export class ServiceWithdrawalController {
   @Roles(...ACCESS_ROLES.MANAGE_CUSTOMER_REQUESTS)
   initiate(@Body() dto: InitiateServiceWithdrawalDto, @CurrentUser() user: AuthUser) {
     return this.workflow.initiate(dto, user);
+  }
+
+  /** Voluntary termination from Tickets: commercial termination now, technical withdrawal (OT BAJA VOLUNTARIA) prepared. */
+  @Post('voluntary')
+  @Roles(...ACCESS_ROLES.CREATE_TICKETS)
+  terminateVoluntarily(@Body() dto: VoluntaryTerminationDto, @CurrentUser() user: AuthUser) {
+    return this.workflow.terminateVoluntarily(dto, user);
   }
 
   @Post(':id/dispatch')

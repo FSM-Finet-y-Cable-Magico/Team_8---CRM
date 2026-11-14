@@ -7,7 +7,7 @@ import { PUBLIC_DISPATCH_COLUMN_VALUE } from './withdrawal-workflow.service';
 
 /**
  * Real SQL of the private g8_retiros storage against an EPHEMERAL PostgreSQL with
- * db/g8/migrations/002_service_withdrawal.sql + grants applied, connected as the RUNTIME role.
+ * db/g8/migrations/002_service_withdrawal.sql + 003_withdrawal_voluntary_termination.sql + both grants applied, connected as the RUNTIME role.
  * Skipped unless G8_WITHDRAWAL_PG_TEST_URL is set; it refuses anything that is not loopback and a
  * database named g8moro_* (never the shared finet_global_validacion). Every test rolls back.
  */
@@ -36,12 +36,12 @@ class Rollback extends Error {}
     fechaRecepcion: new Date('2026-11-13T15:00:00Z'), idServicioExterno: 61, detalle: null, claveEvento: 'g1-recepcion-1-930-1', estadoRecepcion: 'COMPLETA', ...over });
 
   it('detecta el esquema aplicado', async () => {
-    expect(await storage.capabilities(db as unknown as Prisma.TransactionClient)).toEqual({ ticketLink: true, g3Dispatch: true, g1Reception: true });
+    expect(await storage.capabilities(db as unknown as Prisma.TransactionClient)).toEqual({ ticketLink: true, g3Dispatch: true, g1Reception: true, termination: true });
   });
 
   it('vínculo, despacho (uuid + jsonb), claim atómico y actualización', async () => {
     await inTx(async tx => {
-      await storage.insertLink(tx, { idSolicitudRetiro: 501, idTicket: 9001, idAviso: 7, idEmpresa: 1, idCliente: 33, idServicio: 61, idContrato: 20, idUsuarioResponsable: 7 });
+      await storage.insertLink(tx, { idSolicitudRetiro: 501, idTicket: 9001, idAviso: 7, causa: 'MOROSIDAD', idEmpresa: 1, idCliente: 33, idServicio: 61, idContrato: 20, idUsuarioResponsable: 7 });
       expect(await storage.findLinkByTicket(tx, 9001)).toMatchObject({ idSolicitudRetiro: 501 });
       const created = await storage.insertDispatch(tx, dispatchRow);
       expect(created).toMatchObject({ estadoDespacho: 'PENDIENTE', intentos: 0, traceId: snapshot.trace_id, payloadSnapshot: snapshot });
@@ -87,6 +87,38 @@ class Rollback extends Error {}
       await storage.insertDispatch(tx, dispatchRow);
       await storage.storeReceptionVersion(tx, 501, 1, 'g1-recepcion-1-930-x', [reception({ claveEvento: 'g1-recepcion-1-930-x' })]);
     })).rejects.toThrow(/recepcion_g1_clave_check/);
+  });
+
+  // 003 (FINET 13-11-2026): this is the check the in-memory harness cannot prove. Pending execution by whoever applies
+  // 002 + 003 in an authorized ephemeral database (not run in this environment: no new databases allowed).
+  it('003: la baja aplicada no exige recepción G1, pero sí OT COMPLETADA y cierre BAJA', async () => {
+    await inTx(async tx => {
+      await storage.insertDispatch(tx, dispatchRow);
+      await storage.updateDispatch(tx, 501, { estadoDespacho: 'ACEPTADA', idOtG3: 930, estadoOt: 'COMPLETADA', cierreClave: 'baja:930' });
+      await storage.markApplied(tx, 501); // no recepcion_clave_evento: 002's check would reject this
+      expect(await storage.findDispatch(tx, 501)).toMatchObject({ aplicadoEn: expect.any(Date), recepcionClaveEvento: null });
+    });
+    await expect(db.$transaction(async tx => {
+      await storage.insertDispatch(tx, dispatchRow);
+      await storage.updateDispatch(tx, 501, { estadoDespacho: 'ACEPTADA', idOtG3: 930, estadoOt: 'PENDIENTE_APROBACION' });
+      await storage.markApplied(tx, 501);
+    })).rejects.toThrow(/solicitud_g3_aplicado_check/);
+  });
+
+  it('003: vínculo por causa (aviso solo en MOROSIDAD) y término voluntario único por servicio y ticket', async () => {
+    await inTx(async tx => {
+      await storage.insertLink(tx, { idSolicitudRetiro: 502, idTicket: 9002, idAviso: null, causa: 'VOLUNTARIA', idEmpresa: 1, idCliente: 33, idServicio: 62, idContrato: 20, idUsuarioResponsable: 7 });
+      const created = await storage.insertTermination(tx, { idServicio: 62, idEmpresa: 1, idCliente: 33, idContrato: 20, idTicket: 9002, idSolicitudRetiro: 502,
+        requerimientoEn: new Date('2026-11-13T14:30:00Z'), canal: 'TELEFONO', solicitante: 'TITULAR', evidencia: 'Llamada grabada QA', idUsuarioResponsable: 7 });
+      expect(created).toMatchObject({ idServicio: 62, cierreTecnicoEn: null });
+      await storage.markTerminationTechnicalClosure(tx, 62);
+      expect(await storage.findTerminationByTicket(tx, 9002)).toMatchObject({ idSolicitudRetiro: 502, cierreTecnicoEn: expect.any(Date) });
+    });
+    for (const link of [{ idAviso: null, causa: 'MOROSIDAD' as const }, { idAviso: 7, causa: 'VOLUNTARIA' as const }]) {
+      await expect(db.$transaction(async tx => {
+        await storage.insertLink(tx, { idSolicitudRetiro: 503, idTicket: 9003, ...link, idEmpresa: 1, idCliente: 33, idServicio: 62, idContrato: 20, idUsuarioResponsable: 7 });
+      })).rejects.toThrow(/solicitud_ticket_causa_check/);
+    }
   });
 
   /** True when the ephemeral DB carries the full global contract (db/global/init-global.sql), not a minimal fixture table. */

@@ -114,6 +114,20 @@ export class InitiateServiceWithdrawalDto {
   @Equals(true) confirmacion!: boolean;
 }
 
+/** Voluntary termination requested by the customer, from Tickets (FINET 13-11-2026). */
+export class VoluntaryTerminationDto {
+  @IsString() @Matches(/\S/) @MaxLength(20) rut!: string;
+  @Type(() => Number) @IsInt() @Min(1) idServicio!: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
+  @IsIn(['PRESENCIAL', 'TELEFONO', 'CORREO', 'WHATSAPP', 'PORTAL', 'OTRO']) canal!: string;
+  @IsIn(['TITULAR', 'REPRESENTANTE']) solicitante!: string;
+  @IsDateString() requerimientoEn!: string;
+  @IsString() @MaxLength(500) evidencia!: string;
+  @IsString() @MaxLength(1000) descripcion!: string;
+  /** The operator verified the identity and authorization of the requester. */
+  @Equals(true) confirmacionIdentidad!: boolean;
+}
+
 export class CancelServiceWithdrawalDto {
   @IsString() @Matches(/\S/) @MaxLength(300) motivo!: string;
 }

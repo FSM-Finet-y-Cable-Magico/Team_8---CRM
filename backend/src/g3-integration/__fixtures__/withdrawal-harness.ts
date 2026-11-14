@@ -4,7 +4,7 @@ import { AuditService } from '../../audit/audit.service';
 import { AuthUser } from '../../common/auth.types';
 import { G3HttpReply } from '../g3-withdrawal-contract';
 import { G3WithdrawalClient } from '../http-g3-withdrawal.client';
-import { StoredReception, WithdrawalDispatch, WithdrawalStorage, WithdrawalTicketLink } from '../withdrawal.storage';
+import { ServiceTermination, StoredReception, WithdrawalDispatch, WithdrawalStorage, WithdrawalTicketLink } from '../withdrawal.storage';
 
 /**
  * In-memory doubles for the withdrawal workflow: a Prisma subset with REAL transaction rollback
@@ -13,7 +13,7 @@ import { StoredReception, WithdrawalDispatch, WithdrawalStorage, WithdrawalTicke
  */
 export const comercial = (idEmpresa = 1): AuthUser => ({ idUsuario: 7, idEmpresa, email: 'qa@example.invalid', nombreCompleto: 'Comercial QA', roles: ['Comercial'] });
 
-export function withdrawalHarness(options: { storage?: boolean; dispatch?: boolean; finalize?: boolean } = {}) {
+export function withdrawalHarness(options: { storage?: boolean; dispatch?: boolean; finalize?: boolean; voluntary?: boolean; termination?: boolean } = {}) {
   const state = {
     services: [
       { idServicio: 61, idCliente: 33, idEmpresa: 1, idContrato: 20, idDireccion: 5, estadoOperativo: 'Suspendido', tipoServicio: 'Internet' },
@@ -35,6 +35,7 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
     prospects: [] as any[],
     audits: [] as any[],
     links: [] as WithdrawalTicketLink[],
+    terminations: [] as ServiceTermination[],
     dispatches: [] as WithdrawalDispatch[],
     receptions: [] as Array<StoredReception & { idSolicitudRetiro: number; idEmpresa: number }>,
     // Writes that must never happen in this flow (payments, invoices, signatures, G1 inventory).
@@ -132,10 +133,16 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
 
   const storageOn = options.storage !== false;
   const storage: WithdrawalStorage = {
-    capabilities: async () => ({ ticketLink: storageOn, g3Dispatch: storageOn, g1Reception: storageOn }),
+    // `termination` = 003 applied; a harness with only 002 (termination:false) must answer BLOCKED.
+    capabilities: async () => ({ ticketLink: storageOn, g3Dispatch: storageOn, g1Reception: storageOn, termination: storageOn && options.termination !== false }),
     findLinkByRequest: async (_tx, id) => clone(state.links.find(l => l.idSolicitudRetiro === id) ?? null),
     findLinkByTicket: async (_tx, id) => clone(state.links.find(l => l.idTicket === id) ?? null),
-    insertLink: async (_tx, link) => { const row = { ...link, createdAt: new Date() }; state.links.push(row); return clone(row); },
+    insertLink: async (_tx, link) => {
+      // Same rules as 002 + 003: one link per request and per ticket; the collection notice only (and always) for MOROSIDAD.
+      if (state.links.some(l => l.idSolicitudRetiro === link.idSolicitudRetiro || l.idTicket === link.idTicket)) throw new Error('UNIQUE solicitud_ticket');
+      if ((link.causa === 'MOROSIDAD') !== (link.idAviso !== null)) throw new Error('CHECK solicitud_ticket_causa_check');
+      const row = { ...link, createdAt: new Date() }; state.links.push(row); return clone(row);
+    },
     insertDispatch: async (_tx, row) => {
       if (state.dispatches.some(d => d.requestId === row.requestId)) throw new Error('UNIQUE request_id');
       const created: WithdrawalDispatch = { ...row, payloadSnapshot: clone(row.payloadSnapshot) as Record<string, unknown>, estadoDespacho: 'PENDIENTE', intentos: 0,
@@ -175,28 +182,46 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
       .filter(d => !d.aplicadoEn && d.idOtG3 !== null && ['ACEPTADA', 'CANCELACION_NO_APLICABLE'].includes(d.estadoDespacho) && d.estadoOt !== 'CANCELADA'
         && !['CERRADA', 'CANCELADA'].includes(state.requests.find(r => r.idSolicitudRetiro === d.idSolicitudRetiro)?.estado))
       .slice(0, limit).map(d => d.idSolicitudRetiro),
-    markApplied: async (_tx, id) => { const row = state.dispatches.find(d => d.idSolicitudRetiro === id)!; row.aplicadoEn = row.aplicadoEn ?? new Date(); },
+    markApplied: async (_tx, id) => {
+      const row = state.dispatches.find(d => d.idSolicitudRetiro === id)!;
+      // 003 solicitud_g3_aplicado_check (no G1 reception required).
+      if (row.estadoOt !== 'COMPLETADA' || !row.cierreClave) throw new Error('CHECK solicitud_g3_aplicado_check');
+      row.aplicadoEn = row.aplicadoEn ?? new Date();
+    },
+    insertTermination: async (_tx, row) => {
+      if (state.terminations.some(t => t.idServicio === row.idServicio || t.idTicket === row.idTicket
+        || (row.idSolicitudRetiro !== null && t.idSolicitudRetiro === row.idSolicitudRetiro))) throw new Error('UNIQUE termino_servicio');
+      const created: ServiceTermination = { ...clone(row), terminoComercialEn: new Date(), cierreTecnicoEn: null };
+      state.terminations.push(created); return clone(created);
+    },
+    findTerminationByService: async (_tx, id) => clone(state.terminations.find(t => t.idServicio === id) ?? null),
+    findTerminationByRequest: async (_tx, id) => clone(state.terminations.find(t => t.idSolicitudRetiro === id) ?? null),
+    findTerminationByTicket: async (_tx, id) => clone(state.terminations.find(t => t.idTicket === id) ?? null),
+    markTerminationTechnicalClosure: async (_tx, id) => { const row = state.terminations.find(t => t.idServicio === id)!; row.cierreTecnicoEn = row.cierreTecnicoEn ?? new Date(); },
   };
 
   const tickets = {
     createWithdrawalTicket: jest.fn(async (_tx: unknown, input: any) => {
       if (state.failTicket) throw new Error('TICKET_FAILED');
-      const ticket = { idTicket: nextTicket++, idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idCategoria: 900,
-        estado: 'Abierto', descripcion: input.descripcion, fechaCierre: null as Date | null };
+      const categoria = input.categoria ?? 'Baja de servicio';
+      const ticket = { idTicket: nextTicket++, idEmpresa: input.idEmpresa, idCliente: input.idCliente, idServicio: input.idServicio, idCategoria: categoria === 'Baja de servicio' ? 900 : 901,
+        categoria, estado: 'Abierto', descripcion: input.descripcion, fechaCierre: null as Date | null };
       state.tickets.push(ticket); return clone(ticket);
     }),
     // Mirrors TicketsService.closeWithdrawalTicket (its rules are unit-tested against the real service).
     closeWithdrawalTicket: jest.fn(async (_tx: unknown, input: any) => {
       const ticket = state.tickets.find(t => t.idTicket === input.idTicket);
-      if (!ticket || ticket.idEmpresa !== input.idEmpresa || ticket.idCliente !== input.idCliente || ticket.idServicio !== input.idServicio) {
+      if (!ticket || ticket.idEmpresa !== input.idEmpresa || ticket.idCliente !== input.idCliente || ticket.idServicio !== input.idServicio
+        || ticket.categoria !== (input.categoria ?? 'Baja de servicio')) {
         throw new ConflictException({ code: 'WITHDRAWAL_TICKET_INCONSISTENT', message: 'ticket inconsistente' });
       }
       if (ticket.estado === 'Cerrado') return { action: 'YA_CERRADO', estadoAnterior: 'Cerrado' };
       if (state.failAuditOn === 'CERRAR_TICKET_BAJA_SERVICIO') throw new Error('AUDIT_FAILED');
       const estadoAnterior = ticket.estado;
       Object.assign(ticket, { estado: 'Cerrado', fechaCierre: new Date() });
-      state.audits.push({ accion: 'CERRAR_TICKET_BAJA_SERVICIO', idEntidadAfectada: ticket.idTicket, idUsuario: input.idUsuario,
-        valorNuevo: { estado: 'Cerrado', automatico: true, idSolicitudRetiro: input.idSolicitudRetiro, idOtG3: input.idOtG3 } });
+      state.audits.push({ accion: ticket.categoria === 'Baja de servicio' ? 'CERRAR_TICKET_BAJA_SERVICIO' : 'CERRAR_TICKET_TERMINO_SERVICIO', idEntidadAfectada: ticket.idTicket, idUsuario: input.idUsuario,
+        valorNuevo: { estado: 'Cerrado', automatico: true, resultado: input.resultado ?? (ticket.categoria === 'Baja de servicio' ? 'BAJA_POR_MOROSIDAD' : 'RETIRO_TRAS_TERMINO_VOLUNTARIO'),
+          idSolicitudRetiro: input.idSolicitudRetiro, idOtG3: input.idOtG3 } });
       return { action: 'CERRADO', estadoAnterior };
     }),
   };
@@ -219,6 +244,7 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
   const config = new ConfigService({
     G3_WITHDRAWAL_DISPATCH_ENABLED: options.dispatch === false ? 'false' : 'true',
     WITHDRAWAL_FINALIZE_ENABLED: options.finalize ? 'true' : 'false',
+    G3_WITHDRAWAL_VOLUNTARY_ENABLED: options.voluntary ? 'true' : 'false',
   });
   const audit = new AuditService(prisma);
   return { state, prisma, storage, tickets, g3, g3Replies, g3Calls, config, audit };

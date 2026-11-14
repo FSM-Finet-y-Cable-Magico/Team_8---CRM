@@ -8,6 +8,7 @@ import { TicketsService } from './tickets.service';
 const operator = { idUsuario: 7, idEmpresa: 2, email: null, nombreCompleto: 'QA', roles: ['Comercial'] };
 const CATALOG = [
   { idCategoria: 731, nombre: 'Consulta general', tipo: 'ATENCION', slaHoras: 24 },
+  { idCategoria: 738, nombre: 'Término de servicio', tipo: 'ATENCION', slaHoras: 48 },
   { idCategoria: 737, nombre: 'BAJA DE SERVICIO', tipo: 'ATENCION', slaHoras: 48 },
   { idCategoria: 701, nombre: 'Internet lento', tipo: 'TECNICA', slaHoras: 8 },
 ];
@@ -18,18 +19,20 @@ function sqlText(query: unknown) {
   return value.strings?.join('?') ?? value.sql ?? '';
 }
 
-function setup({ idCategoria = 737, linked = true, storage = true } = {}) {
+function setup({ idCategoria = 737, linked = true, storage = true, requestState = 'EN_GESTION', terminationRequest = null as number | null } = {}) {
   const ticket = { idTicket: 10, idCliente: 5, idEmpresa: 2, idServicio: 20, idCategoria, estado: 'Abierto', origen: 'CRM', descripcion: 'Baja', fechaCierre: null };
   const prisma = {
     $queryRaw: jest.fn(async (query: unknown) => {
       const text = sqlText(query);
       if (text.includes('categoria_falla')) return CATALOG.map(row => ({ ...row, tipoDisponible: true }));
-      if (text.includes('to_regclass')) return [{ ticketLink: storage, g3Dispatch: storage, g1Reception: storage }];
+      if (text.includes('to_regclass')) return [{ ticketLink: storage, g3Dispatch: storage, g1Reception: storage, termination: storage }];
+      if (text.includes('FROM g8_retiros.termino_servicio')) return terminationRequest ? [{ idServicio: 20, idTicket: 10, idSolicitudRetiro: terminationRequest }] : [];
       if (text.includes('solicitud_ticket')) return linked ? [{ idSolicitudRetiro: 44, idTicket: 10, idServicio: 20 }] : [];
       throw new Error('unexpected query ' + text);
     }),
     ticket: { findUnique: jest.fn().mockResolvedValue(ticket), update: jest.fn(async ({ data }) => ({ ...ticket, ...data })) },
     ordenTrabajo: { findFirst: jest.fn().mockResolvedValue(null) },
+    servicioRetiroSolicitud: { findUnique: jest.fn().mockResolvedValue({ estado: requestState }) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation(async (work: (client: typeof prisma) => unknown) => work(prisma));
@@ -85,5 +88,26 @@ describe('Ticket «Baja de servicio»: solo dentro del flujo guiado', () => {
     const c = setup({ idCategoria: 731 });
     await c.service.updateStatus(10, { estado: 'Cerrado' } as never, operator);
     expect(c.prisma.$queryRaw.mock.calls.some(([query]) => sqlText(query).includes('to_regclass'))).toBe(false);
+  });
+
+  it.each(['CANCELADA', 'CERRADA'])('con la solicitud %s el ticket vinculado se libera y se gestiona como cualquier ticket', async requestState => {
+    const c = setup({ requestState });
+    await expect(c.service.updateStatus(10, { estado: 'Cerrado' } as never, operator)).resolves.toMatchObject({ estado: 'Cerrado' });
+  });
+
+  it('«Término de servicio» no se crea como ticket general ni se reclasifica hacia ella: exige el formulario de término', async () => {
+    const c = setup({ idCategoria: 731 });
+    await expect(c.service.updateCategory(10, { idCategoria: 738 }, operator)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'TERMINATION_TICKET_FLOW_REQUIRED' }) });
+    expect(c.prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('un ticket «Término de servicio» que reutiliza el retiro activo (sin vínculo propio) tampoco se cierra a mano', async () => {
+    const c = setup({ idCategoria: 738, linked: false, terminationRequest: 44 });
+    await expect(c.service.updateStatus(10, { estado: 'Cerrado' } as never, operator)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'WITHDRAWAL_TICKET_MANAGED_BY_FLOW', idSolicitudRetiro: 44 }) });
+  });
+
+  it('un término sin retiro técnico (datos incompletos) deja su ticket gestionable', async () => {
+    const c = setup({ idCategoria: 738, linked: false, terminationRequest: null });
+    await expect(c.service.updateStatus(10, { estado: 'Cerrado' } as never, operator)).resolves.toMatchObject({ estado: 'Cerrado' });
   });
 });

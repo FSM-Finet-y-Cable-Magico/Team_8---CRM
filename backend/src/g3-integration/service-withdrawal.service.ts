@@ -56,6 +56,10 @@ export class ServiceWithdrawalService {
   async create(dto: CreateServiceWithdrawalDto, currentUser: AuthUser) {
     if (!dto.motivo.trim()) throw new BadRequestException('El motivo de retiro es obligatorio');
     if (isMorosityReason(dto.motivo)) throw guidedFlowRequired();
+    // VOLUNTARIA is the cause of the integrated voluntary termination (Tickets): never a generic request without its termination.
+    if (dto.motivo.trim().toUpperCase() === 'VOLUNTARIA') {
+      throw new BadRequestException({ code: 'TERMINATION_FLOW_REQUIRED', message: 'El término voluntario se registra desde Tickets («Término de servicio»), que aplica el término y prepara el retiro técnico.' });
+    }
     const authorized = await this.prisma.servicioContratado.findUnique({
       where: { idServicio: dto.idServicio },
     });

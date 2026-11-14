@@ -43,8 +43,30 @@ describe('cierre automático del ticket «Baja de servicio»', () => {
     expect(h.current().descripcion).toMatch(/Cerrado automáticamente al aplicar la baja por morosidad \(solicitud 15, OT de retiro 930\)/);
     expect(h.tx.ticket.update).toHaveBeenCalledWith(expect.objectContaining({ where: { idTicket: 77, idEmpresa: 1, estado } }));
     expect(h.audits).toEqual([expect.objectContaining({ accion: 'CERRAR_TICKET_BAJA_SERVICIO', idEntidadAfectada: 77, idUsuario: 7,
-      valorAnterior: { estado }, valorNuevo: { estado: 'Cerrado', automatico: true, idSolicitudRetiro: 15, idOtG3: 930 } })]);
+      valorAnterior: { estado }, valorNuevo: { estado: 'Cerrado', automatico: true, resultado: 'BAJA_POR_MOROSIDAD', idSolicitudRetiro: 15, idOtG3: 930 } })]);
     expect(h.queries[0]).toMatch(/FROM ticket WHERE id_ticket = \? FOR UPDATE/);
+  });
+
+  // FINET 13-11-2026: a «Baja de servicio» ticket whose OT was reused by a voluntary termination keeps its category but
+  // must not report a morosity baja; the «Término de servicio» ticket closes with the same truthful result.
+  it('OT reutilizada tras un término voluntario: conserva la categoría y no informa baja por morosidad', async () => {
+    const h = setup();
+    await h.service.closeWithdrawalTicket(h.tx, { ...h.input, resultado: 'RETIRO_TRAS_TERMINO_VOLUNTARIO' });
+    expect(h.current().idCategoria).toBe(41);
+    expect(h.current().descripcion).toMatch(/retiro técnico del servicio terminado/);
+    expect(h.current().descripcion).not.toMatch(/baja por morosidad/);
+    expect(h.audits[0]).toMatchObject({ accion: 'CERRAR_TICKET_BAJA_SERVICIO', valorNuevo: expect.objectContaining({ resultado: 'RETIRO_TRAS_TERMINO_VOLUNTARIO' }) });
+  });
+
+  it('ticket «Término de servicio»: se resuelve por su nombre oficial (sin ID fijo) y se audita como término', async () => {
+    const h = setup({ idCategoria: 512 }, { categories: [
+      { idCategoria: 41, nombre: 'Baja de servicio', slaHoras: 48, tipoDisponible: true, tipo: 'ATENCION' },
+      { idCategoria: 512, nombre: 'TÉRMINO DE SERVICIO', slaHoras: 48, tipoDisponible: true, tipo: 'ATENCION' }] });
+    await h.service.closeWithdrawalTicket(h.tx, { ...h.input, categoria: 'Término de servicio' });
+    expect(h.audits[0]).toMatchObject({ accion: 'CERRAR_TICKET_TERMINO_SERVICIO', valorNuevo: expect.objectContaining({ resultado: 'RETIRO_TRAS_TERMINO_VOLUNTARIO' }) });
+    const wrong = setup({ idCategoria: 41 }, { categories: [{ idCategoria: 41, nombre: 'Baja de servicio', slaHoras: 48, tipoDisponible: true, tipo: 'ATENCION' },
+      { idCategoria: 512, nombre: 'Término de servicio', slaHoras: 48, tipoDisponible: true, tipo: 'ATENCION' }] });
+    await expect(wrong.service.closeWithdrawalTicket(wrong.tx, { ...wrong.input, categoria: 'Término de servicio' })).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_TICKET_INCONSISTENT' } });
   });
 
   it('idempotente: un ticket ya Cerrado no se reescribe ni se audita', async () => {

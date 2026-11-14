@@ -12,11 +12,27 @@ import { Prisma } from '@prisma/client';
 export const WITHDRAWAL_STORAGE = Symbol('WITHDRAWAL_STORAGE');
 type Db = Prisma.TransactionClient;
 
-export type WithdrawalCapabilities = { ticketLink: boolean; g3Dispatch: boolean; g1Reception: boolean };
+/** `termination`: 003_withdrawal_voluntary_termination.sql applied (cause per link, termination record, G1-free applied check). */
+export type WithdrawalCapabilities = { ticketLink: boolean; g3Dispatch: boolean; g1Reception: boolean; termination: boolean };
+/** The engine needs 002 AND 003: without 003 the applied check of 002 would reject a baja without a G1 reception. */
+export const withdrawalStorageReady = (c: WithdrawalCapabilities) => c.ticketLink && c.g3Dispatch && c.termination;
+
+/** One withdrawal engine, two causes (FINET 13-11-2026). */
+export const WITHDRAWAL_CAUSES = ['MOROSIDAD', 'VOLUNTARIA'] as const;
+export type WithdrawalCause = (typeof WITHDRAWAL_CAUSES)[number];
 
 export type WithdrawalTicketLink = {
-  idSolicitudRetiro: number; idTicket: number; idAviso: number; idEmpresa: number; idCliente: number;
+  idSolicitudRetiro: number; idTicket: number; idAviso: number | null; causa: WithdrawalCause; idEmpresa: number; idCliente: number;
   idServicio: number; idContrato: number; idUsuarioResponsable: number; createdAt: Date;
+};
+
+export const TERMINATION_CHANNELS = ['PRESENCIAL', 'TELEFONO', 'CORREO', 'WHATSAPP', 'PORTAL', 'OTRO'] as const;
+export const TERMINATION_REQUESTERS = ['TITULAR', 'REPRESENTANTE'] as const;
+/** Voluntary commercial termination of a service (g8_retiros.termino_servicio, 003). */
+export type ServiceTermination = {
+  idServicio: number; idEmpresa: number; idCliente: number; idContrato: number; idTicket: number; idSolicitudRetiro: number | null;
+  requerimientoEn: Date; canal: (typeof TERMINATION_CHANNELS)[number]; solicitante: (typeof TERMINATION_REQUESTERS)[number]; evidencia: string;
+  idUsuarioResponsable: number; terminoComercialEn: Date; cierreTecnicoEn: Date | null;
 };
 
 export const DISPATCH_STATES = ['PENDIENTE', 'ENVIANDO', 'REINTENTABLE', 'ACEPTADA', 'RECHAZADA', 'INCONSISTENTE',
@@ -66,9 +82,14 @@ export interface WithdrawalStorage {
    * not applied, OT not cancelled and the CRM request neither closed nor cancelled. Terminal ones never come back.
    */
   listTrackable(tx: Db, limit: number): Promise<number[]>;
+  insertTermination(tx: Db, row: Omit<ServiceTermination, 'terminoComercialEn' | 'cierreTecnicoEn'>): Promise<ServiceTermination>;
+  findTerminationByService(tx: Db, idServicio: number): Promise<ServiceTermination | null>;
+  findTerminationByRequest(tx: Db, idSolicitudRetiro: number): Promise<ServiceTermination | null>;
+  findTerminationByTicket(tx: Db, idTicket: number): Promise<ServiceTermination | null>;
+  markTerminationTechnicalClosure(tx: Db, idServicio: number): Promise<void>;
 }
 
-const LINK_COLUMNS = Prisma.sql`id_solicitud_retiro AS "idSolicitudRetiro", id_ticket AS "idTicket", id_aviso AS "idAviso",
+const LINK_COLUMNS = Prisma.sql`id_solicitud_retiro AS "idSolicitudRetiro", id_ticket AS "idTicket", id_aviso AS "idAviso", causa,
   id_empresa AS "idEmpresa", id_cliente AS "idCliente", id_servicio AS "idServicio", id_contrato AS "idContrato",
   id_usuario_responsable AS "idUsuarioResponsable", created_at AS "createdAt"`;
 
@@ -79,6 +100,10 @@ const DISPATCH_COLUMNS = Prisma.sql`id_solicitud_retiro AS "idSolicitudRetiro", 
   cierre_clave AS "cierreClave", cierre_hash AS "cierreHash", cierre_recibido_en AS "cierreRecibidoEn",
   equipos_retirados AS "equiposRetirados", equipos_faltantes AS "equiposFaltantes",
   recepcion_clave_evento AS "recepcionClaveEvento", recepcion_sincronizada_en AS "recepcionSincronizadaEn", aplicado_en AS "aplicadoEn"`;
+
+const TERMINATION_COLUMNS = Prisma.sql`id_servicio AS "idServicio", id_empresa AS "idEmpresa", id_cliente AS "idCliente", id_contrato AS "idContrato",
+  id_ticket AS "idTicket", id_solicitud_retiro AS "idSolicitudRetiro", requerimiento_en AS "requerimientoEn", canal, solicitante, evidencia,
+  id_usuario_responsable AS "idUsuarioResponsable", termino_comercial_en AS "terminoComercialEn", cierre_tecnico_en AS "cierreTecnicoEn"`;
 
 const RECEPTION_COLUMNS = Prisma.sql`numero_serie AS "numeroSerie", id_ot_g3 AS "idOtG3", resultado, estado_g1 AS "estadoG1",
   fecha_recepcion AS "fechaRecepcion", id_servicio_externo AS "idServicioExterno", detalle, clave_evento AS "claveEvento",
@@ -95,8 +120,10 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
     const rows = await tx.$queryRaw<Array<WithdrawalCapabilities>>`
       SELECT to_regclass('g8_retiros.solicitud_ticket') IS NOT NULL AS "ticketLink",
              to_regclass('g8_retiros.solicitud_g3') IS NOT NULL AS "g3Dispatch",
-             to_regclass('g8_retiros.recepcion_g1') IS NOT NULL AS "g1Reception"`;
-    return { ticketLink: rows[0]?.ticketLink === true, g3Dispatch: rows[0]?.g3Dispatch === true, g1Reception: rows[0]?.g1Reception === true };
+             to_regclass('g8_retiros.recepcion_g1') IS NOT NULL AS "g1Reception",
+             to_regclass('g8_retiros.termino_servicio') IS NOT NULL AS "termination"`;
+    return { ticketLink: rows[0]?.ticketLink === true, g3Dispatch: rows[0]?.g3Dispatch === true, g1Reception: rows[0]?.g1Reception === true,
+      termination: rows[0]?.termination === true };
   },
   async findLinkByRequest(tx, idSolicitudRetiro) {
     const rows = await tx.$queryRaw<WithdrawalTicketLink[]>(Prisma.sql`SELECT ${LINK_COLUMNS} FROM g8_retiros.solicitud_ticket WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
@@ -108,8 +135,8 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
   },
   async insertLink(tx, link) {
     const rows = await tx.$queryRaw<WithdrawalTicketLink[]>(Prisma.sql`
-      INSERT INTO g8_retiros.solicitud_ticket (id_solicitud_retiro, id_ticket, id_aviso, id_empresa, id_cliente, id_servicio, id_contrato, id_usuario_responsable)
-      VALUES (${link.idSolicitudRetiro}, ${link.idTicket}, ${link.idAviso}, ${link.idEmpresa}, ${link.idCliente}, ${link.idServicio}, ${link.idContrato}, ${link.idUsuarioResponsable})
+      INSERT INTO g8_retiros.solicitud_ticket (id_solicitud_retiro, id_ticket, id_aviso, causa, id_empresa, id_cliente, id_servicio, id_contrato, id_usuario_responsable)
+      VALUES (${link.idSolicitudRetiro}, ${link.idTicket}, ${link.idAviso}, ${link.causa}, ${link.idEmpresa}, ${link.idCliente}, ${link.idServicio}, ${link.idContrato}, ${link.idUsuarioResponsable})
       RETURNING ${LINK_COLUMNS}`);
     if (!rows[0]) throw new Error('WITHDRAWAL_LINK_NOT_STORED');
     return rows[0];
@@ -196,5 +223,31 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
   async markApplied(tx, idSolicitudRetiro) {
     await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.solicitud_g3 SET aplicado_en = COALESCE(aplicado_en, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
       WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
+  },
+  async insertTermination(tx, row) {
+    const rows = await tx.$queryRaw<ServiceTermination[]>(Prisma.sql`
+      INSERT INTO g8_retiros.termino_servicio (id_servicio, id_empresa, id_cliente, id_contrato, id_ticket, id_solicitud_retiro, requerimiento_en,
+        canal, solicitante, evidencia, id_usuario_responsable)
+      VALUES (${row.idServicio}, ${row.idEmpresa}, ${row.idCliente}, ${row.idContrato}, ${row.idTicket}, ${row.idSolicitudRetiro}, ${row.requerimientoEn},
+        ${row.canal}, ${row.solicitante}, ${row.evidencia}, ${row.idUsuarioResponsable})
+      RETURNING ${TERMINATION_COLUMNS}`);
+    if (!rows[0]) throw new Error('SERVICE_TERMINATION_NOT_STORED');
+    return rows[0];
+  },
+  async findTerminationByService(tx, idServicio) {
+    const rows = await tx.$queryRaw<ServiceTermination[]>(Prisma.sql`SELECT ${TERMINATION_COLUMNS} FROM g8_retiros.termino_servicio WHERE id_servicio = ${idServicio}`);
+    return rows[0] ?? null;
+  },
+  async findTerminationByRequest(tx, idSolicitudRetiro) {
+    const rows = await tx.$queryRaw<ServiceTermination[]>(Prisma.sql`SELECT ${TERMINATION_COLUMNS} FROM g8_retiros.termino_servicio WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
+    return rows[0] ?? null;
+  },
+  async findTerminationByTicket(tx, idTicket) {
+    const rows = await tx.$queryRaw<ServiceTermination[]>(Prisma.sql`SELECT ${TERMINATION_COLUMNS} FROM g8_retiros.termino_servicio WHERE id_ticket = ${idTicket}`);
+    return rows[0] ?? null;
+  },
+  async markTerminationTechnicalClosure(tx, idServicio) {
+    await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.termino_servicio SET cierre_tecnico_en = COALESCE(cierre_tecnico_en, CURRENT_TIMESTAMP)
+      WHERE id_servicio = ${idServicio}`);
   },
 };
