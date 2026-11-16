@@ -19,8 +19,9 @@ function loadComponent(file, mocks) {
     if (name === '../../shared/data/chile-territories') return { findChileRegion: () => null };
     if (name === '../../lib') return { formatDateTime: String, formatRutForDisplay: value => value ?? null };
     if (name.endsWith('.css')) return {};
+    if(name.endsWith('/ChileanPhoneInput')) return require('./helpers/chilean-phone-input.cjs');
     if (name.startsWith('.')) throw new Error(`Unmocked dependency: ${name}`);
-    return require(name);
+    return (name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name));
   }, exports);
   return exports[file];
 }

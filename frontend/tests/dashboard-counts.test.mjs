@@ -12,7 +12,7 @@ const code = ts.transpileModule(readFileSync(new URL('../src/features/dashboard/
 }).outputText;
 const Card = () => null;
 const exports = {};
-new Function('require', 'exports', code)(name => name === '../../api' ? {} : name === '../../shared/components' ? {
+new Function('require', 'exports', code)(name => name === './useDashboardFinance' ? { useDashboardFinance: () => ({ data: null, loading: false }) } : name === '../../api' ? {} : name === '../../shared/components' ? {
   DashboardStatCard: Card, Modal: () => null, QuickActionCard: () => null,
 } : name === '../../lib' ? {
   isInstallationWorkOrder: () => true, isTerminalWorkOrder: () => false, isInProgressWorkOrder: () => false,

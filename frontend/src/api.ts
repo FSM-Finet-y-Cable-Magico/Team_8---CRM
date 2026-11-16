@@ -258,6 +258,7 @@ export type Customer = {
   }>;
   contratos?: Array<{
     idContrato: number;
+    diaVencimiento?: number;
     idEmpresa: number | null;
     idZonaPago?: number | null;
     precioMensualAplicable?: number | null;

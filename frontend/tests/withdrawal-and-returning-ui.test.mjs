@@ -12,7 +12,7 @@ const textOf = node => typeof node === 'string' ? node : Array.isArray(node) ? n
 const transpile = (relative, mocks) => {
   const source = readFileSync(new URL('../src/' + relative, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } });
-  const exports = {}; new Function('require', 'exports', outputText)(name => (name in mocks ? mocks[name] : require(name)), exports); return exports;
+  const exports = {}; new Function('require', 'exports', outputText)(name => (name in mocks ? mocks[name] : (name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name))), exports); return exports;
 };
 
 // ---------- Ficha del Libro de Control: acción «Dar de baja el servicio» ----------

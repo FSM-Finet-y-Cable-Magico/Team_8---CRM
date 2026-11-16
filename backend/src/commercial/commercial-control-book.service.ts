@@ -1,3 +1,4 @@
+import { PaymentDayAdjustment } from './payment-day-adjustment';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
@@ -273,18 +274,20 @@ export class CommercialControlBookService {
     const start = this.dateOnly(dto.fechaInicio, 'fechaInicio');
     dto.cuotas.forEach((item) => { if (this.dateOnly(item.fechaVencimiento, 'fechaVencimiento') < start) throw new BadRequestException('Las cuotas no pueden vencer antes del inicio'); });
 
-    const agreement = await this.prisma.convenioPago.create({
-      data: {
-        idEmpresa: companyId, idCliente: customer.idCliente, idFactura: invoice.idFactura,
-        idContrato: invoice.idContrato, idServicio: dto.idServicio,
-        montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas,
-        condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'APROBADO', idUsuarioResponsable: user.idUsuario,
-        idUsuarioAprobador: user.idUsuario, fechaAprobacion: new Date(),
-        cuotas: { create: dto.cuotas.map((item) => ({ numero: item.numero, monto: item.monto, fechaVencimiento: this.dateOnly(item.fechaVencimiento, 'fechaVencimiento') })) },
-      }, include: { cuotas: true },
+    return this.withAnnualAllowance(customer.idCliente, 'agreement', async tx => {
+      const agreement = await tx.convenioPago.create({
+        data: {
+          idEmpresa: companyId, idCliente: customer.idCliente, idFactura: invoice.idFactura,
+          idContrato: invoice.idContrato, idServicio: dto.idServicio,
+          montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas,
+          condiciones: dto.condiciones.trim(), fechaInicio: start, estado: 'APROBADO', idUsuarioResponsable: user.idUsuario,
+          idUsuarioAprobador: user.idUsuario, fechaAprobacion: new Date(),
+          cuotas: { create: dto.cuotas.map((item) => ({ numero: item.numero, monto: item.monto, fechaVencimiento: this.dateOnly(item.fechaVencimiento, 'fechaVencimiento') })) },
+        }, include: { cuotas: true },
+      });
+      await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_CONVENIO_PAGO', entidadAfectada: 'convenio_pago', idEntidadAfectada: agreement.idConvenio, valorNuevo: { idCliente: customer.idCliente, idFactura: invoice.idFactura, montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas, estado: agreement.estado } }, tx);
+      return agreement;
     });
-    await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_CONVENIO_PAGO', entidadAfectada: 'convenio_pago', idEntidadAfectada: agreement.idConvenio, valorNuevo: { idCliente: customer.idCliente, idFactura: invoice.idFactura, montoComprometido: dto.montoComprometido, cantidadCuotas: dto.cantidadCuotas, estado: agreement.estado } });
-    return agreement;
   }
 
   async approveAgreement(idConvenio: number, user: AuthUser) {
@@ -319,9 +322,19 @@ export class CommercialControlBookService {
     const newDate = this.dateOnly(dto.nuevaFecha, 'nuevaFecha');
     const latest = invoice.prorrogasPago[0]?.nuevaFecha ?? invoice.fechaLimitePago;
     if (newDate <= latest) throw new BadRequestException('La nueva fecha debe ser posterior a la fecha vigente');
-    const extension = await this.prisma.prorrogaPago.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: invoice.idContrato, idFactura: invoice.idFactura, fechaOriginal: invoice.fechaLimitePago, nuevaFecha: newDate, motivo: dto.motivo.trim(), estado: 'APROBADA', idUsuarioResponsable: user.idUsuario } });
-    await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_PRORROGA', entidadAfectada: 'prorroga_pago', idEntidadAfectada: extension.idProrroga, valorNuevo: { idFactura: invoice.idFactura, fechaOriginal: invoice.fechaLimitePago, nuevaFecha: newDate, motivo: dto.motivo.trim() } });
-    return extension;
+    return this.withAnnualAllowance(customer.idCliente, 'extension', async tx => {
+      const extension = await tx.prorrogaPago.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: invoice.idContrato, idFactura: invoice.idFactura, fechaOriginal: invoice.fechaLimitePago, nuevaFecha: newDate, motivo: dto.motivo.trim(), estado: 'APROBADA', idUsuarioResponsable: user.idUsuario } });
+      await this.audit.record({ idUsuario: user.idUsuario, accion: 'CREAR_PRORROGA', entidadAfectada: 'prorroga_pago', idEntidadAfectada: extension.idProrroga, valorNuevo: { idFactura: invoice.idFactura, fechaOriginal: invoice.fechaLimitePago, nuevaFecha: newDate, motivo: dto.motivo.trim() } }, tx);
+      return extension;
+    });
+  }
+
+  async paymentDayPreview(idContrato: number, newDay: number, user: AuthUser) {
+    this.assertWriter(user);
+    const contract = await this.prisma.contrato.findUnique({ where: { idContrato } });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+    this.assertCompany(this.requireCompany(contract.idEmpresa), user);
+    return new PaymentDayAdjustment(this.prisma).preview(idContrato, newDay);
   }
 
   async changePaymentCondition(dto: ChangePaymentConditionDto, user: AuthUser) {
@@ -336,13 +349,8 @@ export class CommercialControlBookService {
       if (!contract || contract.idCliente !== customer.idCliente || contract.idEmpresa !== companyId) throw new BadRequestException('Contrato incompatible con el cliente o empresa');
       const newDay = Number(dto.valorNuevo);
       if (!Number.isInteger(newDay) || newDay < 1 || newDay > 28) throw new BadRequestException('El día de pago debe estar entre 1 y 28');
-      const result = await this.prisma.$transaction(async (tx) => {
-        const change = await tx.cambioCondicionPago.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: contract.idContrato, tipoCambio: dto.tipoCambio, valorAnterior: String(contract.diaVencimiento), valorNuevo: String(newDay), justificacion: dto.justificacion.trim(), idUsuarioResponsable: user.idUsuario } });
-        await tx.contrato.update({ where: { idContrato: contract.idContrato }, data: { diaVencimiento: newDay } });
-        return change;
-      });
-      await this.auditCondition(result.idCambio, user, dto, String(contract.diaVencimiento), String(newDay));
-      return result;
+      return new PaymentDayAdjustment(this.prisma).save(contract.idContrato, newDay, dto.previewFingerprint, dto.justificacion.trim(), user.idUsuario,
+        (id, tx) => this.auditCondition(id, user, dto, String(contract.diaVencimiento), String(newDay), tx));
     }
 
     if (!dto.idFactura) throw new BadRequestException('La fecha comprometida requiere factura');
@@ -353,13 +361,44 @@ export class CommercialControlBookService {
     const newDate = this.dateOnly(dto.valorNuevo, 'valorNuevo');
     const currentDate = invoice.prorrogasPago[0]?.nuevaFecha ?? invoice.fechaLimitePago;
     if (newDate <= currentDate) throw new BadRequestException('La fecha comprometida debe ser posterior a la vigente');
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.withAnnualAllowance(customer.idCliente, 'extension', async (tx) => {
       const change = await tx.cambioCondicionPago.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: invoice.idContrato, idFactura: invoice.idFactura, tipoCambio: dto.tipoCambio, valorAnterior: currentDate.toISOString().slice(0, 10), valorNuevo: dto.valorNuevo, justificacion: dto.justificacion.trim(), idUsuarioResponsable: user.idUsuario } });
       const extension = await tx.prorrogaPago.create({ data: { idEmpresa: companyId, idCliente: customer.idCliente, idContrato: invoice.idContrato, idFactura: invoice.idFactura, fechaOriginal: invoice.fechaLimitePago, nuevaFecha: newDate, motivo: dto.justificacion.trim(), estado: 'APROBADA', idUsuarioResponsable: user.idUsuario } });
+      await this.auditCondition(change.idCambio, user, dto, currentDate.toISOString().slice(0, 10), dto.valorNuevo, tx);
       return { change, extension };
     });
-    await this.auditCondition(result.change.idCambio, user, dto, currentDate.toISOString().slice(0, 10), dto.valorNuevo);
     return result;
+  }
+
+  private allowanceYear() {
+    const year = Number(todayDateOnly().slice(0, 4));
+    return { year, start: new Date(`${year}-01-01T00:00:00-03:00`), end: new Date(`${year + 1}-01-01T00:00:00-03:00`) };
+  }
+
+  private async allowanceCounts(idCliente: number, tx: Prisma.TransactionClient = this.prisma) {
+    const { year, start, end } = this.allowanceYear();
+    const where = { idCliente, fechaRegistro: { gte: start, lt: end } };
+    const [agreements, extensions] = await Promise.all([tx.convenioPago.count({ where }), tx.prorrogaPago.count({ where })]);
+    return { year, limit: 3, agreements: { used: agreements, remaining: Math.max(0, 3 - agreements) }, extensions: { used: extensions, remaining: Math.max(0, 3 - extensions) } };
+  }
+
+  private withAnnualAllowance<T>(idCliente: number, kind: 'agreement' | 'extension', operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+    return this.prisma.$transaction(async tx => {
+      // A customer-level lock serializes both companies and all this person's contracts.
+      await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${idCliente} FOR UPDATE`;
+      const usage = await this.allowanceCounts(idCliente, tx);
+      const remaining = kind === 'agreement' ? usage.agreements.remaining : usage.extensions.remaining;
+      if (!remaining) throw new BadRequestException(`El cliente ya utilizó sus 3 ${kind === 'agreement' ? 'convenios' : 'prórrogas'} de ${usage.year}.`);
+      return operation(tx);
+    });
+  }
+
+  async annualAllowance(idCliente: number, requestedCompany: number | undefined, user: AuthUser) {
+    this.assertViewer(user);
+    const idEmpresa = this.queryCompany(requestedCompany, user);
+    const customer = await this.prisma.cliente.findFirst({ where: { idCliente, OR: [{ idEmpresa }, { contratos: { some: { idEmpresa } } }] }, select: { idCliente: true } });
+    if (!customer) throw new NotFoundException('Cliente no encontrado en la empresa seleccionada');
+    return this.allowanceCounts(idCliente);
   }
 
   async createAdditionalCharge(dto: CreateAdditionalChargeDto, user: AuthUser) {
@@ -467,7 +506,7 @@ export class CommercialControlBookService {
       const charges = customer.cargosAdicionales.filter((charge) => contract ? charge.idContrato === contract.idContrato : service ? charge.idContrato === null && charge.idServicio === service.idServicio : charge.idContrato === null && charge.idServicio === null);
       return {
         rowId: invoice ? `${customer.idCliente}-${contract!.idContrato}-${invoice.idFactura}` : `${customer.idCliente}-${contract?.idContrato ?? 'sin-contrato'}-${service?.idServicio ?? 'sin-servicio'}-sin-factura`,
-        resumenCliente: undefined as { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null }> } | undefined,
+        resumenCliente: undefined as { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null; saldoPendiente: number | null }> } | undefined,
         idEmpresa: company, idCliente: customer.idCliente, rut: customer.rut, nombre: customer.nombreCompleto,
         telefono: customer.telefono, email: customer.email, direccion: service?.direccion?.direccionCompleta ?? contract?.direccionInstalacion ?? null,
         idServicio: service?.idServicio ?? null, serviciosRelacionados: services.map((item) => item.idServicio), estadoServicio: service?.estadoOperativo ?? (services.length > 1 ? 'Múltiples servicios' : null),
@@ -544,7 +583,12 @@ export class CommercialControlBookService {
         ...representative,
         rowId: `customer-${representative.idEmpresa}-${representative.idCliente}`,
         resumenCliente: { contratos: contracts.length, facturas: invoices.length, planes: plans,
-          contratosRelacionados: contracts.map(row => ({ idContrato: row.idContrato!, numeroContrato: row.numeroContrato, plan: row.plan })) },
+          contratosRelacionados: contracts.map(row => {
+            const contractInvoices = invoices.filter(invoice => invoice.idContrato === row.idContrato);
+            const saldoPendiente = contractInvoices.some(invoice => invoice.saldoPendiente === null) ? null
+              : this.money(contractInvoices.reduce((total, invoice) => total + (invoice.saldoPendiente ?? 0), 0));
+            return { idContrato: row.idContrato!, numeroContrato: row.numeroContrato, plan: row.plan, saldoPendiente };
+          }) },
         // Customer totals must never be used as if they belonged to one invoice, contract or service.
         idContrato: null, idServicio: null, idFactura: null, idPlan: null, idZona: null,
         serviciosRelacionados: [...new Set(records.flatMap(row => row.serviciosRelacionados))],
@@ -631,8 +675,8 @@ export class CommercialControlBookService {
     if (invoice && (!invoice.contrato || invoice.contrato.idCliente !== idCliente || invoice.contrato.idEmpresa !== idEmpresa)) throw new BadRequestException('Factura incompatible con el cliente o empresa');
   }
 
-  private auditCondition(id: number, user: AuthUser, dto: ChangePaymentConditionDto, previous: string, next: string) {
-    return this.audit.record({ idUsuario: user.idUsuario, accion: 'CAMBIAR_CONDICION_PAGO', entidadAfectada: 'cambio_condicion_pago', idEntidadAfectada: id, valorAnterior: { valor: previous }, valorNuevo: { tipoCambio: dto.tipoCambio, valor: next, justificacion: dto.justificacion.trim() } });
+  private auditCondition(id: number, user: AuthUser, dto: ChangePaymentConditionDto, previous: string, next: string, tx?: Prisma.TransactionClient) {
+    return this.audit.record({ idUsuario: user.idUsuario, accion: 'CAMBIAR_CONDICION_PAGO', entidadAfectada: 'cambio_condicion_pago', idEntidadAfectada: id, valorAnterior: { valor: previous }, valorNuevo: { tipoCambio: dto.tipoCambio, valor: next, justificacion: dto.justificacion.trim() } }, tx);
   }
 
   private assertViewer(user: AuthUser) {

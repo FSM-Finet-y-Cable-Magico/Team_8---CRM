@@ -912,6 +912,7 @@ model ConvenioPago {
 
   @@index([idEmpresa, estado, fechaInicio])
   @@index([idCliente, estado])
+  @@index([idCliente, fechaRegistro])
   @@index([idFactura])
   @@map("convenio_pago")
 }
@@ -953,11 +954,13 @@ model ProrrogaPago {
   responsable Usuario   @relation(fields: [idUsuarioResponsable], references: [idUsuario], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([idEmpresa, estado, nuevaFecha])
+  @@index([idCliente, fechaRegistro])
   @@index([idFactura, fechaRegistro])
   @@map("prorroga_pago")
 }
 
 model CambioCondicionPago {
+  reajuste             Json?    @map("reajuste")
   idCambio             Int      @id @default(autoincrement()) @map("id_cambio")
   idEmpresa            Int      @map("id_empresa")
   idCliente            Int      @map("id_cliente")

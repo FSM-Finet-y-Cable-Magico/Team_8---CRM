@@ -10,6 +10,12 @@ import { G2IntegrationService } from './g2-integration.service';
 export class G2IntegrationController {
   constructor(private readonly integrations: G2IntegrationService) {}
 
+  @Get('customers/:id/payment-conditions')
+  @IntegrationCompanyScope('query')
+  paymentConditions(@Param('id', ParseIntPipe) id: number, @Query() query: G2CompanyQueryDto) {
+    return this.integrations.paymentConditions(id, query.id_empresa);
+  }
+
   @Get('invoices')
   @IntegrationCompanyScope('query')
   invoices(@Query() query: G2InvoiceQueryDto) { return this.integrations.invoices(query); }
