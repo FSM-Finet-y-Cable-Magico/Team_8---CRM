@@ -27,6 +27,23 @@ export class G2IntegrationService {
     private readonly audit: AuditService,
   ) {}
 
+  async paymentConditions(idCliente: number, idEmpresa: number) {
+    const contracts = await this.prisma.contrato.findMany({ where: { idCliente, idEmpresa }, select: {
+      idContrato: true, idCliente: true, idEmpresa: true, diaVencimiento: true,
+      cargosAdicionales: { where: { idEmpresa, idCliente, estado: 'PENDIENTE_FACTURACION' },
+        select: { idCargo: true, monto: true, fecha: true, estado: true, observacion: true } },
+      cambiosCondicionPago: { where: { tipoCambio: 'DIA_PAGO', idEmpresa, idCliente }, orderBy: { idCambio: 'desc' }, take: 1,
+        select: { idCambio: true, fechaRegistro: true, reajuste: true } },
+    } });
+    if (!contracts.length) throw new NotFoundException('Cliente sin contratos en la empresa indicada');
+    return { id_cliente: idCliente, id_empresa: idEmpresa, contratos: contracts.map(contract => ({
+      id_contrato: contract.idContrato, dia_pago: contract.diaVencimiento,
+      ultimo_cambio: contract.cambiosCondicionPago[0] ?? null,
+      cargos_pendientes: contract.cargosAdicionales.map(charge => ({ id_cargo: charge.idCargo, monto: Number(charge.monto),
+        fecha: charge.fecha, estado: charge.estado, observacion: charge.observacion })),
+    })) };
+  }
+
   invoices(query: G2InvoiceQueryDto) {
     const identifiers = [query.rut, query.id_cliente, query.id_contrato].filter(value => value !== undefined);
     if (identifiers.length !== 1) {

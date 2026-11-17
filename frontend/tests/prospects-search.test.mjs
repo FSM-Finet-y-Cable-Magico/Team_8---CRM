@@ -28,7 +28,7 @@ function loadPanel(api) {
     '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage() {} }) },
     '../../shared/data/chile-territories': { chileRegions: [], findChileRegion: () => null, normalizeTerritory: String },
   };
-  new Function('require', 'exports', outputText)(name => (name in mocks ? mocks[name] : require(name)), exports);
+  new Function('require', 'exports', outputText)(name => (name in mocks ? mocks[name] : (name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name))), exports);
   return exports.ProspectsPanel;
 }
 

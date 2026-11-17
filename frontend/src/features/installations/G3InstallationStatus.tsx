@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
 import { api, apiErrorMessage, type CustomerService, type G3InstallationTracking } from '../../api';
-import { formatDateTime, userFacingMessage } from '../../lib';
+import { formatDateTime } from '../../lib';
 import { StatusBadge, ToastNotice } from '../../shared/components';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 
@@ -10,13 +10,31 @@ const STATE_LABELS: Record<string, string> = {
   CANCELADA: 'Cancelada', PENDIENTE_CLIENTE_AUSENTE: 'Cliente ausente', EN_SEGUIMIENTO: 'En seguimiento',
 };
 
-function textValue(value: unknown) {
-  if (typeof value === 'string') return value;
+function textValue(value: unknown, keys = ['nombre_completo', 'nombreCompleto', 'nombre']) {
+  if (typeof value === 'string' && value.trim() && !['-', '—'].includes(value.trim())) return value.trim();
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    return String(record.nombre_completo ?? record.nombre ?? record.direccion_completa ?? 'No informado');
+    for (const key of keys) {
+      const item = record[key];
+      if (typeof item === 'string' && item.trim() && !['-', '—'].includes(item.trim())) return item.trim();
+    }
   }
-  return '-';
+  return 'No registrado';
+}
+
+function trackingFields(tracking: G3InstallationTracking, className = 'customer-readonly-details') {
+  const remoteState = tracking.estadoRemotoG3 ?? tracking.detalle?.estado;
+  const technician = textValue(tracking.detalle?.tecnico);
+  return <dl className={className}>
+    <div><dt>Orden de trabajo</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'No registrado'}</dd></div>
+    <div><dt>Fecha solicitud</dt><dd>{tracking.fechaSolicitud ? formatDateTime(tracking.fechaSolicitud) : 'No registrado'}</dd></div>
+    <div><dt>Última actualización</dt><dd>{tracking.fechaUltimaSincronizacion ? formatDateTime(tracking.fechaUltimaSincronizacion) : 'No registrado'}</dd></div>
+    <div><dt>Intentos de envío</dt><dd>{tracking.intentos ?? 'No registrado'}</dd></div>
+    <div><dt>Estado informado por el equipo técnico</dt><dd>{remoteState ? STATE_LABELS[remoteState] ?? 'Pendiente de revisión' : 'No registrado'}</dd></div>
+    <div><dt>Técnico</dt><dd>{technician !== 'No registrado' ? technician : tracking.detalle?.idTecnicoG3 ? `Técnico #${tracking.detalle.idTecnicoG3}` : 'No registrado'}</dd></div>
+    <div><dt>Dirección</dt><dd>{textValue(tracking.detalle?.direccion, ['direccion_completa', 'direccionCompleta', 'direccion'])}</dd></div>
+    <div><dt>Fecha de finalización</dt><dd>{tracking.detalle?.fechaCompletada ? formatDateTime(tracking.detalle.fechaCompletada) : 'No registrado'}</dd></div>
+  </dl>;
 }
 
 function completedFields(tracking: G3InstallationTracking | null, service?: CustomerService) {
@@ -37,9 +55,9 @@ function completedFields(tracking: G3InstallationTracking | null, service?: Cust
       return typeof serial === 'string' && serial.trim() ? [serial.trim()] : [];
     }) : []);
   return <dl className="customer-contract-facts installation-facts">
-    <div><dt>Técnico</dt><dd>{technician && technician !== 'No informado' ? technician : technicianId ? 'ID #' + technicianId : '—'}</dd></div>
-    <div><dt>Fecha y hora de instalación</dt><dd>{date ? formatDateTime(date) : '—'}</dd></div>
-    <div><dt>Equipos declarados en la orden</dt><dd>{series.length ? [...new Set(series)].join(' · ') : '—'}</dd></div>
+    <div><dt>Técnico</dt><dd>{technician && technician !== 'No registrado' ? technician : technicianId ? 'ID #' + technicianId : 'No registrado'}</dd></div>
+    <div><dt>Fecha y hora de instalación</dt><dd>{date ? formatDateTime(date) : 'No registrado'}</dd></div>
+    <div><dt>Equipos declarados en la orden</dt><dd>{series.length ? [...new Set(series)].join(' · ') : 'No registrado'}</dd></div>
     {typeof power === 'number' && <div><dt>Potencia óptica</dt><dd>{power} dBm</dd></div>}
   </dl>;
 }
@@ -50,23 +68,21 @@ function matchesTarget(tracking: G3InstallationTracking | null, contractId?: num
   return !tracking || ((contractId == null || tracking.idContrato == null || tracking.idContrato === contractId)
     && (prospectId == null || tracking.idProspecto == null || tracking.idProspecto === prospectId));
 }
-export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, singleRefresh = false, service }: InstallationTarget & {
+export function G3InstallationStatus({ prospectId, contractId, canRequest, blockedReason, onChanged, compact = false, installationSummary = false, hideRequest = false, service }: InstallationTarget & {
   canRequest: boolean; blockedReason?: string; onChanged?: () => void; compact?: boolean;
-  installationSummary?: boolean; hideRequest?: boolean; singleRefresh?: boolean; service?: CustomerService;
+  installationSummary?: boolean; hideRequest?: boolean; service?: CustomerService;
 }) {
   const [tracking, setTracking] = useState<G3InstallationTracking | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [readFailed, setReadFailed] = useState(false);
   const [requirements, setRequirements] = useState<{ idContrato: number; comunaFaltante: boolean; puedeCompletarComuna?: boolean } | null>(null);
   const [comuna, setComuna] = useState('');
   const [sameAddress, setSameAddress] = useState(false);
   const [notice, setNotice] = useState('');
   const { message, showMessage, clearMessage } = useTransientMessage(5000);
-  const trackingError = tracking?.ultimoErrorSanitizado
-    ? userFacingMessage(tracking.ultimoErrorSanitizado, 'No se pudo actualizar la instalación. Inténtalo nuevamente más tarde.')
-    : '';
-  const feedback = error || notice || trackingError;
+  const feedback = error || notice;
   useEffect(() => {
     if (!compact) return;
     if (!tracking || !feedback || loading || busy) {
@@ -82,6 +98,10 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
   const savedInstallation = service?.instalacion;
   const savedCompletion = Boolean(savedInstallation && (savedInstallation.estado === 'COMPLETADA'
     || savedInstallation.fechaProcesamiento || savedInstallation.fechaCompletada));
+  const loadOptions = useRef({ canRequest, savedCompletion, installationSummary });
+  loadOptions.current = { canRequest, savedCompletion, installationSummary };
+  const changedListener = useRef(onChanged);
+  changedListener.current = onChanged;
   useEffect(() => { setComuna(''); setSameAddress(false); setNotice(''); }, [contractId, prospectId]);
   useEffect(() => {
     mutationInFlight.current = false;
@@ -96,27 +116,54 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     const controller = new AbortController();
     loadController.current = controller;
     const revision = ++loadRevision.current;
-    setLoading(true); setError(''); setRequirements(null);
+    setLoading(true); setError(''); setReadFailed(false); setRequirements(null);
     setTracking(null);
     try {
       if ((prospectId == null) === (contractId == null)) { setError('No se pudo identificar el contrato de esta instalación.'); return; }
       const path = contractId != null ? `/integrations/g3/contracts/${contractId}/installation` : `/integrations/g3/prospects/${prospectId}/installation`;
-      const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal });
+      const { data } = await api.get<G3InstallationTracking | null>(path, { signal: controller.signal, timeout: 15000 });
       if (revision !== loadRevision.current || controller.signal.aborted) return;
       if (!matchesTarget(data, contractId, prospectId)) throw new Error('La consulta no corresponde a la instalación seleccionada.');
       setTracking(data);
-      if (!data && canRequest && !savedCompletion && !installationSummary) {
+      // The local lookup identifies the order; its detail is fetched on opening, just as on manual refresh.
+      if (data && (data.idOtG3 || data.codigoOtG3) && !data.detalle) {
+        try {
+          const detail = await fetchDetail(data, controller.signal);
+          if (revision !== loadRevision.current || controller.signal.aborted) return;
+          setTracking(detail);
+          if (!detail.detalle && detail.ultimoErrorSanitizado) setReadFailed(true);
+          if (relationshipChanged(data, detail)) changedListener.current?.();
+        } catch {
+          if (revision === loadRevision.current && !controller.signal.aborted) setReadFailed(true);
+        }
+      }
+      const options = loadOptions.current;
+      if (!data && options.canRequest && !options.savedCompletion && !options.installationSummary) {
         const result = await api.post('/integrations/g3/installation-requirements', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
+        if (revision !== loadRevision.current || controller.signal.aborted) return;
         if (contractId != null && result.data.idContrato !== contractId) { setError('La validación no corresponde al contrato seleccionado. Vuelve a comprobar la instalación.'); return; }
         if (typeof result.data.comunaFaltante !== 'boolean') { setError('No se pudieron comprobar los requisitos de instalación.'); return; }
         if (revision === loadRevision.current && !controller.signal.aborted) setRequirements(result.data);
       }
-    } catch (cause) {
-      if (revision === loadRevision.current && !controller.signal.aborted) setError(apiErrorMessage(cause));
+    } catch {
+      if (revision === loadRevision.current && !controller.signal.aborted) setReadFailed(true);
     } finally {
       if (revision === loadRevision.current && !controller.signal.aborted) setLoading(false);
     }
-  }, [canRequest, contractId, prospectId, savedCompletion, installationSummary]);
+  }, [contractId, prospectId]);
+
+  async function fetchDetail(base: G3InstallationTracking, signal: AbortSignal) {
+    const { data } = await api.get<G3InstallationTracking>(`/integrations/g3/installations/${base.idIntegracion}`, { signal, timeout: 15000 });
+    if (!data || data.idIntegracion !== base.idIntegracion || !matchesTarget(data, contractId, prospectId)
+      || (data.idEmpresa != null && base.idEmpresa != null && data.idEmpresa !== base.idEmpresa)) {
+      throw new Error('La consulta no corresponde a la instalación seleccionada.');
+    }
+    return data;
+  }
+
+  function relationshipChanged(before: G3InstallationTracking, after: G3InstallationTracking) {
+    return isCompleted(after) !== isCompleted(before) || (after.idServicio ?? null) !== (before.idServicio ?? null);
+  }
   useEffect(() => {
     void load();
     return () => {
@@ -142,7 +189,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     finally { if (current()) { mutationInFlight.current = false; setBusy(false); actionController.current = null; } }
   }
 
-  async function run(action: 'request' | 'retry' | 'detail' | 'reconcile') {
+  async function run(action: 'request' | 'retry' | 'detail') {
     if (mutationInFlight.current || loading) return;
     if (action !== 'detail' && !canRequest) return;
     if (action === 'request' && (hideRequest || tracking || error || !requirements || requirements.comunaFaltante)) return;
@@ -151,7 +198,7 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
     actionController.current = controller;
     const current = () => actionController.current === controller && !controller.signal.aborted;
     mutationInFlight.current = true;
-    setBusy(true); setError(''); setNotice('');
+    setBusy(true); setError(''); setReadFailed(false); setNotice('');
     try {
       if (action === 'request') {
         const { data } = await api.post<G3InstallationTracking>('/integrations/g3/installations', prospectId ? { idProspecto: prospectId } : { idContrato: contractId }, { signal: controller.signal });
@@ -161,33 +208,36 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       } else if (tracking) {
         const path = `/integrations/g3/installations/${tracking.idIntegracion}`;
         if (action === 'detail') {
-          const { data } = await api.get<G3InstallationTracking>(path, { signal: controller.signal });
+          const data = await fetchDetail(tracking, controller.signal);
           if (!current()) return;
-          if (!data || data.idIntegracion !== tracking.idIntegracion || !matchesTarget(data, contractId, prospectId)) {
-            setError('La consulta no corresponde a la instalación seleccionada.');
-            return;
-          }
-          setTracking(data);
+          // Keep the last detail visible when the remote service is temporarily unavailable.
+          setTracking(data.detalle ? data : { ...data, detalle: tracking.detalle });
+          if (!data.detalle && data.ultimoErrorSanitizado) setReadFailed(true);
           // A read-only refresh updates this card. Reload the customer only when its operational relationship changed.
-          if (isCompleted(data) !== isCompleted(tracking) || (data.idServicio ?? null) !== (tracking.idServicio ?? null)) onChanged?.();
+          if (relationshipChanged(tracking, data)) onChanged?.();
           return;
         } else {
-          const { data } = await api.post(`${path}/${action}`, undefined, { signal: controller.signal });
+          await api.post(`${path}/${action}`, undefined, { signal: controller.signal });
           if (!current()) return;
-          if (action === 'reconcile' && data.available === false) setNotice('El cierre técnico aún no está confirmado. La instalación continúa en seguimiento.');
           await load();
         }
       }
       if (current()) onChanged?.();
-    } catch (cause) { if (current()) setError(apiErrorMessage(cause)); }
+    } catch (cause) { if (current()) {
+      if (action === 'detail') setReadFailed(true);
+      else setError(apiErrorMessage(cause));
+    } }
     finally { if (current()) { mutationInFlight.current = false; setBusy(false); actionController.current = null; } }
   }
 
   if (loading) return <p className="inline-status">Consultando instalación técnica…</p>;
+  const retryRead = <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" disabled={busy} onClick={() => void load()}><RefreshCw size={17} aria-hidden="true" /></button>;
   if (installationSummary && !tracking && savedCompletion) return <section className="customer-installation-summary" aria-label="Instalación">
     <header><div className="customer-installation-order"><span>Orden de instalación</span><strong>{savedInstallation?.codigoSeguimiento ?? savedInstallation?.idOt ?? '—'}</strong></div><StatusBadge value="Completada" /></header>
     {completedFields(null, service)}
+    {readFailed && retryRead}
   </section>;
+  if (!tracking && readFailed) return <div>{retryRead}</div>;
   if (installationSummary && !tracking) return <p className="customer-contract-note customer-installation-empty">Sin orden de instalación registrada.</p>;
   if (!tracking) return <div className="g3-installation-card">
     {requirements?.comunaFaltante && !requirements.puedeCompletarComuna && <p role="alert">Falta la comuna. Solicita a Comercial o Administración completar los datos de instalación.</p>}
@@ -199,21 +249,18 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       <p>Si la dirección contratada es incorrecta, solicita revisión y la aprobación o firma que corresponda antes de continuar.</p>
       <button type="button" disabled={!comuna.trim() || !sameAddress || busy} onClick={() => void completeData()}>Guardar comuna</button>
     </fieldset>}
-    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || Boolean(error) || busy} aria-busy={busy} onClick={() => void run('request')}>{busy ? 'Generando…' : 'Generar instalación'}</button>}
+    {!hideRequest && <button type="button" disabled={!canRequest || !requirements || requirements.comunaFaltante || Boolean(error) || readFailed || busy} aria-busy={busy} onClick={() => void run('request')}>{busy ? 'Generando…' : 'Generar instalación'}</button>}
     {!canRequest && <p className="alert" role="alert">{blockedReason ?? 'No tienes permisos para solicitar instalaciones desde esta vista.'}</p>}
     {error && <><p className="alert" role="alert">{error}</p><button type="button" className="secondary compact" disabled={busy} onClick={() => void load()}>Volver a comprobar</button></>}
     {notice && <p role="status">{notice}</p>}
+    {readFailed && retryRead}
   </div>;
 
   const completed = isCompleted(tracking);
   const state = completed ? 'Completada' : STATE_LABELS[tracking.estadoPresentacion] ?? 'En seguimiento';
   const delivered = Boolean(tracking.idOtG3 || tracking.codigoOtG3);
   const retryable = tracking.estadoIntegracion === 'FALLIDA_REINTENTABLE';
-  const consultClosure = delivered && !completed && !installationSummary && !singleRefresh && canRequest && (
-    <button type="button" className={compact ? 'secondary compact crm-table-action' : 'secondary'} disabled={busy}
-      title="Consulta al equipo técnico si la orden ya fue cerrada y registra el cierre confirmado" onClick={() => void run('reconcile')}>Consultar cierre</button>
-  );
-  const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run(singleRefresh && canRequest && !completed ? 'reconcile' : 'detail')}>
+  const refreshButton = delivered && <button type="button" className="installation-refresh-state" aria-label="Actualizar estado de instalación" title="Actualizar estado de instalación" aria-busy={busy} disabled={busy} onClick={() => void run('detail')}>
     <RefreshCw size={17} aria-hidden="true" />
   </button>;
   if (installationSummary) return <section className="customer-installation-summary" aria-label="Instalación">
@@ -222,47 +269,31 @@ export function G3InstallationStatus({ prospectId, contractId, canRequest, block
       <div className="installation-status-actions"><StatusBadge value={state} />{refreshButton}</div>
     </header>
     {completed ? completedFields(tracking, service?.instalacion?.fuente === 'G3' && service.idServicio === tracking.idServicio ? service : undefined)
-      : <dl className="customer-contract-facts installation-facts">
-        <div><dt>Fecha de solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
-        {tracking.fechaUltimaSincronizacion && <div><dt>Última actualización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>}
-      </dl>}
+      : trackingFields(tracking, 'customer-contract-facts installation-facts')}
     {retryable && canRequest && <div><button type="button" className="secondary compact" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button></div>}
     <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} />
   </section>;
   return <div className="g3-installation-card">
     <header>
       <div className="installation-delivery-heading">{delivered ? <CheckCircle2 size={20} aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<strong>{delivered ? 'Orden de instalación enviada a terreno' : 'Orden de instalación pendiente de envío'}</strong></div>
-      {compact ? <div className="installation-status-actions">
+      <div className="installation-status-actions">
         <StatusBadge value={state} />
         {refreshButton}
-      </div> : <StatusBadge value={state} />}
+      </div>
     </header>
-    <dl className="customer-readonly-details">
-      <div><dt>Orden de trabajo</dt><dd>{tracking.codigoOtG3 ?? tracking.idOtG3 ?? 'Pendiente de asignación'}</dd></div>
-      <div><dt>Fecha solicitud</dt><dd>{formatDateTime(tracking.fechaSolicitud)}</dd></div>
-      <div><dt>Última actualización</dt><dd>{formatDateTime(tracking.fechaUltimaSincronizacion)}</dd></div>
-      {tracking.fechaCierreProcesado && <div><dt>Fecha de confirmación del cierre</dt><dd>{formatDateTime(tracking.fechaCierreProcesado)}</dd></div>}
-      <div><dt>Intentos de envío</dt><dd>{tracking.intentos}</dd></div>
-      {tracking.estadoRemotoG3 && <div><dt>Estado informado por el equipo técnico</dt><dd>{STATE_LABELS[tracking.estadoRemotoG3] ?? 'Pendiente de revisión'}</dd></div>}
-      {tracking.detalle && <>
-        <div><dt>Técnico</dt><dd>{tracking.detalle.tecnico ? textValue(tracking.detalle.tecnico) : tracking.detalle.idTecnicoG3 ? `Técnico #${tracking.detalle.idTecnicoG3}` : 'Sin asignar'}</dd></div>
-        <div><dt>Dirección</dt><dd>{textValue(tracking.detalle.direccion)}</dd></div>
-        <div><dt>Fecha de finalización</dt><dd>{tracking.detalle.fechaCompletada ? formatDateTime(tracking.detalle.fechaCompletada) : 'No registrada'}</dd></div>
+    {trackingFields(tracking)}
+    {tracking.detalle && (tracking.detalle.potenciaOpticaDbm != null || tracking.detalle.resultadoLlamada || tracking.detalle.resueltoRemotamente != null || tracking.detalle.materiales) && <dl className="customer-readonly-details">
         {tracking.detalle.potenciaOpticaDbm != null && <div><dt>Potencia óptica</dt><dd>{tracking.detalle.potenciaOpticaDbm} dBm</dd></div>}
         {tracking.detalle.resultadoLlamada && <div><dt>Resultado llamada</dt><dd>{tracking.detalle.resultadoLlamada}</dd></div>}
         {tracking.detalle.resueltoRemotamente != null && <div><dt>Resuelto remotamente</dt><dd>{tracking.detalle.resueltoRemotamente ? 'Sí' : 'No'}</dd></div>}
         {tracking.detalle.materiales && <div><dt>Materiales informados</dt><dd>{tracking.detalle.materiales.length} registro(s)</dd></div>}
-      </>}
-    </dl>
+    </dl>}
     {completed && <p className="inline-status">La instalación ya tiene un cierre confirmado.</p>}
     {(tracking.estadoOriginalRemotoG3 || tracking.estadoOriginalG3) && <p className="inline-status">La última actualización técnica está pendiente de revisión. {completed ? 'Se conserva el cierre confirmado de la instalación.' : 'La instalación continúa en seguimiento.'}</p>}
     {tracking.estadoPresentacion === 'CANCELADA' && <p className="inline-status">La cancelación no activa al cliente ni elimina el contrato.</p>}
     {tracking.estadoPresentacion === 'PENDIENTE_CLIENTE_AUSENTE' && <p className="inline-status">No fue posible realizar la visita por ausencia del cliente. Está pendiente coordinar una nueva fecha.</p>}
-    {!compact && trackingError && <p className="alert">{trackingError}</p>}
-    {(!compact || retryable || consultClosure) && <div className="button-row">
-      {!compact && delivered && <button type="button" className="secondary" disabled={busy} onClick={() => void run('detail')}>Detalle</button>}
-      {consultClosure}
-      {retryable && canRequest && <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>}
+    {retryable && canRequest && <div className="button-row">
+      <button type="button" disabled={busy} onClick={() => void run('retry')}>Reintentar envío</button>
     </div>}
     {compact ? <ToastNotice message={message} tone={error || !notice ? 'error' : 'info'} onDismiss={clearMessage} /> : <>
       {error && <p className="alert">{error}</p>}

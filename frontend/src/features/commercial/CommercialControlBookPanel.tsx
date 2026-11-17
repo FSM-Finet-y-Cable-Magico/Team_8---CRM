@@ -50,8 +50,9 @@ function Cell({ column, row }: { column: string; row: ControlRow }) {
   return <>{value === null ? '—' : String(value)}</>;
 }
 
-export function CommercialControlBookPanel({ active = true, scope, writeCompanyId, permissions, customers, companies, onChanged }: {
+export function CommercialControlBookPanel({ active = true, scope, writeCompanyId, permissions, customers, companies, onChanged, customerFocus, onCustomerFocusConsumed }: {
   active?: boolean;
+  customerFocus?: { idCliente: number; idEmpresa: number } | null; onCustomerFocusConsumed?: () => void;
   scope: string; writeCompanyId: number; permissions: DashboardPermissions; customers: Customer[]; companies: Company[]; onChanged: () => void;
 }) {
   const [focusedInvoice, setFocusedInvoice] = useState<InvoiceFocus | null>(null);
@@ -85,6 +86,7 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
   const openerId = useRef<string | null>(null);
   const companyId = scope !== 'consolidado' ? scope : String(writeCompanyId);
   const previousCompany = useRef(companyId);
+  const focusConsumed = useRef(onCustomerFocusConsumed); focusConsumed.current = onCustomerFocusConsumed;
   const params = useMemo(() => ({ idEmpresa: companyId, groupBy: 'customer', ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== '')), page, pageSize: 20 }), [companyId, filters, page]);
 
   useAutoRefresh(() => {
@@ -114,6 +116,24 @@ export function CommercialControlBookPanel({ active = true, scope, writeCompanyI
     openerId.current = null;
     (opener ?? searchInput.current)?.focus({ preventScroll: true });
   }, [selected, loading]);
+
+  useEffect(() => {
+    if (!active || !customerFocus || String(customerFocus.idEmpresa) !== companyId) return;
+    const controller = new AbortController();
+    setContractError('');
+    void api.get<ControlResponse>('/commercial/control-book', { params: {
+      idEmpresa: customerFocus.idEmpresa, idCliente: customerFocus.idCliente, groupBy: 'customer', page: 1, pageSize: 1,
+    }, signal: controller.signal, timeout: 15000 }).then(({ data: result }) => {
+      if (controller.signal.aborted) return;
+      const row = result.items.find(item => item.idCliente === customerFocus.idCliente && item.idEmpresa === customerFocus.idEmpresa);
+      if (row) { tableRecord.current = row; setSelected(row); setFocusedInvoice(null); }
+      else setContractError('El cliente no está disponible en el libro de control de esta empresa.');
+      focusConsumed.current?.();
+    }).catch(err => {
+      if (!controller.signal.aborted) { setContractError(apiErrorMessage(err)); focusConsumed.current?.(); }
+    });
+    return () => controller.abort();
+  }, [active, customerFocus, companyId]);
 
   useEffect(() => {
     if (loading || !sortReturn.current) return;

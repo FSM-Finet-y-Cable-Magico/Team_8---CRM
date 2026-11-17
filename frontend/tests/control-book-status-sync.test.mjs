@@ -17,6 +17,38 @@ function compile(file, mocks = {}) {
   return exports;
 }
 
+test('abrir cliente desde una alerta selecciona su ficha real y no dispara escrituras', async t => {
+  const reads = []; let consumed = 0;
+  const model = compile('control-book-model.ts');
+  const target = { rowId: 'customer-2-10', idEmpresa: 2, idCliente: 10, nombre: 'Cliente de alerta', idFactura: null,
+    saldoPendiente: 19990, diasAtraso: 3, estadoComercial: 'DEUDA_VENCIDA', accionSugerida: '', resumenCliente: { contratos: 1, facturas: 1, planes: ['Internet'] } };
+  const { CommercialControlBookPanel } = compile('CommercialControlBookPanel.tsx', {
+    '../../api': { api: { get: async (url, options) => { reads.push(options); return { data: {
+      items: options.params.idCliente ? [target] : [], dashboard: { customerCount: 1, totalDebt: 19990, overdueCustomerCount: 1, overdueInvoiceCount: 1 },
+      pagination: { page: 1, totalPages: 1, totalRows: 1, pageSize: 20 }, filterOptions: { plans: [], zones: [], commercialStatuses: [], serviceStatuses: [] },
+    } }; } }, apiErrorMessage: () => 'Error' },
+    './control-book-model': model,
+    './ControlBookDrawer': { ControlBookDrawer: ({ row }) => React.createElement('div', { 'data-customer': row.idCliente, 'data-company': row.idEmpresa }, row.nombre) },
+    './ControlBookFinancePanel': { ControlBookFinancePanel: () => null },
+    './ControlBookFilters': { FILTER_LABELS: {}, filterDescription: () => '', ControlBookFilters: () => null },
+    './ControlBookExternalDocuments': { ControlBookExternalDocuments: () => null },
+    '../../shared/components/TablePagination': { TablePagination: () => null },
+    '../../shared/hooks/useAutoRefresh': { useAutoRefresh() {} },
+    '../../shared/hooks/useTransientMessage': { useTransientMessage: () => ({ message: '', showMessage() {}, clearMessage() {} }) },
+    './commercial-control-book.css': {},
+  });
+  const props = { active: true, scope: '2', writeCompanyId: 2, customers: [], companies: [], permissions: {}, onChanged() {},
+    customerFocus: { idCliente: 10, idEmpresa: 2 }, onCustomerFocusConsumed: () => consumed++ };
+  let tree; await act(async () => { tree = create(React.createElement(CommercialControlBookPanel, props)); });
+  t.after(async () => { await act(async () => tree.unmount()); });
+  assert.equal(tree.root.findByProps({ 'data-customer': 10 }).props['data-company'], 2);
+  assert.equal(consumed, 1);
+  assert.ok(reads.some(read => read.params.idCliente === 10 && read.params.idEmpresa === 2 && read.params.groupBy === 'customer'));
+  const count = reads.length;
+  await act(async () => tree.update(React.createElement(CommercialControlBookPanel, { ...props, customerFocus: null })));
+  assert.equal(reads.length, count);
+});
+
 test('el listado solicita un resumen por cliente y guardar una suspensión actualiza esa fila sin alterar la deuda', async t => {
   const model = compile('control-book-model.ts');
   let suspended = false, parentUpdates = 0;

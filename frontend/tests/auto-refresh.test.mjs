@@ -30,10 +30,10 @@ test('actualización automática respeta visibilidad, pausa de formularios y lim
   assert.equal(count, 0);
   doc.visibilityState = 'hidden'; [...timers].forEach(timer => timer());
   assert.equal(count, 0);
-  doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange'));
-  win.dispatchEvent(new Event('focus'));
+  doc.visibilityState = 'visible';
+  await act(async () => { doc.dispatchEvent(new Event('visibilitychange')); win.dispatchEvent(new Event('focus')); });
   assert.equal(count, 1);
-  now += 60000; [...timers].forEach(timer => timer());
+  now += 60000; await act(async () => { [...timers].forEach(timer => timer()); });
   assert.equal(count, 2);
   await act(async () => tree.update(React.createElement(View, { enabled: false })));
   now += 60000; win.dispatchEvent(new Event('focus')); [...timers].forEach(timer => timer());

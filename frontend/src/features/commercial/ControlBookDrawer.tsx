@@ -77,6 +77,17 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
     return () => controller.abort();
   }, [sourceRow.idCliente, sourceRow.idEmpresa, selectedContractId, revision]);
   const [action, setAction] = useState<ActionName | null>(null);
+  const [allowance, setAllowance] = useState<{ year: number; agreements: { remaining: number }; extensions: { remaining: number } } | null>(null);
+  const agreementAction = action === 'agreement' || action === 'extension';
+  useEffect(() => {
+    if (!agreementAction) return;
+    const controller = new AbortController(); setAllowance(null);
+    void api.get(`/commercial/customers/${sourceRow.idCliente}/annual-allowance`, { params: { idEmpresa: sourceRow.idEmpresa }, signal: controller.signal }).then(({ data }) => {
+      if (!controller.signal.aborted) setAllowance(data);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [agreementAction, sourceRow.idCliente, sourceRow.idEmpresa]);
+  const allowanceRemaining = action === 'agreement' ? allowance?.agreements?.remaining : allowance?.extensions?.remaining;
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -86,6 +97,18 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
   const [servicesReload, setServicesReload] = useState(0);
   const initialForm = () => ({ canal: 'TELEFONO', fecha: today(), fechaContacto: contactDateTimeInput(), observacion: '', monto: String(row.saldoPendiente ?? ''), cuotas: '2', condiciones: '', nuevaFecha: '', diaPago: String(row.diaPago ?? ''), tipoCargo: 'REPOSICION' });
   const [form, setForm] = useState(initialForm);
+  const [paymentPreview, setPaymentPreview] = useState<{ fingerprint: string; mensualidad: number; montoReajuste: number; diasReajuste: number; fechaDesde: string; proximoVencimiento: string } | null>(null);
+  useEffect(() => {
+    setPaymentPreview(null);
+    if (action !== 'paymentDay' || !row.idContrato || !form.diaPago || Number(form.diaPago) === row.diaPago) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void api.get(`/commercial/contracts/${row.idContrato}/payment-day-preview`, { params: { day: Number(form.diaPago) }, signal: controller.signal }).then(({ data }) => {
+        if (!controller.signal.aborted) setPaymentPreview(data);
+      }).catch(err => { if (!controller.signal.aborted) setError(apiErrorMessage(err)); });
+    }, 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [action, row.idContrato, row.diaPago, form.diaPago]);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(true);
   const pending = useRef(false);
@@ -152,6 +175,8 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
     if (!target || contextLoading || !action || !canManage || !CONTROL_ACTIONS.includes(action) || pending.current) return;
     const disabled = actionDisabledReason(action, row);
     if (disabled) { setError(disabled); return; }
+    if (agreementAction && allowanceRemaining === 0) { setError('El cliente ya utilizó el cupo anual de esta gestión.'); return; }
+    if (action === 'paymentDay' && !paymentPreview) { setError('Revisa el cálculo del reajuste antes de confirmar.'); return; }
     const contactTimestamp = isContactAction ? contactDateTimeISO(form.fechaContacto) : null;
     if (isContactAction && !contactTimestamp) { setError('Selecciona una fecha y hora válidas.'); return; }
     if (action === 'agreement') {
@@ -171,7 +196,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
       }
       if (action === 'agreement') await api.post('/commercial/agreements', { ...base, montoComprometido: Number(form.monto), cantidadCuotas: Number(form.cuotas), condiciones: form.condiciones.trim(), fechaInicio: form.fecha, cuotas: installments });
       if (action === 'extension') await api.post('/commercial/extensions', { idFactura: row.idFactura, nuevaFecha: form.nuevaFecha, motivo: form.observacion.trim() });
-      if (action === 'paymentDay') await api.post('/commercial/payment-condition-changes', { idCliente: row.idCliente, idContrato: base.idContrato, tipoCambio: 'DIA_PAGO', valorNuevo: form.diaPago, justificacion: form.observacion.trim() });
+      if (action === 'paymentDay') await api.post('/commercial/payment-condition-changes', { idCliente: row.idCliente, idContrato: base.idContrato, tipoCambio: 'DIA_PAGO', valorNuevo: form.diaPago, justificacion: form.observacion.trim(), previewFingerprint: paymentPreview?.fingerprint });
       if (action === 'charge') await api.post('/commercial/additional-charges', { idCliente: row.idCliente, idContrato: base.idContrato, idServicio: base.idServicio, tipo: form.tipoCargo, monto: Number(form.monto), fecha: form.fecha, observacion: form.observacion.trim() });
       if (mounted.current) {
         onSaved(action === 'agreement' ? 'Convenio creado correctamente.' : action === 'charge' ? 'Cargo registrado. Pendiente de facturación; no modifica el saldo actual.' : 'Gestión registrada correctamente.');
@@ -242,10 +267,13 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
       </section>}
     </div>
     {action && <ControlBookModal title={isContactAction ? 'Registrar gestión' : action === 'agreement' || action === 'extension' ? 'Convenio / prórroga' : ACTION_LABELS[action]} busy={saving} onClose={closeAction}>
-    <div className="control-modal-customer"><strong>{row.nombre}</strong><span>{row.plan ?? 'Sin plan'}</span></div>
+    <div className={'control-modal-customer' + (agreementAction ? ' control-agreement-customer' : '')}>
+      <div className="control-modal-customer-identity"><strong>{row.nombre}</strong><span>{row.plan ?? 'Sin plan'}</span></div>
+      {agreementAction && <p className="control-agreement-allowance"><span>{action === 'agreement' ? 'Convenios' : 'Prórrogas'} disponibles: </span><strong>{allowanceRemaining ?? '—'} de 3</strong></p>}
+    </div>
     <form className={"control-action-form" + (action === "agreement" ? " control-agreement-form" : "")} onSubmit={(event) => void submit(event)}>
       <fieldset disabled={saving}>
-        {(action === 'agreement' || action === 'extension') && <label>Tipo de acuerdo<select value={action} disabled={saving || step > 0} onChange={event => {
+        {agreementAction && step === 0 && <label>Tipo de acuerdo<select value={action} disabled={saving} onChange={event => {
           const next = event.target.value;
           if (next !== 'agreement' && next !== 'extension') return;
           setAction(next); setStep(0); setError('');
@@ -278,13 +306,14 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
           <p className="control-muted">Registra una comunicación realizada con el cliente.</p>
         </>}
         {action === 'extension' && <><DetailList values={[[ 'Vencimiento original', dateLabel(row.fechaVencimiento) ], [ 'Vencimiento vigente', dateLabel(row.fechaVencimientoEfectiva) ]]}/><label>Nueva fecha<input type="date" required value={form.nuevaFecha} onChange={(event) => setForm({ ...form, nuevaFecha: event.target.value })}/></label></>}
-        {action === 'paymentDay' && <><DetailList values={[[ 'Contrato', row.numeroContrato ?? (row.idContrato ? `#${row.idContrato}` : null) ], [ 'Día mensual actual', row.diaPago ? `Día ${row.diaPago}` : null ]]}/><label>Nuevo día de pago<input type="number" min="1" max="28" required value={form.diaPago} onChange={(event) => setForm({ ...form, diaPago: event.target.value })}/><small>Entre el 1 y el 28 de cada mes.</small></label></>}
+        {action === 'paymentDay' && <><DetailList values={[[ 'Contrato', row.numeroContrato ?? (row.idContrato ? `#${row.idContrato}` : null) ], [ 'Día mensual actual', row.diaPago ? `Día ${row.diaPago}` : null ]]}/><label>Nuevo día de pago<input type="number" min="1" max="28" required value={form.diaPago} onChange={(event) => { setError(''); setForm({ ...form, diaPago: event.target.value }); }}/><small>Entre el 1 y el 28 de cada mes.</small></label>
+          {paymentPreview && <DetailList values={[[ 'Mensualidad', currency.format(paymentPreview.mensualidad) ], [ 'Base del reajuste', 'Mensualidad / 30 días' ], [ 'Días adicionales', paymentPreview.diasReajuste ], [ 'Reajuste del próximo período', currency.format(paymentPreview.montoReajuste) ], [ 'Desde', dateLabel(paymentPreview.fechaDesde) ], [ 'Próximo vencimiento', dateLabel(paymentPreview.proximoVencimiento) ]]}/>}</>}
         {action === 'charge' && <><div className="control-form-grid"><label>Concepto<select value={form.tipoCargo} onChange={(event) => setForm({ ...form, tipoCargo: event.target.value })}>{[['REPOSICION', 'Reposición'], ['RECONEXION', 'Reconexión'], ['RETIRO', 'Retiro'], ['OTRO', 'Otro']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Monto<input type="number" min="1" step="0.01" required value={form.monto} onChange={(event) => setForm({ ...form, monto: event.target.value })}/></label><label>Fecha<input type="date" required value={form.fecha} onChange={(event) => setForm({ ...form, fecha: event.target.value })}/></label></div></>}
         {action !== 'agreement' && <label className="control-form-observation">{['event', 'lastNotice', 'withdrawal'].includes(action) ? 'Qué se informó o acordó con el cliente' : 'Motivo / observación'}{action === 'charge' && ' (opcional)'}<textarea placeholder="Describe lo acordado con el cliente y los próximos pasos." required={action !== 'charge'} value={form.observacion} onChange={(event) => setForm({ ...form, observacion: event.target.value })}/></label>}
         </>}
       </fieldset>
       {error && <p className="control-feedback error" role="alert">{error}</p>}
-      <footer className="control-form-footer"><button type="button" className="control-text-button" disabled={saving} onClick={() => { if (action === 'agreement' && step > 0) setStep(step - 1); else closeAction(); setError(''); }}>{action === 'agreement' && step > 0 ? 'Atrás' : 'Cancelar'}</button><button type="submit" disabled={saving || !target || contextLoading}>{saving ? 'Guardando…' : action === 'agreement' ? step === 1 ? 'Crear convenio' : 'Continuar' : SAVE_LABELS[action]}</button></footer>
+      <footer className="control-form-footer"><button type="button" className="control-text-button" disabled={saving} onClick={() => { if (action === 'agreement' && step > 0) setStep(step - 1); else closeAction(); setError(''); }}>{action === 'agreement' && step > 0 ? 'Atrás' : 'Cancelar'}</button><button type="submit" disabled={saving || !target || contextLoading || (agreementAction && allowanceRemaining === 0) || (action === 'paymentDay' && !paymentPreview)}>{saving ? 'Guardando…' : action === 'agreement' ? step === 1 ? 'Crear convenio' : 'Continuar' : SAVE_LABELS[action]}</button></footer>
     </form></ControlBookModal>}
     {suspensionOpen && !withdrawalOpen && selectedContractId && canManagePayments && suspensionCheck?.elegible && <ControlBookSuspension contractId={selectedContractId} customerName={row.nombre} plan={row.plan} canManage={canManagePayments}
       onBusyChange={setSaving} onClose={() => setSuspensionOpen(false)} onSaved={message => { setSuspensionOpen(false); onSaved(message); }}/>}

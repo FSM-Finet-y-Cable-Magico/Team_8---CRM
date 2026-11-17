@@ -11,8 +11,9 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { type BillingOverview, type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
-import { expiryAlertKey, expiryUrgency, formatDateOnly, formatWorkOrderValue, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder, isInProgressWorkOrder } from '../../lib';
+import { type Company, type Customer, type Prospect, type Ticket, type WorkOrder } from '../../api';
+import { expiryAlertKey, expiryUrgency, formatDateOnly, isInstallationWorkOrder, isCompletedWorkOrder, isTerminalWorkOrder, isInProgressWorkOrder } from '../../lib';
+import { useDashboardFinance } from './useDashboardFinance';
 import { type DashboardPermissions } from '../../permissions';
 import {
   DashboardStatCard,
@@ -47,6 +48,11 @@ const clpFormatter = new Intl.NumberFormat('es-CL', {
   currency: 'CLP',
   maximumFractionDigits: 0,
 });
+
+export function isPendingDashboardTicket(ticket: Ticket) {
+  const terminal = /^(RESUELT[OA]|CERRAD[OA]|CANCELAD[OA]|ANULAD[OA]|COMPLETAD[OA]|FINALIZAD[OA])$/;
+  return ![ticket.estado, ticket.estadoPresentacion].some(value => value && terminal.test(value.trim().toUpperCase()));
+}
 
 type Summary = {
   metricas: {
@@ -85,30 +91,37 @@ export function DashboardHome({
   customers,
   tickets,
   workOrders,
-  billingOverview,
+  scope = 'consolidado',
+  companies = [],
   permissions,
   onNavigate,
   onOpenPendingInstallations,
   onOpenTicket,
+  onOpenControlBook,
 }: {
   summary: Summary | null;
   prospects: Prospect[];
   customers: Customer[];
   tickets: Ticket[];
   workOrders: WorkOrder[];
-  billingOverview: BillingOverview | null;
+  scope?: string; companies?: Company[];
   permissions: DashboardPermissions;
   onNavigate: (tab: Tab) => void;
   onOpenPendingInstallations?: (view: 'activation' | 'agenda') => void;
   onOpenTicket: (id: number) => void;
+  onOpenControlBook?: (alert: ExpiryCustomerAlert) => void;
 }) {
   const [expiryFilter, setExpiryFilter] = useState<'overdue' | 'upcoming'>('upcoming');
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
+  const [ticketsModalOpen, setTicketsModalOpen] = useState(false);
   const [selectedAlertKey, setSelectedAlertKey] = useState<string | null>(null);
   const pendingInstallations = workOrders.filter(
     (order) => isInstallationWorkOrder(order.tipoOt) && !isTerminalWorkOrder(order.estado),
   ).length;
-  const overdueBalance = billingOverview?.morosos.reduce((total, invoice) => total + Number(invoice.saldo ?? 0), 0) ?? 0;
+  const expiryWindowDays = summary?.diasAnticipacionVencimiento ?? 7;
+  const companyKey = scope === 'consolidado' ? [...new Set(companies.map(company => company.idEmpresa))].sort((a, b) => a - b).join(',') : scope;
+  const finance = useDashboardFinance(companyKey, permissions.viewControlBook, expiryWindowDays);
+  const pendingTickets = tickets.filter(isPendingDashboardTicket);
   const stats = [
     {
       label: 'Prospectos activos',
@@ -155,8 +168,8 @@ export function DashboardHome({
     },
     {
       label: 'Clientes morosos',
-      value: summary?.metricas.clientesMorosos ?? '—',
-      description: 'Con deuda o suspensión',
+      value: finance.data?.overdueCustomerCount ?? (permissions.viewControlBook ? '—' : summary?.metricas.clientesMorosos ?? '—'),
+      description: 'Con saldo vencido',
       icon: HandCoins,
       tone: 'rose' as const,
       tab: 'commercial' as Tab,
@@ -170,9 +183,9 @@ export function DashboardHome({
       tab: 'inventory' as Tab,
     },
     {
-      label: 'Instalaciones del mes',
+      label: 'Instalaciones completadas este mes',
       value: summary?.metricas.instalacionesMensuales ?? 0,
-      description: 'Por fecha técnica efectiva (Santiago)',
+      description: 'Instalaciones completadas en la empresa seleccionada',
       icon: CircleCheckBig,
       tone: 'green' as const,
       tab: 'installations' as Tab,
@@ -216,8 +229,7 @@ export function DashboardHome({
       visible: permissions.viewWorkOrders,
     },
   ];
-  const expiryAlerts = summary?.alertasVencimiento ?? [];
-  const expiryWindowDays = summary?.diasAnticipacionVencimiento ?? 7;
+  const expiryAlerts = finance.data?.alerts ?? [];
   const overdueAlerts = expiryAlerts.filter((alert) => alert.diasRestantes < 0);
   const upcomingAlerts = expiryAlerts.filter((alert) => alert.diasRestantes >= 0 && alert.diasRestantes <= expiryWindowDays);
   const filteredExpiryAlerts = expiryFilter === 'overdue' ? overdueAlerts : upcomingAlerts;
@@ -254,10 +266,10 @@ export function DashboardHome({
     }));
   const activityMaximum = Math.max(...activityBars.map((item) => item.value), 1);
   const keyIndicators = [
-    { label: 'Instalaciones del mes', value: summary?.metricas.instalacionesMensuales ?? 0, description: 'Por fecha técnica efectiva (Santiago)', tone: 'green', tab: 'installations' as Tab },
+    { label: 'Instalaciones completadas este mes', value: summary?.metricas.instalacionesMensuales ?? '—', description: 'Instalaciones completadas', tone: 'green', tab: 'installations' as Tab },
     { label: 'Churn mensual', value: '-', description: 'Historial insuficiente para calcular bajas y población inicial', tone: 'amber', tab: 'commercial' as Tab },
     { label: 'Órdenes de trabajo', value: workOrders.length, description: 'Registradas en la vista actual', tone: 'violet', tab: 'workOrders' as Tab },
-    { label: 'Facturas vencidas', value: billingOverview?.metricas.facturasVencidas ?? 0, description: 'Documentos con atraso', tone: 'rose', tab: 'commercial' as Tab },
+    { label: 'Facturas vencidas', value: finance.data?.overdueInvoiceCount ?? '—', description: 'Documentos con saldo vencido', tone: 'rose', tab: 'commercial' as Tab },
   ];
 
   function selectExpiryFilter(filter: 'overdue' | 'upcoming') {
@@ -266,8 +278,16 @@ export function DashboardHome({
   }
 
   function openExpiryDetails(alert?: ExpiryCustomerAlert) {
+    void finance.refresh();
     setSelectedAlertKey(alert ? expiryAlertKey(alert) : null);
     setAlertsModalOpen(true);
+  }
+
+  function ticketCard(ticket: Ticket) {
+    return <button type="button" key={ticket.idTicket} className="compact-list-item dashboard-ticket-item" onClick={() => { setTicketsModalOpen(false); onOpenTicket(ticket.idTicket); }}>
+      <strong>{ticket.codigoSeguimiento || `#${ticket.idTicket}`}</strong>
+      <span>{ticket.cliente?.nombreCompleto ?? 'Sin cliente'}</span>
+    </button>;
   }
 
   return (
@@ -292,6 +312,7 @@ export function DashboardHome({
 
       <section className="dashboard-command-center">
         <article className="dashboard-activity-panel">
+          {permissions.viewProspects && <button type="button" className="dashboard-panel-hitarea" aria-label="Ver prospectos por origen de captación" onClick={() => onNavigate('prospects')} />}
           <div className="dashboard-panel-heading">
             <h2>Origen de captación</h2>
           </div>
@@ -312,6 +333,7 @@ export function DashboardHome({
         </article>
 
         <article className="dashboard-installation-panel">
+          {permissions.viewInstallations && <button type="button" className="dashboard-panel-hitarea" aria-label="Ir a instalaciones" onClick={() => onNavigate('installations')} />}
           <div className="dashboard-panel-heading"><h2>Órdenes de instalación</h2></div>
           <div className="installation-chart-layout">
             <div className="installation-donut-wrap">
@@ -344,7 +366,7 @@ export function DashboardHome({
           <div>
             {keyIndicators.map((indicator) => (
               <button key={indicator.label} type="button" className={`dashboard-key-indicator dashboard-key-indicator-${indicator.tone}`} onClick={() => onNavigate(indicator.tab)}>
-                <span>{indicator.label}</span><strong>{indicator.value}</strong><small>{indicator.description}</small>
+                <span>{indicator.label}</span><strong>{indicator.value}</strong>
               </button>
             ))}
           </div>
@@ -356,7 +378,6 @@ export function DashboardHome({
           <div className="expiry-panel-header">
             <div className="section-heading">
               <h2>Alertas de vencimiento</h2>
-              <p>Revisa contratos vencidos o próximos a vencer.</p>
             </div>
             <div className="expiry-filters" role="group" aria-label="Filtrar alertas de vencimiento">
               <button
@@ -383,18 +404,19 @@ export function DashboardHome({
             <>
               <div className="expiry-alert-list">
                 {filteredExpiryAlerts.slice(0, 4).map((alert) => (
-                  <div
+                  <button type="button"
                     key={expiryAlertKey(alert)}
                     className={`expiry-alert-item expiry-alert-item-${expiryUrgency(alert.diasRestantes)}`}
+                    onClick={() => openExpiryDetails(alert)}
                   >
                     <div className="expiry-alert-copy">
-                      <button type="button" className="expiry-client-link" onClick={() => openExpiryDetails(alert)}>
+                      <strong className="expiry-client-link">
                         {alert.cliente}
-                      </button>
+                      </strong>
                       <span>{alert.plan ?? 'Plan sin detalle'} · {formatDateOnly(alert.fechaVencimiento)}</span>
                     </div>
                     <ExpiryBadge days={alert.diasRestantes} />
-                  </div>
+                  </button>
                 ))}
               </div>
               <button type="button" className="expiry-view-more" onClick={() => openExpiryDetails()}>
@@ -403,14 +425,14 @@ export function DashboardHome({
             </>
           ) : (
             <p className="empty-state">
-              {expiryFilter === 'overdue'
-                ? 'No hay contratos vencidos para mostrar.'
-                : `No hay contratos próximos a vencer durante los próximos ${expiryWindowDays} días.`}
+              {finance.loading ? 'Consultando vencimientos…' : !finance.data ? 'Sin datos disponibles.' : expiryFilter === 'overdue'
+                ? 'No hay facturas con saldo vencido.'
+                : `No hay pagos pendientes que venzan durante los próximos ${expiryWindowDays} días.`}
             </p>
           )}
 
           <Modal
-            title={expiryFilter === 'overdue' ? 'Contratos vencidos' : 'Próximos vencimientos'}
+            title={expiryFilter === 'overdue' ? 'Vencimientos pendientes' : 'Próximos vencimientos'}
             open={alertsModalOpen}
             onClose={() => setAlertsModalOpen(false)}
           >
@@ -440,7 +462,9 @@ export function DashboardHome({
               </section>
 
               {selectedAlert ? (
-                <ExpiryCustomerCard alert={selectedAlert} customer={selectedCustomer} />
+                <ExpiryCustomerCard alert={{ ...selectedAlert, empresa: companies.find(company => company.idEmpresa === selectedAlert.idEmpresa)?.nombre,
+                  numeroContrato: selectedCustomer?.contratos?.find(contract => contract.idContrato === selectedAlert.idContrato)?.numeroContratoExterno ?? selectedAlert.numeroContrato }} customer={selectedCustomer}
+                  onOpenCustomer={permissions.viewControlBook && selectedAlert.idCliente && onOpenControlBook ? () => onOpenControlBook(selectedAlert) : undefined} />
               ) : (
                 <p className="empty-state">Selecciona un cliente para revisar sus datos.</p>
               )}
@@ -450,19 +474,17 @@ export function DashboardHome({
 
         <article className="panel stack dashboard-tickets-panel">
           <div className="section-heading"><h2>Tickets</h2></div>
-          {!permissions.viewTickets ? <p className="empty-state">No tienes acceso a los tickets.</p> : tickets.length > 0 ? (
+          {!permissions.viewTickets ? <p className="empty-state">No tienes acceso a los tickets.</p> : pendingTickets.length > 0 ? (
             <div className="compact-list">
-              {tickets.slice(0, 4).map((ticket) => (
-                <button type="button" key={ticket.idTicket} className="compact-list-item dashboard-ticket-item" onClick={() => onOpenTicket(ticket.idTicket)}>
-                  <strong>{ticket.codigoSeguimiento || `Ticket #${ticket.idTicket}`} · {ticket.cliente?.nombreCompleto ?? 'Sin cliente'}</strong>
-                  <span>{ticket.categoria?.nombreAtencion || ticket.categoria?.nombre || 'Sin categoría'} · {ticket.estadoPresentacion || formatWorkOrderValue(ticket.estado)}</span>
-                </button>
-              ))}
+              {pendingTickets.slice(0, 4).map(ticketCard)}
             </div>
           ) : (
-            <p className="empty-state">No hay tickets para mostrar.</p>
+            <p className="empty-state">No hay tickets pendientes.</p>
           )}
-          {permissions.viewTickets && <button type="button" className="expiry-view-more" onClick={() => onNavigate('tickets')}>Ver tickets</button>}
+          {permissions.viewTickets && <button type="button" className="expiry-view-more" onClick={() => setTicketsModalOpen(true)}>Ver tickets</button>}
+          <Modal title="Tickets pendientes" open={ticketsModalOpen} onClose={() => setTicketsModalOpen(false)}>
+            <div className="dashboard-ticket-list">{pendingTickets.length ? pendingTickets.map(ticketCard) : <p className="empty-state">No hay tickets pendientes.</p>}</div>
+          </Modal>
         </article>
         <section className="dashboard-actions dashboard-support-actions">
           <div className="dashboard-panel-heading"><h2>Acciones rápidas</h2></div>
@@ -474,12 +496,11 @@ export function DashboardHome({
         </section>
       </section>
 
-      {permissions.viewBilling && (
-        <section className="dashboard-financial-summary" aria-label="Resumen de cobranza">
+      {permissions.viewControlBook && (
+        <section className="dashboard-financial-summary" aria-label="Resumen financiero">
           <div className="dashboard-financial-heading">
             <div>
-              <span>Seguimiento financiero</span>
-              <h2>Resumen de cobranza</h2>
+              <h2>Resumen financiero</h2>
             </div>
             <button type="button" className="dashboard-inline-link" onClick={() => onNavigate('commercial')}>
               Ver libro de control
@@ -488,23 +509,19 @@ export function DashboardHome({
           <div className="dashboard-financial-metrics">
             <div>
               <span>Saldo vencido</span>
-              <strong>{clpFormatter.format(overdueBalance)}</strong>
-              <small>Total pendiente de regularizar</small>
+              <strong>{finance.data ? clpFormatter.format(finance.data.overdueBalance) : '—'}</strong>
             </div>
             <div>
               <span>Facturas vencidas</span>
-              <strong>{billingOverview?.metricas.facturasVencidas ?? 0}</strong>
-              <small>Documentos con atraso</small>
+              <strong>{finance.data?.overdueInvoiceCount ?? '—'}</strong>
             </div>
             <div>
-              <span>Cortes programados</span>
-              <strong>{billingOverview?.metricas.clientesProgramadosCorte ?? 0}</strong>
-              <small>Requieren seguimiento</small>
+              <span>Saldo pendiente</span>
+              <strong>{finance.data ? clpFormatter.format(finance.data.totalDebt) : '—'}</strong>
             </div>
             <div>
               <span>Clientes morosos</span>
-              <strong>{billingOverview?.metricas.clientesMorosos ?? summary?.metricas.clientesMorosos ?? 0}</strong>
-              <small>Con deuda o suspensión</small>
+              <strong>{finance.data?.overdueCustomerCount ?? '—'}</strong>
             </div>
           </div>
         </section>

@@ -3,6 +3,7 @@ import { api, apiErrorMessage, type Customer } from '../../api';
 import { Users } from 'lucide-react';
 import { CustomerStatusSummary } from './CustomerStatusBadge';
 import { chileRegions, findChileRegion, normalizeTerritory } from '../../shared/data/chile-territories';
+import { ChileanPhoneInput } from '../../shared/components/ChileanPhoneInput';
 
 export type CustomerProfileFields = Pick<Customer, 'idCliente' | 'nombreCompleto' | 'email' | 'telefono' | 'direccionActual' | 'direccionesOmitidas'>;
 
@@ -66,7 +67,7 @@ export function CustomerProfileForm({ customer, onCancel, onSaved, onBusy, compa
     <div className="customer-profile-data">
       <div><span>Empresa</span><strong>{companyLabel ?? customer.empresa?.nombre ?? '—'}</strong></div>
       <div><span>Origen</span><strong>{customer.origenContacto ?? '—'}</strong></div>
-      <label>Teléfono<input type="tel" maxLength={20} value={phone} disabled={saving} onChange={event => setPhone(event.target.value)}/></label>
+      <label>Teléfono<ChileanPhoneInput pattern="[2-9][0-9]{8}" value={phone} disabled={saving} onChange={setPhone}/></label>
       <label>Correo<input type="email" maxLength={120} value={email} disabled={saving} onChange={event => setEmail(event.target.value)}/></label>
       <label>Dirección<input maxLength={200} minLength={3} required={addressChanged} value={address} disabled={saving} onChange={event => setAddress(event.target.value)} /></label>
       <div><span>Contratos / servicios</span><strong>{contractsLabel ?? '—'}</strong></div>

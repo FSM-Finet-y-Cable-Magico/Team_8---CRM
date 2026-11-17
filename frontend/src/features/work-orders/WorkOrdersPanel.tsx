@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowDownUp, ArrowUp, Search } from 'lucide-react';
 import { type WorkOrder } from '../../api';
 import {
@@ -6,7 +6,7 @@ import {
   formatWorkOrderValue,
   normalizeWorkOrderValue,
 } from '../../lib';
-import { Modal, StatusBadge } from '../../shared/components';
+import { Modal, StatusBadge, TablePagination } from '../../shared/components';
 import { WorkOrderDetail } from './WorkOrderDetail';
 
 const sortLabels = { code: 'Código registro', type: 'Tipo', date: 'Fecha' } as const;
@@ -17,6 +17,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ field: SortField; descending: boolean } | null>(null);
   const selectedOrder = workOrders.find((order) => order.idOt === selectedId) ?? null;
 
@@ -99,6 +100,13 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
     });
   }
 
+  const pageSize = 26;
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = visibleRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1); }, [query, sort]);
+  useEffect(() => { setPage(previous => Math.min(previous, pageCount)); }, [pageCount]);
+
   function sortableHeading(field: SortField) {
     const direction = sort?.field === field ? (sort.descending ? 'descending' : 'ascending') : undefined;
     const Icon = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowDownUp;
@@ -141,7 +149,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map(row => (
+            {pageRows.map(row => (
               <tr key={row.order.idOt}>
                 <td className="work-order-id">{row.code}</td>
                 <td><span className="work-order-type">{row.type}</span></td>
@@ -171,6 +179,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
         </table>
       </div>
       {!visibleRows.length && <p className="empty-state">{rows.length ? 'No hay órdenes de trabajo que coincidan con la búsqueda.' : 'No hay órdenes de trabajo disponibles.'}</p>}
+      <TablePagination currentPage={currentPage} totalItems={visibleRows.length} pageSize={pageSize} onPageChange={setPage} />
 
       <Modal title="Detalle de orden de trabajo" open={modalOpen} onClose={() => setModalOpen(false)} focusClose>
         {selectedOrder ? (
