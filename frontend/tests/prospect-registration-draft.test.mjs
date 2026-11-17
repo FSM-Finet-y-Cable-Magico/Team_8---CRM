@@ -16,7 +16,7 @@ const fields = {
   '12345678-5': '12345678-5',
   'Nombre Apellido': 'Prospecto de prueba',
   'correo@ejemplo.cl': 'prospecto@example.invalid',
-  '+56912345678': '+56912345678',
+  '912345678': '912345678',
   'Av. Siempre Viva 123, Comuna': 'Av. de Prueba 123',
   Comuna: 'La Florida',
   Region: 'Metropolitana de Santiago',
@@ -138,28 +138,20 @@ test('el campo RUT impide agregar más de nueve caracteres y permite corregirlos
   assert.equal(h.input('12345678-5').props.value, '');
 });
 
-test('celular agrega +569 al escribir, reconoce números pegados y conserva el valor al navegar', async t => {
+test('celular edita nueve dígitos con +56 fijo, acepta pegado completo y conserva el valor al navegar', async t => {
   const h = await harness(t);
-  const phone = '+56912345678';
-  for (const firstDigit of ['0', '5', '6', '9']) {
-    await h.change(phone, firstDigit);
-    assert.equal(h.input(phone).props.value, '+569' + firstDigit);
-  }
-  await h.change(phone, '6');
-  for (const digit of '1234567') await h.change(phone, h.input(phone).props.value + digit);
-  assert.equal(h.input(phone).props.value, '+56961234567');
-  await h.navigate();
-  assert.equal(h.input(phone).props.value, '+56961234567');
-  for (const pasted of ['61234567', '961234567', '56961234567', '+56 9 6123-4567']) {
-    await h.change(phone, pasted);
-    assert.equal(h.input(phone).props.value, '+56961234567');
-  }
+  const phone = '912345678';
   await h.change(phone, '9');
   for (const digit of '61234567') await h.change(phone, h.input(phone).props.value + digit);
-  assert.equal(h.input(phone).props.value, '+56961234567');
-  await h.change(phone, '+569');
-  await h.change(phone, '+56');
-  assert.equal(h.input(phone).props.value, '');
+  assert.equal(h.input(phone).props.value, '961234567');
+  await h.navigate();
+  assert.equal(h.input(phone).props.value, '961234567');
+  for (const pasted of ['961234567', '56961234567', '+56 9 6123-4567']) {
+    await h.change(phone, pasted);
+    assert.equal(h.input(phone).props.value, '961234567');
+  }
+  await h.change(phone, '9612345678');
+  assert.equal(h.input(phone).props.value, '961234567');
   await h.change(phone, '');
   assert.equal(h.input(phone).props.value, '');
 });
@@ -211,7 +203,7 @@ test('un registro exitoso limpia el borrador y conserva el envío correcto a la 
   assert.equal(h.calls[0][0], '/prospects');
   assert.equal(h.calls[0][1].idEmpresa, 1);
   assert.equal(h.calls[0][1].nombreCompleto, fields['Nombre Apellido']);
-  assert.equal(h.calls[0][1].telefono, fields['+56912345678']);
+  assert.equal(h.calls[0][1].telefono, '+56' + fields['912345678']);
   assert.deepEqual(h.calls[0][1].ubicacion, { latitud: -33.58, longitud: -70.63 });
   await h.navigate();
   for (const placeholder of Object.keys(fields)) assert.equal(h.input(placeholder).props.value, '');

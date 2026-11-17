@@ -402,6 +402,7 @@ CREATE TABLE IF NOT EXISTS cambio_condicion_pago (
     justificacion                TEXT NOT NULL,
     id_usuario_responsable       INTEGER NOT NULL,
     fecha_registro               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reajuste                     JSONB,
     CONSTRAINT cambio_condicion_pago_tipo_check CHECK (((tipo_cambio)::text = ANY ((ARRAY['DIA_PAGO'::character varying, 'FECHA_COMPROMETIDA'::character varying])::text[])))
 );
 
@@ -1441,6 +1442,7 @@ CREATE INDEX IF NOT EXISTS cliente_id_empresa_fecha_creacion_idx ON cliente (id_
 CREATE INDEX IF NOT EXISTS idx_contrato_estado_cliente ON contrato (id_cliente, estado);
 CREATE INDEX IF NOT EXISTS idx_contrato_id_prospecto ON contrato (id_prospecto);
 CREATE INDEX IF NOT EXISTS convenio_pago_id_cliente_estado_idx ON convenio_pago (id_cliente, estado);
+CREATE INDEX IF NOT EXISTS convenio_pago_id_cliente_fecha_registro_idx ON convenio_pago (id_cliente, fecha_registro);
 CREATE INDEX IF NOT EXISTS convenio_pago_id_empresa_estado_fecha_inicio_idx ON convenio_pago (id_empresa, estado, fecha_inicio);
 CREATE INDEX IF NOT EXISTS convenio_pago_id_factura_idx ON convenio_pago (id_factura);
 CREATE INDEX IF NOT EXISTS cuota_convenio_pago_fecha_vencimiento_estado_idx ON cuota_convenio_pago (fecha_vencimiento, estado);
@@ -1493,6 +1495,7 @@ CREATE INDEX IF NOT EXISTS plan_zona_precio_id_zona_pago_activo_fechas_idx ON pl
 CREATE INDEX IF NOT EXISTS plantilla_notificacion_id_empresa_idx ON plantilla_notificacion (id_empresa);
 CREATE INDEX IF NOT EXISTS prorroga_pago_id_empresa_estado_nueva_fecha_idx ON prorroga_pago (id_empresa, estado, nueva_fecha);
 CREATE INDEX IF NOT EXISTS prorroga_pago_id_factura_fecha_registro_idx ON prorroga_pago (id_factura, fecha_registro);
+CREATE INDEX IF NOT EXISTS prorroga_pago_id_cliente_fecha_registro_idx ON prorroga_pago (id_cliente, fecha_registro);
 CREATE INDEX IF NOT EXISTS prospecto_id_empresa_clasificacion_comercial_idx ON prospecto (id_empresa, clasificacion_comercial);
 CREATE INDEX IF NOT EXISTS prospecto_id_empresa_id_zona_pago_idx ON prospecto (id_empresa, id_zona_pago);
 CREATE INDEX IF NOT EXISTS prospecto_id_empresa_id_plan_interes_idx ON prospecto (id_empresa, id_plan_interes);

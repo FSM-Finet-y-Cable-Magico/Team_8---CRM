@@ -5,7 +5,6 @@ export type StatCardTone = 'mint' | 'teal' | 'blue' | 'orange' | 'rose' | 'viole
 export function DashboardStatCard({
   label,
   value,
-  description,
   icon: Icon,
   tone,
   onClick,
@@ -22,9 +21,8 @@ export function DashboardStatCard({
       <Icon size={21} strokeWidth={1.8} />
     </span>
     <div className="dashboard-stat-card-copy">
-      <span>{label}</span>
       <strong>{value}</strong>
-      <small>{description}</small>
+      <span>{label}</span>
     </div>
   </>;
 

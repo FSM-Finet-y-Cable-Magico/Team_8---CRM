@@ -1,10 +1,11 @@
 export type ExpiryAlertLike = {
+  idEmpresa?: number; idFactura?: number;
   idContrato: number;
   fechaVencimiento: string;
 };
 
 export function expiryAlertKey(alert?: ExpiryAlertLike | null) {
-  return alert ? `${alert.idContrato}-${alert.fechaVencimiento}` : '';
+  return alert ? `${alert.idEmpresa ?? ''}:${alert.idContrato}:${alert.idFactura ?? ''}:${alert.fechaVencimiento}` : '';
 }
 
 export function expiryUrgency(days: number) {

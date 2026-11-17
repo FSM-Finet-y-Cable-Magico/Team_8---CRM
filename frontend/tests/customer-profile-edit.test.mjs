@@ -17,7 +17,7 @@ async function render(t,fail=false,addressChange=null){
   const source=readFileSync(new URL('../src/features/customers/CustomerProfileForm.tsx',import.meta.url),'utf8');
   const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
   const mocks={'../../api':{api:{patch:async(...args)=>{calls.push(args);if(fail)throw Error('falló');return {data:{...customer,...args[1],nombreCompleto:'Nombre actualizado'}};}},apiErrorMessage:()=> 'No se pudo guardar'},'./CustomerStatusBadge':{CustomerStatusSummary:()=>null}};
-  const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??require(name),exports);
+  const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??(name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name)),exports);
   let tree;await act(async()=>{tree=create(React.createElement(exports.CustomerProfileForm,{customer,onCancel(){},onBusy:value=>events.push(value),onSaved:value=>events.push(value)}));});
   t.after(async()=>{await act(async()=>tree.unmount());});
   await act(async()=>tree.root.findAllByType('input')[0].props.onChange({target:{value:'Nombre actualizado'}}));
@@ -65,7 +65,7 @@ test('modal completo alterna editar, cancelar y guardar sin duplicar la ficha ni
   function compile(path,mocks={}){
     const source=readFileSync(new URL('../src/features/customers/'+path,import.meta.url),'utf8');
     const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-    const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??require(name),exports);return exports;
+    const exports={};new Function('require','exports',output)(name=>mocks[name]??territoryMock[name]??(name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name)),exports);return exports;
   }
   const patches=[],warnings=[];
   t.mock.method(console,'error',(...args)=>warnings.push(args.join(' ')));

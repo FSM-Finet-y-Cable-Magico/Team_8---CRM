@@ -1,6 +1,7 @@
 import { type ChangeEvent, FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, apiErrorMessage, Plan, Prospect, type ProspectSearchResult } from '../../api';
-import { emptyProspectForm, formatChileanMobileInput, formatRutForDisplay, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
+import { emptyProspectForm, formatRutForDisplay, formatRutInput, normalizeRutInput, validateProspectForm, type ProspectFormState } from '../../lib';
+import { ChileanPhoneInput } from '../../shared/components/ChileanPhoneInput';
 import { DashboardPermissions } from '../../permissions';
 import { Modal, TablePagination } from '../../shared/components';
 import { ProspectWorkflowPanel } from './ProspectWorkflowPanel';
@@ -105,6 +106,7 @@ export function ProspectsPanel({
   useEffect(() => {
     if (!serverSide) return;
     const request = ++searchRequest.current;
+    const controller = new AbortController();
     setRemoteLoading(true);
     setRemoteError('');
     const params: Record<string, string | number | boolean> = { paginated: true, scope: scope as string, page, pageSize };
@@ -113,10 +115,11 @@ export function ProspectsPanel({
     if (filters.origen) params.origen = filters.origen;
     if (filters.desde) params.desde = filters.desde;
     if (filters.hasta) params.hasta = filters.hasta;
-    api.get<ProspectSearchResult>('/prospects', { params, timeout: 15000 })
-      .then(({ data }) => { if (request === searchRequest.current) setRemote(data); })
-      .catch(err => { if (request === searchRequest.current) setRemoteError(apiErrorMessage(err)); })
-      .finally(() => { if (request === searchRequest.current) setRemoteLoading(false); });
+    api.get<ProspectSearchResult>('/prospects', { params, timeout: 15000, signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted && request === searchRequest.current) setRemote(data); })
+      .catch(err => { if (!controller.signal.aborted && request === searchRequest.current) setRemoteError(apiErrorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted && request === searchRequest.current) setRemoteLoading(false); });
+    return () => controller.abort();
     // reloadedProspects changes identity whenever the parent reloads after a mutation.
   }, [serverSide, scope, page, appliedQuery, filters.estado, filters.origen, filters.desde, filters.hasta, reloadedProspects]);
 
@@ -245,15 +248,10 @@ export function ProspectsPanel({
           </label>
           <label>
             Celular
-            <input
+            <ChileanPhoneInput
               value={form.telefono}
-              onChange={(event) => setForm({ ...form, telefono: formatChileanMobileInput(event.target.value) })}
-              placeholder="+56912345678"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
+              onChange={telefono => setForm({ ...form, telefono })}
               disabled={submitting}
-              maxLength={20}
               required
             />
           </label>

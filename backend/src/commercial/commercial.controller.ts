@@ -55,6 +55,12 @@ export class CommercialController {
     return this.commercial.registerEvent({ ...dto, tipo: 'AVISO_PREVIO_RETIRO' }, user);
   }
 
+  @Get('customers/:id/annual-allowance')
+  @Roles(...ACCESS_ROLES.VIEW_CONTROL_BOOK)
+  annualAllowance(@Param('id', ParseIntPipe) id: number, @Query() query: ControlBookQueryDto, @CurrentUser() user: AuthUser) {
+    return this.commercial.annualAllowance(id, query.idEmpresa, user);
+  }
+
   @Post('agreements')
   @Roles(...ACCESS_ROLES.MANAGE_COMMERCIAL_COLLECTIONS)
   agreement(@Body() dto: CreateAgreementDto, @CurrentUser() user: AuthUser) {
@@ -71,6 +77,12 @@ export class CommercialController {
   @Roles(...ACCESS_ROLES.MANAGE_COMMERCIAL_COLLECTIONS)
   extension(@Body() dto: CreateExtensionDto, @CurrentUser() user: AuthUser) {
     return this.commercial.createExtension(dto, user);
+  }
+
+  @Get('contracts/:id/payment-day-preview')
+  @Roles(...ACCESS_ROLES.MANAGE_COMMERCIAL_COLLECTIONS)
+  paymentDayPreview(@Param('id', ParseIntPipe) id: number, @Query('day', ParseIntPipe) day: number, @CurrentUser() user: AuthUser) {
+    return this.commercial.paymentDayPreview(id, day, user);
   }
 
   @Post('payment-condition-changes')

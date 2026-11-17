@@ -69,6 +69,7 @@ async function harness(t, name, props, { openManually = true } = {}) {
     '../../shared/components': {
       Modal: ({ open, children }) => open ? React.createElement('section', {}, children) : null,
       StatusBadge: ({ value }) => React.createElement('span', {}, value),
+      TablePagination: () => null,
       ToastNotice: () => null,
       HistoryBox: ({ title, value }) => React.createElement('div', {}, `${title}: ${value}`),
     },

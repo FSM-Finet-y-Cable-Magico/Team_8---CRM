@@ -1,10 +1,10 @@
 import { Users } from 'lucide-react';
 import type { Customer } from '../../api';
 import { formatDateOnly } from '../../lib';
-import { ExpiryBadge } from './ExpiryBadge';
 import { StatusBadge } from './StatusBadge';
 
 export type ExpiryCustomerAlert = {
+  idEmpresa?: number; idCliente?: number | null; idFactura?: number; numeroContrato?: string | null; empresa?: string;
   idContrato: number;
   cliente: string;
   rut: string | null;
@@ -14,8 +14,8 @@ export type ExpiryCustomerAlert = {
   diasRestantes: number;
 };
 
-export function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryCustomerAlert; customer: Customer | null }) {
-  const company = customer?.empresa?.nombre ?? customer?.empresas?.join(', ') ?? 'Sin empresa registrada';
+export function ExpiryCustomerCard({ alert, customer, onOpenCustomer }: { alert: ExpiryCustomerAlert; customer: Customer | null; onOpenCustomer?: () => void }) {
+  const company = alert.empresa ?? customer?.empresa?.nombre ?? customer?.empresas?.join(', ') ?? 'No registrado';
 
   return (
     <article className="expiry-customer-card">
@@ -24,7 +24,7 @@ export function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryCustomerA
           <Users size={21} strokeWidth={1.8} />
         </span>
         <div>
-          <h3>{customer?.nombreCompleto ?? alert.cliente}</h3>
+          <h3>{onOpenCustomer ? <button type="button" className="expiry-customer-name" onClick={onOpenCustomer}>{customer?.nombreCompleto ?? alert.cliente}</button> : customer?.nombreCompleto ?? alert.cliente}</h3>
         </div>
         <StatusBadge value={customer?.estado ?? alert.estado} />
       </header>
@@ -50,14 +50,10 @@ export function ExpiryCustomerCard({ alert, customer }: { alert: ExpiryCustomerA
           <dt>Origen</dt>
           <dd>{customer?.origenContacto ?? 'No registrado'}</dd>
         </div>
+        <div><dt>Contrato</dt><dd>{alert.numeroContrato ?? `#${alert.idContrato}`}</dd></div>
+        <div><dt>Plan</dt><dd>{alert.plan ?? 'No registrado'}</dd></div>
+        <div><dt>Fecha de vencimiento</dt><dd>{formatDateOnly(alert.fechaVencimiento)}</dd></div>
       </dl>
-
-      <div className="expiry-contract-card">
-        <span>Contrato #{alert.idContrato}</span>
-        <strong>{alert.plan ?? 'Plan sin detalle'}</strong>
-        <small>Vencimiento: {formatDateOnly(alert.fechaVencimiento)}</small>
-        <ExpiryBadge days={alert.diasRestantes} />
-      </div>
     </article>
   );
 }

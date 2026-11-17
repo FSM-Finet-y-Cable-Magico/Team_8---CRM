@@ -49,6 +49,7 @@ async function setup(primary = 1, shared = true) {
     payments: [] as any[], audits: [] as any[], jobs: [] as any[],
   };
   const contractRow = (c: any) => c && ({ ...c, cliente: state.customer,
+    cambiosCondicionPago: [], cargosAdicionales: [],
     servicios: state.services.filter(s => s.idContrato === c.idContrato),
     facturas: state.invoices.filter(i => i.idContrato === c.idContrato).map(i => ({ ...i, pagos: state.payments.filter(p => p.idFactura === i.idFactura), prorrogasPago: [] })),
   });
@@ -142,6 +143,19 @@ describe('P0-03 HTTP real con persistencia simulada, sin servicios externos', ()
   let app: INestApplication;
   const start = async (primary = 1, shared = true) => { const ctx = await setup(primary, shared); app = ctx.app; return ctx; };
   afterEach(async () => { await app?.close(); });
+
+  it('expone a web el día de cada plan del cliente, aislado por empresa', async () => {
+    const ctx=await start();
+    ctx.state.contracts[0].diaVencimiento=15;
+    const first=await ctx.get('customers/10/payment-conditions?id_empresa=1').expect(200);
+    expect(first.body).toEqual({id_cliente:10,id_empresa:1,contratos:[{id_contrato:31,dia_pago:15,ultimo_cambio:null,cargos_pendientes:[]}]});
+    const second=await ctx.get('customers/10/payment-conditions?id_empresa=2').expect(200);
+    expect(second.body.contratos).toEqual([{id_contrato:32,dia_pago:10,ultimo_cambio:null,cargos_pendientes:[]}]);
+    await ctx.get('customers/10/payment-conditions?id_empresa=3').expect(403);
+    await ctx.get('customers/10/payment-conditions').expect(403);
+    await ctx.get('customers/999/payment-conditions?id_empresa=1').expect(404);
+    await request(ctx.app.getHttpServer()).get('/api/integrations/g2/customers/10/payment-conditions?id_empresa=1').expect(401);
+  });
 
   it.each([1, 2])('cliente exclusivo empresa %s: pago y comprobante autorizados', async company => {
     const ctx = await start(company, false);

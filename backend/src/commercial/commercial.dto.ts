@@ -89,6 +89,7 @@ export class CreateExtensionDto {
 }
 
 export class ChangePaymentConditionDto {
+  @IsOptional() @IsString() @MaxLength(64) previewFingerprint?: string;
   @Type(() => Number) @IsInt() @Min(1) idCliente!: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idContrato?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) idFactura?: number;

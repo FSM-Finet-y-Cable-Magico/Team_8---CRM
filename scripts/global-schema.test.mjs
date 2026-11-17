@@ -1,8 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {auditPrisma,blockingPrismaDifferences} from './audit-prisma-global.mjs';
 import {parseGlobalSchema,splitSql,normalizeExpression,normalizeCheckExpression,normalizeIndexDefinition} from './global-schema.mjs';
 import {classifyDifference,compareCatalog,isAllowedDifference,readCatalog} from './verify-global-db.mjs';
 const global=parseGlobalSchema();
+test('payment-day projection matches the global contract and missing additions still block CI',()=>{
+ const prisma=readFileSync(new URL('../backend/prisma/schema.prisma',import.meta.url),'utf8');
+ assert.deepEqual(blockingPrismaDifferences(auditPrisma(prisma,global)),[]);
+ const withoutAdjustment=structuredClone(global);
+ withoutAdjustment.tables.find(t=>t.name==='cambio_condicion_pago').columns=withoutAdjustment.tables.find(t=>t.name==='cambio_condicion_pago').columns.filter(c=>c.name!=='reajuste');
+ assert.ok(blockingPrismaDifferences(auditPrisma(prisma,withoutAdjustment)).some(r=>r.table==='cambio_condicion_pago'&&r.column==='reajuste'&&r.status==='PRISMA_ONLY'));
+ for(const table of ['convenio_pago','prorroga_pago']){
+  const withoutIndex=structuredClone(global);
+  withoutIndex.indexes=withoutIndex.indexes.filter(i=>i.name!==table+'_id_cliente_fecha_registro_idx');
+  assert.ok(blockingPrismaDifferences(auditPrisma(prisma,withoutIndex)).some(r=>r.table===table&&r.column==='INDEX:id_cliente,fecha_registro'&&r.status==='INDEX_MISMATCH'));
+ }
+});
 function fixture(){
  const actions={'NO ACTION':'a',CASCADE:'c',RESTRICT:'r','SET NULL':'n','SET DEFAULT':'d'};
  return {capturedAt:'synthetic-unit-fixture',tables:global.tables.map(t=>({name:t.name})),
@@ -35,7 +49,7 @@ const postgres18PartialIndexes = [
  {table:'tax_emission_intent',name:'tax_intent_email_pending_idx',observed:"CREATE INDEX tax_intent_email_pending_idx ON public.tax_emission_intent USING btree (id_empresa, email_estado, fecha_proximo_email) WHERE ((estado)::text = 'GENERADO'::text)"},
 ];
 test('canonical hash and all objects parsed, SQL expressions stay intact',()=>{
- assert.deepEqual(global.counts,{tables:96,columns:984,pk:96,fk:230,checks:63,indexes:133});
+ assert.deepEqual(global.counts,{tables:96,columns:985,pk:96,fk:230,checks:63,indexes:135});
  const taxIntent=global.tables.find(table=>table.name==='tax_emission_intent');
  assert.ok(taxIntent);
  assert.equal(taxIntent.columns.length,28);

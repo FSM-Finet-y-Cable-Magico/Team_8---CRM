@@ -1,7 +1,6 @@
-import { formatWorkOrderValue } from '../../lib';
 import { StatusBadge } from '../../shared/components';
 import type { Customer, CustomerService } from '../../api';
-import { dateLabel, type ControlRow } from './control-book-model';
+import { currency, dateLabel, type ControlRow } from './control-book-model';
 
 type Contract = NonNullable<Customer['contratos']>[number];
 
@@ -34,12 +33,13 @@ export function ControlBookCustomerContracts({ row, contracts, services, loading
     {error && <p className="control-muted" role="status">No se pudo cargar la lista de servicios. <button type="button" className="control-text-button" onClick={onRetry}>Reintentar</button></p>}
     {byId.size > 0 || unlinked.length > 0 || pendingService ? <div className="control-contract-table" role="region" aria-label="Contratos y servicios del cliente" tabIndex={0}>
       <table>
-        <thead><tr>{onSelect && <th scope="col"><span className="control-sr-only">Seleccionar plan</span></th>}<th scope="col">Plan</th><th scope="col">Contrato</th><th scope="col">Servicio</th><th scope="col">Dirección de instalación</th><th scope="col">Estado</th></tr></thead>
+        <thead><tr>{onSelect && <th scope="col"><span className="control-sr-only">Seleccionar plan</span></th>}<th scope="col">Plan</th><th scope="col">Contrato</th><th scope="col" className="control-contract-payment-day">Día de pago</th><th scope="col">Servicio</th><th scope="col">Dirección de instalación</th><th scope="col" className="control-contract-balance">Saldo pendiente</th><th scope="col">Estado</th></tr></thead>
         <tbody>
           {[...byId.values()].map(contract => {
             const planName = contract.plan?.nombreComercial ?? related.get(contract.idContrato)?.plan;
             const linked = services.filter(service => service.idContrato === contract.idContrato);
             const selected = contract.idContrato === row.idContrato;
+            const balance = related.get(contract.idContrato)?.saldoPendiente;
             const toggle = () => onSelect?.(selectedContractId === contract.idContrato ? null : contract.idContrato);
             return <tr key={contract.idContrato} className={selectedContractId === contract.idContrato ? 'control-current-contract' : undefined}
               onClick={onSelect ? toggle : undefined}>
@@ -48,10 +48,12 @@ export function ControlBookCustomerContracts({ row, contracts, services, loading
               <td><span>{contract.numeroContratoExterno ?? (selected ? row.numeroContrato : null) ?? `#${contract.idContrato}`}</span>
                 {(contract.fechaFirmaEfectiva || contract.fechaFirmaManual) && <small>Firma {dateLabel(contract.fechaFirmaEfectiva ?? contract.fechaFirmaManual)}</small>}
               </td>
-              <td>{linked.length ? linked.map(service => <div key={service.idServicio}>{service.tipoServicio} · {formatWorkOrderValue(service.estadoOperativo)}</div>)
-                : selected && row.estadoServicio ? formatWorkOrderValue(row.estadoServicio) : loading || error ? '—' : 'Sin servicio registrado'}</td>
+              <td className="control-contract-payment-day">{contract.diaVencimiento ?? (selected ? row.diaPago : null) ?? '—'}</td>
+              <td>{linked.length ? linked.map(service => <div key={service.idServicio}>{service.tipoServicio}</div>)
+                : loading || error ? '—' : 'Sin servicio registrado'}</td>
               <td>{[...new Set(linked.flatMap(service => service.direccion?.direccionCompleta ? [service.direccion.direccionCompleta] : []))].join(' · ')
                 || contract.direccionInstalacion || (selected ? row.direccion : null) || '—'}</td>
+              <td className="control-contract-balance">{balance == null ? '—' : currency.format(balance)}</td>
               <td>{contract.estado ? <StatusBadge value={contract.estado}/> : '—'}</td>
             </tr>;
           })}
@@ -59,11 +61,13 @@ export function ControlBookCustomerContracts({ row, contracts, services, loading
             {onSelect && <td/>}
             <th scope="row">{service.contrato?.plan?.nombreComercial ?? 'Sin plan asociado'}</th>
             <td>{service.idContrato === null ? '—' : `#${service.idContrato}`}</td>
-            <td>{service.tipoServicio} · {formatWorkOrderValue(service.estadoOperativo)}</td>
-            <td>{service.direccion?.direccionCompleta ?? '—'}</td>
             <td>—</td>
+            <td>{service.tipoServicio}</td>
+            <td>{service.direccion?.direccionCompleta ?? '—'}</td>
+            <td className="control-contract-balance">—</td>
+            <td><StatusBadge value={service.estadoOperativo}/></td>
           </tr>)}
-          {pendingService && <tr><th scope="row">{row.plan ?? 'Sin plan asociado'}</th><td>—</td><td>{row.estadoServicio ? formatWorkOrderValue(row.estadoServicio) : '—'}</td><td>{row.direccion ?? '—'}</td></tr>}
+          {pendingService && <tr>{onSelect && <td/>}<th scope="row">{row.plan ?? 'Sin plan asociado'}</th><td>—</td><td>—</td><td>—</td><td>{row.direccion ?? '—'}</td><td className="control-contract-balance">—</td><td>{row.estadoServicio ? <StatusBadge value={row.estadoServicio}/> : '—'}</td></tr>}
         </tbody>
       </table>
     </div> : !loading && !error && <p className="control-muted">Este cliente aún no tiene contratos ni servicios registrados.</p>}

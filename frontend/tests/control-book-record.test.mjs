@@ -50,10 +50,22 @@ test('el resumen permite seleccionar cada contrato aunque aún no tenga servicio
   assert.deepEqual(selected, [32]);
 });
 
-async function drawer(t, changes = {}, portfolioRows) {
+test('cada plan muestra su saldo completo y se actualiza tras un pago, sin repetir el total del cliente', async t => {
+  const {ControlBookCustomerContracts}=compile('ControlBookCustomerContracts.tsx',{'../../shared/components':{StatusBadge:({value})=>value},'./control-book-model':model});
+  const summary=[{idContrato:31,numeroContrato:'CT-31',plan:'Plan Uno',saldoPendiente:20000},{idContrato:32,numeroContrato:'CT-32',plan:'Plan Dos',saldoPendiente:8000},{idContrato:33,numeroContrato:'CT-33',plan:'Plan Tres',saldoPendiente:0},{idContrato:34,numeroContrato:'CT-34',plan:'Plan Cuatro',saldoPendiente:null}];
+  const props={row:{...row,idContrato:null,saldoPendiente:28000,resumenCliente:{contratos:4,facturas:5,planes:[],contratosRelacionados:summary}},contracts:[],services:[],loading:false,error:false,onRetry(){}};
+  let tree;await act(async()=>{tree=create(React.createElement(ControlBookCustomerContracts,props));});
+  t.after(async()=>{await act(async()=>tree.unmount());});
+  const balances=()=>tree.root.findByType('tbody').findAllByType('tr').map(tr=>textOf(tr.findAllByType('td').find(td=>td.props.className==='control-contract-balance')));
+  assert.deepEqual(balances(),[model.currency.format(20000),model.currency.format(8000),model.currency.format(0),'—']);
+  await act(async()=>{tree.update(React.createElement(ControlBookCustomerContracts,{...props,row:{...props.row,resumenCliente:{...props.row.resumenCliente,contratosRelacionados:summary.map(item=>item.idContrato===31?{...item,saldoPendiente:0}:item)}}}));});
+  assert.deepEqual(balances(),[model.currency.format(0),model.currency.format(8000),model.currency.format(0),'—']);
+});
+
+async function drawer(t, changes = {}, portfolioRows, quota = { year: 2026, agreements: { remaining: 3 }, extensions: { remaining: 3 } }) {
   const posts = [], saved = [];
   const { ControlBookDrawer } = compile('ControlBookDrawer.tsx', {
-    '../../api': { api: { get: async path => ({ data: path === '/commercial/control-book' ? { items: portfolioRows ?? [{ ...row, ...changes }], pagination: { totalPages: 1 } } : [] }), post: async (...args) => posts.push(args) }, apiErrorMessage: () => 'No se pudo guardar' },
+    '../../api': { api: { get: async path => ({ data: path.endsWith('/annual-allowance') ? quota : path.endsWith('/payment-day-preview') ? { fingerprint: 'preview-validado', mensualidad: 30000, montoReajuste: 15000, diasReajuste: 15, fechaDesde: '2026-11-10', proximoVencimiento: '2026-11-25' } : path === '/commercial/control-book' ? { items: portfolioRows ?? [{ ...row, ...changes }], pagination: { totalPages: 1 } } : [] }), post: async (...args) => posts.push(args) }, apiErrorMessage: () => 'No se pudo guardar' },
     '../customers/CustomerStatusBadge': { CustomerStatusSummary: () => null },
     './ControlBookCustomerContracts': { ControlBookCustomerContracts: ({ onSelect }) => React.createElement('button', { onClick: () => onSelect(portfolioRows?.[0]?.idContrato ?? 31) }, 'Seleccionar plan') },
     './ControlBookHistory': { ControlBookHistory: () => null },
@@ -123,7 +135,21 @@ test('cambiar día conserva el contrato y valor elegidos, sin modificar facturas
   await h.change('Nuevo día de pago', '25');
   await h.change('Motivo / observación', 'Solicitado por el cliente', 'textarea');
   await h.submit();
-  assert.deepEqual(h.posts, [['/commercial/payment-condition-changes', { idCliente: 10, idContrato: 31, tipoCambio: 'DIA_PAGO', valorNuevo: '25', justificacion: 'Solicitado por el cliente' }]]);
+  assert.equal(h.posts.length, 0, 'no confirma antes de consultar el reajuste');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+  assert.match(textOf(h.tree.toJSON()), /Mensualidad \/ 30 días/);
+  await h.submit();
+  assert.deepEqual(h.posts, [['/commercial/payment-condition-changes', { idCliente: 10, idContrato: 31, tipoCambio: 'DIA_PAGO', valorNuevo: '25', justificacion: 'Solicitado por el cliente', previewFingerprint: 'preview-validado' }]]);
+});
+
+test('convenios y prórrogas muestran cupos separados del cliente', async t => {
+  const h = await drawer(t, {}, undefined, { year: 2026, agreements: { remaining: 0 }, extensions: { remaining: 2 } });
+  await h.click('Convenio / prórroga');
+  assert.match(textOf(h.tree.toJSON()), /Convenios disponibles: 0 de 3/);
+  assert.equal(h.tree.root.findByProps({ type: 'submit' }).props.disabled, true);
+  await h.change('Tipo de acuerdo', 'extension', 'select');
+  assert.match(textOf(h.tree.toJSON()), /Prórrogas disponibles: 2 de 3/);
+  assert.equal(h.tree.root.findByProps({ type: 'submit' }).props.disabled, false);
 });
 
 test('convenio se confirma en dos pasos y usa el plan seleccionado, sin crear pagos', async t => {
@@ -134,6 +160,7 @@ test('convenio se confirma en dos pasos y usa el plan seleccionado, sin crear pa
   await h.submit();
   assert.equal(h.posts.length, 0);
   assert.ok(textOf(h.tree.toJSON()).includes('Cuotas del convenio'));
+  assert.ok(!textOf(h.tree.toJSON()).includes('Tipo de acuerdo'));
   assert.ok(!textOf(h.tree.toJSON()).includes('Revisión'));
   await h.submit();
   assert.equal(h.posts.length, 1);

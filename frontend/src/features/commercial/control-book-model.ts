@@ -1,5 +1,5 @@
 export type ControlRow = {
-  resumenCliente?: { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null }> };
+  resumenCliente?: { contratos: number; facturas: number; planes: string[]; contratosRelacionados?: Array<{ idContrato: number; numeroContrato: string | null; plan: string | null; saldoPendiente?: number | null }> };
   rowId: string; idEmpresa: number | null; idCliente: number; rut: string | null; nombre: string; telefono: string | null; email: string | null; direccion: string | null;
   idServicio: number | null; serviciosRelacionados: number[]; estadoServicio: string | null; idContrato: number | null; numeroContrato: string | null; idPlan: number | null; plan: string | null;
   idZona: number | null; zona: string | null; tipoDocumento: string | null; idFactura: number | null; numeroDocumento: string | null; fechaEmision: string | null; fechaVencimiento: string | null;

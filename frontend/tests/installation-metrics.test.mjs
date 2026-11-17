@@ -13,6 +13,7 @@ const formatting = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/formatting.ts', import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(formatting);
 const mocks = {
+  './useDashboardFinance': { useDashboardFinance: () => ({ data: null, loading: false }) },
   '../../lib': { ...formatting, expiryAlertKey: () => '', expiryUrgency: () => '', formatDateOnly: v => v },
   '../../shared/components': {
     DashboardStatCard: ({ label, value, description, onClick }) => React.createElement('article', { 'data-label': label, 'data-value': value, onClick }, description),
@@ -36,12 +37,12 @@ async function render(metricas, check, workOrders = [], navigation = {}) {
 test('CU47 presents effective-date total without adding undated completions to pending execution', async () => {
   await render({ instalacionesMensuales: 2, instalacionesSinFechaTecnica: 3 }, tree => {
     const cards = tree.root.findAllByType('article');
-    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
+    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones completadas este mes'));
     assert.equal(monthly.findByType('strong').props.children, 2);
     assert.equal(cards.find(c => c.props['data-label'] === 'Instalaciones pendientes').props['data-value'], 0);
     const rendered = JSON.stringify(tree.toJSON());
     assert.doesNotMatch(rendered, /Pendiente de fecha técnica/);
-    assert.match(rendered, /Por fecha técnica efectiva \(Santiago\)/);
+    assert.doesNotMatch(rendered, /Santiago/);
   });
 });
 
@@ -58,11 +59,11 @@ test('gráfico de instalaciones reconoce cierre global y EN_CURSO sin contar rep
 
 test('older summary responses remain compatible with monthly indicator', async () => {
   await render({ instalacionesMensuales: 0, instalacionesRequierenRevision: 1 }, tree => {
-    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
+    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones completadas este mes'));
     assert.equal(monthly.findByType('strong').props.children, 0);
   });
   await render({ instalacionesMensuales: 4 }, tree => {
-    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones del mes'));
+    const monthly = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Instalaciones completadas este mes'));
     assert.equal(monthly.findByType('strong').props.children, 4);
   });
 });
@@ -73,7 +74,7 @@ test('churn sin historia suficiente no presenta porcentaje ni bajas inventadas, 
       const churn = tree.root.findAllByType('button').find(b => b.findAllByType('span').some(s => s.props.children === 'Churn mensual'));
       assert.equal(churn.findByType('strong').props.children, '-');
       const rendered = JSON.stringify(tree.toJSON());
-      assert.match(rendered, /Historial insuficiente/);
+      assert.doesNotMatch(rendered, /Historial insuficiente/);
       assert.doesNotMatch(rendered, /50%|0%|baja\(s\) durante el mes/);
     });
   }

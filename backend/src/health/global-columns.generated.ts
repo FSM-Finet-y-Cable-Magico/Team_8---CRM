@@ -1,4 +1,4 @@
-// Generated from init-global.sql SHA256 8b744395f2d067592b61f70e09e74f263b2656a8cacb44cbac5e492d85b6ed1e; no seeds or credentials.
+// Generated from init-global.sql SHA256 7ae174fa5ed14952664d1173f468562c59bba9c4de8364471c9b683d969f7cb2; no seeds or credentials.
 export const GLOBAL_COLUMNS = [
   {
     "table": "empresa",
@@ -1541,6 +1541,12 @@ export const GLOBAL_COLUMNS = [
     "name": "fecha_registro",
     "type": "timestamptz",
     "nullable": false
+  },
+  {
+    "table": "cambio_condicion_pago",
+    "name": "reajuste",
+    "type": "jsonb",
+    "nullable": true
   },
   {
     "table": "cargo_adicional",

@@ -10,7 +10,8 @@ function load(file,mocks) {
   const source=readFileSync(new URL('../src/'+file,import.meta.url),'utf8');
   const out=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
   const exports={};new Function('require','exports',out)(name=>{
-    if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.startsWith('.'))throw Error(name);return require(name);
+    if(name in mocks)return mocks[name];if(name.endsWith('.css'))return {};if(name.endsWith('/ChileanPhoneInput')) return require('./helpers/chilean-phone-input.cjs');
+    if (name.startsWith('.'))throw Error(name);return (name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name));
   },exports);return exports;
 }
 async function harness(t,{company=1,state='Factible',quoted=false,outside=false,emailDelivery='disabled',g2=false,reviewAvailable=true,reviewFailure=false,commercial=true,canEdit=false,requiresReview=g2,existingContract=false,noPlans=false,geocodeFailure=false,locationFailure=false,noLocation=false,geocodeDisabled=false}={}) {
@@ -365,7 +366,7 @@ test('TK-07: el editor de prospecto usa el patrón del editor de clientes sin ca
   const h = await harness(t, { g2: true, requiresReview: false });
   await act(async () => h.button('Editar prospecto').props.onClick());
   const form = h.tree.root.findByProps({ className: 'prospect-edit-form' });
-  const text = node => typeof node === 'string' ? node : (node.children ?? []).map(text).join('');
+  const text = node => typeof node === 'string' ? node : node.props?.['aria-hidden'] ? '' : (node.children ?? []).map(text).join('');
   const labels = form.findAllByType('label').map(node => text(node).split(/(?=Seleccionar|Selecciona)/)[0]);
   assert.deepEqual(labels.map(label => label.replace(/Metropolitana.*$/, '')), ['Nombre completo', 'Origen de contacto', 'Teléfono', 'Correo', 'Dirección', 'Región', 'Comuna']);
   assert.match(text(form), /Empresa/);

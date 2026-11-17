@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { clearSession, monitorSession, restoreSession } from './lib/session';
 import {
   ArrowRight,
@@ -26,7 +26,6 @@ import {
   apiErrorMessage,
   AuditLog,
   AuthUser,
-  BillingOverview,
   Company,
   Customer,
   CustomerRequest,
@@ -75,12 +74,12 @@ import {
   formatDateOnly,
   formatDateTime,
   formatWorkOrderValue,
-  settledData,
   technicalEntries,
 } from './lib';
 import { Sidebar, Topbar, type SidebarNavItem } from './layouts';
 import { useCompanyDraft } from './shared/hooks/useCompanyDraft';
 import { useTransientMessage } from './shared/hooks/useTransientMessage';
+import { isRefreshPaused, useAutoRefresh } from './shared/hooks/useAutoRefresh';
 import { DashboardPermissions, getDashboardPermissions, hasPermission } from './permissions';
 import {
   DashboardStatCard,
@@ -188,6 +187,7 @@ export default function App() {
 function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [focusedTicketId, setFocusedTicketId] = useState<number | null>(null);
+  const [controlBookFocus, setControlBookFocus] = useState<{ idCliente: number; idEmpresa: number } | null>(null);
   const [visitedModules, setVisitedModules] = useState<Tab[]>([]);
   useEffect(() => {
     if (activeTab === 'customers' || activeTab === 'commercial') {
@@ -202,26 +202,27 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const [focusedInstallationContractId, setFocusedInstallationContractId] = useState<number | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const dataRequest = useRef(0);
+  const dataRequest = useRef<AbortController | null>(null);
+  const loadedScope = useRef<string | null>(null);
+  const companiesScope = useRef<string | null>(null);
+  const [sectionError, setSectionError] = useState('');
   const dataScope = useRef(scope);
   dataScope.current = scope;
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [prospectsLoading, setProspectsLoading] = useState(true);
   const [prospectsError, setProspectsError] = useState('');
-  const prospectsRequest = useRef(0);
+  const prospectsRequest = useRef<AbortController | null>(null);
   const prospectsScope = useRef(scope);
   const [pendingActivationProspects, setPendingActivationProspects] = useState<Prospect[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryUnit[]>([]);
-  const [billingOverview, setBillingOverview] = useState<BillingOverview | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
-  const [message, setMessage] = useState('');
   const { message: notification, showMessage: showNotification, clearMessage: clearNotification } = useTransientMessage(3000);
   const isAdmin = hasPermission(user.roles, 'manageCompanyScope');
   const permissions = getDashboardPermissions(user.roles);
@@ -230,12 +231,6 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   const canViewTickets = permissions.viewTickets;
   const canViewInstallations = permissions.viewInstallations;
   const canViewWorkOrders = permissions.viewWorkOrders;
-
-  useEffect(() => {
-    if (!message) return undefined;
-    const timer = window.setTimeout(() => setMessage(''), 3000);
-    return () => window.clearTimeout(timer);
-  }, [message]);
 
   const writeCompanyId = useMemo(() => {
     if (scope !== 'consolidado') {
@@ -246,113 +241,98 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
   }, [companies, scope, user.idEmpresa]);
   const prospectRegistration = useCompanyDraft(writeCompanyId, createProspectRegistrationDraft);
 
-  async function loadProspects() {
-    const request = ++prospectsRequest.current;
-    setProspectsLoading(true);
-    setProspectsError('');
-    // Keep the selected prospect mounted while rechecking coverage; clear only when changing company scope.
+  async function loadProspects(background = false, parentSignal?: AbortSignal) {
+    prospectsRequest.current?.abort();
+    const controller = new AbortController();
+    prospectsRequest.current = controller;
+    const abort = () => controller.abort();
+    parentSignal?.addEventListener('abort', abort, { once: true });
+    if (parentSignal?.aborted) controller.abort();
+    const current = () => !controller.signal.aborted && dataScope.current === scope;
+    if (!background) { setProspectsLoading(true); setProspectsError(''); }
     if (prospectsScope.current !== scope) {
       prospectsScope.current = scope;
       setProspects([]);
     }
     try {
-      const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000 });
-      if (request === prospectsRequest.current && dataScope.current === scope) setProspects(data);
-    } catch {
-      if (request === prospectsRequest.current && dataScope.current === scope) {
-        setProspectsError('No se pudieron cargar los prospectos. Comprueba la conexión del servidor y la configuración de la base de datos.');
+      const { data } = await api.get<Prospect[]>('/prospects', { params: { scope }, timeout: 15000, signal: controller.signal });
+      if (current() && !(background && isRefreshPaused())) {
+        setProspects(previous => background && JSON.stringify(previous) === JSON.stringify(data) ? previous : data);
+        setProspectsError('');
       }
+      return true;
+    } catch (error) {
+      if (current()) setProspectsError(apiErrorMessage(error));
+      return false;
     } finally {
-      if (request === prospectsRequest.current && dataScope.current === scope) setProspectsLoading(false);
+      parentSignal?.removeEventListener('abort', abort);
+      if (current()) setProspectsLoading(false);
     }
   }
 
-  async function loadData() {
-    const request = ++dataRequest.current;
-    const current = () => request === dataRequest.current && dataScope.current === scope;
-    void loadProspects();
-    setMessage('');
+  async function loadData(background = false) {
+    // Timer, focus and returning online share one read. Mutations can request a fresh one.
+    if (background && dataRequest.current) return true;
+    dataRequest.current?.abort();
+    const controller = new AbortController();
+    dataRequest.current = controller;
+    const current = () => !controller.signal.aborted && dataScope.current === scope;
     const errors: string[] = [];
-    const loadCustomers = canManageCustomers || permissions.installEquipment;
-    const [
-      summaryResult,
-      companiesResult,
-      pendingActivationProspectsResult,
-      plansResult,
-      customersResult,
-      inventoryResult,
-      billingResult,
-      ticketsResult,
-      categoriesResult,
-      workOrdersResult,
-    ] = await Promise.allSettled([
-      api.get<Summary>('/companies/summary', { params: { scope } }),
-      isAdmin ? api.get<Company[]>('/companies') : Promise.resolve({ data: [] as Company[] }),
-      canViewInstallations
-        ? api.get<Prospect[]>('/prospects/pending-activation', { params: { scope } })
-        : Promise.resolve({ data: [] as Prospect[] }),
-      api.get<Plan[]>('/plans', { params: { scope, includeInactive: permissions.managePlans ? 'true' : undefined } }),
-      loadCustomers ? api.get<Customer[]>('/customers', { params: { scope } }) : Promise.resolve({ data: [] as Customer[] }),
-      canViewInventory ? api.get<InventoryUnit[]>('/inventory', { params: { scope } }) : Promise.resolve({ data: [] as InventoryUnit[] }),
-      permissions.viewBilling ? api.get<BillingOverview>('/billing/overview', { params: { scope } }) : Promise.resolve({ data: null as BillingOverview | null }),
-      canViewTickets ? api.get<Ticket[]>('/tickets', { params: { scope } }) : Promise.resolve({ data: [] as Ticket[] }),
-      canViewTickets ? api.get<TicketCategory[]>('/tickets/categories') : Promise.resolve({ data: [] as TicketCategory[] }),
-      canViewWorkOrders || canViewInstallations
-        ? api.get<WorkOrder[]>('/work-orders', { params: { scope } })
-        : Promise.resolve({ data: [] as WorkOrder[] }),
-    ]);
-    if (!current()) return;
-    const summaryData = settledData(summaryResult, null as Summary | null, errors);
-    const companyOptions = isAdmin
-      ? settledData(companiesResult, [] as Company[], errors)
-      : summaryData?.empresas ?? [];
-
-    setSummary(summaryData);
-    setCompanies(companyOptions.length > 0 ? companyOptions : summaryData?.empresas ?? []);
-    setPendingActivationProspects(settledData(pendingActivationProspectsResult, [] as Prospect[], errors));
-    setPlans(settledData(plansResult, [] as Plan[], errors));
-    setCustomers(settledData(customersResult, [] as Customer[], errors));
-    setInventory(settledData(inventoryResult, [] as InventoryUnit[], errors));
-    setBillingOverview(settledData(billingResult, null as BillingOverview | null, errors));
-    setTickets(settledData(ticketsResult, [] as Ticket[], errors));
-    setTicketCategories(settledData(categoriesResult, [] as TicketCategory[], errors));
-    setWorkOrders(settledData(workOrdersResult, [] as WorkOrder[], errors));
-
-    if (isAdmin) {
-      const [usersResult, rolesResult, auditResult] = await Promise.allSettled([
-        api.get<UserRow[]>('/users'),
-        api.get<Role[]>('/users/roles'),
-        api.get<AuditLog[]>('/audit', { params: { limit: 40 } }),
-      ]);
-      if (!current()) return;
-      setUsers(settledData(usersResult, [] as UserRow[], errors));
-      setRoles(settledData(rolesResult, [] as Role[], errors));
-      setAudit(settledData(auditResult, [] as AuditLog[], errors));
+    const jobs: Promise<unknown>[] = [];
+    if (!background) setSectionError('');
+    function read<T>(path: string, setter: Dispatch<SetStateAction<T>>, params?: Record<string, unknown>, onData?: (data: T) => void) {
+      jobs.push(api.get<T>(path, { params, signal: controller.signal, timeout: 15000 }).then(({ data }) => {
+        if (!current() || (background && isRefreshPaused())) return;
+        // Identical responses must not reset downstream forms or trigger another fetch.
+        setter(previous => JSON.stringify(previous) === JSON.stringify(data) ? previous : data);
+        onData?.(data);
+        if (path === '/companies') companiesScope.current = scope;
+      }).catch(error => { if (current()) errors.push(apiErrorMessage(error)); }));
     }
-
-    if (errors.length) {
-      setMessage([...new Set(errors)].join(' | '));
+    const inView = (...tabs: Tab[]) => tabs.includes(activeTab);
+    if (companiesScope.current !== scope) {
+      if (isAdmin) read('/companies', setCompanies);
+      else if (activeTab !== 'dashboard') jobs.push(api.get<Summary>('/companies/summary', { params: { scope }, signal: controller.signal, timeout: 15000 }).then(({ data }) => {
+        if (current()) { setCompanies(data.empresas); companiesScope.current = scope; }
+      }).catch(error => { if (current()) errors.push(apiErrorMessage(error)); }));
     }
+    if (activeTab === 'dashboard') read('/companies/summary', setSummary, { scope }, result => {
+      if (!isAdmin && result) { setCompanies(result.empresas); companiesScope.current = scope; }
+    });
+    if (permissions.viewProspects && inView('dashboard', 'prospects', 'installations')) {
+      jobs.push(loadProspects(background, controller.signal).then(ok => { if (!ok && current()) errors.push('No se pudieron actualizar los prospectos. Inténtalo nuevamente.'); }));
+    }
+    if (inView('prospects', 'customers', 'plans')) read('/plans', setPlans, { scope, includeInactive: permissions.managePlans ? 'true' : undefined });
+    if ((canManageCustomers || permissions.installEquipment) && inView('dashboard', 'customers', 'installations', 'commercial')) read('/customers', setCustomers, { scope });
+    if (canViewInstallations && inView('dashboard', 'installations')) read('/prospects/pending-activation', setPendingActivationProspects, { scope });
+    if (canViewInventory && activeTab === 'installations') read('/inventory', setInventory, { scope });
+    if (canViewTickets && inView('dashboard', 'tickets')) read('/tickets', setTickets, { scope });
+    if (canViewTickets && activeTab === 'tickets') read('/tickets/categories', setTicketCategories);
+    if ((canViewWorkOrders || canViewInstallations) && inView('dashboard', 'installations', 'workOrders')) read('/work-orders', setWorkOrders, { scope });
+    if (isAdmin && activeTab === 'users') { read('/users', setUsers); read('/users/roles', setRoles); }
+    if (isAdmin && activeTab === 'audit') read('/audit', setAudit, { limit: 40 });
+    await Promise.all(jobs);
+    if (!current()) return false;
+    setSectionError(errors.length ? 'No se pudieron actualizar los datos de esta sección. Inténtalo nuevamente.' : '');
+    if (dataRequest.current === controller) dataRequest.current = null;
+    return errors.length === 0;
   }
 
   useEffect(() => {
-    setSummary(null);
-    setCustomers([]);
-    setPendingActivationProspects([]);
-    setWorkOrders([]);
+    if (loadedScope.current !== scope) {
+      loadedScope.current = scope;
+      setSummary(null); setProspects([]); setCustomers([]); setPendingActivationProspects([]);
+      setWorkOrders([]); setPlans([]); setInventory([]);
+      setTickets([]); setTicketCategories([]); setUsers([]); setRoles([]); setAudit([]);
+    }
     void loadData();
-    const refresh = () => { if (document.visibilityState !== 'hidden') void loadData(); };
-    const timer = window.setInterval(refresh, 30000);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
     return () => {
-      dataRequest.current++;
-      prospectsRequest.current++;
-      window.clearInterval(timer);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
+      dataRequest.current?.abort(); dataRequest.current = null;
+      prospectsRequest.current?.abort();
     };
-  }, [scope]);
+  }, [scope, activeTab]);
+
+  useAutoRefresh(() => loadData(true));
 
   function logout() {
     clearSession();
@@ -429,9 +409,10 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
           </section>
         </Modal>
 
-        {message && <p className="alert app-alert">{message}</p>}
-
         <section className="content-shell">
+          {sectionError && <div className="section-read-error" role="status">
+            <span>{sectionError}</span> <button type="button" className="link-button" onClick={() => void loadData()}>Reintentar</button>
+          </div>}
           {activeTab === 'dashboard' && (
             <DashboardHome
               summary={summary}
@@ -439,10 +420,17 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
               customers={customers}
               tickets={tickets}
               workOrders={workOrders}
-              billingOverview={billingOverview}
+              scope={scope}
+              companies={companies}
               permissions={permissions}
               onNavigate={setActiveTab}
               onOpenTicket={(id) => { setFocusedTicketId(id); setActiveTab('tickets'); }}
+              onOpenControlBook={alert => {
+                if (!permissions.viewControlBook || !alert.idCliente || !alert.idEmpresa) return;
+                setScope(String(alert.idEmpresa));
+                setControlBookFocus({ idCliente: alert.idCliente, idEmpresa: alert.idEmpresa });
+                setActiveTab('commercial');
+              }}
               onOpenPendingInstallations={(view) => {
                 if (view === 'agenda') {
                   if (!canViewInstallations) return;
@@ -532,6 +520,8 @@ function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void })
             <div hidden={activeTab !== 'commercial'}>
             <CommercialControlBookPanel
               active={activeTab === 'commercial'}
+              customerFocus={controlBookFocus}
+              onCustomerFocusConsumed={() => setControlBookFocus(null)}
               scope={scope}
               writeCompanyId={writeCompanyId}
               permissions={permissions}

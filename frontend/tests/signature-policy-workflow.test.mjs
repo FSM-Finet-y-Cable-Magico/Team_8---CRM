@@ -16,22 +16,23 @@ function load(path,mocks={}) {
     if(name==='./CustomerPlanForm')return {CustomerPlanForm:()=>null};
     if(name==='../../shared/hooks/useTransientMessage')return load('shared/hooks/useTransientMessage.ts');
     if(name.endsWith('.css'))return {};
-    if(name.startsWith('.'))throw Error('Unmocked '+name);
-    return require(name);
+    if(name.endsWith('/ChileanPhoneInput')) return require('./helpers/chilean-phone-input.cjs');
+    if (name.startsWith('.'))throw Error('Unmocked '+name);
+    return (name.endsWith('/ChileanPhoneInput') ? require('./helpers/chilean-phone-input.cjs') : require(name));
   },exports);
   return exports;
 }
 const state=(mode,enabled=false,extra={})=>({enabled,policy:{mode,available:enabled,manualAllowed:mode==='manual',reason:null},solicitud:null,...extra});
 function harness(initial) {
-  let response=initial;const mutations=[];const timers=new Set();
+  let response=initial;const mutations=[];const reads=[];const timers=new Set();
   const oldSet=globalThis.setInterval,oldClear=globalThis.clearInterval;
   globalThis.setInterval=fn=>{timers.add(fn);return fn;};
   globalThis.clearInterval=fn=>timers.delete(fn);
-  const api={get:async()=>({data:typeof response==='function'?await response():response}),
+  const api={get:async(...args)=>{reads.push(args);return {data:typeof response==='function'?await response():response};},
     patch:async(...args)=>{mutations.push(args);return {data:{}};},
     post:async(...args)=>{mutations.push(args);return {data:{}};}};
   const hook=load('features/contracts/useSignatureStatus.ts',{'../../api':{api}});
-  return {api,hook,mutations,set:next=>{response=next;},
+  return {api,hook,mutations,reads,set:next=>{response=next;},
     tick:async()=>{await act(async()=>{for(const fn of [...timers])fn();});},
     restore:()=>{globalThis.setInterval=oldSet;globalThis.clearInterval=oldClear;},
     common:{'../../shared/data/chile-territories': load('shared/data/chile-territories.ts',{}),'../../lib': { formatDateTime: String, formatRutForDisplay: value => value ?? null },'../../api':{api,apiErrorMessage:()=> 'No disponible'},
@@ -358,5 +359,42 @@ test('descarga histórica sigue disponible aunque ya no exista modalidad para nu
     assert.ok(button(tree, 'Descargar contrato con constancia'));
     assert.equal(button(tree, 'Enviar a firma'), undefined);
     assert.deepEqual(h.mutations, []);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+
+test('firma: petición lenta no se duplica y se cancela al cerrar la ficha', async () => {
+  let finish; const wait = new Promise(resolve => { finish = resolve; });
+  const h = harness(() => wait); let tree;
+  function View() { h.hook.useSignatureStatus(10); return null; }
+  try {
+    await act(async () => { tree = create(React.createElement(View)); });
+    await h.tick(); await h.tick();
+    assert.equal(h.reads.length, 1);
+    assert.equal(h.reads[0][1].timeout, 15000);
+    await act(async () => tree.unmount()); tree = null;
+    assert.equal(h.reads[0][1].signal.aborted, true);
+    await act(async () => finish(state('automatic')));
+    assert.equal(h.mutations.length, 0);
+  } finally { if (tree) act(() => tree.unmount()); h.restore(); }
+});
+
+test('firma: fallo de consulta conserva el estado previo y espera antes de reintentar automáticamente', async t => {
+  let now = 100000; t.mock.method(Date, 'now', () => now);
+  const h = harness(state('automatic')); let tree, policy;
+  function View() { policy = h.hook.useSignatureStatus(10); return null; }
+  try {
+    await act(async () => { tree = create(React.createElement(View)); });
+    const initial = policy.status;
+    h.set(() => { throw Error('503'); });
+    await h.tick();
+    assert.strictEqual(policy.status, initial);
+    const attempts = h.reads.length;
+    now += 15000; await h.tick(); assert.equal(h.reads.length, attempts);
+    now += 15000; await h.tick(); assert.equal(h.reads.length, attempts + 1);
+    h.set(state('manual'));
+    await act(async () => policy.refresh());
+    assert.equal(policy.status.policy.mode, 'manual');
+    assert.equal(policy.error, '');
   } finally { if (tree) act(() => tree.unmount()); h.restore(); }
 });
