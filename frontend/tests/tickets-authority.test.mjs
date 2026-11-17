@@ -348,10 +348,11 @@ test('ticket compartido G3 conserva estado y consulta sin ofrecer escrituras ni 
   const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'DERIVADO_OT', origen: 'CRM',
     estadoPresentacion: 'Derivado a OT', soloLecturaTecnica: true }], categories: [], permissions });
   assert.match(ctx.text(), /Derivado a OT/);
-  assert.match(ctx.text(), /Solo consulta/);
+  assert.doesNotMatch(ctx.text(), /Solo consulta|Organiza la atención|Tienes acceso de consulta/);
   assert.equal(ctx.button('Resolución'), undefined);
   assert.equal(ctx.button('Guardar cambios'), undefined);
-  await ctx.click('Seguimiento1');
+  assert.equal(ctx.tree.root.findAllByProps({ role: 'tablist' }).length, 0);
+  assert.equal(ctx.tree.root.findAllByType('summary').map(textOf).join(''), 'Seguimiento1');
   assert.match(ctx.text(), /Nota historica/);
   assert.equal(ctx.button('Agregar observación'), undefined);
   assert.equal(ctx.calls.length, 0);
@@ -359,7 +360,7 @@ test('ticket compartido G3 conserva estado y consulta sin ofrecer escrituras ni 
 
 test('backend anterior no convierte EN_PROGRESO ni estado desconocido en opcion CRM editable', async t => {
   const ctx = await harness(t, 'TicketsPanel', { tickets: [{ ...ticket, estado: 'EN_PROGRESO' }], categories: [], permissions });
-  assert.match(ctx.text(), /Solo consulta/);
+  assert.doesNotMatch(ctx.text(), /Solo consulta/);
   assert.equal(ctx.button('Guardar cambios'), undefined);
   assert.equal(ctx.button('Resolución'), undefined);
   assert.equal(ctx.calls.length, 0);
@@ -511,7 +512,8 @@ test('panel sin permisos permite consultar antecedentes sin ofrecer edicion', as
   const ctx = await harness(t, 'TicketsPanel', { tickets: [ticket], categories: [], permissions: {} });
   assert.equal(ctx.button('Resolución'), undefined);
   assert.equal(ctx.button('Guardar cambios'), undefined);
-  await ctx.click('Seguimiento1');
+  assert.equal(ctx.tree.root.findAllByProps({ role: 'tablist' }).length, 0);
+  assert.equal(ctx.tree.root.findAllByType('summary').map(textOf).join(''), 'Seguimiento1');
   assert.equal(ctx.button('Agregar observación'), undefined);
   assert.match(ctx.text(), /Nota historica/);
   assert.equal(ctx.calls.length, 0);

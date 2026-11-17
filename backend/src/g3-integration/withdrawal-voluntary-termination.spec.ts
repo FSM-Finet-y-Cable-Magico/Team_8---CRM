@@ -7,9 +7,8 @@ import { comercial, created, orderRead, withdrawalHarness } from './__fixtures__
 /**
  * FINET 13-11-2026 (adjustment to Documento 2): two causes, one withdrawal engine.
  *  - MOROSIDAD: unchanged (suspension, notice, debt; commercial baja only after G3 approves).
- *  - VOLUNTARIA: started from Tickets; the COMMERCIAL termination is applied at registration (it never waits for the
- *    technical visit, G1 or G3) and the technical withdrawal (OT BAJA, motivo VOLUNTARIA) follows the same G3 path; its
- *    closure only closes the request and tickets, it never touches the terminated relationship again.
+ *  - VOLUNTARIA: started from Tickets; service and return to Prospects also wait for approved G3 closure.
+ *    Historical immediate terminations keep their original timestamp and only close technically.
  * Synthetic data only; nothing leaves the process.
  */
 const NOW = new Date('2026-11-13T15:00:00.000Z');
@@ -27,25 +26,34 @@ function engine(options: Parameters<typeof withdrawalHarness>[0] = {}, prepare?:
   return { ...h, service, g1, snapshot, terminate: (over: Record<string, unknown> = {}, user = comercial()) => service.terminateVoluntarily(request(over) as never, user) };
 }
 const svc = (h: { state: any }, id: number) => h.state.services.find((s: any) => s.idServicio === id);
+async function approve(h: ReturnType<typeof engine>) {
+  const d = h.state.dispatches.at(-1)!;
+  h.g3Replies.push(orderRead('COMPLETADA', d.idOtG3!));
+  await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { id_ot: d.idOtG3!, clave_idempotencia: `baja:${d.idOtG3}`,
+    id_servicio: 62, id_ticket_externo: 77, trace_id: d.traceId })));
+  h.g3Replies.push(orderRead('COMPLETADA', d.idOtG3!));
+  return h.service.finalizeApprovedBySystem(d.idSolicitudRetiro);
+}
 
 beforeEach(() => jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] }));
 afterEach(() => jest.useRealTimers());
 
-describe('Término voluntario: el término comercial no espera a la visita técnica, a G1 ni a G3', () => {
+describe('Término voluntario: solicitud pendiente de aprobación de G3', () => {
   it('con deuda: registra ticket, requerimiento y evidencia, aplica el término y conserva la deuda; el retiro queda preparado', async () => {
     const h = engine();
     const invoicesBefore = JSON.stringify(h.state.invoices);
     const result = await h.terminate();
     expect(result).toMatchObject({ repetido: false, retiroTecnico: 'NUEVA_SOLICITUD', ticket: { idTicket: 77, categoria: 'Término de servicio', estado: 'Abierto' },
-      comercial: { contratoDeBaja: false }, despachoPendiente: expect.stringMatching(/ratifique el motivo voluntario/) });
-    expect(svc(h, 62).estadoOperativo).toBe('Baja');
+      comercial: null, despachoPendiente: expect.stringMatching(/ratifique el motivo voluntario/) });
+    expect(svc(h, 62).estadoOperativo).toBe('Activo');
     expect(svc(h, 61).estadoOperativo).toBe('Suspendido'); // other service of the same contract untouched
     expect(h.state.requests[0]).toMatchObject({ motivo: 'VOLUNTARIA', estado: 'REGISTRADA', estadoDespachoTecnico: 'BLOQUEADO_CONTRATO_G3', idServicio: 62 });
     expect(h.state.links[0]).toMatchObject({ causa: 'VOLUNTARIA', idAviso: null, idTicket: 77 });
     expect(h.state.dispatches[0].payloadSnapshot).toMatchObject({ tipo_ot: 'BAJA', motivo: 'VOLUNTARIA', id_servicio_externo: 62, id_ticket_externo: 77 });
     expect(h.state.terminations[0]).toMatchObject({ idServicio: 62, idTicket: 77, idSolicitudRetiro: 15, canal: 'TELEFONO', solicitante: 'TITULAR',
       evidencia: 'Llamada grabada N° 5521', requerimientoEn: new Date('2026-11-13T14:30:00.000Z') });
-    expect(h.state.audits.find(a => a.accion === 'TERMINO_VOLUNTARIO_SERVICIO').valorNuevo).toMatchObject({ deudaConservada: true, esperaG3: false, estadoNuevo: 'Baja' });
+    expect(h.state.terminations[0].terminoComercialEn).toBeNull();
+    expect(h.state.audits.find(a => a.accion === 'TERMINO_VOLUNTARIO_SERVICIO').valorNuevo).toMatchObject({ deudaConservada: true, esperaG3: true, estadoNuevo: 'Activo' });
     expect(JSON.stringify(h.state.invoices)).toBe(invoicesBefore);
     expect(h.state.forbiddenWrites).toEqual([]);
     expect(h.g3Calls).toEqual([]); // VOLUNTARIA is never sent before G3 ratifies it, and never disguised as MOROSIDAD
@@ -53,11 +61,31 @@ describe('Término voluntario: el término comercial no espera a la visita técn
   });
 
   it('sin deuda y última relación en la empresa: contrato y cliente de baja, excliente en Prospectos (sin suspensión ni aviso previos)', async () => {
-    const h = engine({}, x => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 61); x.state.invoices = []; x.state.notices = []; x.state.contracts[0].estado = 'Activo'; });
+    const h = engine({ voluntary: true, finalize: true }, x => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 61); x.state.invoices = []; x.state.notices = []; x.state.contracts[0].estado = 'Activo'; });
+    h.g3Replies.push(created('g8-retiro-1-15', 931));
     const result = await h.terminate();
-    expect(result).toMatchObject({ comercial: { contratoDeBaja: true, estadoCliente: 'Baja', retornoProspectos: 'CREADO' } });
+    expect(result.comercial).toBeNull();
+    expect(h.state.contracts[0].estado).toBe('Activo');
+    expect(h.state.prospects).toEqual([]);
+    await approve(h);
     expect(h.state.contracts[0].estado).toBe('Baja');
-    expect(h.state.prospects).toEqual([expect.objectContaining({ idCliente: 33, idEmpresa: 1 })]);
+    expect(h.state.prospects).toEqual([expect.objectContaining({ idCliente: 33, idEmpresa: 1, estadoPipeline: 'Perdido', observacionPerdida: 'Término voluntario del servicio' })]);
+  });
+
+  it('reutiliza el prospecto histórico como Perdido, mantiene origen e identidad y audita el estado anterior', async () => {
+    const h = engine({ voluntary: true, finalize: true }, x => {
+      x.state.services = x.state.services.filter((s: any) => s.idServicio !== 61);
+      x.state.invoices = []; x.state.notices = [];
+      x.state.prospects.push({ idProspecto: 400, idEmpresa: 1, idCliente: 33, rut: '12345678-5', estadoPipeline: 'Servicio Activo', origenContacto: 'Referido' });
+    });
+    h.g3Replies.push(created('g8-retiro-1-15', 931));
+    await h.terminate();
+    expect(h.state.prospects[0].estadoPipeline).toBe('Servicio Activo');
+    await approve(h);
+    expect(h.state.prospects).toEqual([expect.objectContaining({ idProspecto: 400, idCliente: 33, rut: '12345678-5', origenContacto: 'Referido', estadoPipeline: 'Perdido' })]);
+    expect(h.state.audits.find(a => a.accion === 'EXCLIENTE_VISIBLE_EN_PROSPECTOS')).toMatchObject({
+      valorAnterior: { estadoPipeline: 'Servicio Activo' }, valorNuevo: { resultado: 'REUTILIZADO', causa: 'VOLUNTARIA', estadoPipeline: 'Perdido' },
+    });
   });
 
   it('doble clic o reintento: la misma operación, sin segundo ticket, solicitud ni OT', async () => {
@@ -107,13 +135,21 @@ describe('Término voluntario: el término comercial no espera a la visita técn
     expect(h.snapshot()).toBe(before);
   });
 
-  it('datos de retiro incompletos (sin dirección): el término comercial igual se aplica; el retiro queda pendiente de datos', async () => {
+  it('sin la migración 004 no registra una solicitud que pueda terminar comercialmente antes de G3', async () => {
+    const h = engine({ deferredTermination: false });
+    const before = h.snapshot();
+    await expect(h.terminate()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_DEFERRED_TERMINATION_NOT_AVAILABLE' } });
+    expect(h.snapshot()).toBe(before);
+  });
+
+  it('datos de retiro incompletos: revierte todo para corregirlos y volver a solicitar', async () => {
     const h = engine({}, x => { x.state.services.find((s: any) => s.idServicio === 62).idDireccion = null; x.state.contracts[0].direccionInstalacion = null; });
-    const result = await h.terminate();
-    expect(result).toMatchObject({ retiroTecnico: 'DATOS_INCOMPLETOS', requisito: 'DIRECCION_INVALIDA' });
-    expect(svc(h, 62).estadoOperativo).toBe('Baja');
+    const before = h.snapshot();
+    await expect(h.terminate()).rejects.toMatchObject({ response: { code: 'WITHDRAWAL_G3_DATA_INVALID', requisito: 'DIRECCION_INVALIDA' } });
+    expect(h.snapshot()).toBe(before);
+    expect(svc(h, 62).estadoOperativo).toBe('Activo');
     expect(h.state.dispatches).toEqual([]);
-    expect(h.state.terminations[0].idSolicitudRetiro).toBeNull();
+    expect(h.state.terminations).toEqual([]);
   });
 
   it('un fallo de auditoría revierte todo: ticket, solicitud, vínculo, término y estado del servicio', async () => {
@@ -146,15 +182,15 @@ describe('Retiro técnico del término voluntario: mismo recorrido G3, sin volve
     expect(h.g3Calls).toEqual([]);
   });
 
-  it('falla o retraso de G3: el término comercial ya está aplicado; el envío queda reintentable', async () => {
+  it('falla o retraso de G3: conserva el servicio y el envío queda reintentable', async () => {
     const h = engine({ voluntary: true });
     h.g3Replies.push({ status: 503, body: null });
     const result = await h.terminate();
-    expect(svc(h, 62).estadoOperativo).toBe('Baja');
+    expect(svc(h, 62).estadoOperativo).toBe('Activo');
     expect(result).toMatchObject({ despacho: { estadoDespacho: 'REINTENTABLE' } });
   });
 
-  it('G3 aún en PENDIENTE_APROBACION: no cierra nada técnico (el término comercial no dependía de esto)', async () => {
+  it('G3 en PENDIENTE_APROBACION: no termina el servicio ni cierra el ticket', async () => {
     const { h } = await ratified();
     h.g3Replies.push(orderRead('PENDIENTE_APROBACION', 931));
     await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { id_ot: 931, clave_idempotencia: 'baja:931', id_servicio: 62, id_ticket_externo: 77, trace_id: h.state.dispatches[0].traceId })));
@@ -163,12 +199,12 @@ describe('Retiro técnico del término voluntario: mismo recorrido G3, sin volve
     await expect(h.service.track(15)).rejects.toMatchObject({ status: 503 });
     h.g1.getReceptions.mockRejectedValue(Object.assign(new Error('404'), { name: 'G1IntegrationError' }));
     await expect(h.service.finalizeApprovedBySystem(15)).rejects.toMatchObject({ response: expect.objectContaining({ code: 'WITHDRAWAL_CLOSURE_BLOCKED' }) });
-    expect(svc(h, 62).estadoOperativo).toBe('Baja');
+    expect(svc(h, 62).estadoOperativo).toBe('Activo');
     expect(h.state.requests[0].estado).not.toBe('CERRADA');
     expect(h.state.tickets[0].estado).toBe('Abierto');
   });
 
-  it('G3 COMPLETADA + cierre correlacionado (G1 sin recepción): cierra solicitud y ticket sin modificar servicio, contrato, cliente ni Prospectos', async () => {
+  it('G3 COMPLETADA + cierre correlacionado: aplica el término voluntario y cierra solicitud y ticket', async () => {
     const { h } = await ratified();
     h.g3Replies.push(orderRead('COMPLETADA', 931));
     await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { id_ot: 931, clave_idempotencia: 'baja:931', id_servicio: 62, id_ticket_externo: 77, trace_id: h.state.dispatches[0].traceId })));
@@ -178,11 +214,40 @@ describe('Retiro técnico del término voluntario: mismo recorrido G3, sin volve
     expect(h.state.requests[0].estado).toBe('CERRADA');
     expect(h.state.tickets[0]).toMatchObject({ idTicket: 77, estado: 'Cerrado' });
     expect(h.state.terminations[0].cierreTecnicoEn).toBeInstanceOf(Date);
-    expect(JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, p: h.state.prospects })).toBe(commercialBefore);
+    expect(JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, p: h.state.prospects })).not.toBe(commercialBefore);
+    expect(svc(h, 62).estadoOperativo).toBe('Baja');
+    expect(h.state.terminations[0].terminoComercialEn).toBeInstanceOf(Date);
+    expect(h.state.audits.filter(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_VOLUNTARIO')).toHaveLength(1);
     const audit = h.state.audits.find(a => a.accion === 'CERRAR_RETIRO_TECNICO_TRAS_TERMINO');
-    expect(audit).toMatchObject({ idUsuario: null, valorNuevo: expect.objectContaining({ actor: 'SISTEMA_G8_SEGUIMIENTO_RETIROS', relacionComercialModificada: false,
+    expect(audit).toMatchObject({ idUsuario: null, valorNuevo: expect.objectContaining({ actor: 'SISTEMA_G8_SEGUIMIENTO_RETIROS', relacionComercialModificada: true,
       avisos: expect.arrayContaining(['RECEPCION_G1_PENDIENTE']) }) });
     expect(h.state.audits.some(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toBe(false);
+  });
+
+  it('preserva un término inmediato histórico y su fecha original, sin aplicar una segunda baja', async () => {
+    const { h } = await ratified();
+    const historicalDate = new Date('2026-11-12T15:00:00Z');
+    h.state.terminations[0].terminoComercialEn = historicalDate;
+    svc(h, 62).estadoOperativo = 'Baja';
+    const before = JSON.stringify({ s: h.state.services, c: h.state.contracts, p: h.state.prospects });
+    await approve(h);
+    expect(JSON.stringify({ s: h.state.services, c: h.state.contracts, p: h.state.prospects })).toBe(before);
+    expect(h.state.terminations[0].terminoComercialEn).toEqual(historicalDate);
+    expect(h.state.audits.some(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_VOLUNTARIO')).toBe(false);
+  });
+
+  it('un fallo al auditar la baja aprobada revierte también el retorno a Prospectos y el cierre', async () => {
+    const { h } = await ratified(x => { x.state.services = x.state.services.filter((s: any) => s.idServicio !== 61); });
+    const d = h.state.dispatches[0];
+    h.g3Replies.push(orderRead('COMPLETADA', 931));
+    await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { id_ot: 931, clave_idempotencia: 'baja:931',
+      id_servicio: 62, id_ticket_externo: 77, trace_id: d.traceId })));
+    h.state.failAuditOn = 'APLICAR_BAJA_POR_RETIRO_VOLUNTARIO';
+    const before = h.snapshot();
+    h.g3Replies.push(orderRead('COMPLETADA', 931));
+    await expect(h.service.finalizeApprovedBySystem(15)).rejects.toThrow('AUDIT_FAILED');
+    expect(h.snapshot()).toBe(before);
+    expect(h.state.prospects).toEqual([]);
   });
 });
 
@@ -193,7 +258,7 @@ describe('Cambio de motivo: retiro por morosidad activo y término voluntario de
     const result = await h.terminate({ idServicio: 61, descripcion: 'El titular decide terminar el servicio de Internet.' });
     expect(h.state.requests.map((r: any) => [r.motivo, r.estado])).toEqual([['MOROSIDAD', 'CANCELADA'], ['VOLUNTARIA', 'REGISTRADA']]);
     expect(result).toMatchObject({ retiroTecnico: 'NUEVA_SOLICITUD' });
-    expect(svc(h, 61).estadoOperativo).toBe('Baja');
+    expect(svc(h, 61).estadoOperativo).toBe('Suspendido');
     expect(h.state.dispatches.find((d: any) => d.idSolicitudRetiro === 16)?.payloadSnapshot.motivo).toBe('VOLUNTARIA');
     expect(h.state.audits.find(a => a.accion === 'CANCELAR_SOLICITUD_RETIRO').valorNuevo).toMatchObject({ reemplazadaPorTermino: true });
   });
@@ -206,7 +271,7 @@ describe('Cambio de motivo: retiro por morosidad activo y término voluntario de
     expect(result).toMatchObject({ retiroTecnico: 'REUTILIZA_SOLICITUD_EXISTENTE', solicitud: { idSolicitudRetiro: 15, motivo: 'MOROSIDAD' } });
     expect(h.state.requests).toHaveLength(1);
     expect(h.state.terminations[0]).toMatchObject({ idSolicitudRetiro: 15, idTicket: 78 });
-    expect(svc(h, 61).estadoOperativo).toBe('Baja');
+    expect(svc(h, 61).estadoOperativo).toBe('Suspendido');
     expect(h.g3Calls.filter(c => c.op === 'create')).toHaveLength(1);
     h.g3Replies.push(orderRead('COMPLETADA'));
     await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { trace_id: h.state.dispatches[0].traceId })));
@@ -229,7 +294,7 @@ describe('Cambio de motivo: retiro por morosidad activo y término voluntario de
     await h.terminate({ idServicio: 61, descripcion: 'El titular también termina Internet.' });
     expect(h.state.terminations.map((t: any) => t.idServicio)).toEqual([62, 61]);
     expect(new Set(h.state.dispatches.map((d: any) => d.requestId)).size).toBe(2);
-    expect(h.state.contracts[0].estado).toBe('Baja');
+    expect(h.state.contracts[0].estado).not.toBe('Baja');
   });
 });
 
@@ -263,7 +328,8 @@ describe('Revisión FINET 13-11: reutilización de la OT, concurrencia y resulta
     await closeApproved(h);
     expect(h.state.requests[0]).toMatchObject({ idSolicitudRetiro: 15, motivo: 'MOROSIDAD', estado: 'CERRADA' });
     expect(h.state.links[0]).toMatchObject({ causa: 'MOROSIDAD', idTicket: 77 });
-    expect(JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, p: h.state.prospects })).toBe(commercialAfterTermination);
+    expect(JSON.stringify({ s: h.state.services, c: h.state.contracts, k: h.state.customers, p: h.state.prospects })).not.toBe(commercialAfterTermination);
+    expect(svc(h, 61).estadoOperativo).toBe('Baja');
     expect(h.state.audits.filter(a => a.accion === 'TERMINO_VOLUNTARIO_SERVICIO')).toHaveLength(1);
     expect(h.state.audits.filter(a => a.accion === 'APLICAR_BAJA_POR_RETIRO_MOROSIDAD')).toHaveLength(0);
     const closures = h.state.audits.filter(a => a.accion.startsWith('CERRAR_TICKET_'));
@@ -281,7 +347,7 @@ describe('Revisión FINET 13-11: reutilización de la OT, concurrencia y resulta
     await h.service.receiveWithdrawalClosure(withdrawalClosure(g3WithdrawalClosure(1, { trace_id: h.state.dispatches[0].traceId })));
     h.g3Replies.push(orderRead('COMPLETADA'));
     const outcomes = await Promise.allSettled([h.service.finalizeApprovedBySystem(15), h.terminate({ idServicio: 61, descripcion: 'El titular decide terminar el servicio de Internet.' })]);
-    const commercial = h.state.audits.filter(a => ['APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'TERMINO_VOLUNTARIO_SERVICIO'].includes(a.accion));
+    const commercial = h.state.audits.filter(a => ['APLICAR_BAJA_POR_RETIRO_MOROSIDAD', 'APLICAR_BAJA_POR_RETIRO_VOLUNTARIO'].includes(a.accion));
     expect(commercial).toHaveLength(1);
     expect(svc(h, 61).estadoOperativo).toBe('Baja');
     expect(h.state.prospects.length).toBeLessThanOrEqual(1);

@@ -1,6 +1,6 @@
 import { ContractDocuments } from '../customers/ContractDocuments';
 import { useSignatureStatus } from '../contracts/useSignatureStatus';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Download, FileClock, MapPin, Pencil, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
@@ -17,6 +17,7 @@ const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'P
 const FINAL_PROSPECT_STATUSES = ['Perdido'];
 const LOSS_REASONS = ['Precio', 'Sin cobertura', 'Competencia', 'Falta de respuesta', 'Otro'];
 const FEASIBILITY_STAGES = ['Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible'];
+const ReturningCustomerActions = lazy(() => import('./ReturningCustomerActions').then(module => ({ default: module.ReturningCustomerActions })));
 
 function fullAddress({ direccion, comuna, region }: Pick<Prospect, 'direccion' | 'comuna' | 'region'>) {
   const parts = [direccion, comuna, region].map(part => part?.trim().replace(/\s+/g, ' ') ?? '');
@@ -394,6 +395,9 @@ export function ProspectWorkflowPanel({
           </div>
           <StatusBadge value={currentProspect.excliente?.etiqueta ?? (requiresReview ? 'Revisión comercial requerida' : currentStatus)} />
         </header>
+        {currentProspect.excliente && permissions.contractPlans && !requiresReview && <Suspense fallback={<p role="status">Cargando contratación…</p>}>
+          <ReturningCustomerActions key={currentProspect.idProspecto} prospect={currentProspect} plans={plans} onChanged={onChanged} />
+        </Suspense>}
         {requiresReview && (
           <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
         )}

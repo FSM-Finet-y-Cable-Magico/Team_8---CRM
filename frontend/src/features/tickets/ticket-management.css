@@ -12,6 +12,11 @@
 .ticket-context { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin: 17px 0 0; }
 .ticket-context dt, .ticket-report > strong { color: var(--ticket-muted); font-size: .74rem; font-weight: 500; }
 .ticket-context dd { margin: 4px 0 0; font-size: .86rem; font-weight: 600; overflow-wrap: anywhere; }
+.ticket-overview-order { margin-top: 16px; }
+.ticket-follow-up { border-top: 1px solid var(--ticket-line); }
+.ticket-follow-up > summary { display: flex; align-items: center; gap: 8px; padding: 16px 24px; cursor: pointer; font-size: .86rem; font-weight: 600; }
+.ticket-follow-up > summary::before { content: '›'; font-size: 1.2rem; }
+.ticket-follow-up[open] > summary::before { transform: rotate(90deg); }
 .ticket-report { margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--ticket-line); }
 .ticket-report p { margin-top: 5px; max-height: 100px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; line-height: 1.55; }
 .ticket-tabs { display: flex; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--ticket-line); }

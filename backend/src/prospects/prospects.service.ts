@@ -126,7 +126,8 @@ export class ProspectsService {
     const former: Prisma.ProspectoWhereInput = { AND: [companyScope, ...base, formerCustomerProspectWhere(await this.scopedCompanyIds(companyScope))] };
     const where: Prisma.ProspectoWhereInput = { OR: [managed, former] };
     const stateFilter = query.estado && query.estado !== FORMER_CUSTOMER_VIEW ? this.stateWhere(query.estado) : null;
-    const filtered = query.estado === FORMER_CUSTOMER_VIEW ? former : stateFilter ? { AND: [managed, stateFilter] } : where;
+    const filtered = query.estado === FORMER_CUSTOMER_VIEW ? former : stateFilter
+      ? { AND: [query.estado === LOST_PROSPECT_PIPELINE_STATUS ? where : managed, stateFilter] } : where;
     const [total, rows, grouped, formerCount] = await Promise.all([
       this.prisma.prospecto.count({ where: filtered }),
       this.prisma.prospecto.findMany({
@@ -145,6 +146,10 @@ export class ProspectsService {
       counts[key] = (counts[key] ?? 0) + group._count._all;
     }
     if (formerCount) counts[FORMER_CUSTOMER_VIEW] = formerCount;
+    if (formerCount) {
+      const lostFormer = await this.prisma.prospecto.count({ where: { AND: [former, { estadoPipeline: LOST_PROSPECT_PIPELINE_STATUS }] } });
+      if (lostFormer) counts[LOST_PROSPECT_PIPELINE_STATUS] = (counts[LOST_PROSPECT_PIPELINE_STATUS] ?? 0) + lostFormer;
+    }
     return {
       items: await this.projectProspectRows(rows, { formerCustomers: true }),
       total, page, pageSize, counts,
@@ -158,14 +163,16 @@ export class ProspectsService {
   }
 
   /** Former-customer view of linked rows, recomputed on every read (never stored). */
-  private async formerCustomerViews(prospects: Array<{ idProspecto: number; idCliente: number | null; idEmpresa: number | null; rut?: string | null }>) {
+  private async formerCustomerViews(prospects: Array<{ idProspecto: number; idCliente: number | null; idEmpresa: number | null; rut?: string | null; estadoPipeline?: string | null }>) {
     const views = new Map<number, { etiqueta: string; situacionFinanciera: string }>();
     for (const prospect of prospects) {
       if (prospect.idCliente == null || prospect.idEmpresa == null) continue;
       const former = await this.prisma.cliente.count({ where: { AND: [{ idCliente: prospect.idCliente }, formerCustomerInCompanyWhere(prospect.idEmpresa)] } });
       if (!former) continue;
       const debt = await formerCustomerDebt(this.prisma, prospect.idCliente, prospect.idEmpresa, prospect.rut);
-      views.set(prospect.idProspecto, { etiqueta: formerCustomerLabel(debt), situacionFinanciera: debt });
+      const label = debt === 'SIN_DEUDA' && prospect.estadoPipeline === LOST_PROSPECT_PIPELINE_STATUS
+        ? LOST_PROSPECT_PIPELINE_STATUS : formerCustomerLabel(debt);
+      views.set(prospect.idProspecto, { etiqueta: label, situacionFinanciera: debt });
     }
     return views;
   }

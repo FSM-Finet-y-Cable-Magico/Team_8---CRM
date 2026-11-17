@@ -322,11 +322,11 @@ describe('ProspectsService', () => {
   });
 
   describe('search (paginado, incluye Perdido)', () => {
-    function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = [], options: { formerCount?: number; former?: boolean; invoices?: unknown[] } = {}) {
+    function searchFixture(rows: unknown[] = [], total = 0, grouped: unknown[] = [], options: { formerCount?: number; former?: boolean; invoices?: unknown[]; lostFormerCount?: number } = {}) {
       const prisma = {
         prospecto: {
           // First count: listing total; second: exclientes in scope.
-          count: jest.fn().mockResolvedValueOnce(total).mockResolvedValueOnce(options.formerCount ?? 0),
+          count: jest.fn().mockResolvedValueOnce(total).mockResolvedValueOnce(options.formerCount ?? 0).mockResolvedValueOnce(options.lostFormerCount ?? 0),
           findMany: jest.fn().mockResolvedValue(rows),
           groupBy: jest.fn().mockResolvedValue(grouped),
         },
@@ -423,6 +423,16 @@ describe('ProspectsService', () => {
     ])('etiqueta %s', async (_name, invoices, etiqueta) => {
       const { service } = searchFixture([formerRow], 1, [], { former: true, invoices });
       expect((await service.search(admin, { scope: '1' })).items[0].excliente).toMatchObject({ etiqueta });
+    });
+
+    it('el retorno voluntario sin deuda aparece como Perdido y participa en ese filtro y conteo', async () => {
+      const { prisma, service } = searchFixture([{ ...formerRow, estadoPipeline: 'Perdido' }], 1, [], { formerCount: 1, lostFormerCount: 1, former: true });
+      const result = await service.search(admin, { scope: '1', estado: 'Perdido' });
+      expect(result.items[0].excliente).toEqual({ etiqueta: 'Perdido', situacionFinanciera: 'SIN_DEUDA' });
+      expect(result.counts.Perdido).toBe(1);
+      const where = prisma.prospecto.findMany.mock.calls[0][0].where;
+      expect(JSON.stringify(where)).toContain('"idCliente":{"not":null}');
+      expect(JSON.stringify(where)).toContain('"estadoPipeline":"Perdido"');
     });
 
     it('si recontrató en la empresa deja de ser excliente sin escribir nada', async () => {

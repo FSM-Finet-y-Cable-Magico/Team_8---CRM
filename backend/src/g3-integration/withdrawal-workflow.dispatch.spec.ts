@@ -15,6 +15,12 @@ function setup(options: Parameters<typeof withdrawalHarness>[0] = {}) {
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe('Baja por morosidad: elegibilidad para el formulario del Libro de Control (PR #81)', () => {
+  it.each([[true, false, false], [false, true, false], [true, true, true]])('solo anuncia baja automática con finalización=%s y seguimiento=%s', async (finalize, tracking, automatic) => {
+    const h = setup({ finalize, tracking });
+    const result = await h.service.eligibility(61, comercial());
+    expect(result.bajaAutomaticaHabilitada).toBe(automatic);
+    expect(result.seguimientoAutomaticoHabilitado).toBe(tracking);
+  });
   it('precarga empresa, cliente, contrato, servicio, deuda, aviso, dirección y responsable sin escribir nada', async () => {
     const h = setup({ dispatch: false });
     const before = structuredClone(h.state);

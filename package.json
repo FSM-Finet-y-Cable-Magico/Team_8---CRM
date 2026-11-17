@@ -7,6 +7,7 @@
     "frontend"
   ],
   "scripts": {
+    "test:morosidad:postgres": "npm run build -w backend && node scripts/g8-morosidad-lifecycle-qa.cjs",
     "test:signature:postgres": "node scripts/i4-contract-signature-qa.cjs",
     "test:i3-release": "node scripts/i3-release-acceptance.mjs --run-local",
     "schema:i3:proposal": "node scripts/i3-schema-proposal.mjs",

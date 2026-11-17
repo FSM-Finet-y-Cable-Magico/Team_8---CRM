@@ -62,7 +62,8 @@ const secret = k => console.log(" ", k.padEnd(34), e[k] ? "presente" : "AUSENTE"
 try { const u = new URL(e.DATABASE_URL); console.log("  DATABASE_URL".padEnd(36), "host=" + u.hostname, "port=" + (u.port || "5432"), "db=" + u.pathname.slice(1), "user=" + decodeURIComponent(u.username)); } catch { console.log("  DATABASE_URL (no definida o no URL)"); }
 ["NODE_ENV", "PORT", "G1_INTEGRATION_ENABLED", "G3_INTEGRATION_ENABLED", "GEOCODING_PROVIDER", "MAIL_PROVIDER", "CONTRACT_SIGNATURE_ENABLED",
  "CONTRACT_SIGNATURE_LEGAL_APPROVED", "FACTURACION_CL_INTEGRATION_ENABLED", "FACTURACION_CL_PRODUCTION_ENABLED", "PLAN_CHANGE_PROCESSOR_ENABLED",
- "COVERAGE_TECHNICAL_PROVIDER", "TRUST_PROXY_HOPS"].forEach(show);
+ "COVERAGE_TECHNICAL_PROVIDER", "TRUST_PROXY_HOPS", "G3_WITHDRAWAL_DISPATCH_ENABLED", "G3_WITHDRAWAL_VOLUNTARY_ENABLED",
+ "WITHDRAWAL_TRACKING_ENABLED", "WITHDRAWAL_TRACKING_INTERVAL_MS", "WITHDRAWAL_FINALIZE_ENABLED"].forEach(show);
 ["G1_API_URL", "G3_API_URL", "GEOCODING_API_URL", "FRONTEND_URL", "CONTRACT_SIGNATURE_PUBLIC_URL", "TOMODAT_API_URL"].forEach(origin);
 ["JWT_SECRET", "G1_API_KEY", "G3_API_KEY", "G8_INTEGRATION_API_KEYS", "CONTRACT_SIGNATURE_OTP_SECRET", "TOMODAT_API_TOKEN"].forEach(secret);
 try { const smtp = JSON.parse(e.SMTP_COMPANIES || "[]"); console.log("  SMTP_COMPANIES".padEnd(36), smtp.length + " empresa(s)", smtp.map(s => `empresa=${s.idEmpresa ?? s.id_empresa ?? "?"} host=${s.host ?? "?"}:${s.port ?? "?"} usuario=${s.user || s.auth?.user ? "presente" : "ausente"} clave=${s.pass || s.password || s.auth?.pass ? "presente" : "ausente"}`).join("; ")); }

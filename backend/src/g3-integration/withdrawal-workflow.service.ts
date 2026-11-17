@@ -115,7 +115,8 @@ export class WithdrawalWorkflowService {
     return {
       idServicio, motivo: WITHDRAWAL_MOTIVE_MOROSITY, eligible: result.eligible, checks: result.checks, firstFailure: result.firstFailure,
       habilitado: withdrawalStorageReady(capabilities), despachoG3Habilitado: this.dispatchEnabled(), capabilities,
-      bajaAutomaticaHabilitada: this.finalizeEnabled(), seguimiento,
+      bajaAutomaticaHabilitada: this.finalizeEnabled() && this.trackingEnabled(),
+      seguimientoAutomaticoHabilitado: this.trackingEnabled(), seguimiento,
       deuda: facts.debt, solicitudActiva: facts.activeRequest,
       // Read-only context preloaded by the Libro de Control form (ported from PR #81 2c5de07d). Display only:
       // initiate() never trusts it and re-reads everything under lock.
@@ -250,8 +251,10 @@ export class WithdrawalWorkflowService {
       }
       const termination = await this.storage.findTerminationByRequest(tx, idSolicitudRetiro);
       if (termination) {
-        // Commercially terminated already (voluntary): only the equipment withdrawal remains; debt is not a condition.
-        if (service?.estadoOperativo !== 'Baja') throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: 'El servicio terminado no está en Baja; revisa la solicitud.' });
+        // Voluntary withdrawals do not require debt or suspension. Historical immediate terminations remain valid.
+        if (!service || (termination.terminoComercialEn ? service.estadoOperativo !== 'Baja' : service.estadoOperativo === 'Baja')) {
+          throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: 'El estado del servicio cambió; revisa la solicitud.' });
+        }
       } else {
         // Payment before dispatch: no OT is requested for a debt that is no longer collectible.
         const invoices = await this.overdueInvoices(tx, request.idEmpresa, request.idCliente, request.idContrato!);
@@ -520,6 +523,10 @@ export class WithdrawalWorkflowService {
     return (this.config.get<string>('WITHDRAWAL_FINALIZE_ENABLED') ?? '').trim().toLowerCase() === 'true';
   }
 
+  trackingEnabled() {
+    return (this.config.get<string>('WITHDRAWAL_TRACKING_ENABLED') ?? '').trim().toLowerCase() === 'true';
+  }
+
   /**
    * Effective withdrawal ("baja efectiva") for morosity requested by an Administrador: reconciliation / authorized retry of
    * the same operation the follow-up applies automatically. Disabled by default (WITHDRAWAL_FINALIZE_ENABLED).
@@ -628,13 +635,13 @@ export class WithdrawalWorkflowService {
   }
 
   /**
-   * Commercial end of ONE service, shared by the morosity baja (after G3's approval) and the voluntary termination
-   * (immediately, at registration): service -> Baja; contract -> Baja only without other operational services; customer
+   * Commercial end of ONE service, for either cause only after G3's approved closure:
+   * service -> Baja; contract -> Baja only without other operational services; customer
    * status recomputed with every service and company; excliente visible in that company's Prospects when it was the last
    * operational relationship. Debt, invoices, payments, signed documents and other companies are never written.
    */
   private async applyCommercialTermination(tx: Db, service: { idServicio: number; idCliente: number; idEmpresa: number | null; idContrato: number | null },
-    idUsuario: number | null) {
+    idUsuario: number | null, causa: WithdrawalCause = 'MOROSIDAD') {
     const updated = await tx.servicioContratado.update({ where: { idServicio: service.idServicio }, data: { estadoOperativo: 'Baja' } });
     let contratoDeBaja = false;
     if (service.idContrato) {
@@ -651,15 +658,13 @@ export class WithdrawalWorkflowService {
       estadoCliente = next;
     }
     // FINET 13-11-2026: last operational relationship in the company -> excliente in that company's Prospects (derived view).
-    const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa!, idUsuario });
+    const retorno = await ensureFormerCustomerProspect(tx, this.auditService, { idCliente: service.idCliente, idEmpresa: service.idEmpresa!, idUsuario, causa });
     return { estadoNuevo: updated.estadoOperativo, contratoDeBaja, estadoCliente, retorno };
   }
 
   /**
-   * Technical closure of a withdrawal whose service was ALREADY terminated commercially (voluntary termination, including
-   * one that reused an active morosity OT). Same evidence rules as the morosity baja (G3 COMPLETADA + correlated BAJA
-   * closure; G1 informative), but it never touches the service, contract, customer, debt or Prospects again: it closes the
-   * request, the linked ticket(s) and records the technical closure. Idempotent and atomic like finalize().
+   * Approved voluntary closure, including a reused morosity OT. New requests end commercially here;
+   * historical immediate terminations only close the equipment withdrawal. Debt is never modified.
    */
   private async closeTechnicalAfterTermination(tx: Db, input: {
     idSolicitudRetiro: number; service: { idServicio: number; idCliente: number; idEmpresa: number | null; estadoOperativo: string };
@@ -668,7 +673,8 @@ export class WithdrawalWorkflowService {
     user: AuthUser | null; actor: FinalizationActor;
   }) {
     const { idSolicitudRetiro, service, link, dispatch, termination, user } = input;
-    if (service.estadoOperativo !== 'Baja' || termination.idServicio !== service.idServicio) {
+    const pendingCommercial = termination.terminoComercialEn === null;
+    if (termination.idServicio !== service.idServicio || (pendingCommercial ? service.estadoOperativo === 'Baja' : service.estadoOperativo !== 'Baja')) {
       throw new ConflictException({ code: 'WITHDRAWAL_SERVICE_STATE_CHANGED', message: `El servicio terminado figura ${service.estadoOperativo}; no se cerró el retiro.` });
     }
     const assessment = assessWithdrawalClosure({
@@ -680,9 +686,18 @@ export class WithdrawalWorkflowService {
       throw new ConflictException({ code: 'WITHDRAWAL_CLOSURE_BLOCKED', message: assessment.reasons.map(reason => reason.message).join('. '), motivos: assessment.reasons, avisos: assessment.avisos });
     }
     const idUsuario = user?.idUsuario ?? null;
+    const comercial = pendingCommercial ? await this.applyCommercialTermination(tx,
+      { ...service, idContrato: termination.idContrato }, idUsuario, 'VOLUNTARIA') : null;
+    if (comercial) {
+      await this.audit(tx, user, 'APLICAR_BAJA_POR_RETIRO_VOLUNTARIO', 'servicio_contratado', service.idServicio, {
+        idSolicitudRetiro, idOtG3: dispatch.idOtG3, estadoAnterior: service.estadoOperativo, estadoNuevo: comercial.estadoNuevo,
+        retornoProspectos: comercial.retorno.action, deudaConservada: true,
+      });
+    }
     const closed = await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro }, data: { estado: 'CERRADA' } });
     await this.storage.markApplied(tx, idSolicitudRetiro);
     await this.storage.markTerminationTechnicalClosure(tx, service.idServicio);
+    const completedTermination = await this.storage.findTerminationByService(tx, service.idServicio);
     const base = { idEmpresa: service.idEmpresa!, idCliente: service.idCliente, idServicio: service.idServicio, idSolicitudRetiro, idOtG3: dispatch.idOtG3, idUsuario };
     const tickets: Array<{ idTicket: number; categoria: FlowTicketCategory }> = [{ idTicket: link.idTicket, categoria: link.causa === 'VOLUNTARIA' ? TERMINATION_TICKET_CATEGORY : WITHDRAWAL_TICKET_CATEGORY }];
     if (termination.idTicket !== link.idTicket) tickets.push({ idTicket: termination.idTicket, categoria: TERMINATION_TICKET_CATEGORY });
@@ -695,10 +710,10 @@ export class WithdrawalWorkflowService {
     }
     await this.audit(tx, user, 'CERRAR_RETIRO_TECNICO_TRAS_TERMINO', 'solicitud_retiro_servicio', idSolicitudRetiro, {
       actor: input.actor.kind === 'SISTEMA' ? input.actor.origen : 'USUARIO', idServicio: service.idServicio, idOtG3: dispatch.idOtG3,
-      estadoOtG3: dispatch.estadoOt, cierreClave: dispatch.cierreClave, terminoComercialEn: termination.terminoComercialEn,
+      estadoOtG3: dispatch.estadoOt, cierreClave: dispatch.cierreClave, terminoComercialEn: completedTermination?.terminoComercialEn,
       equiposRetiradosDeclarados: dispatch.equiposRetirados.map(item => item.numeroSerie), equiposFaltantes: dispatch.equiposFaltantes.map(item => item.numeroSerie),
       inventarioG1: { recepcionClaveEvento: dispatch.recepcionClaveEvento, equiposAsociados: input.activeEquipment?.length ?? null },
-      avisos: assessment.avisos.map(item => item.code), tickets: ticketResults, relacionComercialModificada: false,
+      avisos: assessment.avisos.map(item => item.code), tickets: ticketResults, relacionComercialModificada: pendingCommercial,
     });
     return { solicitud: closed, aplicado: true, yaAplicado: false, tipo: 'CIERRE_TECNICO' as const, idServicio: service.idServicio, tickets: ticketResults, avisos: assessment.avisos };
   }
@@ -706,8 +721,8 @@ export class WithdrawalWorkflowService {
   /**
    * Voluntary termination requested by the customer (FINET 13-11-2026), started from Tickets. In ONE transaction under
    * locks: identity, authorization and relations are validated; the «Término de servicio» ticket, the requirement
-   * date/time and its evidence are recorded; the COMMERCIAL termination is applied right away (it never waits for the
-   * technical visit, G1 or G3); and a technical withdrawal (motivo VOLUNTARIA, OT BAJA) is prepared with the same engine.
+   * date/time and its evidence are recorded; a technical withdrawal (motivo VOLUNTARIA, OT BAJA) is prepared.
+   * Service, contract, customer and Prospects remain unchanged until G3 approves the correlated closure.
    * No suspension, zero debt, absence of agreements or collection notice is required, and none is fabricated. Debt,
    * documents, payments, history and the rehire restriction are kept. Repeating it returns the same operation.
    * An active morosity withdrawal already sent to G3 is reused (no second OT); one never sent is cancelled and replaced.
@@ -731,7 +746,9 @@ export class WithdrawalWorkflowService {
     this.assertCompany(authorized.idEmpresa, currentUser);
 
     const result = await this.prisma.$transaction(async tx => {
-      await this.assertStorage(tx);
+      const capabilities = await this.assertStorage(tx);
+      if (!capabilities.deferredTermination) throw new ConflictException({ code: 'WITHDRAWAL_DEFERRED_TERMINATION_NOT_AVAILABLE',
+        message: 'La baja voluntaria pendiente de aprobación técnica requiere actualizar el almacenamiento de retiros (004).' });
       await tx.$queryRaw`SELECT id_servicio FROM servicio_contratado WHERE id_servicio = ${dto.idServicio} FOR UPDATE`;
       const service = await tx.servicioContratado.findUnique({ where: { idServicio: dto.idServicio }, include: SERVICE_INCLUDE });
       if (!service?.idEmpresa) throw new NotFoundException('Servicio contratado no encontrado');
@@ -776,7 +793,7 @@ export class WithdrawalWorkflowService {
           await this.closeAsCancelled(tx, active.idSolicitudRetiro, 'Reemplazada por el término voluntario solicitado por el titular', currentUser,
             { remoto: false, reemplazadaPorTermino: true, estadoDespachoAnterior: activeDispatch.estadoDespacho });
         } else {
-          // Already sent: the same OT BAJA retires the equipment; no second OT. Its closure will not touch the commercial relation.
+          // Already sent: the same OT BAJA retires the equipment; its approval will apply the voluntary termination.
           technicalRequest = active.idSolicitudRetiro; reused = true;
         }
       }
@@ -793,10 +810,9 @@ export class WithdrawalWorkflowService {
       const ticket = await this.tickets.createWithdrawalTicket(tx, {
         idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato: service.idContrato,
         idSolicitudRetiro: technicalRequest, idAviso: null, idUsuario: currentUser.idUsuario, categoria: TERMINATION_TICKET_CATEGORY,
-        descripcion: `${descripcion}\n${requirementText}\nTérmino comercial aplicado al registrar; retiro de equipos pendiente.`,
+        descripcion: `${descripcion}\n${requirementText}\nBaja voluntaria pendiente del cierre aprobado de la orden de retiro.`,
       });
-      let retiroTecnico: 'NUEVA_SOLICITUD' | 'REUTILIZA_SOLICITUD_EXISTENTE' | 'DATOS_INCOMPLETOS' = reused ? 'REUTILIZA_SOLICITUD_EXISTENTE' : 'NUEVA_SOLICITUD';
-      let requisito: string | null = null;
+      const retiroTecnico = reused ? 'REUTILIZA_SOLICITUD_EXISTENTE' as const : 'NUEVA_SOLICITUD' as const;
       if (!reused) {
         await this.storage.insertLink(tx, { idSolicitudRetiro: technicalRequest!, idTicket: ticket.idTicket, idAviso: null, causa: 'VOLUNTARIA',
           idEmpresa: service.idEmpresa, idCliente: service.idCliente, idServicio: service.idServicio, idContrato: service.idContrato, idUsuarioResponsable: currentUser.idUsuario });
@@ -813,29 +829,22 @@ export class WithdrawalWorkflowService {
             traceId: snapshot.trace_id, payloadSnapshot: snapshot, payloadHash: sha256Payload(snapshot) });
         } catch (error) {
           if (!(error instanceof WithdrawalPayloadError)) throw error;
-          // The commercial termination never depends on the technical data: it is applied; the withdrawal waits for the data.
-          retiroTecnico = 'DATOS_INCOMPLETOS'; requisito = error.code;
+          throw new BadRequestException({ code: 'WITHDRAWAL_G3_DATA_INVALID', requisito: error.code, message: error.message });
         }
       }
       const termino = await this.storage.insertTermination(tx, {
         idServicio: service.idServicio, idEmpresa: service.idEmpresa, idCliente: service.idCliente, idContrato: service.idContrato, idTicket: ticket.idTicket,
-        idSolicitudRetiro: retiroTecnico === 'DATOS_INCOMPLETOS' ? null : technicalRequest, requerimientoEn,
+        idSolicitudRetiro: technicalRequest, requerimientoEn,
         canal: dto.canal as ServiceTermination['canal'], solicitante: dto.solicitante as ServiceTermination['solicitante'], evidencia, idUsuarioResponsable: currentUser.idUsuario,
       });
-      if (retiroTecnico === 'DATOS_INCOMPLETOS' && request) {
-        // Without valid withdrawal data there is no OT to wait for: the request records it and stays REGISTRADA for review.
-        await tx.servicioRetiroSolicitud.update({ where: { idSolicitudRetiro: request.idSolicitudRetiro }, data: { observaciones: `${descripcion}\nRetiro técnico pendiente de datos (${requisito}).` } });
-      }
-      const comercial = await this.applyCommercialTermination(tx, service, currentUser.idUsuario);
       await this.audit(tx, currentUser, 'TERMINO_VOLUNTARIO_SERVICIO', 'servicio_contratado', service.idServicio, {
         idEmpresa: service.idEmpresa, idCliente: service.idCliente, idContrato: service.idContrato, idTicket: ticket.idTicket,
-        idSolicitudRetiro: termino.idSolicitudRetiro, retiroTecnico, requisitoRetiro: requisito, requerimientoEn: requerimientoEn.toISOString(),
-        canal: dto.canal, solicitante: dto.solicitante, evidencia, estadoAnterior: service.estadoOperativo, estadoNuevo: comercial.estadoNuevo,
-        contratoDeBaja: comercial.contratoDeBaja, estadoCliente: comercial.estadoCliente, retornoProspectos: comercial.retorno.action,
-        deudaConservada: true, esperaG3: false,
+        idSolicitudRetiro: termino.idSolicitudRetiro, retiroTecnico, requerimientoEn: requerimientoEn.toISOString(),
+        canal: dto.canal, solicitante: dto.solicitante, evidencia, estadoAnterior: service.estadoOperativo, estadoNuevo: service.estadoOperativo,
+        deudaConservada: true, esperaG3: true,
       });
-      return { repetido: false, ticket, solicitud: request, termino, retiroTecnico, requisito,
-        comercial: { contratoDeBaja: comercial.contratoDeBaja, estadoCliente: comercial.estadoCliente, retornoProspectos: comercial.retorno.action },
+      return { repetido: false, ticket, solicitud: request, termino, retiroTecnico,
+        comercial: null,
         enviar: retiroTecnico === 'NUEVA_SOLICITUD' };
     });
 

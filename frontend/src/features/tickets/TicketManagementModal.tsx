@@ -41,6 +41,7 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
   const statusChanged = permissions.updateTicketStatus && draft.status !== saved.status;
   const hasChanges = categoryChanged || priorityChanged || statusChanged;
   const canManage = !technicalReadOnly && (permissions.classifyTickets || permissions.updateTicketStatus);
+  const consultation = technicalReadOnly || (!canManage && !permissions.diagnoseTickets && !permissions.registerTechnicalNotes);
   // The reserved «Baja de servicio» is never a reclassification target (the current one is still shown, disabled).
   const generalCategories = categories.filter(category => isGeneralTicketCategory(category) && !isWithdrawalTicketCategory(category) && !isTerminationTicketCategory(category));
   const attentionIds = new Set(ticketAttentionAvailability(categories).options.map(category => category.idCategoria));
@@ -134,6 +135,11 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
       {label && <button type="submit" disabled={busy || disabled}><Save size={16} aria-hidden="true" />{busy ? 'Guardando…' : label}</button>}</div>
   </footer>;
 
+  const activityList = activities.length ? <ol className="ticket-activity-list">{activities.map((entry, index) => <li key={`${entry.kind}-${index}`}>
+    <span className="ticket-activity-dot" aria-hidden="true">{entry.kind === 'diagnosis' ? <CheckCircle2 size={16} /> : <MessageSquare size={16} />}</span>
+    <article><header><strong>{entry.kind === 'diagnosis' ? 'Diagnóstico registrado' : entry.kind === 'status' ? 'Comentario de seguimiento' : 'Observación técnica'}</strong>{entry.date && <time dateTime={entry.date}>{formatDateTime(entry.date)}</time>}</header>{entry.author && <small>{entry.author}</small>}<p>{entry.text.replace(/^Causa raiz:/m, 'Causa raíz:').replace(/^Estado final:/m, 'Estado observado:')}</p></article>
+  </li>)}</ol> : <p className="empty-state">Aún no hay seguimiento registrado.</p>;
+
   return <Modal title="Gestionar ticket" open onClose={() => { if (!pending.current) onClose(); }}>
     <div className="ticket-management" ref={content} tabIndex={-1} aria-busy={busy}>
       <section className="ticket-overview" aria-label="Resumen del ticket">
@@ -146,23 +152,34 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
           <div><dt>Cliente</dt><dd>{ticket.cliente?.nombreCompleto ?? 'Sin cliente asociado'}</dd></div>
           <div><dt>RUT</dt><dd>{ticket.cliente?.rut ?? 'No registrado'}</dd></div>
           <div><dt>Servicio</dt><dd>{ticket.idServicio ? `Servicio #${ticket.idServicio}` : 'Atención general'}</dd></div>
+          {consultation && <>
+            <div><dt>Categoría</dt><dd>{ticket.categoria?.nombre ?? 'Sin categoría'}</dd></div>
+            <div><dt>Prioridad</dt><dd><StatusBadge value={formatWorkOrderValue(saved.priority)} /></dd></div>
+          </>}
         </dl>
+        {consultation && <section className="ticket-order ticket-overview-order" aria-label="Orden técnica asociada"><Wrench size={17} aria-hidden="true" /><div><strong>{order ? order.codigoSeguimiento ?? `Orden #${order.idOt}` : 'Sin orden técnica asociada'}</strong>{order && <span>{formatWorkOrderValue(order.tipoOt)}</span>}</div>{order && <StatusBadge value={formatWorkOrderValue(order.estado)} />}</section>}
         <div className="ticket-report"><strong>Problema reportado</strong><p>{report || 'Sin descripción registrada.'}</p></div>
       </section>
 
-      {technicalReadOnly && <p className="ticket-notice" role="status">Solo consulta: este ticket se gestiona desde operaciones técnicas. Puedes revisar su estado y seguimiento aquí.</p>}
+      {consultation && <>
+        <details className="ticket-follow-up">
+          <summary>Seguimiento{activities.length > 0 && <span className="ticket-tab-count">{activities.length}</span>}</summary>
+          <div className="ticket-panel-content">{activityList}</div>
+        </details>
+        {footer()}
+      </>}
 
-      <div className="ticket-tabs" role="tablist" aria-label="Secciones del ticket">
+      {!consultation && <div className="ticket-tabs" role="tablist" aria-label="Secciones del ticket">
         {tabs.map(({ id, label, icon: Icon }, index) => <button key={id} id={`ticket-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls={`ticket-panel-${id}`} tabIndex={tab === id ? 0 : -1}
           onClick={() => setTab(id)} onKeyDown={event => {
             const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
             if (next !== null) { event.preventDefault(); setTab(tabs[next].id); document.getElementById(`ticket-tab-${tabs[next].id}`)?.focus(); }
           }}><Icon size={17} aria-hidden="true" />{label}{id === 'activity' && activities.length > 0 && <span className="ticket-tab-count">{activities.length}</span>}</button>)}
-      </div>
+      </div>}
 
       {feedback && <p role={feedback.kind === 'error' ? 'alert' : 'status'} className={`ticket-feedback ${feedback.kind}`}>{feedback.kind === 'success' && <Check size={17} aria-hidden="true" />}{feedback.text}</p>}
 
-      {tab === 'management' && <form id="ticket-panel-management" role="tabpanel" aria-labelledby="ticket-tab-management" onSubmit={saveManagement}>
+      {!consultation && tab === 'management' && <form id="ticket-panel-management" role="tabpanel" aria-labelledby="ticket-tab-management" onSubmit={saveManagement}>
         <div className="ticket-panel-content">
           <header className="ticket-section-heading"><h3>Organiza la atención</h3><p>Clasifica el caso y actualiza su avance.</p></header>
           {canManage ? <fieldset className="ticket-fields" disabled={busy}>
@@ -190,17 +207,14 @@ export function TicketManagementModal({ ticket, categories, permissions, onClose
         {footer(canManage ? 'Guardar cambios' : undefined, !hasChanges || (statusChanged && closureBlocked))}
       </form>}
 
-      {tab === 'activity' && <div id="ticket-panel-activity" role="tabpanel" aria-labelledby="ticket-tab-activity">
+      {!consultation && tab === 'activity' && <div id="ticket-panel-activity" role="tabpanel" aria-labelledby="ticket-tab-activity">
         <div className="ticket-panel-content">
           <header className="ticket-section-heading"><h3>Seguimiento del caso</h3><p>Consulta los avances y registra nuevas observaciones.</p></header>
           {!technicalReadOnly && permissions.registerTechnicalNotes && <form className="ticket-note-form" onSubmit={saveNote}>
             <label>Nueva observación<textarea maxLength={1000} rows={3} value={note} onChange={event => setNote(event.target.value)} placeholder="Describe la gestión realizada o el próximo paso" disabled={busy} required minLength={3} /></label>
             <div><span className="ticket-muted">La observación se añade al historial.</span><button type="submit" disabled={busy || note.trim().length < 3}><MessageSquare size={16} aria-hidden="true" />{busy ? 'Guardando…' : 'Agregar observación'}</button></div>
           </form>}
-          {activities.length ? <ol className="ticket-activity-list">{activities.map((entry, index) => <li key={`${entry.kind}-${index}`}>
-            <span className="ticket-activity-dot" aria-hidden="true">{entry.kind === 'diagnosis' ? <CheckCircle2 size={16} /> : <MessageSquare size={16} />}</span>
-            <article><header><strong>{entry.kind === 'diagnosis' ? 'Diagnóstico registrado' : entry.kind === 'status' ? 'Comentario de seguimiento' : 'Observación técnica'}</strong>{entry.date && <time dateTime={entry.date}>{formatDateTime(entry.date)}</time>}</header>{entry.author && <small>{entry.author}</small>}<p>{entry.text.replace(/^Causa raiz:/m, 'Causa raíz:').replace(/^Estado final:/m, 'Estado observado:')}</p></article>
-          </li>)}</ol> : <p className="empty-state">Aún no hay seguimiento registrado.</p>}
+          {activityList}
         </div>{footer()}
       </div>}
 

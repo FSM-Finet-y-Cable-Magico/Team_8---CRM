@@ -57,8 +57,9 @@ export function TicketsPanel({
   const attentionCatalog = ticketAttentionAvailability(categories);
   const selectedCategory = attentionCategories.find(category => String(category.idCategoria) === createForm.idCategoria);
   const terminationSelected = Boolean(selectedCategory && isTerminationTicketCategory(selectedCategory));
+  const terminationCategory = attentionCategories.find(isTerminationTicketCategory);
 
-  /** Voluntary termination: commercial termination now; the technical withdrawal follows (it never waits for it). */
+  /** Voluntary request: both commercial termination and return to Prospects wait for approved withdrawal. */
   async function registerTermination(rut: string) {
     if (terminating) return;
     if (!createForm.idServicio) { setStatus('Selecciona el servicio que el titular pide terminar.'); return; }
@@ -75,7 +76,7 @@ export function TicketsPanel({
       const ticket = data.ticket ? data.ticket.codigoSeguimiento ?? `#${data.ticket.idTicket}` : '';
       const technical = data.retiroTecnico === 'DATOS_INCOMPLETOS' ? 'El retiro de equipos queda pendiente: faltan datos de dirección o identificación.'
         : data.despacho?.idOtG3 ? `Orden de retiro N° ${data.despacho.idOtG3} creada.` : 'El retiro de equipos queda pendiente de envío.';
-      setStatus(data.repetido ? `El término ya estaba registrado (ticket ${ticket}).` : `Término registrado y aplicado (ticket ${ticket}). ${technical} La deuda existente se conserva.`);
+      setStatus(data.repetido ? `La solicitud ya estaba registrada (ticket ${ticket}).` : `Baja voluntaria solicitada (ticket ${ticket}). ${technical} El servicio y el retorno a Prospectos esperan el cierre aprobado de la orden de retiro. La deuda existente se conserva.`);
       setTermination(current => ({ ...current, evidencia: '', identidad: false }));
       onChanged();
     } catch (err) {
@@ -226,6 +227,11 @@ export function TicketsPanel({
             ))}
           </select>
         </label>
+        {!terminationSelected && <>
+          <button type="button" className="secondary" disabled={!terminationCategory} aria-describedby={!terminationCategory ? 'termination-catalog-status' : undefined}
+            onClick={() => { if (terminationCategory) setCreateForm(current => ({ ...current, idCategoria: String(terminationCategory.idCategoria) })); }}>Solicitar baja voluntaria</button>
+          {!terminationCategory && <small id="termination-catalog-status">La baja voluntaria requiere habilitar la categoría «Término de servicio».</small>}
+        </>}
         {terminationSelected && <>
           <label>
             Canal del requerimiento
@@ -251,7 +257,7 @@ export function TicketsPanel({
           <label>
             <span><input type="checkbox" checked={termination.identidad} onChange={(event) => setTermination({ ...termination, identidad: event.target.checked })} /> Verifiqué la identidad del titular (o la autorización del representante).</span>
           </label>
-          <p className="inline-status">El término comercial se aplica al registrar, sin esperar la visita técnica. La deuda existente se conserva y el retiro de equipos sigue su curso.</p>
+          <p className="inline-status">La baja y el retorno a Prospectos se aplicarán cuando se apruebe el cierre de la orden de retiro. La deuda existente se conserva.</p>
         </>}
         <label>
           Prioridad

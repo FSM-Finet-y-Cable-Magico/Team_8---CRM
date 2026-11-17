@@ -73,12 +73,26 @@ test('el alta ofrece «Término de servicio» solo si el catálogo la habilita; 
   assert.ok(!optionsOf(ambiguous.field('Categoría')).includes('Término de servicio'), 'duplicada no se habilita');
 });
 
+test('el acceso explícito a baja voluntaria selecciona la categoría real y explica un catálogo incompleto', async t => {
+  const h = await panel(t);
+  const button = h.tree.root.findAllByType('button').find(n => textOf(n) === 'Solicitar baja voluntaria');
+  assert.equal(button.props.disabled, false);
+  await act(async () => button.props.onClick());
+  assert.equal(h.field('Categoría').props.value, '40');
+  assert.ok(h.field('Evidencia del requerimiento'));
+  assert.equal(h.calls.filter(call => call[0] === 'post').length, 0);
+  const absent = await panel(t, { categories: attention });
+  const disabled = absent.tree.root.findAllByType('button').find(n => textOf(n) === 'Solicitar baja voluntaria');
+  assert.equal(disabled.props.disabled, true);
+  assert.match(absent.text(), /requiere habilitar la categoría «Término de servicio»/);
+});
+
 test('con «Término de servicio» pide canal, fecha y hora, solicitante, evidencia e identidad, y registra por el flujo de término', async t => {
   const h = await panel(t);
   await h.lookup();
   await h.change(h.field('Categoría'), '40');
   for (const label of ['Canal del requerimiento', 'Fecha y hora del requerimiento', 'Solicitante', 'Evidencia del requerimiento']) assert.ok(h.field(label), label);
-  assert.match(h.text(), /sin esperar la visita técnica/);
+  assert.match(h.text(), /se aplicarán cuando se apruebe el cierre de la orden de retiro/);
   await h.change(h.field('Descripción'), 'El titular pide terminar el servicio de TV.');
   await h.submit();
   assert.match(h.text(), /Selecciona el servicio que el titular pide terminar/);
@@ -95,7 +109,7 @@ test('con «Término de servicio» pide canal, fecha y hora, solicitante, eviden
   assert.deepEqual({ ...posts[0][2], requerimientoEn: typeof posts[0][2].requerimientoEn }, { rut: '12345678-5', idServicio: 62, canal: 'TELEFONO', solicitante: 'TITULAR',
     requerimientoEn: 'string', evidencia: 'Llamada grabada N° 5521', descripcion: 'El titular pide terminar el servicio de TV.', confirmacionIdentidad: true });
   assert.ok(!h.calls.some(call => call[1] === '/tickets'), 'no crea un ticket general');
-  assert.match(h.text(), /Término registrado y aplicado \(ticket TK-TERM\).*La deuda existente se conserva/);
+  assert.match(h.text(), /Baja voluntaria solicitada \(ticket TK-TERM\).*esperan el cierre aprobado.*La deuda existente se conserva/);
   assert.ok(!/\bG[0-9]\b/.test(h.text()));
 });
 
