@@ -9,38 +9,6 @@ const MAX_PENDING = 32;
 
 type RequestResult<T> = { value: T; failed: boolean };
 type ProviderUrl = { url: URL; motivo?: undefined } | { url: null; motivo: Extract<GeocodingOutcome, 'PROVEEDOR_DESHABILITADO' | 'CONFIGURACION_INVALIDA'> };
-type AddressMatch = { calle: string; comuna?: string };
-
-function normalizeAddressPart(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  return value.toLocaleLowerCase('es-CL').normalize('NFD').replace(/\p{M}/gu, '')
-    .replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function normalizeStreet(value: string): string {
-  return normalizeAddressPart(value)
-    .replace(/^(?:av|avda) /, 'avenida ')
-    .replace(/\s+(?:n|no|numero)\s+(?=\d)/, ' ');
-}
-
-function matchesAddress(details: Record<string, unknown>, requested: AddressMatch): boolean {
-  const street = normalizeStreet(requested.calle);
-  const streetType = /^(avenida|calle) /;
-  const requestedType = street.match(streetType)?.[1];
-  const number = normalizeAddressPart(details.house_number);
-  const road = ['road', 'pedestrian', 'residential', 'living_street', 'footway', 'path'].some(key => {
-    const name = details[key];
-    if (typeof name !== 'string') return false;
-    const candidate = normalizeStreet(number ? `${name} ${number}` : name);
-    const candidateType = candidate.match(streetType)?.[1];
-    return (!requestedType || !candidateType || requestedType === candidateType)
-      && candidate.replace(streetType, '') === street.replace(streetType, '');
-  });
-  const comuna = normalizeAddressPart(requested.comuna);
-  return road && (!comuna || [
-    'municipality', 'city', 'town', 'village', 'city_district', 'suburb', 'borough', 'county', 'hamlet',
-  ].some(key => normalizeAddressPart(details[key]) === comuna));
-}
 
 @Injectable()
 export class GeocodingService implements GeocodingProvider {
@@ -59,7 +27,7 @@ export class GeocodingService implements GeocodingProvider {
   }
 
   /** Same lookup as geocode(), plus the reason it returned no candidates. Never throws: manual selection stays available. */
-  async lookup(address: string, requested?: AddressMatch): Promise<GeocodingLookup> {
+  async lookup(address: string): Promise<GeocodingLookup> {
     const query = address.trim().replace(/\s+/g, ' ');
     if (!query) return { candidatos: [], motivo: 'DIRECCION_VACIA' };
     const provider = this.configuredUrl('search');
@@ -70,7 +38,7 @@ export class GeocodingService implements GeocodingProvider {
     url.searchParams.set('limit', '5');
     url.searchParams.set('countrycodes', 'cl');
     url.searchParams.set('addressdetails', '1');
-    const result = await this.cachedRequest(url, data => {
+    const result = await this.cachedRequest<GeocodingCandidate[]>(url, data => {
       if (!Array.isArray(data)) return [];
       return data.slice(0, 5).flatMap(item => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
@@ -78,18 +46,14 @@ export class GeocodingService implements GeocodingProvider {
         const latitud = this.coordinate(record.lat, 90);
         const longitud = this.coordinate(record.lon, 180);
         if (latitud === null || longitud === null) return [];
-        const details = record.address && typeof record.address === 'object' && !Array.isArray(record.address)
-          ? record.address as Record<string, unknown> : {};
-        const country = details.country_code;
+        const country = record.address && typeof record.address === 'object'
+          ? (record.address as Record<string, unknown>).country_code : undefined;
         if (country !== undefined && country !== 'cl') return [];
-        const candidate = { etiqueta: (typeof record.display_name === 'string' ? record.display_name : query).slice(0, 300), latitud, longitud };
-        return [{ candidate, details }];
+        return [{ etiqueta: (typeof record.display_name === 'string' ? record.display_name : query).slice(0, 300), latitud, longitud }];
       });
     }, []);
     if (result.failed) return { candidatos: [], motivo: 'PROVEEDOR_NO_DISPONIBLE' };
-    const candidatos = result.value
-      .filter(({ details }) => !requested || matchesAddress(details, requested))
-      .map(({ candidate }) => ({ ...candidate }));
+    const candidatos = result.value.map(candidate => ({ ...candidate }));
     return { candidatos, motivo: candidatos.length ? 'OK' : 'SIN_RESULTADOS' };
   }
 

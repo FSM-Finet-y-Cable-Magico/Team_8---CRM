@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -29,9 +29,6 @@ const GEOCODING_MESSAGES: Record<Exclude<GeocodingOutcome, 'OK'>, string> = {
   PROVEEDOR_NO_DISPONIBLE: 'El servicio de ubicación automática no respondió. Reintenta o marca el punto en el mapa.',
   SIN_RESULTADOS: 'No encontramos esta dirección. Revisa calle, número y comuna, o marca el punto en el mapa.',
 };
-
-const ADDRESS_NOT_FOUND = 'No encontramos esta dirección. Revisa la calle, el número y la comuna.';
-const ADDRESS_LOOKUP_UNAVAILABLE = 'No pudimos verificar la dirección en este momento. Reintenta en unos instantes.';
 
 @Injectable()
 export class CoverageDomainService {
@@ -269,22 +266,9 @@ export class CoverageDomainService {
     return this.commercial.resolvePlanAvailabilityForLocation(idEmpresa, location.latitud, location.longitud);
   }
 
-  async geocode(address: string, calle?: string, comuna?: string) {
-    const { candidatos, motivo } = await this.geocoding.lookup(address, calle === undefined ? undefined : { calle, comuna });
-    const mensaje = motivo === 'OK' ? null
-      : calle === undefined ? GEOCODING_MESSAGES[motivo]
-        : motivo === 'SIN_RESULTADOS' ? ADDRESS_NOT_FOUND : ADDRESS_LOOKUP_UNAVAILABLE;
-    return { candidatos, motivo, mensaje };
-  }
-
-  async validateProspectAddress({ direccion, comuna, region }: { direccion: string; comuna?: string; region?: string }): Promise<CoverageLocationDto> {
-    if (!direccion.trim()) throw new BadRequestException(ADDRESS_NOT_FOUND);
-    const address = [direccion, comuna, region, 'Chile'].flatMap(part => part?.trim() ? [part.trim()] : []).join(', ');
-    const { candidatos, motivo } = await this.geocode(address, direccion, comuna);
-    if (motivo === 'SIN_RESULTADOS') throw new BadRequestException(ADDRESS_NOT_FOUND);
-    const match = candidatos[0];
-    if (!match) throw new ServiceUnavailableException(ADDRESS_LOOKUP_UNAVAILABLE);
-    return { latitud: match.latitud, longitud: match.longitud };
+  async geocode(address: string) {
+    const { candidatos, motivo } = await this.geocoding.lookup(address);
+    return { candidatos, motivo, mensaje: motivo === 'OK' ? null : GEOCODING_MESSAGES[motivo] };
   }
 
   private technicalProvider() {

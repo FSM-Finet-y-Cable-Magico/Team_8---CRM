@@ -1,4 +1,3 @@
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ProspectsService } from './prospects.service';
 
 describe('Factibilidad geografica en prospectos', () => {
@@ -24,7 +23,7 @@ describe('Factibilidad geografica en prospectos', () => {
     };
     prisma.prospecto.findUniqueOrThrow.mockImplementation(async () => prisma.prospecto.findUnique());
     prisma.$transaction.mockImplementation(callback => callback(prisma));
-    const coverage = { validateProspectAddress: jest.fn().mockResolvedValue(location), check: jest.fn().mockResolvedValue({
+    const coverage = { check: jest.fn().mockResolvedValue({
       estado: coberturaComercial ? 'FACTIBLE' : 'NO_FACTIBLE',
       coberturaComercial,
       zona: coberturaComercial ? { idZonaPago: 10 } : null,
@@ -136,27 +135,11 @@ describe('Factibilidad geografica en prospectos', () => {
     expect(data.cotizaciones).toBeUndefined();
   });
 
-  it('rechaza un domicilio inexistente aunque se envíen coordenadas válidas', async () => {
-    const { service, coverage, prisma, audit } = setup();
-    coverage.validateProspectAddress.mockRejectedValue(new BadRequestException('No encontramos esta dirección.'));
-    await expect(service.create(input, user)).rejects.toMatchObject({ status: 400 });
+  it('sin ubicacion registra el prospecto como Prospecto Nuevo sin consultar cobertura', async () => {
+    const { service, coverage } = setup();
+
+    expect((await service.create({ ...input, ubicacion: undefined }, user)).estadoPipeline).toBe('Prospecto Nuevo');
     expect(coverage.check).not.toHaveBeenCalled();
-    expect(prisma.prospecto.create).not.toHaveBeenCalled();
-    expect(audit.record).not.toHaveBeenCalled();
-  });
-
-  it('si falla el geocodificador, la creación queda pendiente de reintento', async () => {
-    const { service, coverage, prisma } = setup();
-    coverage.validateProspectAddress.mockRejectedValue(new ServiceUnavailableException());
-    await expect(service.create(input, user)).rejects.toMatchObject({ status: 503 });
-    expect(prisma.prospecto.create).not.toHaveBeenCalled();
-  });
-
-  it('usa las coordenadas verificadas por el backend aunque el cliente envíe otro punto', async () => {
-    const { service, coverage } = setup(false);
-    const result = await service.create({ ...input, ubicacion: { latitud: 0, longitud: 0 } }, user);
-    expect(coverage.check).toHaveBeenCalledWith(1, location, user);
-    expect(result).toMatchObject({ ...location, estadoPipeline: 'No Factible' });
   });
 
   it('el endpoint legacy usa cobertura comercial y registra Factible sin TomoDAT', async () => {

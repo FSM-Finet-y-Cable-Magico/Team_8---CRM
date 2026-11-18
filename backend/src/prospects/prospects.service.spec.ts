@@ -294,10 +294,7 @@ describe('ProspectsService', () => {
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       { sendQuote: jest.fn() } as unknown as MailService,
-      {
-        validateProspectAddress: jest.fn().mockResolvedValue({ latitud: -33.45, longitud: -70.67 }),
-        check: jest.fn().mockResolvedValue({ coberturaComercial: false }),
-      } as unknown as CoverageDomainService,
+      {} as CoverageDomainService,
       {} as never,
     );
 

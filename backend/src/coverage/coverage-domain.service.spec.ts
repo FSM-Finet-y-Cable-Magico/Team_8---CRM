@@ -238,17 +238,4 @@ describe('CoverageDomainService', () => {
     await expect(service.geocode('Calle QA 1')).resolves.toEqual({ candidatos: [candidato], motivo: 'OK', mensaje: null });
     expect(commercialProvider.resolvePlanAvailabilityForLocation).not.toHaveBeenCalled();
   });
-
-  it.each([
-    ['SIN_RESULTADOS', 400, /No encontramos esta dirección/],
-    ['PROVEEDOR_NO_DISPONIBLE', 503, /No pudimos verificar la dirección/],
-  ] as const)('un alta distingue una búsqueda sin coincidencia de un fallo del proveedor (%s)', async (motivo, status, message) => {
-    const { service, geocoding } = setup();
-    geocoding.lookup.mockResolvedValue({ candidatos: [], motivo });
-    await expect(service.validateProspectAddress({
-      direccion: 'Calle QA 1', comuna: 'La Florida', region: 'Metropolitana de Santiago',
-    })).rejects.toMatchObject({ status, message: expect.stringMatching(message) });
-    expect(geocoding.lookup).toHaveBeenCalledWith('Calle QA 1, La Florida, Metropolitana de Santiago, Chile',
-      { calle: 'Calle QA 1', comuna: 'La Florida' });
-  });
 });

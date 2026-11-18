@@ -44,31 +44,6 @@ describe('GeocodingService', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('para el alta exige que calle, número y comuna coincidan aunque el proveedor devuelva resultados aproximados', async () => {
-    const service = createService();
-    const address = { country_code: 'cl', road: 'Avenida José Prueba', house_number: '123', suburb: 'La Florida' };
-    jest.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([
-      { ...candidate, address: { country_code: 'cl', suburb: 'La Florida' } },
-      { ...candidate, address: { ...address, house_number: undefined } },
-      { ...candidate, address: { ...address, house_number: '132' } },
-      { ...candidate, address: { ...address, suburb: 'Puente Alto' } },
-      { ...candidate, display_name: 'Coincidencia exacta', address },
-    ])));
-    const query = 'Av. José Prueba 123, La Florida, Chile';
-    const requested = { calle: 'Av. Jose Prueba N° 123', comuna: 'La Florida' };
-
-    await expect(service.lookup(query, requested)).resolves.toEqual({
-      motivo: 'OK', candidatos: [{ etiqueta: 'Coincidencia exacta', latitud: -33.58, longitud: -70.63 }],
-    });
-    await expect(service.lookup(query, { ...requested, calle: 'José Prueba 123' })).resolves.toMatchObject({ motivo: 'OK' });
-    await expect(service.lookup(query, { ...requested, calle: 'Calle José Prueba 123' })).resolves.toMatchObject({ motivo: 'SIN_RESULTADOS' });
-    await expect(service.lookup(query, { ...requested, calle: 'Av. José Prueba 9999' })).resolves.toEqual({
-      motivo: 'SIN_RESULTADOS', candidatos: [],
-    });
-    await expect(service.geocode(query)).resolves.toHaveLength(5);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
   it('forward y reverse comparten el limite de una peticion por segundo', async () => {
     const starts: number[] = [];
     jest.mocked(fetch).mockImplementation(async input => {

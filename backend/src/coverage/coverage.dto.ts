@@ -157,14 +157,4 @@ export class GeocodeAddressDto {
   // Address (200) + comuna (80) + region (80), separators and country.
   @MaxLength(400)
   direccion!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  calle?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  comuna?: string;
 }

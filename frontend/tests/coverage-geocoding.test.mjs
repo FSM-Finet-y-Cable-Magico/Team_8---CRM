@@ -155,7 +155,6 @@ async function harness(t, { geocode = async () => response(), check = async () =
   };
   const { CoveragePicker } = load('features/coverage/CommercialCoveragePicker.tsx', {
     '../../shared/hooks/useTransientMessage': load('shared/hooks/useTransientMessage.ts',{}),
-    '../../shared/components/ToastNotice': load('shared/components/ToastNotice.tsx'),
     leaflet, '../../api': { api, apiErrorMessage: () => 'Error local' }, '../../lib/user-facing-messages': require('./helpers/user-facing-messages.cjs'),
   });
   const { ProspectsPanel } = load('features/prospects/ProspectsPanel.tsx', {
@@ -211,10 +210,7 @@ test('registro ubica domicilio completo al seleccionar comuna y muestra solo est
   assert.equal(h.tree.root.findAllByProps({ 'aria-label': 'Consulta de cobertura comercial' }).length, 0);
   await h.fill(); await h.tick(699); assert.equal(h.requests('/coverage/geocode').length, 0);
   await h.tick(1); assert.equal(h.requests('/coverage/geocode').length, 1);
-  assert.deepEqual(h.requests('/coverage/geocode')[0].body, {
-    direccion: 'Av. Prueba 123, La Florida, Metropolitana de Santiago, Chile',
-    calle: 'Av. Prueba 123', comuna: 'La Florida',
-  });
+  assert.deepEqual(h.requests('/coverage/geocode')[0].body, { direccion: 'Av. Prueba 123, La Florida, Metropolitana de Santiago, Chile' });
   assert.equal(h.maps.length, 0); assert.equal(h.button('Ubicar dirección'), undefined);
   assert.equal(h.button('Registrar prospecto').props.disabled, true);
   await h.submit(); assert.equal(h.requests('/prospects').length, 0);
@@ -255,20 +251,15 @@ test('sin cobertura permite registrar; el registro conserva las coordenadas', as
   assert.deepEqual(h.requests('/prospects')[0].body.ubicacion, { latitud: -33.58, longitud: -70.63 });
 });
 
-test('una dirección inexistente muestra el aviso y bloquea el registro hasta corregirla', async t => {
-  const mensaje = 'No encontramos esta dirección. Revisa la calle, el número y la comuna.';
-  const h = await harness(t, { geocode: async ({ calle }) => calle === 'Av. Prueba 456' ? response()
-    : { data: { candidatos: [], motivo: 'SIN_RESULTADOS', mensaje } } });
+test('sin resultados no inventa coordenadas o factibilidad y permite corregir la dirección o registrar para revisión', async t => {
+  const h = await harness(t, { geocode: async () => response([]) });
   await h.fill(); await h.tick(700); await h.tick(350);
   assert.equal(h.location(), null); assert.equal(h.requests('/coverage/check').length, 0);
-  assert.ok(h.text().includes('Dirección no encontrada'));
-  assert.ok(h.tree.root.findByProps({ className: 'toast-notice toast-notice-error' }));
+  assert.equal(h.button('Registrar prospecto').props.disabled, false); assert.ok(h.text().includes('No se pudo ubicar la dirección'));
   assert.equal(h.button('Actualizar cobertura'), undefined);
-  await h.submit(); assert.equal(h.requests('/prospects').length, 0);
-  await h.change('Av. Siempre Viva 123, Comuna', 'Av. Prueba 456');
-  await h.blur(); await h.tick(700); await h.tick(350);
+  await h.change('Av. Siempre Viva 123, Comuna', 'Av. Prueba 456'); await h.blur(); await h.tick(700);
   assert.equal(h.requests('/coverage/geocode').length, 2);
-  await h.submit(); assert.equal(h.requests('/prospects').length, 1);
+  await h.submit(); assert.equal(h.requests('/prospects')[0].body.ubicacion, undefined);
 });
 
 test('respuestas de una dirección o empresa anterior no cambian ubicación ni estado actuales', async t => {
@@ -361,16 +352,12 @@ test('proveedor caído (PROVEEDOR_NO_DISPONIBLE): el reintento sigue disponible'
   assert.equal(h.requests('/coverage/geocode').length, 2);
 });
 
-test('alta con proveedor deshabilitado informa la indisponibilidad y bloquea la creación', async t => {
-  const mensaje = 'No pudimos verificar la dirección en este momento. Reintenta en unos instantes.';
-  const h = await harness(t, {
-    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje } }),
-  });
-  await h.fill(); await h.tick(700);
+test('alta con proveedor MANUAL explica que el punto se marca en la ficha', async t => {
+  const h = await harness(t, { picker: { presentation: 'status' },
+    geocode: async () => ({ data: { candidatos: [], motivo: 'PROVEEDOR_DESHABILITADO', mensaje: 'x' } }) });
+  await h.tick(700); await h.tick(0);
   assert.ok(h.text().includes('Ubicación automática no disponible'));
-  assert.ok(h.text().includes(mensaje));
   assert.equal(h.requests('/coverage/check').length, 0);
-  await h.submit(); assert.equal(h.requests('/prospects').length, 0);
 });
 
 test('dirección guardada con coordenadas consulta cobertura vigente sin volver a geocodificar', async t => {
