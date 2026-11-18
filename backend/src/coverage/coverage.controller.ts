@@ -14,6 +14,8 @@ import {
 } from './coverage.dto';
 import { CoverageDomainService } from './coverage-domain.service';
 
+// DEMO CU-70 | REST /api/coverage/zones: POST crea, PATCH actualiza/activa; JWT, rol y empresa delimitan el acceso.
+// DEMO CU-06 | REST /api/coverage: POST geocode ubica la direccion; POST check consulta cobertura comercial.
 @Controller('coverage')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Administrador', 'Comercial', 'Soporte')

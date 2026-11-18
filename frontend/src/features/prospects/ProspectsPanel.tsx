@@ -162,6 +162,7 @@ export function ProspectsPanel({
     setForm({ ...form, rut: value });
   }
 
+  // DEMO CU-06 | 01 Alta: envia datos y ubicacion opcional a POST /prospects; el servidor recalcula la cobertura.
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (submitting || coverageBusy) return;

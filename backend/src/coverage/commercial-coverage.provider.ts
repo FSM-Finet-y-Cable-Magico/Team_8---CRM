@@ -21,6 +21,7 @@ type ZoneRecord = {
 export class CommercialCoverageProvider {
   constructor(private readonly prisma: PrismaService) {}
 
+  // DEMO CU-06 | 06 Cobertura: filtra zonas activas/vigentes de la empresa y aplica pointInPolygon a [longitud, latitud].
   async resolveZoneForPoint(idEmpresa: number, latitud: number, longitud: number, at = new Date()) {
     const records = await this.prisma.zonaPago.findMany({
       where: { idEmpresa, activo: { not: false } },
@@ -42,6 +43,7 @@ export class CommercialCoverageProvider {
     return (await this.resolveZoneForPoint(idEmpresa, latitud, longitud, at)).microzona;
   }
 
+  // DEMO CU-70 | 08 Puente a CU-06: planes asignados y vigentes; el precio de microzona prevalece sobre el de cobertura padre.
   async resolvePlanAvailabilityForLocation(idEmpresa: number, latitud: number, longitud: number, at = new Date()): Promise<CommercialCoverageResult> {
     const resolved = await this.resolveZoneForPoint(idEmpresa, latitud, longitud, at);
     if (!resolved.zona) return { coberturaComercial: false, zona: null, microzona: null, planes: [] };

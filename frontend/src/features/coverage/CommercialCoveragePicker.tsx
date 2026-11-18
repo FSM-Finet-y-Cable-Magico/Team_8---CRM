@@ -144,6 +144,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
 
   useEffect(() => {
     if (presentation === 'status' || !container.current) return;
+    // DEMO CU-06 | 03 Visualizar: Leaflet superpone domicilio y zonas sobre teselas OpenStreetMap; no decide factibilidad.
     const instance = L.map(container.current, { scrollWheelZoom: false }).setView([-33.57, -70.61], 12);
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -199,6 +200,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     if (!value || !connection) return;
     setBusy(!background);
     const timer = window.setTimeout(() => {
+      // DEMO CU-06 | 04 Consultar: las coordenadas y la empresa van al backend; la respuesta comercial es la autoridad.
       void api.post<CoverageResult>('/coverage/check', { idEmpresa, ...value }, { signal: controller.signal })
         .then(({ data }) => {
           if (!controller.signal.aborted && latestQuery.current === queryKey) {
@@ -275,6 +277,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     selectLocation({ latitud, longitud });
   }
 
+  // DEMO CU-06 | 02 Ubicar: POST /coverage/geocode devuelve candidatos y se toma el primero; aun no confirma cobertura.
   const geocodeAddress = useCallback(async () => {
     if (!direccion.trim()) {
       setGeocodeMessage('Ingresa una dirección antes de intentar ubicarla.');

@@ -85,6 +85,7 @@ export class PlansService {
     return { idPlan, zones: zones.map(({ precios, ...zone }) => ({ ...zone, assigned: precios.length > 0 })) };
   }
 
+  // DEMO CU-70 | 07 Persistir asignacion: transaccion PlanZonaPrecio (plan_zona_precio), zonas activas de la misma empresa y auditoria.
   async assignZones(idPlan: number, zoneIds: number[], currentUser: AuthUser) {
     if (!Array.isArray(zoneIds) || zoneIds.length > 500 || zoneIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
       throw new BadRequestException('Selecciona zonas válidas');

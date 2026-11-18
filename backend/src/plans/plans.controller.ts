@@ -39,6 +39,7 @@ export class PlansController {
     return this.plansService.zones(id, user);
   }
 
+  // DEMO CU-70 | REST PUT /api/plans/:id/zones recibe { zoneIds }; GET del mismo recurso carga las opciones.
   @Put(':id/zones')
   @Roles(...ACCESS_ROLES.MANAGE_PLANS)
   assignZones(@Param('id', ParseIntPipe) id: number, @Body() dto: AssignPlanZonesDto, @CurrentUser() user: AuthUser) {

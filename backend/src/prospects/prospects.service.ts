@@ -306,6 +306,8 @@ export class ProspectsService {
       } };
     });
   }
+  // DEMO CU-06 | 07 Guardar: valida RUT/duplicados; con ubicacion recalcula cobertura y persiste coordenadas, zona y estado en prospecto.
+  // DEMO CU-06 | Un resultado comercial positivo crea cotizacion con factibilidadVerificada=true; sin ubicacion queda Prospecto Nuevo.
   async create(dto: CreateProspectDto, currentUser: AuthUser) {
     const rutResult = validateRut(dto.rut);
 
@@ -630,6 +632,7 @@ export class ProspectsService {
     }
   }
 
+  // DEMO CU-06 | 08 Reconsulta: transaccion con bloqueo; invalida verificaciones previas, actualiza estado y audita cobertura comercial.
   private async saveFeasibility(idProspecto: number, dto: VerifyFeasibilityDto, currentUser: AuthUser, prospect: Prospecto, cobertura?: CoverageResult, location?: CoverageLocationDto) {
     this.assertFeasibilityStage(prospect.estadoPipeline);
 

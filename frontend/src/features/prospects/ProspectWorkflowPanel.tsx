@@ -167,6 +167,7 @@ export function ProspectWorkflowPanel({
     const controller = new AbortController();
     setCheckingCoverage(true);
     // Persist only changed feasibility/location; opening or polling a modal must not create repeated checks in the history.
+    // DEMO CU-06 | 09 Ficha: persiste cambios de factibilidad/ubicacion; la ruta historica tomodat usa el dominio comercial actual.
     const timer = window.setTimeout(() => {
       const persistCoverage = hasSavedLocation
         ? api.post(`/prospects/${prospect.idProspecto}/feasibility/tomodat`, location, { signal: controller.signal })

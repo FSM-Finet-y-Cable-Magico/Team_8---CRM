@@ -59,6 +59,7 @@ export class ProspectsController {
     return this.prospectsService.customerQuotes(customer, company, user);
   }
 
+  // DEMO CU-06 | REST POST /api/prospects: valida el DTO y delega el alta al servicio.
   @Post()
   @Roles(...ACCESS_ROLES.MANAGE_PROSPECTS)
   create(@Body() dto: CreateProspectDto, @CurrentUser() user: AuthUser) {
@@ -157,6 +158,7 @@ export class ProspectsController {
     return this.prospectsService.installAvailability(id, dto, user);
   }
 
+  // DEMO CU-06 | REST historica: /api/prospects/:id/feasibility/tomodat hoy recalcula cobertura comercial, no consulta TomoDAT.
   @Post(':id/feasibility/tomodat')
   @Roles('Administrador', 'Comercial', 'Soporte')
   verifyTomodat(

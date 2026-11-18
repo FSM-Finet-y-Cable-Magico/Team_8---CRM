@@ -81,6 +81,7 @@ function CoverageWorkspace({ idEmpresa, scope, companies = [], canManage = true 
 
   useEffect(() => {
     if (!mapElement.current) return;
+    // DEMO CU-70 | 01 Mapa: Leaflet dibuja los limites; OpenStreetMap aporta las teselas de fondo.
     const instance = L.map(mapElement.current, { scrollWheelZoom: true }).setView([-33.57, -70.61], 12);
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -169,6 +170,7 @@ function CoverageWorkspace({ idEmpresa, scope, companies = [], canManage = true 
     if (saving) return;
     setEditing(false); setEditor(emptyEditor); setError(''); clearMessage();
   }
+  // DEMO CU-70 | 02 Guardar: cierra el poligono GeoJSON [longitud, latitud] y envia POST/PATCH /coverage/zones.
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!canManage || saving) return;
@@ -193,6 +195,7 @@ function CoverageWorkspace({ idEmpresa, scope, companies = [], canManage = true 
     } catch (err) { if (mounted.current) setError(apiErrorMessage(err)); }
     finally { if (mounted.current) setSaving(false); }
   }
+  // DEMO CU-70 | 03 Activar: PATCH con activo=true; no existe una aprobacion separada en este flujo.
   async function changeStatus(zone: Zone) {
     if (!canManage || changingStatus !== null || saving || editing) return;
     setChangingStatus(zone.idZonaPago); setError(''); clearMessage();

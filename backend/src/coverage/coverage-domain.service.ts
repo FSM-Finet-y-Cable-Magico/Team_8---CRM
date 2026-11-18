@@ -83,6 +83,7 @@ export class CoverageDomainService {
     return zone;
   }
 
+  // DEMO CU-70 | 04 Crear: valida geometria y jerarquia; persiste ZonaPago (zona_pago) y registra auditoria.
   async createZone(dto: CreateCoverageZoneDto, user: AuthUser) {
     this.assertManage(dto.idEmpresa, user);
     const polygon = this.parsePolygon(dto.poligonoGeojson);
@@ -118,6 +119,7 @@ export class CoverageDomainService {
     return zone;
   }
 
+  // DEMO CU-70 | 05 Activar/editar: revalida poligono, jerarquia, vigencia y solapes de microzonas; guarda activo.
   async updateZone(idZonaPago: number, dto: UpdateCoverageZoneDto, user: AuthUser) {
     const current = await this.prisma.zonaPago.findUnique({
       where: { idZonaPago },
@@ -222,6 +224,7 @@ export class CoverageDomainService {
     });
   }
 
+  // DEMO CU-06 | 05 Evaluar: FACTIBLE depende del poligono comercial; tecnica=PENDIENTE, sin consultar ni reservar puertos.
   async check(idEmpresa: number, location: CoverageLocationDto, user: AuthUser): Promise<CoverageResult> {
     this.assertAccess(idEmpresa, user);
     this.assertCoordinates(location.latitud, location.longitud);

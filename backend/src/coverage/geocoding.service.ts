@@ -27,6 +27,7 @@ export class GeocodingService implements GeocodingProvider {
   }
 
   /** Same lookup as geocode(), plus the reason it returned no candidates. Never throws: manual selection stays available. */
+  // DEMO CU-06 | 02 Nominatim: direccion -> candidatos latitud/longitud mediante /search, limitado a Chile; requiere proveedor configurado.
   async lookup(address: string): Promise<GeocodingLookup> {
     const query = address.trim().replace(/\s+/g, ' ');
     if (!query) return { candidatos: [], motivo: 'DIRECCION_VACIA' };
@@ -77,6 +78,7 @@ export class GeocodingService implements GeocodingProvider {
     return Number.isFinite(number) && Math.abs(number) <= limit ? number : null;
   }
 
+  // DEMO CU-06 | Geocodificacion: cache y cola compartida espacian solicitudes; ante fallo se conserva la alternativa manual.
   private async cachedRequest<T>(url: URL, parse: (data: unknown) => T, fallback: T): Promise<RequestResult<T>> {
     const normalized = new URL(url);
     const query = normalized.searchParams.get('q');

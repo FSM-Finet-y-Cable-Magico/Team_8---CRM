@@ -34,6 +34,7 @@ export function PlanZonesModal({ plan, onClose, onSaved }: { plan: Plan; onClose
     return () => controller.abort();
   }, [plan.idPlan, revision]);
 
+  // DEMO CU-70 | 06 Asignar planes: envia la seleccion completa de zonas mediante PUT /plans/:id/zones.
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!loaded || pending.current) return;
