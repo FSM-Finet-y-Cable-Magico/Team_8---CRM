@@ -245,11 +245,12 @@ export class WithdrawalWorkflowService {
         }
       }
       const service = await tx.servicioContratado.findUnique({ where: { idServicio: request.idServicio } });
+      const termination = await this.storage.findTerminationByRequest(tx, idSolicitudRetiro);
       if (request.motivo.toUpperCase() === WITHDRAWAL_MOTIVE_VOLUNTARY && !this.voluntaryDispatchEnabled()) {
         throw new ConflictException({ code: 'G3_VOLUNTARY_NOT_RATIFIED',
-          message: 'El retiro técnico de un término voluntario espera que el área técnica ratifique ese motivo; la solicitud queda registrada sin orden. El término comercial ya está aplicado.' });
+          message: 'El retiro técnico de un término voluntario espera que el área técnica ratifique ese motivo; la solicitud queda registrada sin orden. '
+            + (termination?.terminoComercialEn ? 'El término comercial histórico ya está aplicado.' : 'La baja del servicio y el retorno a Prospectos esperan el cierre aprobado de la orden de retiro.') });
       }
-      const termination = await this.storage.findTerminationByRequest(tx, idSolicitudRetiro);
       if (termination) {
         // Voluntary withdrawals do not require debt or suspension. Historical immediate terminations remain valid.
         if (!service || (termination.terminoComercialEn ? service.estadoOperativo !== 'Baja' : service.estadoOperativo === 'Baja')) {

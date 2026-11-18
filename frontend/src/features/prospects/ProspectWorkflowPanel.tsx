@@ -302,9 +302,12 @@ export function ProspectWorkflowPanel({
       window.open(objectUrl, '_blank');
       if (data.envioEmail === 'failed') {
         setStatusIsError(true);
-        setStatus('No se pudo enviar la cotización.');
+        setStatus('Cotización generada. No se pudo enviar por correo.');
       } else {
-        const message = data.envioEmail === 'sent' ? 'Cotización enviada' : 'Cotización generada';
+        const message = data.envioEmail === 'sent' ? 'Cotización enviada'
+          : data.envioEmail === 'not_configured' ? 'Cotización generada. El correo de la empresa no está configurado.'
+          : data.envioEmail === 'simulated' ? 'Cotización generada. Envío por correo simulado.'
+          : 'Cotización generada';
         if (onNotify) onNotify(message);
         else setStatus(message);
       }
@@ -501,6 +504,10 @@ export function ProspectWorkflowPanel({
             />
             {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>
+        )}
+
+        {permissions.generateQuotes && commercialReady && planOptions.length === 0 && (
+          <p className="muted" role="status">No hay planes disponibles para esta ubicación. Asigna un plan activo de la empresa a la zona de cobertura para cotizar.</p>
         )}
 
         {permissions.generateQuotes && commercialReady && planOptions.length > 0 && (

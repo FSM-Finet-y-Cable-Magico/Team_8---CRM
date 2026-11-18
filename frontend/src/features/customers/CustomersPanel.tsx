@@ -869,7 +869,7 @@ export function CustomersPanel({
         </div>
         {status && !managementOpen && <p className="inline-status">{status}</p>}
         <div className="table-wrap customers-table-wrap">
-          <table className="customers-table">
+          <table className="customers-table responsive-records-table">
             <thead>
               <tr>
                 <th>RUT</th>
@@ -885,14 +885,14 @@ export function CustomersPanel({
             <tbody>
               {paginatedCustomers.map((customer) => (
                 <tr key={customer.idCliente}>
-                  <td>{formatRutForDisplay(customer.rut) ?? '-'}</td>
-                  <td>{customer.nombreCompleto}</td>
-                  <td>{customerCompanyLabel(customer)}</td>
-                  <td><span className="customer-current-status"><CustomerStatusSummary customer={customer} format={formatWorkOrderValue} compact/></span></td>
-                  <td>{customer.origenContacto ?? '-'}</td>
-                  <td>{customerMainPlan(customer)}</td>
-                  <td>{customer.telefono ?? customer.email ?? '-'}</td>
-                  <td>
+                  <td data-label="RUT">{formatRutForDisplay(customer.rut) ?? '-'}</td>
+                  <td data-label="Nombre">{customer.nombreCompleto}</td>
+                  <td data-label="Empresa">{customerCompanyLabel(customer)}</td>
+                  <td data-label={statusDimensionLabel}><span className="customer-current-status"><CustomerStatusSummary customer={customer} format={formatWorkOrderValue} compact/></span></td>
+                  <td data-label="Origen">{customer.origenContacto ?? '-'}</td>
+                  <td data-label="Servicio / Plan">{customerMainPlan(customer)}</td>
+                  <td data-label="Contacto">{customer.telefono ?? customer.email ?? '-'}</td>
+                  <td data-label="Acciones">
                     <button className="secondary compact crm-table-action" onClick={() => openCustomerManagement(customer.idCliente)}>
                       Gestionar
                     </button>

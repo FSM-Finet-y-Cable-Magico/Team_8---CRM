@@ -231,6 +231,7 @@ for(const options of [{outside:true},{noPlans:true},{locationFailure:true}])test
   const h=await harness(t,{g2:true,requiresReview:false,...options});
   await act(async()=>h.button('Editar prospecto').props.onClick());await h.address();await h.tick();await h.save();await h.tick();
   assert.equal(h.button('Generar cotización'),undefined);assert.equal(h.button('Confirmar contratación'),undefined);
+  assert.equal(h.text().includes('No hay planes disponibles para esta ubicación'), Boolean(options.noPlans));
   if(options.locationFailure)assert.equal(h.calls.filter(c=>c.path.includes('/feasibility')).length,0);
 });
 
@@ -353,13 +354,16 @@ test('React: una cotización previa no habilita contratar si la cobertura dejó 
 });
 
 
-for (const delivery of ['sent', 'failed', 'disabled']) test('React: aviso de cotización refleja el envío real: ' + delivery, async t => {
+for (const delivery of ['sent', 'failed', 'not_configured', 'simulated']) test('React: aviso de cotización refleja el envío real: ' + delivery, async t => {
   const h = await harness(t, { emailDelivery: delivery });
   await h.select(0, 1); await act(async () => h.button('Generar cotización').props.onClick());
   assert.ok(!h.text().includes('SMTP'));
   if (delivery === 'sent') assert.deepEqual(h.notices, ['Cotización enviada']);
-  else if (delivery === 'disabled') assert.deepEqual(h.notices, ['Cotización generada']);
-  else { assert.deepEqual(h.notices, []); assert.ok(h.text().includes('No se pudo enviar la cotización.')); }
+  else if (delivery === 'not_configured') assert.deepEqual(h.notices, ['Cotización generada. El correo de la empresa no está configurado.']);
+  else if (delivery === 'simulated') assert.deepEqual(h.notices, ['Cotización generada. Envío por correo simulado.']);
+  else { assert.deepEqual(h.notices, []); assert.ok(h.text().includes('Cotización generada. No se pudo enviar por correo.')); }
+  assert.equal(h.pdfOpened(), 1);
+  assert.ok(h.button('Confirmar contratación'));
 });
 
 test('TK-07: el editor de prospecto usa el patrón del editor de clientes sin cambiar su guardado', async t => {

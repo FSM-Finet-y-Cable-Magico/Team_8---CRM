@@ -65,26 +65,25 @@ const optionsOf = select => select.findAllByType('option').map(textOf);
 test('el alta ofrece «Término de servicio» solo si el catálogo la habilita; nunca «Baja de servicio»', async t => {
   const enabled = await panel(t);
   const options = optionsOf(enabled.field('Categoría'));
-  assert.ok(options.includes('Término de servicio'));
+  assert.ok(options.includes('Baja voluntaria del servicio'));
   assert.ok(!options.includes('Baja de servicio'));
   const absent = await panel(t, { categories: attention });
-  assert.ok(!optionsOf(absent.field('Categoría')).includes('Término de servicio'), 'sin la inserción autorizada no se ofrece');
+  assert.ok(!optionsOf(absent.field('Categoría')).includes('Baja voluntaria del servicio'), 'sin la inserción autorizada no se ofrece');
   const ambiguous = await panel(t, { categories: [...attention, termination, { ...termination, idCategoria: 41 }] });
-  assert.ok(!optionsOf(ambiguous.field('Categoría')).includes('Término de servicio'), 'duplicada no se habilita');
+  assert.ok(!optionsOf(ambiguous.field('Categoría')).includes('Baja voluntaria del servicio'), 'duplicada no se habilita');
 });
 
-test('el acceso explícito a baja voluntaria selecciona la categoría real y explica un catálogo incompleto', async t => {
+test('la baja voluntaria se selecciona desde la categoría real, sin acceso separado, y explica un catálogo incompleto', async t => {
   const h = await panel(t);
-  const button = h.tree.root.findAllByType('button').find(n => textOf(n) === 'Solicitar baja voluntaria');
-  assert.equal(button.props.disabled, false);
-  await act(async () => button.props.onClick());
+  assert.ok(!h.tree.root.findAllByType('button').some(n => textOf(n) === 'Solicitar baja voluntaria'));
+  const option = h.field('Categoría').findAllByType('option').find(n => textOf(n) === 'Baja voluntaria del servicio');
+  await h.change(h.field('Categoría'), String(option.props.value));
   assert.equal(h.field('Categoría').props.value, '40');
   assert.ok(h.field('Evidencia del requerimiento'));
   assert.equal(h.calls.filter(call => call[0] === 'post').length, 0);
   const absent = await panel(t, { categories: attention });
-  const disabled = absent.tree.root.findAllByType('button').find(n => textOf(n) === 'Solicitar baja voluntaria');
-  assert.equal(disabled.props.disabled, true);
-  assert.match(absent.text(), /requiere habilitar la categoría «Término de servicio»/);
+  assert.ok(!optionsOf(absent.field('Categoría')).includes('Baja voluntaria del servicio'));
+  assert.match(absent.text(), /cuando se habilite «Término de servicio»/);
 });
 
 test('con «Término de servicio» pide canal, fecha y hora, solicitante, evidencia e identidad, y registra por el flujo de término', async t => {

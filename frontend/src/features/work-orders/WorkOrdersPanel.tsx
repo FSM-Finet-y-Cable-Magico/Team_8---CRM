@@ -134,7 +134,7 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
         <span className="work-orders-result-count" role="status">{searchTerm ? `${visibleRows.length} de ${rows.length}` : rows.length} {rows.length === 1 ? 'orden' : 'órdenes'}</span>
       </div>
       <div className="table-wrap work-orders-table-wrap">
-        <table className="work-orders-table operational-table">
+        <table className="work-orders-table operational-table responsive-records-table">
           <thead>
             <tr>
               {sortableHeading('code')}
@@ -151,18 +151,18 @@ export function WorkOrdersPanel({ workOrders }: { workOrders: WorkOrder[]; onCha
           <tbody>
             {pageRows.map(row => (
               <tr key={row.order.idOt}>
-                <td className="work-order-id">{row.code}</td>
-                <td><span className="work-order-type">{row.type}</span></td>
-                <td>{row.client}</td>
-                <td>{row.ticket}</td>
-                <td>
+                <td data-label="Código" className="work-order-id">{row.code}</td>
+                <td data-label="Tipo"><span className="work-order-type">{row.type}</span></td>
+                <td data-label="Cliente">{row.client}</td>
+                <td data-label="Ticket">{row.ticket}</td>
+                <td data-label="Fecha">
                   {row.order.fechaProgramada ? formatDateOnly(row.order.fechaProgramada) : '-'}
                   {row.order.horaVisita ? ` ${row.order.horaVisita}` : ''}
                 </td>
-                <td>{row.technician}</td>
-                <td className="operational-badge-column"><StatusBadge value={row.priority} /></td>
-                <td className="operational-badge-column"><StatusBadge value={row.status} /></td>
-                <td>
+                <td data-label="Técnico">{row.technician}</td>
+                <td data-label="Prioridad" className="operational-badge-column"><StatusBadge value={row.priority} /></td>
+                <td data-label="Estado" className="operational-badge-column"><StatusBadge value={row.status} /></td>
+                <td data-label="Acciones">
                   <button
                     className="secondary compact crm-table-action"
                     onClick={() => {

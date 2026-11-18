@@ -222,16 +222,12 @@ export function TicketsPanel({
             <option value="">Seleccionar</option>
             {attentionCategories.map((category) => (
               <option key={category.idCategoria} value={category.idCategoria}>
-                {category.nombreAtencion}
+                {isTerminationTicketCategory(category) ? 'Baja voluntaria del servicio' : category.nombreAtencion}
               </option>
             ))}
           </select>
         </label>
-        {!terminationSelected && <>
-          <button type="button" className="secondary" disabled={!terminationCategory} aria-describedby={!terminationCategory ? 'termination-catalog-status' : undefined}
-            onClick={() => { if (terminationCategory) setCreateForm(current => ({ ...current, idCategoria: String(terminationCategory.idCategoria) })); }}>Solicitar baja voluntaria</button>
-          {!terminationCategory && <small id="termination-catalog-status">La baja voluntaria requiere habilitar la categoría «Término de servicio».</small>}
-        </>}
+        {!terminationCategory && <small id="termination-catalog-status">La categoría «Baja voluntaria del servicio» estará disponible cuando se habilite «Término de servicio» en el catálogo de atención.</small>}
         {terminationSelected && <>
           <label>
             Canal del requerimiento
@@ -282,7 +278,7 @@ export function TicketsPanel({
 
       <section className="tickets-list-section" aria-label="Listado de tickets">
         <div className="table-wrap tickets-table-wrap">
-          <table className="tickets-table operational-table">
+          <table className="tickets-table operational-table responsive-records-table">
             <thead>
               <tr>
                 <th>Código</th>
@@ -298,18 +294,18 @@ export function TicketsPanel({
             <tbody>
               {visibleTickets.map((ticket) => (
                 <tr key={ticket.idTicket}>
-                  <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
-                  <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
-                  <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
-                  <td>{ticket.idServicio ?? '-'}</td>
-                  <td>{ticket.workOrders?.[0] ? `#${ticket.workOrders[0].idOt}` : '-'}</td>
-                  <td className="operational-badge-column">
+                  <td data-label="Código">{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
+                  <td data-label="Cliente">{ticket.cliente?.nombreCompleto ?? '-'}</td>
+                  <td data-label="Categoría">{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
+                  <td data-label="Servicio">{ticket.idServicio ?? '-'}</td>
+                  <td data-label="OT">{ticket.workOrders?.[0] ? `#${ticket.workOrders[0].idOt}` : '-'}</td>
+                  <td data-label="Prioridad" className="operational-badge-column">
                     <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
                   </td>
-                  <td className="operational-badge-column">
+                  <td data-label="Estado" className="operational-badge-column">
                     <StatusBadge value={ticket.estadoPresentacion ?? formatWorkOrderValue(ticket.estado)} />
                   </td>
-                  <td>
+                  <td data-label="Acciones">
                     <button
                       className="secondary compact crm-table-action"
                       onClick={() => {
