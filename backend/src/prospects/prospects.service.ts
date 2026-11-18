@@ -339,9 +339,8 @@ export class ProspectsService {
       throw new BadRequestException('Ya existe un cliente o prospecto con ese RUT en la empresa seleccionada');
     }
 
-    const cobertura = dto.ubicacion
-      ? await this.coverageService.check(idEmpresa, dto.ubicacion, currentUser)
-      : null;
+    const location = await this.coverageService.validateProspectAddress(dto);
+    const cobertura = await this.coverageService.check(idEmpresa, location, currentUser);
     const prospect = await this.prisma.prospecto.create({
       data: {
         idEmpresa,
@@ -353,17 +352,13 @@ export class ProspectsService {
         direccion: dto.direccion.trim(),
         comuna: dto.comuna?.trim() || null,
         region: dto.region?.trim() || null,
-        latitud: dto.ubicacion?.latitud ?? null,
-        longitud: dto.ubicacion?.longitud ?? null,
-        idZonaPago: cobertura?.microzona?.idZonaPago ?? cobertura?.zona?.idZonaPago ?? null,
+        latitud: location.latitud,
+        longitud: location.longitud,
+        idZonaPago: cobertura.microzona?.idZonaPago ?? cobertura.zona?.idZonaPago ?? null,
         idPlanInteres: dto.idPlanInteres ?? null,
         origenContacto: dto.origenContacto?.trim() || 'Contacto directo',
-        estadoPipeline: cobertura?.coberturaComercial
-          ? FEASIBLE_PIPELINE_STATUS
-          : cobertura
-            ? NOT_FEASIBLE_PIPELINE_STATUS
-            : INITIAL_PIPELINE_STATUS,
-        ...(cobertura?.coberturaComercial ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
+        estadoPipeline: cobertura.coberturaComercial ? FEASIBLE_PIPELINE_STATUS : NOT_FEASIBLE_PIPELINE_STATUS,
+        ...(cobertura.coberturaComercial ? { cotizaciones: { create: { factibilidadVerificada: true } } } : {}),
         fechaCreacion: new Date(),
       },
       include: {
@@ -381,7 +376,8 @@ export class ProspectsService {
         estadoPipeline: prospect.estadoPipeline,
         idEmpresa: prospect.idEmpresa,
         origenContacto: prospect.origenContacto,
-        ...(cobertura ? { direccion: dto.direccion.trim(), cobertura } : {}),
+        direccion: dto.direccion.trim(),
+        cobertura,
       },
     });
 

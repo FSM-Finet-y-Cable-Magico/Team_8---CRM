@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { api, apiErrorMessage } from '../../api';
 import { userFacingMessage } from '../../lib/user-facing-messages';
+import { ToastNotice } from '../../shared/components/ToastNotice';
 import { useTransientMessage } from '../../shared/hooks/useTransientMessage';
 import './coverage.css';
 
@@ -47,9 +48,10 @@ function zonePositions(zone: CoverageZone): L.LatLngTuple[] {
   return ring.map(point => [point[1], point[0]]);
 }
 
-export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false, simpleSummary = false, companyName }: {
+export function CoveragePicker({ idEmpresa, direccion, domicilio, value, onChange, onResult, onBusyChange, disabled = false, autoGeocode = false, presentation = 'editor', minimal = false, showAddressRetry = false, allowManualLocation = false, simpleSummary = false, companyName }: {
   idEmpresa: number;
   direccion: string;
+  domicilio?: { calle: string; comuna: string };
   value: CoverageLocation | null;
   onChange: (location: CoverageLocation | null) => void;
   onResult?: (result: CoverageResult | null) => void;
@@ -79,6 +81,9 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
   const [providerOff, setProviderOff] = useState(automaticGeocodingOff);
   const { message: geocodeMessage, showMessage: setGeocodeMessage } = useTransientMessage();
   const [geocodeIssue, setGeocodeIssue] = useState('');
+  const calle = domicilio?.calle;
+  const comuna = domicilio?.comuna;
+  const requireAddressMatch = domicilio !== undefined;
   const [retry, setRetry] = useState(0);
   const [backgroundRetry, setBackgroundRetry] = useState(0);
   const [coordinates, setCoordinates] = useState({ latitud: '', longitud: '' });
@@ -290,7 +295,9 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     setGeocodeMessage('');
     setGeocodeIssue('');
     try {
-      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; motivo?: string; mensaje: string | null }>('/coverage/geocode', { direccion }, { signal: controller.signal });
+      const { data } = await api.post<{ candidatos: Array<CoverageLocation & { etiqueta: string }>; motivo?: string; mensaje: string | null }>(
+        '/coverage/geocode', { direccion, ...(requireAddressMatch ? { calle, comuna } : {}) }, { signal: controller.signal },
+      );
       if (controller.signal.aborted || current.current.version !== version || current.current.disabled || current.current.value !== requestedLocation) return;
       const off = Boolean(data.motivo && PROVIDER_OFF_REASONS.has(data.motivo));
       if (off) { automaticGeocodingOff = true; setProviderOff(true); }
@@ -298,7 +305,9 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       if (first) current.current.onChange({ latitud: first.latitud, longitud: first.longitud });
       else {
         setGeocodeIssue(off ? 'Ubicación automática no disponible' : data.motivo === 'SIN_RESULTADOS' ? 'Dirección no encontrada' : 'No se pudo ubicar la dirección');
-        setGeocodeMessage(presentation === 'editor' || manualLocation
+        setGeocodeMessage(requireAddressMatch
+        ? userFacingMessage(data.mensaje, 'No pudimos verificar la dirección. Revisa los datos o reintenta.')
+        : presentation === 'editor' || manualLocation
         ? userFacingMessage(data.mensaje, 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.')
         : off ? 'La ubicación automática no está habilitada. Registra el prospecto y marca el punto en su ficha.'
         : 'No pudimos ubicar esta dirección. Revisa la calle, el número y la comuna.');
@@ -306,14 +315,16 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
     } catch {
       if (!controller.signal.aborted && current.current.version === version && current.current.value === requestedLocation) {
         setGeocodeIssue('No se pudo ubicar la dirección');
-        setGeocodeMessage(presentation === 'editor' || manualLocation
+        setGeocodeMessage(requireAddressMatch
+          ? 'No pudimos verificar la dirección en este momento. Reintenta en unos instantes.'
+          : presentation === 'editor' || manualLocation
           ? 'No fue posible ubicar automáticamente la dirección. Selecciona el punto manualmente.'
           : 'No pudimos ubicar esta dirección. Puedes reintentar o registrar el prospecto para revisarlo después.');
       }
     } finally {
       if (!controller.signal.aborted && current.current.version === version) setGeocoding(false);
     }
-  }, [direccion, version, rememberAttempt, presentation, manualLocation, setGeocodeMessage]);
+  }, [direccion, calle, comuna, requireAddressMatch, version, rememberAttempt, presentation, manualLocation, setGeocodeMessage]);
 
   useEffect(() => {
     // A saved address selected again must be located again if the parent has no saved point.
@@ -357,6 +368,7 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
       : result?.estado === 'NO_FACTIBLE' ? 'negative' : 'pending';
     const Icon = tone === 'success' ? CheckCircle2 : tone === 'negative' ? XCircle : CircleHelp;
     const title = checking ? (geocoding || waitingForAddress ? 'Ubicando dirección…' : 'Consultando cobertura…')
+      : requireAddressMatch && !value && geocodeIssue ? geocodeIssue
       : error ? 'Cobertura sin verificar'
       : zonesError ? 'No se pudieron actualizar las zonas'
       : !value && autoGeocode && providerOff ? 'Ubicación automática no disponible'
@@ -374,6 +386,9 @@ export function CoveragePicker({ idEmpresa, direccion, value, onChange, onResult
         <Icon size={presentation === 'summary' ? 24 : 19} aria-hidden="true" />
         <div><strong>{title}</strong></div>
       </div>}
+      {requireAddressMatch && !value && <ToastNotice message={geocodeMessage} tone="error" onDismiss={() => setGeocodeMessage('')} />}
+      {requireAddressMatch && autoGeocode && !value && !disabled && !checking && !providerOff && geocodeIssue &&
+        <button type="button" className="secondary compact" onClick={() => void geocodeAddress()}>Reintentar dirección</button>}
       {presentation === 'summary' && <>
         <div ref={container} className="coverage-map" aria-label="Mapa de ubicación del prospecto" />
         {mapWarning && !simpleSummary && <p className="coverage-map-warning" role="status">No se pudo cargar el mapa base. La consulta de cobertura sigue disponible.</p>}

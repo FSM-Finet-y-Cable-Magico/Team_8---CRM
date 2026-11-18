@@ -173,6 +173,14 @@ export function ProspectsPanel({
       return;
     }
 
+    if (!location) {
+      confirmAddress();
+      setStatus(addressParts.every(Boolean)
+        ? 'Verifica la dirección antes de registrar el prospecto.'
+        : 'Completa la dirección, la región y la comuna.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await api.post('/prospects', {
@@ -185,7 +193,7 @@ export function ProspectsPanel({
         region: form.region.trim() || undefined,
         origenContacto: form.origenContacto.trim(),
         idEmpresa: writeCompanyId,
-        ubicacion: location ?? undefined,
+        ubicacion: location,
       });
       setForm(emptyProspectForm);
       setLocation(null);
@@ -307,7 +315,8 @@ export function ProspectsPanel({
             </select>
           </label>
           {status && <p className="inline-status">{status}</p>}
-          <CoveragePicker presentation="status" idEmpresa={writeCompanyId} direccion={fullAddress} autoGeocode={confirmedAddress === addressVersion}
+          <CoveragePicker presentation="status" idEmpresa={writeCompanyId} direccion={fullAddress}
+            domicilio={{ calle: addressParts[0], comuna: addressParts[1] }} autoGeocode={confirmedAddress === addressVersion}
             value={location} onChange={setLocation} onBusyChange={setCoverageBusy} disabled={submitting} />
           <button disabled={submitting || coverageBusy}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>

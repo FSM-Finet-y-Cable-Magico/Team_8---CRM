@@ -75,6 +75,6 @@ export class CoverageController {
 
   @Post('geocode')
   geocode(@Body() dto: GeocodeAddressDto) {
-    return this.coverage.geocode(dto.direccion);
+    return this.coverage.geocode(dto.direccion, dto.calle, dto.comuna);
   }
 }

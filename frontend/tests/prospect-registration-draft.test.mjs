@@ -218,6 +218,7 @@ test('errores de validación o guardado conservan los datos al salir y regresar'
   await h.navigate();
   assert.equal(h.input('Nombre Apellido').props.value, fields['Nombre Apellido']);
   await h.fill();
+  await h.point({ latitud: -33.58, longitud: -70.63 });
   await h.submit();
   await h.navigate();
   for (const [placeholder, value] of Object.entries(fields)) assert.equal(h.input(placeholder).props.value, value);
@@ -236,6 +237,7 @@ test('navegar durante un registro mantiene el bloqueo y evita un segundo envío'
   let finish;
   const h = await harness(t, () => new Promise(resolve => { finish = resolve; }));
   await h.fill();
+  await h.point({ latitud: -33.58, longitud: -70.63 });
   const { pending } = await h.startSubmit();
   await h.navigate();
   assert.equal(h.input('Nombre Apellido').props.disabled, true);
@@ -250,6 +252,7 @@ test('la respuesta de otra empresa limpia solamente el borrador del registro env
   let finish;
   const h = await harness(t, () => new Promise(resolve => { finish = resolve; }));
   await h.fill();
+  await h.point({ latitud: -33.58, longitud: -70.63 });
   const { pending } = await h.startSubmit();
   await h.company(2);
   await h.change('Nombre Apellido', 'Borrador de segunda empresa');
@@ -277,7 +280,9 @@ test('cerrar sesión o expirar el acceso elimina los borradores de la sesión an
 test('crear un prospecto muestra un aviso global breve y desaparece a los tres segundos', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = await harness(t);
-  await h.fill(); await h.submit();
+  await h.fill();
+  await h.point({ latitud: -33.58, longitud: -70.63 });
+  await h.submit();
   assert.equal(h.tree().root.findByProps({ 'data-testid': 'toast' }).props.children, 'Prospecto creado');
   await h.click('Cobertura');
   assert.equal(h.tree().root.findByProps({ 'data-testid': 'toast' }).props.children, 'Prospecto creado');
