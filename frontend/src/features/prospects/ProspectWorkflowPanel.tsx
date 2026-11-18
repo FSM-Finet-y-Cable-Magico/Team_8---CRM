@@ -1,6 +1,6 @@
 import { ContractDocuments } from '../customers/ContractDocuments';
 import { useSignatureStatus } from '../contracts/useSignatureStatus';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Download, FileClock, MapPin, Pencil, UserRoundPlus, Wifi } from 'lucide-react';
 import { api, apiErrorMessage, Plan, Prospect } from '../../api';
 import { DashboardPermissions } from '../../permissions';
@@ -17,6 +17,7 @@ const QUOTED_STATUSES = ['Cotizacion Enviada', 'Contrato externo registrado', 'P
 const FINAL_PROSPECT_STATUSES = ['Perdido'];
 const LOSS_REASONS = ['Precio', 'Sin cobertura', 'Competencia', 'Falta de respuesta', 'Otro'];
 const FEASIBILITY_STAGES = ['Prospecto Nuevo', 'Contactado', 'En Factibilidad', 'Factible', 'No Factible'];
+const ReturningCustomerActions = lazy(() => import('./ReturningCustomerActions').then(module => ({ default: module.ReturningCustomerActions })));
 
 function fullAddress({ direccion, comuna, region }: Pick<Prospect, 'direccion' | 'comuna' | 'region'>) {
   const parts = [direccion, comuna, region].map(part => part?.trim().replace(/\s+/g, ' ') ?? '');
@@ -301,9 +302,12 @@ export function ProspectWorkflowPanel({
       window.open(objectUrl, '_blank');
       if (data.envioEmail === 'failed') {
         setStatusIsError(true);
-        setStatus('No se pudo enviar la cotización.');
+        setStatus('Cotización generada. No se pudo enviar por correo.');
       } else {
-        const message = data.envioEmail === 'sent' ? 'Cotización enviada' : 'Cotización generada';
+        const message = data.envioEmail === 'sent' ? 'Cotización enviada'
+          : data.envioEmail === 'not_configured' ? 'Cotización generada. El correo de la empresa no está configurado.'
+          : data.envioEmail === 'simulated' ? 'Cotización generada. Envío por correo simulado.'
+          : 'Cotización generada';
         if (onNotify) onNotify(message);
         else setStatus(message);
       }
@@ -394,6 +398,9 @@ export function ProspectWorkflowPanel({
           </div>
           <StatusBadge value={currentProspect.excliente?.etiqueta ?? (requiresReview ? 'Revisión comercial requerida' : currentStatus)} />
         </header>
+        {currentProspect.excliente && permissions.contractPlans && !requiresReview && <Suspense fallback={<p role="status">Cargando contratación…</p>}>
+          <ReturningCustomerActions key={currentProspect.idProspecto} prospect={currentProspect} plans={plans} onChanged={onChanged} />
+        </Suspense>}
         {requiresReview && (
           <p role="alert">El estado histórico «{currentStatus}» no demuestra una activación. Revise las relaciones comerciales antes de continuar; no se han modificado los datos.</p>
         )}
@@ -497,6 +504,10 @@ export function ProspectWorkflowPanel({
             />
             {checkingCoverage && <p className="muted" role="status">Actualizando estado del prospecto…</p>}
           </section>
+        )}
+
+        {permissions.generateQuotes && commercialReady && planOptions.length === 0 && (
+          <p className="muted" role="status">No hay planes disponibles para esta ubicación. Asigna un plan activo de la empresa a la zona de cobertura para cotizar.</p>
         )}
 
         {permissions.generateQuotes && commercialReady && planOptions.length > 0 && (

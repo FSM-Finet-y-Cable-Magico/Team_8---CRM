@@ -43,9 +43,27 @@ d8 exec "$CB" node -e "const v=process.env.DATABASE_URL; try{const u=new URL(v);
 [ "$(cut -d'|' -f1 "$WORK/pg-identity.txt")" = "$PG_DB" ] || fail "PG_DB no coincide con la base del backend"
 
 echo "== integraciones y geocodificación efectivas (sin secretos; estas variables NO cambian con el release)"
-d8 exec "$CB" node -e "const e=process.env; for (const k of ['G1_INTEGRATION_ENABLED','G3_INTEGRATION_ENABLED','GEOCODING_PROVIDER','MAIL_PROVIDER','CONTRACT_SIGNATURE_ENABLED']) console.log(' ',k,'=',e[k]??'(no definida)');
+d8 exec "$CB" node -e "const e=process.env; for (const k of ['G1_INTEGRATION_ENABLED','G3_INTEGRATION_ENABLED','GEOCODING_PROVIDER','MAIL_PROVIDER','CONTRACT_SIGNATURE_ENABLED','G3_WITHDRAWAL_DISPATCH_ENABLED','G3_WITHDRAWAL_VOLUNTARY_ENABLED','WITHDRAWAL_TRACKING_ENABLED','WITHDRAWAL_TRACKING_INTERVAL_MS','WITHDRAWAL_FINALIZE_ENABLED']) console.log(' ',k,'=',e[k]??'(no definida)');
 for (const k of ['G1_API_URL','G3_API_URL','GEOCODING_API_URL','FRONTEND_URL']) { const v=e[k]; try{console.log(' ',k, v?new URL(v).origin:'(vacía)')}catch{console.log(' ',k,'formato no URL')} }
 for (const k of ['G1_API_KEY','G3_API_KEY','JWT_SECRET']) console.log(' ',k, e[k]?'presente':'AUSENTE');"
+
+echo "== almacenamiento de retiros (definición y grants se verifican con 002/003/004 verify)"
+d8 exec -i "$CB" node <<'NODE'
+const { PrismaClient } = require('@prisma/client');
+const db = new PrismaClient();
+db.$transaction(async tx => {
+  await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
+  await tx.$executeRawUnsafe("SET LOCAL statement_timeout='3000ms'");
+  const rows = await tx.$queryRawUnsafe(`SELECT
+    to_regclass('g8_retiros.solicitud_ticket') IS NOT NULL AS ticket_link,
+    to_regclass('g8_retiros.solicitud_g3') IS NOT NULL AS dispatch,
+    to_regclass('g8_retiros.termino_servicio') IS NOT NULL AS voluntary_termination,
+    EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('g8_retiros.termino_servicio')
+      AND attname='termino_comercial_en' AND NOT attnotnull AND NOT attisdropped) AS deferred_termination`);
+  console.log(JSON.stringify({ withdrawal_storage_detected: rows[0] }));
+}).catch(() => { console.error('WITHDRAWAL_STORAGE_READ_FAILED'); process.exitCode = 1; })
+  .finally(() => db.$disconnect());
+NODE
 
 echo "== readiness y esquema (transacción READ ONLY del backend actual)"
 backend_ready "$CB" || fail "readiness del backend actual no responde 2xx"

@@ -57,7 +57,7 @@ export function controlRowStatus(row: ControlRow) {
   return { code: row.estadoComercial.toLowerCase(), label: financial, financial: null };
 }
 export const ACTION_LABELS: Record<ActionName, string> = {
-  event: 'Registrar gestión de cobranza', lastNotice: 'Registrar último aviso', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
+  event: 'Registrar gestión de cobranza', lastNotice: 'Registrar último aviso previo al corte', agreement: 'Crear convenio', extension: 'Otorgar prórroga',
   paymentDay: 'Cambiar día de pago', charge: 'Agregar cargo', withdrawal: 'Aviso de retiro',
 };
 export function actionDisabledReason(action: ActionName, row: ControlRow) {

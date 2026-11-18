@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { rutLookupVariants, validateRut } from '../rut/rut.util';
 import { customerDebtPosition } from './customer-debt';
+import { LOST_PROSPECT_PIPELINE_STATUS } from './customer-lifecycle';
 
 /**
  * Excliente en Prospectos (criterio FINET 13-11-2026): al terminar la última relación operativa de una persona
@@ -14,8 +15,9 @@ import { customerDebtPosition } from './customer-debt';
  * - Si vuelve a contratar en esa empresa deja de mostrarse solo, sin escribir nada.
  * - La situación de deuda se calcula al listar desde facturas, pagos y prórrogas; nunca se guarda.
  * - Nunca crea ni modifica al cliente ni duplica su RUT. Solo si no existe ningún prospecto vinculado en esa empresa
- *   se crea UNO con el estado de pipeline existente 'Fuera pipeline' (mismo valor de los interesados no
- *   contratantes); un prospecto con el mismo RUT sin vínculo queda para revisión manual, sin modificarlo.
+ *   se crea UNO con el estado existente 'Fuera pipeline'. En un término voluntario se registra 'Perdido'
+ *   con su motivo y auditoría, reutilizando el prospecto vinculado si existe. Un prospecto con el mismo RUT
+ *   sin vínculo queda para revisión manual, sin modificarlo.
  */
 export const FORMER_CUSTOMER_PIPELINE_STATUS = 'Fuera pipeline';
 export const FORMER_CUSTOMER_ORIGIN = 'Excliente';
@@ -71,12 +73,12 @@ export type EnsureFormerCustomerResult =
 
 /**
  * Garantiza que el excliente sea visible en Prospectos de la empresa. Debe ejecutarse DENTRO de la transacción que
- * terminó su última relación operativa allí. Idempotente: reutilizar no escribe y repetir no crea otro prospecto.
+ * terminó su última relación operativa allí. Reutiliza la identidad; un nuevo término voluntario registra su pérdida actual.
  */
 export async function ensureFormerCustomerProspect(
   tx: Prisma.TransactionClient,
   audit: AuditService,
-  input: { idCliente: number; idEmpresa: number; idUsuario: number | null },
+  input: { idCliente: number; idEmpresa: number; idUsuario: number | null; causa?: 'MOROSIDAD' | 'VOLUNTARIA' },
 ): Promise<EnsureFormerCustomerResult> {
   await tx.$queryRaw`SELECT id_cliente FROM cliente WHERE id_cliente = ${input.idCliente} FOR UPDATE`;
   const customer = await tx.cliente.findUnique({ where: { idCliente: input.idCliente } });
@@ -88,9 +90,20 @@ export async function ensureFormerCustomerProspect(
   if (operationalServices > 0 || operationalContracts > 0) return { action: 'MANTIENE_RELACION_OPERATIVA' };
 
   const linked = await tx.prospecto.findFirst({ where: { idCliente: input.idCliente, idEmpresa: input.idEmpresa }, orderBy: { idProspecto: 'asc' } });
+  const previousLoss = linked ? {
+    estadoPipeline: linked.estadoPipeline, motivoPerdida: linked.motivoPerdida,
+    observacionPerdida: linked.observacionPerdida, fechaPerdida: linked.fechaPerdida, idUsuarioPerdida: linked.idUsuarioPerdida,
+  } : undefined;
   let result: EnsureFormerCustomerResult;
+  const voluntaryLoss = input.causa === 'VOLUNTARIA' ? {
+    estadoPipeline: LOST_PROSPECT_PIPELINE_STATUS, motivoPerdida: 'Otro',
+    observacionPerdida: 'Término voluntario del servicio', fechaPerdida: new Date(), idUsuarioPerdida: input.idUsuario,
+  } : null;
   if (linked) {
-    // Its history (pipeline, quotes, contracts) stays as it is: the excliente view is derived, not written.
+    // Keep the identity, quotes and contracts. The voluntary departure closes the commercial opportunity as lost.
+    if (voluntaryLoss) {
+      await tx.prospecto.update({ where: { idProspecto: linked.idProspecto }, data: voluntaryLoss });
+    }
     result = { action: 'REUTILIZADO', idProspecto: linked.idProspecto };
   } else {
     const variants = customer.rut ? rutLookupVariants(customer.rut) : [];
@@ -105,6 +118,7 @@ export async function ensureFormerCustomerProspect(
         data: {
           idEmpresa: input.idEmpresa, idCliente: input.idCliente, rut, nombreCompleto: customer.nombreCompleto, email: customer.email,
           telefono: customer.telefono, estadoPipeline: FORMER_CUSTOMER_PIPELINE_STATUS, origenContacto: FORMER_CUSTOMER_ORIGIN, fechaCreacion: new Date(),
+          ...(voluntaryLoss ?? {}),
         },
       });
       result = { action: 'CREADO', idProspecto: created.idProspecto };
@@ -114,7 +128,9 @@ export async function ensureFormerCustomerProspect(
     idUsuario: input.idUsuario,
     accion: result.action === 'PROSPECTO_SIN_VINCULO_EXISTENTE' ? 'EXCLIENTE_REQUIERE_REVISION_PROSPECTO' : 'EXCLIENTE_VISIBLE_EN_PROSPECTOS',
     entidadAfectada: 'prospecto', idEntidadAfectada: result.idProspecto,
-    valorNuevo: { idCliente: input.idCliente, idEmpresa: input.idEmpresa, resultado: result.action },
+    valorAnterior: previousLoss,
+    valorNuevo: { idCliente: input.idCliente, idEmpresa: input.idEmpresa, resultado: result.action,
+      ...(voluntaryLoss ? { causa: 'VOLUNTARIA', estadoPipeline: LOST_PROSPECT_PIPELINE_STATUS } : {}) },
   }, tx);
   return result;
 }

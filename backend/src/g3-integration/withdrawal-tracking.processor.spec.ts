@@ -115,7 +115,8 @@ describe('seguimiento automático de retiros (flujo con dobles)', () => {
     const view = await h.service.eligibility(61, comercial());
     expect(view.seguimiento).toMatchObject({ idSolicitudRetiro: 15, flujoGuiado: true, ticket: { idTicket: 77, estado: 'Abierto' },
       despacho: { estadoDespacho: 'ACEPTADA', idOtG3: 930, cierreRecibido: false, aplicado: false } });
-    expect(view.bajaAutomaticaHabilitada).toBe(true);
+    expect(view.bajaAutomaticaHabilitada).toBe(false); // Finalization alone does not start automatic tracking.
+    expect(view.seguimientoAutomaticoHabilitado).toBe(false);
     expect(view.checks.find(check => !check.ok)).toBeTruthy(); // active request: initiate would replay, never create a second one
   });
 

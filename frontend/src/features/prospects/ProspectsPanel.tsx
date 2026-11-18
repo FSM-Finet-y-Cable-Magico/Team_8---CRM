@@ -321,7 +321,7 @@ export function ProspectsPanel({
           </div>
         )}
         <div className="table-wrap" aria-busy={listLoading}>
-          <table>
+          <table className="responsive-records-table">
             <thead>
               <tr>
                 <th>RUT</th>
@@ -340,15 +340,15 @@ export function ProspectsPanel({
               )}
               {!listLoading && !listError && visibleProspects.map((prospect) => (
                 <tr key={prospect.idProspecto}>
-                  <td>{formatRutForDisplay(prospect.rut)}</td>
-                  <td>{prospect.nombreCompleto}</td>
-                  <td>{prospect.excliente?.etiqueta ?? (prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline ?? 'Prospecto Nuevo')}</td>
-                  <td>{prospect.origenContacto ?? '-'}</td>
-                  <td>{prospect.empresa?.nombre ?? '-'}</td>
-                  <td>{prospect.estadoPipeline === 'Perdido'
+                  <td data-label="RUT">{formatRutForDisplay(prospect.rut)}</td>
+                  <td data-label="Nombre">{prospect.nombreCompleto}</td>
+                  <td data-label="Estado">{prospect.excliente?.etiqueta ?? (prospect.requiereRevisionComercial ? 'Revisión comercial requerida' : prospect.estadoPipeline ?? 'Prospecto Nuevo')}</td>
+                  <td data-label="Origen">{prospect.origenContacto ?? '-'}</td>
+                  <td data-label="Empresa">{prospect.empresa?.nombre ?? '-'}</td>
+                  <td data-label="Pérdida">{prospect.estadoPipeline === 'Perdido'
                     ? [prospect.motivoPerdida, prospect.fechaPerdida ? new Date(prospect.fechaPerdida).toLocaleDateString('es-CL') : null].filter(Boolean).join(' · ') || '-'
                     : '-'}</td>
-                  <td>
+                  <td data-label="Acciones">
                     <button type="button" className="secondary compact crm-table-action" onClick={() => setSelectedId(prospect.idProspecto)}>
                       Gestionar
                     </button>

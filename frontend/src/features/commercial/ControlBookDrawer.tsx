@@ -17,8 +17,8 @@ function DetailList({ values }: { values: Array<[string, string | number | null 
 
 const ACTION_ICONS = { event: Phone, agreement: Handshake, paymentDay: CalendarDays, charge: Wallet };
 const VISIBLE_ACTIONS = ['event', 'agreement', 'paymentDay', 'charge'] as const;
-const CONTACT_REASONS = [['event', 'Contacto de cobranza'], ['lastNotice', 'Último aviso'], ['withdrawal', 'Aviso de retiro']] as const;
-const SAVE_LABELS: Record<ActionName, string> = { event: 'Guardar contacto', lastNotice: 'Guardar último aviso', withdrawal: 'Guardar aviso de retiro', agreement: 'Crear convenio', extension: 'Guardar prórroga', paymentDay: 'Guardar día de pago', charge: 'Guardar cargo' };
+const CONTACT_REASONS = [['event', 'Contacto de cobranza'], ['lastNotice', 'Último aviso previo al corte'], ['withdrawal', 'Aviso de retiro']] as const;
+const SAVE_LABELS: Record<ActionName, string> = { event: 'Guardar contacto', lastNotice: 'Guardar último aviso previo al corte', withdrawal: 'Guardar aviso de retiro', agreement: 'Crear convenio', extension: 'Guardar prórroga', paymentDay: 'Guardar día de pago', charge: 'Guardar cargo' };
 
 type SuspensionCheck = Pick<SuspensionEligibility, 'idContrato' | 'elegible' | 'motivo' | 'umbralDias' | 'empresa' | 'contrato' | 'cliente'>;
 type SuspensionQuery = { key: string } & (
@@ -296,6 +296,7 @@ export function ControlBookDrawer({ row: sourceRow, customer, companyName, revis
           </>}
         </>}
         {isContactAction && <>
+          {action === 'lastNotice' && <p className="control-inline-notice">Registra la última advertencia de pago antes de suspender el servicio. Este registro no suspende el servicio ni solicita el retiro de equipos.</p>}
           <div className="control-form-grid">
             <label className="control-full-field">Motivo<select value={action} onChange={event => { const next = event.target.value as ActionName; if (CONTACT_REASONS.some(([key]) => key === next) && !actionDisabledReason(next, row)) { setAction(next); setError(''); } }}>
               {CONTACT_REASONS.map(([key, label]) => <option key={key} value={key} disabled={Boolean(actionDisabledReason(key, row))}>{label}</option>)}
