@@ -204,6 +204,7 @@ async function harness(t, { geocode = async () => response(), check = async () =
 test('registro ubica domicilio completo al seleccionar comuna y muestra solo estado, sin mapa ni botón manual', async t => {
   const pending = deferred();
   const h = await harness(t, { geocode: () => pending.promise });
+  assert.equal(h.button('Registrar prospecto').props.disabled, true);
   assert.equal(h.tree.root.findAllByProps({ 'aria-label': 'Consulta de cobertura comercial' }).length, 0);
   await h.change('Av. Siempre Viva 123, Comuna', 'Av. Prueba 123');
   await h.change('Región', 'Metropolitana de Santiago');
@@ -228,6 +229,8 @@ test('editar la calle espera a terminar, invalida ubicación y no busca por cada
   const h = await harness(t); await h.fill(); await h.tick(700); await h.tick(350);
   for (const street of ['C', 'Calle', 'Calle Nueva 456']) { await h.change('Av. Siempre Viva 123, Comuna', street); await h.tick(1000); }
   assert.equal(h.location(), null); assert.equal(h.requests('/coverage/geocode').length, 1);
+  assert.equal(h.button('Registrar prospecto').props.disabled, true);
+  await h.submit(); assert.equal(h.requests('/prospects').length, 0);
   await h.blur(); await h.tick(700); await h.tick(350);
   assert.equal(h.requests('/coverage/geocode').length, 2);
   assert.ok(h.requests('/coverage/geocode').at(-1).body.direccion.startsWith('Calle Nueva 456,'));
@@ -251,15 +254,19 @@ test('sin cobertura permite registrar; el registro conserva las coordenadas', as
   assert.deepEqual(h.requests('/prospects')[0].body.ubicacion, { latitud: -33.58, longitud: -70.63 });
 });
 
-test('sin resultados no inventa coordenadas o factibilidad y permite corregir la dirección o registrar para revisión', async t => {
-  const h = await harness(t, { geocode: async () => response([]) });
+test('dirección no encontrada bloquea el alta hasta que la dirección corregida se ubique', async t => {
+  const h = await harness(t, { geocode: async ({ direccion }) => direccion.startsWith('Av. Prueba 456,')
+    ? response() : { data: { candidatos: [], motivo: 'SIN_RESULTADOS', mensaje: 'Dirección no encontrada' } } });
   await h.fill(); await h.tick(700); await h.tick(350);
   assert.equal(h.location(), null); assert.equal(h.requests('/coverage/check').length, 0);
-  assert.equal(h.button('Registrar prospecto').props.disabled, false); assert.ok(h.text().includes('No se pudo ubicar la dirección'));
+  assert.equal(h.button('Registrar prospecto').props.disabled, true); assert.ok(h.text().includes('Dirección no encontrada'));
   assert.equal(h.button('Actualizar cobertura'), undefined);
-  await h.change('Av. Siempre Viva 123, Comuna', 'Av. Prueba 456'); await h.blur(); await h.tick(700);
+  assert.equal(h.button('Reintentar dirección'), undefined);
+  await h.submit(); assert.equal(h.requests('/prospects').length, 0);
+  await h.change('Av. Siempre Viva 123, Comuna', 'Av. Prueba 456'); await h.blur(); await h.tick(700); await h.tick(350);
   assert.equal(h.requests('/coverage/geocode').length, 2);
-  await h.submit(); assert.equal(h.requests('/prospects')[0].body.ubicacion, undefined);
+  assert.equal(h.button('Registrar prospecto').props.disabled, false);
+  await h.submit(); assert.deepEqual(h.requests('/prospects')[0].body.ubicacion, { latitud: -33.58, longitud: -70.63 });
 });
 
 test('respuestas de una dirección o empresa anterior no cambian ubicación ni estado actuales', async t => {

@@ -164,7 +164,7 @@ export function ProspectsPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (submitting || coverageBusy) return;
+    if (submitting || coverageBusy || !location) return;
     setStatus('');
     const validationMessage = validateProspectForm(form);
 
@@ -309,7 +309,7 @@ export function ProspectsPanel({
           {status && <p className="inline-status">{status}</p>}
           <CoveragePicker presentation="status" idEmpresa={writeCompanyId} direccion={fullAddress} autoGeocode={confirmedAddress === addressVersion}
             value={location} onChange={setLocation} onBusyChange={setCoverageBusy} disabled={submitting} />
-          <button disabled={submitting || coverageBusy}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
+          <button disabled={submitting || coverageBusy || !location}>{submitting ? 'Registrando…' : 'Registrar prospecto'}</button>
         </form>
       )}
 
