@@ -99,10 +99,11 @@ test('con la orden técnica aceptada informa su número sin nombrar sistemas int
   assert.ok(!/\bG[0-9]\b/.test(h.saved[0]));
 });
 
-test('sin dirección elegible no muestra comprobaciones ni habilita el retiro', async t => {
+test('sin dirección elegible explica el bloqueo y no habilita el retiro', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ eligible: false, checks: checks('DIRECCION_RETIRO'),
     firstFailure: { code: 'DIRECCION_RETIRO', label: 'Dirección', ok: false, message: 'Falla DIRECCION_RETIRO' } }) });
-  assert.doesNotMatch(h.text(), /Requisito|Falla DIRECCION_RETIRO|Cumple/);
+  assert.match(h.text(), /Falla DIRECCION_RETIRO/);
+  assert.equal(h.submitButton().props['aria-describedby'], 'withdrawal-blocking-reason');
   assert.equal(h.submitButton().props.disabled, true);
   await h.submit(); assert.equal(h.posts.length, 0);
 });
@@ -113,17 +114,18 @@ test('un reintento devuelto por el backend informa que la baja ya estaba iniciad
   assert.match(h.saved[0], /ya estaba iniciada.*#1001/);
 });
 
-test('requisito incumplido: sin mensajes adicionales ni registro', async t => {
+test('requisito incumplido: muestra el motivo sin permitir registrar', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ eligible: false, checks: checks('AVISO_PREVIO'), firstFailure: { code: 'AVISO_PREVIO', label: 'Aviso', ok: false, message: 'Falla AVISO_PREVIO' } }) });
-  assert.doesNotMatch(h.text(), /Requisito|Falla AVISO_PREVIO|Cumple/);
+  assert.match(h.text(), /Falla AVISO_PREVIO/);
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   assert.equal(h.submitButton().props.disabled, true);
   await h.submit(); assert.equal(h.posts.length, 0);
 });
 
-test('sin el registro del vínculo habilitado no muestra mensajes del ambiente ni permite registrar', async t => {
+test('sin almacenamiento habilitado explica el problema de configuración y no registra', async t => {
   const h = await withdrawal(t, { eligibility: eligibility({ habilitado: false }) });
-  assert.doesNotMatch(h.text(), /habilitada|ambiente|registro privado/);
+  assert.match(h.text(), /no está habilitada en este ambiente/);
+  assert.equal(h.submitButton().props['aria-describedby'], 'withdrawal-blocking-reason');
   assert.equal(h.submitButton().props.disabled, true);
   assert.equal(h.tree.root.findAllByType('textarea').length, 0);
   await h.submit(); assert.equal(h.posts.length, 0);
@@ -167,7 +169,7 @@ const followUp = (over = {}) => eligibility({ eligible: false, checks: checks('S
 test('solicitud existente: muestra su seguimiento real sin pasos ni nueva alta', async t => {
   const h = await withdrawal(t, { eligibility: followUp() });
   for (const value of ['N° 44 · En gestión', 'TK-BAJA77 · Abierto', 'Orden aceptada · N° 930', 'Cerrada por el técnico; pendiente de aprobación', 'pendiente de aprobación']) assert.ok(h.text().includes(value), value);
-  assert.doesNotMatch(h.text(), /ambiente|automática está deshabilitada/);
+  assert.match(h.text(), /baja automática está deshabilitada/);
   assert.equal(h.submitButton(), undefined, 'no ofrece crear otra solicitud');
   assert.equal(h.button('Cancelar retiro'), undefined, 'una orden ya cerrada por el técnico no se cancela');
   assert.ok(!/\bG[0-9]\b/.test(h.text()));
@@ -189,10 +191,10 @@ test('seguimiento: envío pendiente se puede reintentar y la cancelación exige 
   assert.match(h.saved.at(-1), /Retiro cancelado: solicitud N° 44.*sigue suspendido/);
 });
 
-test('seguimiento con el envío deshabilitado no muestra mensajes del ambiente ni permite enviar', async t => {
+test('seguimiento con envío deshabilitado informa que la solicitud no se enviará', async t => {
   const h = await withdrawal(t, { eligibility: followUp({ despachoG3Habilitado: false, seguimiento: { idSolicitudRetiro: 44, estado: 'REGISTRADA', flujoGuiado: true, ticket: null,
     despacho: { estadoDespacho: 'PENDIENTE', idOtG3: null, estadoOt: null, cancelable: true, cierreRecibido: false, aplicado: false } } }) });
-  assert.doesNotMatch(h.text(), /ambiente|envío de la orden técnica está deshabilitado/);
+  assert.match(h.text(), /envío de órdenes de retiro está deshabilitado/);
   assert.equal(h.button('Enviar orden de retiro'), undefined);
 });
 

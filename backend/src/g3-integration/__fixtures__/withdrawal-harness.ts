@@ -13,7 +13,7 @@ import { ServiceTermination, StoredReception, WithdrawalDispatch, WithdrawalStor
  */
 export const comercial = (idEmpresa = 1): AuthUser => ({ idUsuario: 7, idEmpresa, email: 'qa@example.invalid', nombreCompleto: 'Comercial QA', roles: ['Comercial'] });
 
-export function withdrawalHarness(options: { storage?: boolean; dispatch?: boolean; finalize?: boolean; voluntary?: boolean; termination?: boolean } = {}) {
+export function withdrawalHarness(options: { storage?: boolean; dispatch?: boolean; finalize?: boolean; voluntary?: boolean; termination?: boolean; tracking?: boolean; deferredTermination?: boolean } = {}) {
   const state = {
     services: [
       { idServicio: 61, idCliente: 33, idEmpresa: 1, idContrato: 20, idDireccion: 5, estadoOperativo: 'Suspendido', tipoServicio: 'Internet' },
@@ -81,7 +81,11 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
     prospecto: {
       findFirst: async ({ where }: any) => clone([...state.prospects].sort((a, b) => a.idProspecto - b.idProspecto).find(p => matches(p, where)) ?? null),
       create: async ({ data }: any) => { const row = { idProspecto: nextProspect++, clasificacionComercial: 'PROSPECTO', ...data }; state.prospects.push(row); return clone(row); },
-      update: () => { state.forbiddenWrites.push('prospecto.update'); },
+      update: async ({ where, data }: any) => {
+        if (data.estadoPipeline !== 'Perdido') state.forbiddenWrites.push('prospecto.update');
+        const row = state.prospects.find(p => p.idProspecto === where.idProspecto);
+        Object.assign(row, clone(data)); return clone(row);
+      },
     },
     cliente: {
       findUnique: async ({ where }: any) => {
@@ -134,7 +138,8 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
   const storageOn = options.storage !== false;
   const storage: WithdrawalStorage = {
     // `termination` = 003 applied; a harness with only 002 (termination:false) must answer BLOCKED.
-    capabilities: async () => ({ ticketLink: storageOn, g3Dispatch: storageOn, g1Reception: storageOn, termination: storageOn && options.termination !== false }),
+    capabilities: async () => ({ ticketLink: storageOn, g3Dispatch: storageOn, g1Reception: storageOn, termination: storageOn && options.termination !== false,
+      deferredTermination: storageOn && options.deferredTermination !== false }),
     findLinkByRequest: async (_tx, id) => clone(state.links.find(l => l.idSolicitudRetiro === id) ?? null),
     findLinkByTicket: async (_tx, id) => clone(state.links.find(l => l.idTicket === id) ?? null),
     insertLink: async (_tx, link) => {
@@ -191,13 +196,14 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
     insertTermination: async (_tx, row) => {
       if (state.terminations.some(t => t.idServicio === row.idServicio || t.idTicket === row.idTicket
         || (row.idSolicitudRetiro !== null && t.idSolicitudRetiro === row.idSolicitudRetiro))) throw new Error('UNIQUE termino_servicio');
-      const created: ServiceTermination = { ...clone(row), terminoComercialEn: new Date(), cierreTecnicoEn: null };
+      const created: ServiceTermination = { ...clone(row), terminoComercialEn: null, cierreTecnicoEn: null };
       state.terminations.push(created); return clone(created);
     },
     findTerminationByService: async (_tx, id) => clone(state.terminations.find(t => t.idServicio === id) ?? null),
     findTerminationByRequest: async (_tx, id) => clone(state.terminations.find(t => t.idSolicitudRetiro === id) ?? null),
     findTerminationByTicket: async (_tx, id) => clone(state.terminations.find(t => t.idTicket === id) ?? null),
-    markTerminationTechnicalClosure: async (_tx, id) => { const row = state.terminations.find(t => t.idServicio === id)!; row.cierreTecnicoEn = row.cierreTecnicoEn ?? new Date(); },
+    markTerminationTechnicalClosure: async (_tx, id) => { const row = state.terminations.find(t => t.idServicio === id)!;
+      row.cierreTecnicoEn = row.cierreTecnicoEn ?? new Date(); row.terminoComercialEn = row.terminoComercialEn ?? new Date(); },
   };
 
   const tickets = {
@@ -244,6 +250,7 @@ export function withdrawalHarness(options: { storage?: boolean; dispatch?: boole
   const config = new ConfigService({
     G3_WITHDRAWAL_DISPATCH_ENABLED: options.dispatch === false ? 'false' : 'true',
     WITHDRAWAL_FINALIZE_ENABLED: options.finalize ? 'true' : 'false',
+    WITHDRAWAL_TRACKING_ENABLED: options.tracking ? 'true' : 'false',
     G3_WITHDRAWAL_VOLUNTARY_ENABLED: options.voluntary ? 'true' : 'false',
   });
   const audit = new AuditService(prisma);

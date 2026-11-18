@@ -1,0 +1,135 @@
+/* Layout follows the space left after navigation, including browser zoom. */
+.crm-shell, .crm-main, .content-shell,
+.content-shell > *, .workspace-grid > *, .modal-content > *,
+.table-wrap, .panel, .stack {
+  min-width: 0;
+}
+
+.content-shell { container: crmContent / inline-size; }
+.table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
+.crm-main :is(input, select, textarea) { max-width: 100%; min-width: 0; }
+.modal-card :is(input, select, textarea) { max-width: 100%; min-width: 0; }
+.modal-header h2, .page-heading, .section-heading { min-width: 0; overflow-wrap: anywhere; }
+.sidebar-item { height: auto; padding-block: 10px; }
+.sidebar-item > span { min-width: 0; overflow-wrap: anywhere; }
+
+@container crmContent (max-width: 1050px) {
+  .workspace-grid,
+  .prospects-workspace-heading,
+  .tickets-workspace-heading,
+  .inventory-workspace { grid-template-columns: minmax(0, 1fr); }
+  .prospects-workspace-heading,
+  .tickets-workspace-heading { gap: 16px; margin-bottom: 20px; }
+  .billing-stats, .advanced-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inventory-advanced-section-content.advanced-forms-grid { grid-template-columns: minmax(0, 1fr); }
+  .table-wrap > table { width: 100%; min-width: 0; }
+  .table-wrap :is(th, td) { white-space: normal; overflow-wrap: normal; word-break: normal; }
+  .table-wrap :is(th, td) { padding-inline: 8px; }
+  .table-wrap button { min-width: max-content; white-space: nowrap; }
+}
+
+/* Prospect entry and results retain their left/right relationship at every size. */
+.prospects-workspace > .workspace-grid,
+.prospects-workspace > .prospects-workspace-heading,
+.tickets-workspace > .workspace-grid,
+.tickets-workspace > .tickets-workspace-heading {
+  grid-template-columns: minmax(0, .42fr) minmax(0, 1fr);
+  gap: clamp(10px, 1.4vw, 24px);
+}
+.prospects-workspace .prospect-create-form { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.tickets-workspace--readonly > .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+.prospects-workspace .prospects-workspace-heading { align-items: start; }
+.prospects-workspace-heading h2 { font-size: clamp(1.05rem, 1.7vw, 1.5rem); overflow-wrap: anywhere; }
+.prospects-list-section > .table-wrap > table { width: 100%; min-width: 0; }
+.prospects-list-section :is(th, td) { overflow-wrap: normal; white-space: normal; padding-inline: clamp(4px, .6vw, 10px); }
+.prospects-list-section .table-wrap button { min-width: max-content; padding-inline: 5px; white-space: nowrap; }
+.prospects-workspace .prospect-create-form :is(label, button) { min-width: 0; overflow-wrap: anywhere; }
+
+@container crmContent (min-width: 621px) and (max-width: 1050px) {
+  .prospects-list-section :is(th, td) { font-size: .75rem; padding-inline: 4px; }
+  .prospects-list-section tbody td:first-child { white-space: nowrap; }
+  .prospects-list-section .table-wrap button { font-size: .7rem; white-space: nowrap; }
+}
+
+@media (min-width: 1600px) {
+  .prospects-workspace > .workspace-grid,
+  .prospects-workspace > .prospects-workspace-heading,
+  .tickets-workspace > .workspace-grid,
+  .tickets-workspace > .tickets-workspace-heading { grid-template-columns: 360px minmax(0, 1fr); }
+  .tickets-workspace--readonly > .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Identifiers and actions are atomic; longer descriptions wrap between words. */
+.table-wrap :is(th, td) { overflow-wrap: normal; word-break: normal; }
+.table-wrap button.crm-table-action { min-width: max-content; max-width: none; white-space: nowrap; }
+.customers-table tbody td:first-child,
+.customers-table tbody td:nth-child(7),
+.prospects-list-section tbody td:first-child,
+.tickets-table tbody td:first-child,
+.tickets-table tbody td:nth-child(4),
+.tickets-table tbody td:nth-child(5),
+.operational-badge-column { white-space: nowrap; }
+.customers-table :is(th, td) { padding-inline: clamp(6px, .8vw, 16px); }
+
+@container crmContent (max-width: 1050px) {
+  .customers-table :is(th, td), .tickets-table :is(th, td) { font-size: .75rem; padding-inline: 5px; }
+  .customers-table .crm-table-action, .tickets-table .crm-table-action { font-size: .7rem; padding-inline: 7px; }
+  .tickets-table .operational-badge-column { width: auto; }
+  .tickets-table .operational-badge-column .status-badge { width: auto; padding-inline: 7px; font-size: .7rem; }
+  .tickets-table :is(th, td) { padding-inline: 3px; }
+  .tickets-workspace > .workspace-grid,
+  .tickets-workspace > .tickets-workspace-heading { grid-template-columns: minmax(0, .38fr) minmax(0, 1fr); }
+  .tickets-workspace--readonly > .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container crmContent (max-width: 620px) {
+  .prospect-create-form,
+  .advanced-forms-grid,
+  .advanced-tables-grid,
+  .report-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .billing-page-header, .customers-list-toolbar,
+  .installation-history-heading { flex-wrap: wrap; gap: 12px; }
+  .customer-search { width: 100%; }
+  .billing-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .billing-summary-strip .stat-card { padding-inline: 12px; }
+}
+
+@container coverageAdmin (max-width: 850px) {
+  .coverage-admin-layout { grid-template-columns: minmax(0, 1fr); }
+  .coverage-zone-list, .coverage-zone-editor { padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--coverage-line); }
+}
+.coverage-admin-map { height: clamp(320px, 58dvh, 600px); }
+
+/* Preserve useful two-column metrics on smaller notebooks. */
+@container dashboard (min-width: 460px) and (max-width: 680px) {
+  .dashboard-home .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1100px) and (min-width: 821px) {
+  .crm-shell { grid-template-columns: 196px minmax(0, 1fr); }
+  .sidebar { padding-inline: 8px; }
+  .sidebar-item { gap: 8px; padding-inline: 9px; }
+}
+
+@media (max-width: 620px) {
+  .crm-main { padding: 12px; }
+  .topbar { position: static; }
+  .topbar-context { gap: 8px; }
+  .company-scope-control { flex: 1 1 160px; min-width: 0; padding-right: 8px; }
+  .company-scope-control select { width: 100%; min-width: 0; }
+  .sidebar { gap: 8px; padding: 12px; }
+  .sidebar-menu { max-height: 230px; overflow-y: auto; }
+  .sidebar-item { font-size: .8rem; }
+  .modal-backdrop { padding: 8px; }
+  .modal-card { max-width: 100%; max-height: calc(100dvh - 16px); }
+  .modal-card > .modal-header { padding: 16px; flex-direction: row; align-items: center; gap: 12px; }
+  .modal-card > .modal-content { padding-inline: 16px; }
+  .modal-close-button { flex-shrink: 0; }
+  .install-order-basic-fields, .install-order-details-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-height: 800px) and (min-width: 821px) {
+  .sidebar { padding-top: 16px; gap: 12px; }
+  .brand { padding-bottom: 8px; }
+  .sidebar-item { min-height: 38px; padding-block: 8px; }
+}

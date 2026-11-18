@@ -57,8 +57,9 @@ export function TicketsPanel({
   const attentionCatalog = ticketAttentionAvailability(categories);
   const selectedCategory = attentionCategories.find(category => String(category.idCategoria) === createForm.idCategoria);
   const terminationSelected = Boolean(selectedCategory && isTerminationTicketCategory(selectedCategory));
+  const terminationCategory = attentionCategories.find(isTerminationTicketCategory);
 
-  /** Voluntary termination: commercial termination now; the technical withdrawal follows (it never waits for it). */
+  /** Voluntary request: both commercial termination and return to Prospects wait for approved withdrawal. */
   async function registerTermination(rut: string) {
     if (terminating) return;
     if (!createForm.idServicio) { setStatus('Selecciona el servicio que el titular pide terminar.'); return; }
@@ -75,7 +76,7 @@ export function TicketsPanel({
       const ticket = data.ticket ? data.ticket.codigoSeguimiento ?? `#${data.ticket.idTicket}` : '';
       const technical = data.retiroTecnico === 'DATOS_INCOMPLETOS' ? 'El retiro de equipos queda pendiente: faltan datos de dirección o identificación.'
         : data.despacho?.idOtG3 ? `Orden de retiro N° ${data.despacho.idOtG3} creada.` : 'El retiro de equipos queda pendiente de envío.';
-      setStatus(data.repetido ? `El término ya estaba registrado (ticket ${ticket}).` : `Término registrado y aplicado (ticket ${ticket}). ${technical} La deuda existente se conserva.`);
+      setStatus(data.repetido ? `La solicitud ya estaba registrada (ticket ${ticket}).` : `Baja voluntaria solicitada (ticket ${ticket}). ${technical} El servicio y el retorno a Prospectos esperan el cierre aprobado de la orden de retiro. La deuda existente se conserva.`);
       setTermination(current => ({ ...current, evidencia: '', identidad: false }));
       onChanged();
     } catch (err) {
@@ -221,11 +222,12 @@ export function TicketsPanel({
             <option value="">Seleccionar</option>
             {attentionCategories.map((category) => (
               <option key={category.idCategoria} value={category.idCategoria}>
-                {category.nombreAtencion}
+                {isTerminationTicketCategory(category) ? 'Baja voluntaria del servicio' : category.nombreAtencion}
               </option>
             ))}
           </select>
         </label>
+        {!terminationCategory && <small id="termination-catalog-status">La categoría «Baja voluntaria del servicio» estará disponible cuando se habilite «Término de servicio» en el catálogo de atención.</small>}
         {terminationSelected && <>
           <label>
             Canal del requerimiento
@@ -251,7 +253,7 @@ export function TicketsPanel({
           <label>
             <span><input type="checkbox" checked={termination.identidad} onChange={(event) => setTermination({ ...termination, identidad: event.target.checked })} /> Verifiqué la identidad del titular (o la autorización del representante).</span>
           </label>
-          <p className="inline-status">El término comercial se aplica al registrar, sin esperar la visita técnica. La deuda existente se conserva y el retiro de equipos sigue su curso.</p>
+          <p className="inline-status">La baja y el retorno a Prospectos se aplicarán cuando se apruebe el cierre de la orden de retiro. La deuda existente se conserva.</p>
         </>}
         <label>
           Prioridad
@@ -276,7 +278,7 @@ export function TicketsPanel({
 
       <section className="tickets-list-section" aria-label="Listado de tickets">
         <div className="table-wrap tickets-table-wrap">
-          <table className="tickets-table operational-table">
+          <table className="tickets-table operational-table responsive-records-table">
             <thead>
               <tr>
                 <th>Código</th>
@@ -292,18 +294,18 @@ export function TicketsPanel({
             <tbody>
               {visibleTickets.map((ticket) => (
                 <tr key={ticket.idTicket}>
-                  <td>{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
-                  <td>{ticket.cliente?.nombreCompleto ?? '-'}</td>
-                  <td>{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
-                  <td>{ticket.idServicio ?? '-'}</td>
-                  <td>{ticket.workOrders?.[0] ? `#${ticket.workOrders[0].idOt}` : '-'}</td>
-                  <td className="operational-badge-column">
+                  <td data-label="Código">{ticket.codigoSeguimiento ?? ticket.idTicket}</td>
+                  <td data-label="Cliente">{ticket.cliente?.nombreCompleto ?? '-'}</td>
+                  <td data-label="Categoría">{ticket.categoria?.nombre ?? ticket.idCategoria}</td>
+                  <td data-label="Servicio">{ticket.idServicio ?? '-'}</td>
+                  <td data-label="OT">{ticket.workOrders?.[0] ? `#${ticket.workOrders[0].idOt}` : '-'}</td>
+                  <td data-label="Prioridad" className="operational-badge-column">
                     <StatusBadge value={formatWorkOrderValue(ticket.prioridad)} />
                   </td>
-                  <td className="operational-badge-column">
+                  <td data-label="Estado" className="operational-badge-column">
                     <StatusBadge value={ticket.estadoPresentacion ?? formatWorkOrderValue(ticket.estado)} />
                   </td>
-                  <td>
+                  <td data-label="Acciones">
                     <button
                       className="secondary compact crm-table-action"
                       onClick={() => {

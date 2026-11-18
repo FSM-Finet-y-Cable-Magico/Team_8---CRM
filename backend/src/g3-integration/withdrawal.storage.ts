@@ -13,7 +13,7 @@ export const WITHDRAWAL_STORAGE = Symbol('WITHDRAWAL_STORAGE');
 type Db = Prisma.TransactionClient;
 
 /** `termination`: 003_withdrawal_voluntary_termination.sql applied (cause per link, termination record, G1-free applied check). */
-export type WithdrawalCapabilities = { ticketLink: boolean; g3Dispatch: boolean; g1Reception: boolean; termination: boolean };
+export type WithdrawalCapabilities = { ticketLink: boolean; g3Dispatch: boolean; g1Reception: boolean; termination: boolean; deferredTermination?: boolean };
 /** The engine needs 002 AND 003: without 003 the applied check of 002 would reject a baja without a G1 reception. */
 export const withdrawalStorageReady = (c: WithdrawalCapabilities) => c.ticketLink && c.g3Dispatch && c.termination;
 
@@ -32,7 +32,7 @@ export const TERMINATION_REQUESTERS = ['TITULAR', 'REPRESENTANTE'] as const;
 export type ServiceTermination = {
   idServicio: number; idEmpresa: number; idCliente: number; idContrato: number; idTicket: number; idSolicitudRetiro: number | null;
   requerimientoEn: Date; canal: (typeof TERMINATION_CHANNELS)[number]; solicitante: (typeof TERMINATION_REQUESTERS)[number]; evidencia: string;
-  idUsuarioResponsable: number; terminoComercialEn: Date; cierreTecnicoEn: Date | null;
+  idUsuarioResponsable: number; terminoComercialEn: Date | null; cierreTecnicoEn: Date | null;
 };
 
 export const DISPATCH_STATES = ['PENDIENTE', 'ENVIANDO', 'REINTENTABLE', 'ACEPTADA', 'RECHAZADA', 'INCONSISTENTE',
@@ -121,9 +121,11 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
       SELECT to_regclass('g8_retiros.solicitud_ticket') IS NOT NULL AS "ticketLink",
              to_regclass('g8_retiros.solicitud_g3') IS NOT NULL AS "g3Dispatch",
              to_regclass('g8_retiros.recepcion_g1') IS NOT NULL AS "g1Reception",
-             to_regclass('g8_retiros.termino_servicio') IS NOT NULL AS "termination"`;
+             to_regclass('g8_retiros.termino_servicio') IS NOT NULL AS "termination",
+             EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('g8_retiros.termino_servicio')
+               AND attname = 'termino_comercial_en' AND NOT attnotnull AND NOT attisdropped) AS "deferredTermination"`;
     return { ticketLink: rows[0]?.ticketLink === true, g3Dispatch: rows[0]?.g3Dispatch === true, g1Reception: rows[0]?.g1Reception === true,
-      termination: rows[0]?.termination === true };
+      termination: rows[0]?.termination === true, deferredTermination: rows[0]?.deferredTermination === true };
   },
   async findLinkByRequest(tx, idSolicitudRetiro) {
     const rows = await tx.$queryRaw<WithdrawalTicketLink[]>(Prisma.sql`SELECT ${LINK_COLUMNS} FROM g8_retiros.solicitud_ticket WHERE id_solicitud_retiro = ${idSolicitudRetiro}`);
@@ -227,9 +229,9 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
   async insertTermination(tx, row) {
     const rows = await tx.$queryRaw<ServiceTermination[]>(Prisma.sql`
       INSERT INTO g8_retiros.termino_servicio (id_servicio, id_empresa, id_cliente, id_contrato, id_ticket, id_solicitud_retiro, requerimiento_en,
-        canal, solicitante, evidencia, id_usuario_responsable)
+        canal, solicitante, evidencia, id_usuario_responsable, termino_comercial_en)
       VALUES (${row.idServicio}, ${row.idEmpresa}, ${row.idCliente}, ${row.idContrato}, ${row.idTicket}, ${row.idSolicitudRetiro}, ${row.requerimientoEn},
-        ${row.canal}, ${row.solicitante}, ${row.evidencia}, ${row.idUsuarioResponsable})
+        ${row.canal}, ${row.solicitante}, ${row.evidencia}, ${row.idUsuarioResponsable}, NULL)
       RETURNING ${TERMINATION_COLUMNS}`);
     if (!rows[0]) throw new Error('SERVICE_TERMINATION_NOT_STORED');
     return rows[0];
@@ -247,7 +249,8 @@ export const postgresWithdrawalStorage: WithdrawalStorage = {
     return rows[0] ?? null;
   },
   async markTerminationTechnicalClosure(tx, idServicio) {
-    await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.termino_servicio SET cierre_tecnico_en = COALESCE(cierre_tecnico_en, CURRENT_TIMESTAMP)
+    await tx.$executeRaw(Prisma.sql`UPDATE g8_retiros.termino_servicio SET cierre_tecnico_en = COALESCE(cierre_tecnico_en, CURRENT_TIMESTAMP),
+      termino_comercial_en = COALESCE(termino_comercial_en, CURRENT_TIMESTAMP)
       WHERE id_servicio = ${idServicio}`);
   },
 };

@@ -65,12 +65,25 @@ const optionsOf = select => select.findAllByType('option').map(textOf);
 test('el alta ofrece «Término de servicio» solo si el catálogo la habilita; nunca «Baja de servicio»', async t => {
   const enabled = await panel(t);
   const options = optionsOf(enabled.field('Categoría'));
-  assert.ok(options.includes('Término de servicio'));
+  assert.ok(options.includes('Baja voluntaria del servicio'));
   assert.ok(!options.includes('Baja de servicio'));
   const absent = await panel(t, { categories: attention });
-  assert.ok(!optionsOf(absent.field('Categoría')).includes('Término de servicio'), 'sin la inserción autorizada no se ofrece');
+  assert.ok(!optionsOf(absent.field('Categoría')).includes('Baja voluntaria del servicio'), 'sin la inserción autorizada no se ofrece');
   const ambiguous = await panel(t, { categories: [...attention, termination, { ...termination, idCategoria: 41 }] });
-  assert.ok(!optionsOf(ambiguous.field('Categoría')).includes('Término de servicio'), 'duplicada no se habilita');
+  assert.ok(!optionsOf(ambiguous.field('Categoría')).includes('Baja voluntaria del servicio'), 'duplicada no se habilita');
+});
+
+test('la baja voluntaria se selecciona desde la categoría real, sin acceso separado, y explica un catálogo incompleto', async t => {
+  const h = await panel(t);
+  assert.ok(!h.tree.root.findAllByType('button').some(n => textOf(n) === 'Solicitar baja voluntaria'));
+  const option = h.field('Categoría').findAllByType('option').find(n => textOf(n) === 'Baja voluntaria del servicio');
+  await h.change(h.field('Categoría'), String(option.props.value));
+  assert.equal(h.field('Categoría').props.value, '40');
+  assert.ok(h.field('Evidencia del requerimiento'));
+  assert.equal(h.calls.filter(call => call[0] === 'post').length, 0);
+  const absent = await panel(t, { categories: attention });
+  assert.ok(!optionsOf(absent.field('Categoría')).includes('Baja voluntaria del servicio'));
+  assert.match(absent.text(), /cuando se habilite «Término de servicio»/);
 });
 
 test('con «Término de servicio» pide canal, fecha y hora, solicitante, evidencia e identidad, y registra por el flujo de término', async t => {
@@ -78,7 +91,7 @@ test('con «Término de servicio» pide canal, fecha y hora, solicitante, eviden
   await h.lookup();
   await h.change(h.field('Categoría'), '40');
   for (const label of ['Canal del requerimiento', 'Fecha y hora del requerimiento', 'Solicitante', 'Evidencia del requerimiento']) assert.ok(h.field(label), label);
-  assert.match(h.text(), /sin esperar la visita técnica/);
+  assert.match(h.text(), /se aplicarán cuando se apruebe el cierre de la orden de retiro/);
   await h.change(h.field('Descripción'), 'El titular pide terminar el servicio de TV.');
   await h.submit();
   assert.match(h.text(), /Selecciona el servicio que el titular pide terminar/);
@@ -95,7 +108,7 @@ test('con «Término de servicio» pide canal, fecha y hora, solicitante, eviden
   assert.deepEqual({ ...posts[0][2], requerimientoEn: typeof posts[0][2].requerimientoEn }, { rut: '12345678-5', idServicio: 62, canal: 'TELEFONO', solicitante: 'TITULAR',
     requerimientoEn: 'string', evidencia: 'Llamada grabada N° 5521', descripcion: 'El titular pide terminar el servicio de TV.', confirmacionIdentidad: true });
   assert.ok(!h.calls.some(call => call[1] === '/tickets'), 'no crea un ticket general');
-  assert.match(h.text(), /Término registrado y aplicado \(ticket TK-TERM\).*La deuda existente se conserva/);
+  assert.match(h.text(), /Baja voluntaria solicitada \(ticket TK-TERM\).*esperan el cierre aprobado.*La deuda existente se conserva/);
   assert.ok(!/\bG[0-9]\b/.test(h.text()));
 });
 

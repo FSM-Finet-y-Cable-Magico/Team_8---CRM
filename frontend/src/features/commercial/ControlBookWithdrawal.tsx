@@ -95,6 +95,13 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
 
   const followUp = eligibility?.seguimiento ?? null;
   const ready = Boolean(eligibility?.eligible && eligibility.habilitado && canManage && !followUp);
+  const blockingReason = !followUp && eligibility ? !canManage
+    ? 'Tu perfil no tiene permiso para iniciar la baja del servicio.'
+    : !eligibility.habilitado
+      ? 'La baja de servicios no está habilitada en este ambiente. Solicita al administrador que revise su configuración.'
+      : !eligibility.eligible
+        ? eligibility.firstFailure?.message || eligibility.checks.find(item => !item.ok)?.message || 'El servicio no cumple los requisitos para iniciar la baja.'
+        : '' : '';
   const observationOk = observation.trim().length >= MIN_WITHDRAWAL_OBSERVATION;
 
   async function submit(event: FormEvent) {
@@ -174,6 +181,8 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
             ['Baja aplicada', dispatch?.aplicado ? 'Sí' : 'No; el servicio sigue suspendido'],
           ], 'Seguimiento')}
           {!followUp.flujoGuiado && <p role="status" className="control-muted">Esta solicitud no se creó desde el Libro de Control; revísala antes de continuar.</p>}
+          {eligibility?.despachoG3Habilitado === false && <p role="status" className="control-muted">El envío de órdenes de retiro está deshabilitado en este ambiente. La solicitud queda pendiente de envío.</p>}
+          {eligibility?.bajaAutomaticaHabilitada === false && <p role="status" className="control-muted">La baja automática está deshabilitada en este ambiente. La aprobación técnica no cambiará el estado comercial hasta que se habilite.</p>}
           {dispatch?.estadoOt === 'PENDIENTE_APROBACION' && <p role="status" className="control-muted">El técnico cerró la orden; la baja se aplica cuando el jefe técnico la apruebe.</p>}
           {notice && <p role="status" className="control-muted">{notice}</p>}
           {canManage && canCancel && <label className="control-form-observation">Motivo de cancelación (si corresponde)<textarea maxLength={300} value={cancelReason} onChange={event => setCancelReason(event.target.value)} placeholder="Por ejemplo: el cliente pagó la deuda."/></label>}
@@ -199,9 +208,10 @@ export function ControlBookWithdrawal({ services, customerName, plan, canManage,
         </>}
       </fieldset>
       {error && <p role="alert" className="control-feedback error">{error}</p>}
+      {blockingReason && <p id="withdrawal-blocking-reason" role="status" className="control-feedback error">{blockingReason}</p>}
       <footer className="control-form-footer">
         <button type="button" className="control-text-button" disabled={saving} onClick={() => { if (step > 0 && !followUp) { setStep(step - 1); setError(''); } else onClose(); }}>{step > 0 && !followUp ? 'Atrás' : followUp ? 'Cerrar' : 'Cancelar'}</button>
-        {!followUp && <button type="submit" disabled={saving || loading || !ready || (step === 1 && !observationOk) || (step === 2 && !confirmed)}>{saving ? 'Registrando…' : step < 2 ? 'Continuar' : 'Crear solicitud y ticket'}</button>}
+        {!followUp && <button type="submit" aria-describedby={blockingReason ? 'withdrawal-blocking-reason' : undefined} disabled={saving || loading || !ready || (step === 1 && !observationOk) || (step === 2 && !confirmed)}>{saving ? 'Registrando…' : step < 2 ? 'Continuar' : 'Crear solicitud y ticket'}</button>}
       </footer>
     </form>
   </ControlBookModal>;
